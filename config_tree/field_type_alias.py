@@ -13,6 +13,8 @@ that have special display formatting (e.g., hexadecimal integers), custom conver
 logic, and validation rules.
 """
 
+from __future__ import annotations
+
 from types import SimpleNamespace
 from typing import Any, Annotated, get_args, get_origin, Literal, cast
 import json

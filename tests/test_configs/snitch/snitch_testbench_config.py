@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2020 ETH Zurich and University of Bologna
 
+from __future__ import annotations
+
 from config_tree import Config, cfg_field
 from tests.test_configs.snitch.memory_config import MemoryConfig
 from tests.test_configs.snitch.snitch_core_config import SnitchCoreConfig

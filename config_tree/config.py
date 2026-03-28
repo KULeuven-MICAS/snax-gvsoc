@@ -44,12 +44,20 @@ from typing import (
     Callable,
     ClassVar,
     Type,
-    dataclass_transform,
     get_args,
     get_origin,
     get_type_hints,
-    override,
 )
+
+try:
+    from typing import dataclass_transform
+except ImportError:
+    from typing_extensions import dataclass_transform
+
+try:
+    from typing import override
+except ImportError:
+    from typing_extensions import override
 
 from rich.console import Console
 
@@ -695,8 +703,9 @@ class Config:
         """Collect IRQ numbers from InterruptMapping links pointing at this config."""
         irqs = {}
         for child in self._find_from_walk(lambda c: isinstance(c, HasIrq), direct_only=False):
+            hints = get_type_hints(type(child))
             for f in fields(child):
-                if f.type is IrqNumber:
+                if hints.get(f.name) is IrqNumber:
                     if child != target:
                         name = f"{child.name}_{f.name}"
                     else:
@@ -726,8 +735,9 @@ class HasIrq(with_type_hint(Config)):
     def irqs(self) -> list[int]:
         """List of IRQ numbers associated with this config node."""
         irqs = []
+        hints = get_type_hints(type(self))
         for f in fields(self):
-            if isinstance(f.type, IrqNumber):
+            if hints.get(f.name) is IrqNumber:
                 irqs.append(getattr(self, f.name))
         return irqs            
 

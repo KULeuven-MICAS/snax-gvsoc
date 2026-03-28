@@ -2,7 +2,12 @@
 # SPDX-FileCopyrightText: 2020 ETH Zurich and University of Bologna
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 
-from typing import override
+from __future__ import annotations
+
+try:
+    from typing import override
+except ImportError:
+    from typing_extensions import override
 
 from vp.clock_domain import ClockDomain
 from gvsoc.systree import Component

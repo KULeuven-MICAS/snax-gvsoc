@@ -10,6 +10,8 @@ Tests cover:
 - Complex boolean expressions
 """
 
+from __future__ import annotations
+
 import pytest
 from dataclasses import dataclass
 from config_tree.expression import (

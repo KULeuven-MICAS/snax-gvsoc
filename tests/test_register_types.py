@@ -1,5 +1,7 @@
 """Tests for config register types, md_parser, and RegisterList/CommandList field types."""
 
+from __future__ import annotations
+
 import json
 import os
 from types import SimpleNamespace

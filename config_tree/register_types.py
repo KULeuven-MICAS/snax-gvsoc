@@ -10,6 +10,8 @@ These types live in config so that configs can declare register/command fields
 without depending on the regmap package.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .field_type_alias import ConfigDumpable

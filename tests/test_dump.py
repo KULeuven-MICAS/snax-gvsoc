@@ -2,6 +2,8 @@
 
 """Test the config dump functionality."""
 
+from __future__ import annotations
+
 import pytest
 from io import StringIO
 

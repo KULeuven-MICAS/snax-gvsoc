@@ -2,6 +2,8 @@
 
 """Tests for Config.children property."""
 
+from __future__ import annotations
+
 from config_tree import Config, cfg_field
 
 

@@ -2,6 +2,8 @@
 
 """Test cfg_field with default_factory parameter."""
 
+from __future__ import annotations
+
 import pytest
 
 from config_tree import Config, cfg_field

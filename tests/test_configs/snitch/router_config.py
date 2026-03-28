@@ -8,6 +8,8 @@ This module provides configuration classes for defining router behavior and addr
 in the simulation environment.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import ClassVar
 

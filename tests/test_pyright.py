@@ -8,6 +8,8 @@ Uses two fixture files:
 Pyright is the same engine Pylance (VS Code) uses for type checking and hover info.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess

@@ -11,6 +11,8 @@ Parses GFM-flavoured markdown produced by register map documentation tools and
 returns config-native dataclasses (Register, Regfield, Cmd, Cmdfield, Cmdmap).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field, InitVar
 from typing import Sequence
 

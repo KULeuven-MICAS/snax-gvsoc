@@ -21,7 +21,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import fields
 from datetime import datetime
-from typing import Any
+from typing import Any, get_type_hints
 
 from code_block import CodeBlock
 
@@ -335,8 +335,9 @@ class IrqHeaderGen(ConfigTreeHeaderWalker):
         children: list[Config],
         has_parent: bool,
     ) -> None:
+        hints = get_type_hints(type(node))
         for f in fields(node):
-            if f.type is IrqNumber:
+            if hints.get(f.name) is IrqNumber:
                 value = getattr(node, f.name)
                 if value is not None:
                     define_name = f'{prefix}_{f.name}'.upper()

@@ -11,6 +11,8 @@ can declare register or command map fields that are loaded from a markdown file
 path via cast() (e.g. Config.override_fields).
 """
 
+from __future__ import annotations
+
 import os
 import sys
 from typing import Any
