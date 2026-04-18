@@ -292,6 +292,12 @@ class Config:
                 path = f.name
             if f.init:
                 cmd_value = self._attribute_arg_values.get(path)
+                # Also try the path relative to the root config, so that
+                # users can write "chip/nb_cus=2" instead of
+                # "board_config0/chip/nb_cus=2".
+                if cmd_value is None and '/' in path:
+                    relative_path = path.split('/', 1)[1]
+                    cmd_value = self._attribute_arg_values.get(relative_path)
                 if cmd_value is not None:
                     casted = cast_to_type(cmd_value, f.type, config=self)
                     setattr(self, f.name, casted)
@@ -739,7 +745,7 @@ class HasIrq(with_type_hint(Config)):
         for f in fields(self):
             if hints.get(f.name) is IrqNumber:
                 irqs.append(getattr(self, f.name))
-        return irqs            
+        return irqs
 
 @dataclass(repr=False, eq=False)
 class MemoryMapped(HasSize, with_type_hint(Config)):
