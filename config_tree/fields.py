@@ -98,10 +98,13 @@ def cfg_field(
         md["write"] = False
     md["inlined_dump"] = inlined_dump
 
-    # Record the file where cfg_field was called
-    caller = inspect.stack()[1]
-    md["source_file"] = caller.filename
-    md["source_line"] = caller.lineno
+    # Record the file where cfg_field was called. Read the caller frame
+    # directly instead of inspect.stack()[1]: stack() builds FrameInfo for
+    # every frame (reading source files and scanning sys.modules per frame),
+    # which with hundreds of fields over a deep import stack dominates startup.
+    caller = inspect.currentframe().f_back
+    md["source_file"] = caller.f_code.co_filename
+    md["source_line"] = caller.f_lineno
 
     # Handle default and default_factory - can't have both
     if default is not MISSING and default_factory is not MISSING:
