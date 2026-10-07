@@ -1,2 +1,3 @@
 # GVSoC build, install and run output (GVSOC_WORKDIR in the container)
 /build/
+__pycache__/
