@@ -42,7 +42,7 @@ snax-gvsoc/
   tutorials/        working copies of the GVSoC tutorials (added in GVS1)
   sw/               C programs (GVS3)
   build/            GVSoC build, install and run output; not tracked
-  NOTES.md
+  docs/             Contains notes and planning information
 ```
 
 SNAX models stay outside the GVSoC tree. GVSoC picks up an external module
