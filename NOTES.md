@@ -113,7 +113,47 @@ Differences from the GVSoC website docs: the tutorials are in
 
 ### GVS1 step 1: repo and container
 
-(fill in: date, machine, image digest, output of the version check)
+- 2026-10-07. Repo created on micaseb19; image built with Docker on WSL
+  (x86), pushed to ghcr.io, pulled and run with Podman on micaseb19.
+- Image: `ghcr.io/kuleuven-micas/snax-gvsoc:gvs1`, 4.73 GB unpacked, about
+  2.0 GB to pull. Contents: RISC-V GCC 2.1 GB, Snitch LLVM 1.6 GB, Ubuntu
+  base and build packages 0.7 GB, Python packages 0.4 GB.
+- `git submodule status --recursive` shows gvsoc at 93cedc4 and
+  snitch_cluster at 4652c6b.
+- Version check in the container: gcc 13.3.0, cmake 3.28.3, Python 3.12.3,
+  riscv64-unknown-elf-gcc 14.2.0, clang 12.0.1, bender 0.27.1,
+  GVSOC_WORKDIR=/work/build. `/work` is writable.
+- Plain `podman run --rm -it -v "$PWD":/work <image>` works; no extra
+  mount or user flags needed.
+- Learned: `git add` the submodules after checking out the pins and before
+  `git submodule update --init --recursive`, or the update resets them to
+  the commit recorded by `submodule add`.
+
+### GVS1 step 2: GVSoC built, bundled program runs
+
+- 2026-10-07, micaseb19, in the container.
+- `make -C gvsoc build TARGETS=snitch` builds into `build/`.
+- `gvrun --target snitch ... fp32_computation_vector.elf run` prints nothing
+  and exits 0. With `--trace=pe0/insn`: 484 lines, first instruction at
+  cycle 7909 (boot ROM, 0x1000), last one an `ebreak` at cycle 23862.
+- Every new container needs `source gvsoc/sourceme.sh` again.
+- `gvrun` creates its own `--work-dir`, but a `>` redirect into a directory
+  that does not exist yet fails before `gvrun` starts.
+
+### GVS1 step 3: Snitch tests built from source and run
+
+- 2026-10-07, micaseb19, in the container.
+- `make DEBUG=ON APPS= tests -j8` in `snitch_cluster/target/snitch_cluster`
+  builds 47 test ELFs. `APPS=` skips the applications, whose data
+  generators need numpy and torch (not in the image). The first build needs
+  internet: Bender fetches one dependency into `snitch_cluster/.bender`.
+- Ran 11 tests on `gvrun --target snitch`: simple, printf_simple, barrier,
+  dma_simple, interrupt_local, fp32_computation_vector, openmp_parallel,
+  perf_cnt, zero_mem, tls all exit 0 with no "invalid register" warning.
+  non_null_exitcode exits 1, as intended (its main returns 14).
+- This confirms the pin pair gvsoc 93cedc4 + snitch_cluster 4652c6b.
+- Each run leaves its full system description in
+  `build/work/<name>/gvsoc_config.json`.
 
 ## Findings for later tasks
 
