@@ -42,7 +42,8 @@ snax-gvsoc/
   tutorials/        working copies of the GVSoC tutorials (added in GVS1)
   sw/               C programs (GVS3)
   build/            GVSoC build, install and run output; not tracked
-  docs/             Contains notes and planning information
+  docs/             notes (this file), plans, and one page per tutorial in
+                    docs/tutorials/
 ```
 
 SNAX models stay outside the GVSoC tree. GVSoC picks up an external module
@@ -155,6 +156,60 @@ Differences from the GVSoC website docs: the tutorials are in
 - Each run leaves its full system description in
   `build/work/<name>/gvsoc_config.json`.
 
+### GVS1 step 4: tutorial 0, system from scratch
+
+- 2026-10-07. Working copy in
+  `tutorials/0_how_to_build_a_system_from_scratch`, with `tutorials/utils`
+  beside it; write-up in `docs/tutorials/0_system_from_scratch.md`.
+- The figures in this entry are from the check run of the same steps on a
+  2-core Ubuntu 24.04 machine at the same pins, outside the container.
+- `export GVSOC_ROOT=/work/gvsoc`, then `make prepare gvsoc all run` prints
+  `Hello`. The GVSoC build for `my_system` takes 1 min 43 s after a `snitch`
+  build. No `BUILDDIR=`, so the build shares `/work/build`; the `snitch`
+  target still runs afterwards.
+- `--trace=insn`: 231 lines, first instruction at cycle 3 (`_start`,
+  0xc04), last one an `ebreak` at cycle 298. 100 MHz clock, 10000 ps per
+  cycle, one instruction per cycle.
+- The generator (`my_system.py`) runs twice. At build time
+  `gapy ... components` writes `build/build/gvsoc/configs/my_system.config`
+  (the C++ models to build, one `.so` each in `build/install/models`, named
+  by a hash of sources and flags) and `my_system.tree.cpp` (instances,
+  bindings and some parameter values, compiled into
+  `libplatform_tree_my_system.so`). At run time `gvrun` runs the script
+  again and writes `build/work/gvsoc_config.json` with the per-instance
+  properties.
+- The loader writes the ELF through the router as a normal IO request, then
+  drives the entry and fetch-enable wires of the core. `printf` and `exit`
+  use semihosting; there is no UART.
+- `cpu/iss` is the instruction set simulator, GVSoC's CPU model: it executes
+  each instruction's effect and adds a cycle count, with no pipeline model.
+  The Snitch cores are variants of it (`iss/src/snitch*`). An `iss_v2`
+  directory exists next to it; not looked at.
+- Ports are declared in the C++ model (`new_master_port`, `new_slave_port`).
+  The `i_X` / `o_Y` methods of the Python generator wrap those names with a
+  type signature and are the nearest thing to a module header. List them
+  with `grep -n "def [io]_[A-Z_]*(" <generator>.py`, or at run time with
+  `--trace=<instance>` and the `New ... port` lines. The Python list can be
+  incomplete: `memory.cpp` has `power_ctrl` and `meminfo`, `memory.py` only
+  `i_INPUT`.
+- What GVSoC checks on a binding, tried on this system: a misspelled method
+  is a Python `AttributeError`; a type mismatch is `Invalid signature`; a
+  port name unknown to the C++ model is `Binding from invalid slave port`;
+  a missing `o_DATA` is `Data master port is not connected` (a check in the
+  core model). A missing `o_DATA_DEBUG` runs fine. A missing `o_START` or
+  `o_ENTRY` gives no message and the simulation never ends.
+- The tutorial text in `tutorials.rst` at the pin is out of date (`parser`
+  and `options` arguments, `remove_offset`, `gvsoc --binary`). The file in
+  `solution/` is the working reference: `TargetParameter`, `rm_base=True`,
+  and a `Target` class with `model` and `name` attributes.
+- Every tutorial writes its program to `build/test/test` and its run output
+  to `build/work/`, so each one overwrites the previous.
+- GDB skipped: the server starts, but the toolchain's
+  `riscv64-unknown-elf-gdb` needs libpython3.10, which Ubuntu 24.04 does
+  not have. Seen on the check machine; not tried in the container.
+- A run leaves `__pycache__/` next to the generator; it should be ignored
+  by git.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -167,11 +222,38 @@ Differences from the GVSoC website docs: the tutorials are in
   say whether bank contention is modelled.
 - GVSoC's docs say `pulp.snitch.snitch_cluster_single` and the default slow
   core are to be deprecated in favour of `snitch:core_type=fast`.
+- The `Router` is not the TCDM crossbar. TCDM path in the Snitch target
+  (read from `snitch_cluster.py` and the C++, not yet measured): per-core
+  `Router` (address decode, `bandwidth=8`) -> `L1_interleaver` (bank select
+  from the low address bits, no arbitration) -> `Memory` bank. Per-bank
+  contention is in the bank model: `width_log2=3` and a `next_packet_start`
+  cycle, so a request to a busy bank gets extra latency. No priority or
+  round-robin. The DMA reaches the same banks through `DmaInterleaver`, so
+  a non-core port (a streamer) could be added the same way. `narrow_axi`
+  and `wide_axi` are plain `Router` instances. To measure: two masters
+  hitting the same bank in the same cycle.
 
 ### GVS3
 
 - Editing one C++ model and rebuilding takes 5 to 20 s; a run of a small
   test takes 1 to 3 s (2 cores).
 - The bank count is hard-coded in the stock generator. For sweeps, our own
-  target should expose such values as `gvrun` parameters so that a design
-  point needs no rebuild. Not tried yet.
+  target should expose such values as `gvrun` parameters, so that a design
+  point needs no edit of the generator. Not tried yet.
+- Generator changes need no rebuild as long as every C++ model variant is
+  already compiled. Checked: values (tutorial 0 memory size) and shape
+  (Snitch L1 with 16, 32 and 64 banks, edited in the installed generator
+  `build/install/generators/pulp/snitch/snitch_cluster/snitch_cluster.py`).
+  GVSoC warns that the installed platform tree does not match and builds
+  the system from `gvsoc_config.json`; traces are identical and run time is
+  unchanged (1.6 s for the bundled ELF, 2 cores). A variant with other
+  sources or flags (e.g. `Router(..., synchronous=False)`) fails with
+  `Couldn't find component` until rebuilt.
+- Caveat from `runner_gvrun2.py`: the JSON path only works for models that
+  read their parameters from JSON. `Memory` and the clock have that
+  fallback and the router reads JSON only; these are the only compiled
+  configs in the stock `snitch` target. Other models with a config class
+  (snitch fast core, iDMA v2/v3, `iss_v2`) are not checked.
+- GVSoC does not check that a component's ports are all bound, unless the
+  model does it itself. Our SNAX components should check their mandatory
+  ports in C++, as the core does for `data`.

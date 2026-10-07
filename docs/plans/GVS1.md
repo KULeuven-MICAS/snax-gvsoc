@@ -17,7 +17,8 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 - Each concept is tied to its SNAX-MODEL counterpart in a sentence.
 - Every command is read from the GVSoC source at the pinned commit and run in
   the container before it is handed over. Anything not verified is said so.
-- After each step: the `NOTES.md` text for it, and the steps that remain.
+- After each step: the `NOTES.md` text for it, a write-up of the tutorial in
+  `docs/tutorials/`, and the steps that remain.
 
 ## Steps
 
@@ -26,7 +27,7 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 1 | Repo, submodules, container, `NOTES.md` | Layout and pins | 20 min | done 2026-10-07 |
 | 2 | Build GVSoC for `snitch`, run the bundled ELF | Build flow, `gvrun`, `--trace` | 30 min | done 2026-10-07 |
 | 3 | Build snitch_cluster tests at the pin, run them | Software flow, the version match | 45 min | done 2026-10-07 |
-| 4 | Tutorial 0: system from scratch | Python generators, router, loader | 30 min | |
+| 4 | Tutorial 0: system from scratch | Python generators, router, loader | 30 min | done 2026-10-07 |
 | 5 | Tutorial 1: component from scratch | C++ model plus generator, serving an IO request | 30 min | |
 | 6 | Tutorial 2: components communicating | Wire interfaces | 30 min | |
 | 7 | Tutorial 3: system traces | `vp::Trace`, `--trace` paths | 15 min | |
@@ -76,6 +77,8 @@ component issuing its own requests to L1 is shown, which a streamer needs.
 - Tutorials in the source: `gvsoc/engine/docs/developer_manual/tutorials`.
   Working copies go in `tutorials/` at the repo root, with `utils/` beside
   them.
+- Write-ups: `docs/tutorials/<number>_<topic>.md`, one per tutorial, written
+  against the pinned source.
 - The website (gvsoc-developer.readthedocs.io) is behind the source: it
   gives the old path and the old `gvsoc --binary` launcher.
 - Per new container: `source gvsoc/sourceme.sh`. For the tutorials also

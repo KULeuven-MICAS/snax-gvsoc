@@ -49,11 +49,15 @@ export GVSOC_ROOT=/work/gvsoc
 | Instance | Generator class | What it is |
 |---|---|---|
 | `clock` | `vp.clock_domain.Clock_domain` | Clock generator, 100 MHz |
-| `soc/host` | `cpu.iss.riscv.Riscv` | RV64 instruction-set simulator |
+| `soc/host` | `cpu.iss.riscv.Riscv` | RV64 core, modelled by the instruction set simulator (ISS) |
 | `soc/ico` | `interco.router.Router` | Memory-mapped router |
 | `soc/mem` | `memory.memory.Memory` | 1 MB memory |
 | `soc/loader` | `utils.loader.loader.ElfLoader` | Copies the ELF into memory, then starts the core |
 | `soc/gdbserver` | `gdbserver.gdbserver.Gdbserver` | Optional GDB server |
+
+The generator classes are found by their Python module path under the GVSoC
+module roots: `cpu.iss.riscv` is `gvsoc/core/models/cpu/iss/riscv.py`,
+`interco.router` is `gvsoc/core/models/interco/router.py`, and so on.
 
 ## Step 1: copy the tutorial out of the GVSoC tree
 
@@ -157,8 +161,11 @@ Reading it from the bottom up:
 
 Three things to know about the wiring:
 
-- **Ports.** `i_X()` returns a handle to an input port. `o_Y(handle)` binds
-  an output port to it. Every binding in this file has that form.
+- **Ports.** `i_X()` returns a handle to an input port, for example
+  `ico.i_INPUT()` or `host.i_FETCHEN()`. `o_Y(handle)` binds an output port
+  to it, for example `host.o_FETCH(...)` or `loader.o_START(...)`. Every
+  binding in this file has that form. Where these methods come from and how
+  to list them is in [Ports](#ports-finding-them-and-what-is-checked).
 - **The router map.** `o_MAP` binds a router output and attaches an address
   range to it. Requests whose address falls in `base .. base+size-1` go to
   that output. `rm_base=True` subtracts `base`, so the memory receives a
@@ -275,6 +282,11 @@ Hello
 The `grep` from step 6 now shows `2097152`. Restore the file with
 `make prepare`; `make run` then prints `Hello` with no warning.
 
+The warning is not a problem here. The run used the new size, and the
+instruction trace is identical to the one from a rebuilt system. What the
+warning means and when a rebuild is needed is in
+[What needs a rebuild](#what-needs-a-rebuild).
+
 ## How it works
 
 The Python generator runs twice.
@@ -297,10 +309,7 @@ mappings, the binary path. The launcher then loads the model libraries,
 creates the instances following the tree, binds the ports, and gives each
 instance its properties.
 
-This split explains step 7. A changed value only changes the JSON. The
-compiled tree is a shortcut; when it no longer matches the script, GVSoC
-builds the tree from the JSON and carries on. Only a change to C++ code needs
-a rebuild.
+This split explains step 7; see [What needs a rebuild](#what-needs-a-rebuild).
 
 **Port types.** Each binding has a signature on both ends, the last two
 columns in `my_system.tree.cpp`. This system uses three: `io` for
@@ -316,6 +325,119 @@ semihosting: the runtime executes an `ebreak` sequence that the core model
 catches and handles on the host. That is the `ebreak` at the end of the
 trace.
 
+## The core model (ISS)
+
+ISS stands for instruction set simulator. It is GVSoC's CPU model
+(`gvsoc/core/models/cpu/iss/`): C++ that fetches each instruction of the ELF,
+decodes it, and applies its effect to a software copy of the registers. It
+models what an instruction does, not the pipeline that does it. Timing is a
+count added on top: one cycle per instruction by default, plus extra cycles
+for things like a memory request that comes back with latency. That is why
+the trace in step 5 shows one instruction per cycle.
+
+The parts, by file name in `iss/src/`: `decode.cpp` and `insn_cache.cpp`
+(decoding, each address decoded once), `regfile.cpp` and `csr.cpp`,
+`prefetch/` and `lsu.cpp` (these send the requests on the `fetch` and `data`
+ports), `exec/` (the execution loop) and `timing.cpp`. `iss/isa_gen/`
+generates the decoder from the ISA string, which is where the
+`isa_rv64imafdc_<hash>` library in step 6 comes from. The Snitch cores are
+variants of the same ISS (`iss/src/snitch*`).
+
+## Ports: finding them and what is checked
+
+There is no single port list like a Verilog module header. Ports are declared
+in two places:
+
+- **In the C++ model**, where they really exist. The constructor calls
+  `new_master_port("name", ...)` or `new_slave_port("name", ...)`.
+- **In the Python generator**, as `i_X` / `o_Y` methods. Each one wraps one
+  C++ port name and a type signature. `host.i_FETCHEN()` returns
+  `SlaveItf(self, 'fetchen', signature='wire<bool>')`, and
+  `loader.o_START(itf)` calls
+  `self.itf_bind('start', itf, signature='wire<bool>')`. The `i_` / `o_`
+  prefix is a naming convention, not a language feature.
+
+The generator's methods are the nearest thing to a module header. Three ways
+to list the ports of a component:
+
+```
+# Python side: the methods, with a docstring under most of them
+grep -n "def [io]_[A-Z_]*(" /work/gvsoc/core/models/cpu/iss/riscv.py
+grep -n "def [io]_[A-Z_]*(" /work/gvsoc/core/models/utils/loader/loader.py
+
+# C++ side: the real ports
+grep -n "new_slave_port\|new_master_port" /work/gvsoc/core/models/memory/memory.cpp
+
+# At run time: every port an instance created
+make run runner_args="--trace=host" 2>&1 | grep "New .* port"
+```
+
+The first `grep` shows 14 methods for the core, among them `o_FETCH`,
+`o_DATA`, `o_DATA_DEBUG`, `i_FETCHEN`, `i_ENTRY`, `i_IRQ` and `o_OFFLOAD`.
+The docstrings give the C++ port type and say which ports must be bound.
+`i_CLOCK`, `i_RESET`, `i_POWER` and `i_VOLTAGE` come from the base
+`Component` class, so every component has them.
+
+The Python list can be incomplete. `memory.cpp` creates `input`, `power_ctrl`
+and `meminfo`, but `memory.py` only has `i_INPUT`. A port without a method
+can still be bound by name:
+`gvsoc.systree.SlaveItf(mem, 'meminfo', signature='io')`.
+
+Nothing in GVSoC works out the right connections for you; they come from the
+docstrings and from existing targets. What GVSoC checks, tried on this system:
+
+| Mistake | What happens |
+|---|---|
+| Method name misspelled (`host.i_FETCH_EN()`) | Python `AttributeError: ... Did you mean: 'i_FETCHEN'?`, before the simulation starts |
+| Wrong type (`loader.o_START(host.i_ENTRY())`) | `Invalid signature (master: wire<bool>@soc/loader->start, slave: wire<uint64_t>@soc/host->bootaddr)` |
+| Port name that the C++ model does not have | `Binding from invalid slave port (master: loader / start, slave: host / nosuchport)`, aborts at start |
+| `host.o_DATA` left out | `/soc/host/wrapper Data master port is not connected`, aborts at start; this check is written in the core model |
+| `host.o_DATA_DEBUG` left out | No message, prints `Hello`; the port is only needed for GDB |
+| `loader.o_START` or `loader.o_ENTRY` left out | No message, and the simulation never ends |
+
+Names and types are checked. Completeness is not, unless the author of the
+model wrote a check. Two ports of the same type bound the wrong way round
+also pass. A component of our own should check its mandatory ports in C++,
+as the core does for `data`.
+
+## What needs a rebuild
+
+Besides the instances and bindings, the compiled tree
+(`libplatform_tree_my_system.so`) holds some parameter values, such as the
+size and latency of a `Memory`. At run time GVSoC renders the tree again
+from the current script and compares a hash with the one stored at build
+time. When they differ it prints the warning from step 7, ignores the
+compiled tree and builds the same system from `gvsoc_config.json`, which is
+always written fresh. The run therefore uses the new values.
+
+| Change | Rebuild? |
+|---|---|
+| A value: memory size, router mapping | No |
+| Shape, with models that are already compiled: more or fewer instances, other bindings | No |
+| A model variant that was never compiled: other sources or compile flags | Yes |
+| Any C++ edit | Yes |
+
+The second row was checked on the `snitch` target by changing its L1 from 32
+banks to 16 and to 64 in the installed generator: all three ran without a
+rebuild, with the same trace length and the same run time.
+
+The third row fails clearly at start-up. For example
+`Router(self, 'ico', synchronous=False)` uses another source file, so its
+library does not exist yet:
+
+```
+Couldn't find component (name: gen_interco_router_router_common_cpp_<hash>, ...)
+```
+
+One caveat, from a comment in `gvsoc/engine/python/gvsoc/runner_gvrun2.py`:
+the JSON path only works for models that read their parameters from JSON. A
+model that only reads its compiled config gets uninitialised values. `Memory`
+and the clock have a JSON fallback in their C++
+(`if (!this->has_tree_config())`), and the router reads JSON only, so this
+system and the stock `snitch` target are safe. Other models with a compiled
+config have not been checked. Rebuilding once a configuration is settled
+removes the warning and the question.
+
 ## SNAX-MODEL counterparts
 
 | GVSoC | SNAX-MODEL |
@@ -323,6 +445,13 @@ trace.
 | `my_system.py`, the Python generator of a target | Cluster / platform file |
 | `gvsoc_config.json` in the work directory | The resolved design point |
 | `Router` with its `o_MAP` entries | xbar |
+
+The `Router` is a general address-decoding interconnect, closest to an AXI
+crossbar. It is not the TCDM crossbar of the Snitch cluster. In GVSoC's
+`snitch` target the TCDM path is three models in a row: a `Router` per core
+for the address decode, an `L1_interleaver` that picks the bank, and one
+`Memory` per bank that models the bank being busy (read from the source; see
+the GVS2 findings in `docs/notes/NOTES.md`).
 
 ## Things that can go wrong
 
@@ -332,6 +461,15 @@ trace.
 - **`Received error during copy (addr: 0x4, ...)`** from `/soc/loader` at
   run time: the ELF does not fit the router map. Check `base` and `size` in
   `o_MAP` against the `MEMORY` line in `../utils/link.ld`.
+- **The simulation never ends and prints nothing**: the core was never
+  started. Check that `loader.o_START` and `loader.o_ENTRY` are bound.
+- **`Invalid signature`, `Binding from invalid slave port`,
+  `... port is not connected`**: a wrong binding; see
+  [Ports](#ports-finding-them-and-what-is-checked).
+- **`Couldn't find component (name: gen_...)`**: the generator now asks for
+  a model variant that was not compiled. Run `make gvsoc` again.
+- **The platform tree warning**: see
+  [What needs a rebuild](#what-needs-a-rebuild).
 - **`gvrun: command not found`**: `source gvsoc/sourceme.sh` was not run in
   this container.
 - **GDB.** `make run runner_args=--gdbserver` starts a server on port 12345,
