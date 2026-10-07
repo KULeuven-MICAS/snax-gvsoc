@@ -1,0 +1,6 @@
+[submodule "gvsoc"]
+	path = gvsoc
+	url = https://github.com/gvsoc/gvsoc.git
+[submodule "snitch_cluster"]
+	path = snitch_cluster
+	url = https://github.com/pulp-platform/snitch_cluster.git
