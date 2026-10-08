@@ -353,6 +353,38 @@ Differences from the GVSoC website docs: the tutorials are in
     per-core router, `L1_interleaver` and `Memory` banks. Two gaps are in
     the GVS2 and GVS3 findings below.
 
+### GVS1 step 8: tutorial 4, VCD traces
+
+- 2026-10-08. Working copy in
+  `tutorials/4_how_to_add_vcd_traces_to_a_component`; write-up in
+  `docs/tutorials/4_vcd_traces.md`.
+- The figures in this entry are from the check run of the same steps on a
+  2-core Ubuntu 24.04 machine at the same pins, outside the container.
+  GTKWave was not available there; the waveform was checked by reading
+  `all.vcd`.
+- Tutorial 4 starts from tutorial 3's component; `main.c` now writes 0 to
+  19 to `0x20000000`. `solution/` has only `my_comp.cpp` and `my_comp.py`.
+  The text in `tutorials.rst` matches. Build 3 min 2 s (196 files).
+- `vp::Signal<uint32_t> vcd_value(*this, "status", 32)` gives the path
+  `/soc/my_comp/status`. `set(v)` dumps a change, `release()` dumps `z`.
+  A signal also keeps its value (`get()`), has `set_and_release` (one-cycle
+  pulse), `inc` / `dec`, and its own text trace at `TRACE` level
+  (`/soc/my_comp/status/trace`, `Setting signal (value: ...)`).
+- `--vcd --event=my_comp` writes `build/work/all.vcd` (timescale 1 ps) and
+  `view.gtkw`. `status` changes from cycle 1513, 0 to 4, `z`, 6 to 19, one
+  step every 5 cycles. `--vcd` alone does not dump component signals (4
+  signals, no `status`); `--event=.*` dumps 88 signals, 772 kB for about
+  1500 cycles.
+- `gen_gtkw` in the generator only places the signal in the GTKWave script;
+  without it `status` is still in the VCD. `view.gtkw` names the VCD by its
+  container path, which must be fixed when opening it on another machine.
+- The 5 cycles per iteration are 3 instructions (`c.sw`, `c.addiw`, `bne`)
+  with a taken `bne` costing 3 cycles: the RV64 core model adds a branch
+  penalty, so "one instruction per cycle" (step 4) holds only for
+  straight-line code.
+- `gvrun` does not clean `build/work/`; files from earlier runs
+  (`stats.txt`, trace files) stay.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -450,3 +482,12 @@ Differences from the GVSoC website docs: the tutorials are in
   of the stock Snitch cluster, streamers and accelerators as separate
   components (wired per design point), internal parts of an accelerator
   (FSM, counters) as `vp::Block`s inside one model.
+- VCD is the most direct feed from GVSoC into the SNAX-FORGE run viewer
+  found so far: `vp::Signal` values per path with ps time stamps, selected
+  with `--event`, in a standard format that `pyvcd` (already in the
+  container) can read. Not tried yet. Text traces carry no structure, and
+  `stats.txt` is end-of-run only.
+- Candidate split for a SNAX accelerator model: FSM state, streamer
+  occupancy and bank-conflict pulses as signals (VCD, looked at per run);
+  totals such as busy cycles and conflicts as statistics (`--stats`, every
+  profiling run).

@@ -31,7 +31,7 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 5 | Tutorial 1: component from scratch | C++ model plus generator, serving an IO request | 30 min | done 2026-10-08 |
 | 6 | Tutorial 2: components communicating | Wire interfaces | 30 min | done 2026-10-08 |
 | 7 | Tutorial 3: system traces | `vp::Trace`, `--trace` paths | 15 min | done 2026-10-08 |
-| 8 | Tutorial 4: VCD traces | `vp::Signal`, GTKWave | 20 min | |
+| 8 | Tutorial 4: VCD traces | `vp::Signal`, GTKWave | 20 min | done 2026-10-08 |
 | 9 | Tutorial 5: register map | By hand, `vp::Register`, `regmap-gen` | 45 min | |
 | 10 | Tutorial 6: timing | `ClockEvent` | 30 min | |
 | 11 | Tutorial 7: IO request interface | Synchronous latency, pending and `resp()` | 45 min | |
@@ -41,7 +41,7 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 15 | Read the HWPE tutorial, no build | A full accelerator: config port, FSM, streamer into L1 | 60 min | |
 | 16 | Close `NOTES.md` | | 15 min | |
 
-Tutorials 0 to 3 have been built and run. Tutorials 4 onward have not been
+Tutorials 0 to 4 have been built and run. Tutorials 5 onward have not been
 run yet.
 
 Tutorial 7 only covers the slave side of an IO request. Step 15 is where a
