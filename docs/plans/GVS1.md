@@ -30,7 +30,7 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 4 | Tutorial 0: system from scratch | Python generators, router, loader | 30 min | done 2026-10-07 |
 | 5 | Tutorial 1: component from scratch | C++ model plus generator, serving an IO request | 30 min | done 2026-10-08 |
 | 6 | Tutorial 2: components communicating | Wire interfaces | 30 min | done 2026-10-08 |
-| 7 | Tutorial 3: system traces | `vp::Trace`, `--trace` paths | 15 min | |
+| 7 | Tutorial 3: system traces | `vp::Trace`, `--trace` paths | 15 min | done 2026-10-08 |
 | 8 | Tutorial 4: VCD traces | `vp::Signal`, GTKWave | 20 min | |
 | 9 | Tutorial 5: register map | By hand, `vp::Register`, `regmap-gen` | 45 min | |
 | 10 | Tutorial 6: timing | `ClockEvent` | 30 min | |
@@ -38,14 +38,16 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 12 | Tutorial 10: interconnect timing | Router latency and bandwidth | 20 min | |
 | 13 | Tutorial 16: control from Python | The proxy: step, read and write memory | 30 min | |
 | 14 | Tutorial 19: standalone testbench (optional) | Testing a model with no core | 30 min | |
-| 15 | Read the HWPE tutorial, no build (optional) | A full accelerator: config port, FSM, streamer into L1 | 60 min | |
+| 15 | Read the HWPE tutorial, no build | A full accelerator: config port, FSM, streamer into L1 | 60 min | |
 | 16 | Close `NOTES.md` | | 15 min | |
 
-Tutorials 0 to 2 have been built and run. Tutorials 3 onward have not been
+Tutorials 0 to 3 have been built and run. Tutorials 4 onward have not been
 run yet.
 
 Tutorial 7 only covers the slave side of an IO request. Step 15 is where a
 component issuing its own requests to L1 is shown, which a streamer needs.
+Step 15 is therefore no longer optional (decided in step 7); step 14 still
+is.
 
 ## SNAX-MODEL counterparts
 

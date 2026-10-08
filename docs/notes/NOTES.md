@@ -299,6 +299,60 @@ Differences from the GVSoC website docs: the tutorials are in
   its documentation is weak (out-of-date text, few comments, behaviour found
   by experiment). An input for GVS4.
 
+### GVS1 step 7: tutorial 3, system traces
+
+- 2026-10-08. Working copy in
+  `tutorials/3_how_to_add_system_traces_to_a_component`; write-up in
+  `docs/tutorials/3_system_traces.md`.
+- The figures in this entry are from the check run of the same steps on a
+  2-core Ubuntu 24.04 machine at the same pins, outside the container.
+- Tutorial 3 starts from tutorial 1's component, not tutorial 2's. The text
+  in `tutorials.rst` matches `solution/`. Build 3 min 8 s (197 files).
+- `make run` prints only `Hello, ...`; `--trace=my_comp` adds
+  `1580000: 158: [/soc/my_comp/trace] Received request at offset 0x0, ...`
+  after eight base-class lines (ports, bindings, reset).
+  `--trace-level=info` hides the `DEBUG` message. `--trace=my_comp:t3.log`
+  writes to the work directory (`/work/build/work/t3.log`), colour codes
+  kept.
+- Traces are compiled out of the default build: only the `debug` and
+  `profile` model variants define `VP_TRACE_ACTIVE`
+  (`gvsoc/engine/cmake/vp_model.cmake`). Any `--trace`, `--vcd` or
+  `--event`, even one matching nothing, makes `gvrun` use
+  `gvsoc_launcher_debug` and `install/models/debug/`
+  (`gen_config` in `runner_gvrun2.py`). A 20-million-iteration loop on
+  `my_system`: 4.2 s by default, 14.2 s with `--trace=zzz`, about 3.5 times
+  slower before any line is printed.
+- Every component already has a trace named `trace` (from `vp::Block`),
+  registered again as `comp` (from `vp::Component`). The tutorial's trace
+  reuses the name `trace`, so `--trace=my_comp/trace` also shows the base
+  class's `clock` and `reset` port lines. Own traces should get their own
+  names.
+- Questions answered:
+  - Several traces per component: yes, one `vp::Trace` member per name,
+    each with its own path. The RV64 core registers 14 (`insn`, `lsu`,
+    `csr`, `regfile`, ...); this is why `--trace=insn` selects only
+    instructions.
+  - Nesting, in Python: a component without `add_sources` is a pure
+    container (composite) and can forward its own ports to a child with
+    `self.bind(self, 'in_0', child, 'in_0')`, as `snitch_cluster.py` does.
+    In C++: a model can contain `vp::Block` sub-units with their own path,
+    traces and clock events but no bindable ports, as the Snitch fast
+    core's `Ssr` and `SsrStreamer` do. Rule of thumb: parts wired
+    differently per design point become components in a composite; fixed
+    parts of one unit become blocks.
+  - Profiling: the counterpart of SNAX-MODEL's profiles is statistics, not
+    traces. A model registers counters with `stats.register_stat(...)`;
+    `--stats` writes `build/work/stats.txt` with per-component counters
+    (checked: `/soc/ico` and `/soc/mem` reads, writes, bytes, bandwidth).
+    `--stats` uses the `profile` build: the same loop took 13.9 s against
+    5.1 s by default.
+  - Can the SNAX cluster be modelled in GVSoC: in outline yes, on top of the
+    stock `snitch` target (cores, TCDM, DMA, crossbar already exist), adding
+    streamers and accelerators as our own components and wires for
+    `start` / `busy` / irq. The TCDM path is not the `Router` but
+    per-core router, `L1_interleaver` and `Memory` banks. Two gaps are in
+    the GVS2 and GVS3 findings below.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -321,6 +375,19 @@ Differences from the GVSoC website docs: the tutorials are in
   a non-core port (a streamer) could be added the same way. `narrow_axi`
   and `wide_axi` are plain `Router` instances. To measure: two masters
   hitting the same bank in the same cycle.
+- The bank model (`memory.cpp`) already reports a conflict: when a request
+  arrives while `next_packet_start` is in the future, it adds the
+  difference as latency and prints `Delayed packet (latency: N)` on its
+  trace. It has stats for reads, writes, bytes and bandwidth, but no
+  conflict counter. Counting conflicts needs a `StatScalar` next to that
+  line, in our own L1 model or a fork of `memory.cpp`.
+- SNAX configures accelerators with `csrw` to custom CSRs through the CSR
+  manager, not with memory-mapped stores. The GVSoC core handles CSRs
+  inside the ISS. The core has an `o_OFFLOAD` wire (`riscv.py`,
+  `IssOffloadInsn`) that hands instructions to another unit, used by the
+  Snitch FP subsystem; whether custom CSR accesses can be routed out
+  through it is not checked. Fallback: memory-mapped accelerator registers,
+  which changes the SNAX software.
 
 ### GVS3
 
@@ -368,3 +435,18 @@ Differences from the GVSoC website docs: the tutorials are in
   `is_bound()`; `sync()` on an unbound wire crashes.
 - An interrupt line to several cores can be one master bound to several
   slaves.
+- Profiling and design-space runs must not use `--trace`: any trace option
+  switches to the debug build, about 3.5 times slower. `--stats` switches
+  to the profile build, about 2.7 times slower. Measured on the tutorial
+  `my_system` with a 20-million-iteration loop, 2 cores.
+- A SNAX model's always-on numbers should be statistics
+  (`stats.register_stat`), written to `stats.txt` by `--stats`; traces are
+  for looking at single runs. Whether `stats.txt` (or `--stats-raw`) can
+  feed the SNAX-FORGE run viewer is part of the GVS3 question.
+- Streamers are `io` masters that issue many requests into L1. Tutorial 7
+  covers only the slave side; the HWPE tutorial (step 15) is the example of
+  a component streaming into L1, so step 15 is kept.
+- Build structure for SNAX-GVSoC: the cluster as a Python composite on top
+  of the stock Snitch cluster, streamers and accelerators as separate
+  components (wired per design point), internal parts of an accelerator
+  (FSM, counters) as `vp::Block`s inside one model.

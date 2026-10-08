@@ -288,6 +288,49 @@ start-up) and that the global level allows it; only then is the text
 formatted. Both checks are a few instructions, so an inactive trace is cheap
 even in the debug build.
 
+## Several traces, sub-blocks and statistics
+
+**Several traces.** A model can have as many traces as it likes: one
+`vp::Trace` member per name, each registered with `new_trace`, each with its
+own path. The RV64 core registers 14 of them (`insn`, `lsu`, `csr`,
+`regfile`, `decoder`, `mmu`, `exception`, ...), which is why `--trace=insn`
+selects only the instruction lines. A SNAX accelerator could have
+`/.../acc/fsm`, `/.../acc/streamer_a` and `/.../acc/conflict`.
+
+**Sub-blocks.** A model can also be split into `vp::Block` sub-units inside
+the same library. A block has its own path, traces and clock events, but no
+ports that Python can bind. The Snitch fast core does this for its stream
+registers: `Ssr` is a block of the core and each `SsrStreamer` a block of
+`Ssr` (`gvsoc/core/models/cpu/iss/src/snitch_fast/ssr.cpp`). Components can
+also be nested on the Python side; a component without `add_sources` is a
+pure container and can forward its ports to a child with
+`self.bind(self, 'in_0', child, 'in_0')`, as `snitch_cluster.py` does.
+
+**Statistics.** Traces are for looking at one run. Counters that should be
+collected in every profiling run are statistics: a model registers them
+with `this->stats.register_stat(...)` (see `gvsoc/core/models/memory/memory.cpp`),
+and `--stats` writes them at the end of the run:
+
+```
+make run runner_args="--stats"
+cat /work/build/work/stats.txt
+```
+
+Expected, among others:
+
+```
+--- /soc/mem ---
+  reads                                 404
+  writes                                155
+  bytes_read                          14655
+  bytes_written                       12821
+  read_bandwidth                953.48 MB/s
+  write_bandwidth               834.16 MB/s
+```
+
+`--stats` uses the `profile` build, so it also costs speed: the 20-million
+iteration loop took 13.9 s with `--stats` against 5.1 s without.
+
 ## SNAX-MODEL counterparts
 
 | GVSoC | SNAX-MODEL |
@@ -296,6 +339,7 @@ even in the debug build.
 | `--trace=REGEX` | Choosing which sources to record |
 | `--trace=REGEX:file` | The trace file of a run directory |
 | `--trace-level` | No direct counterpart |
+| `--stats` and `stats.txt` | The profiles of a run |
 
 GVSoC's text traces are lines for humans, with no structure beyond the
 header. Events and VCD (tutorial 4) are the structured form.
