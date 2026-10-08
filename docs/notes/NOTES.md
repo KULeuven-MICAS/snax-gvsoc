@@ -260,6 +260,45 @@ Differences from the GVSoC website docs: the tutorials are in
 - The page has a commented `my_comp.cpp` and a line-by-line explanation of
   step 3. Both tutorial pages draw the system in Mermaid.
 
+### GVS1 step 6: tutorial 2, components communicating
+
+- 2026-10-08. Working copy in
+  `tutorials/2_how_to_make_components_communicate_together`; write-up in
+  `docs/tutorials/2_components_communicating.md`.
+- The figures in this entry are from the check run of the same steps on a
+  2-core Ubuntu 24.04 machine at the same pins, outside the container.
+- `make prepare gvsoc all run` prints `Received request ...`,
+  `Received value 1`, `Received results 11111111 22222222`, then
+  `Hello, got 0x12345678 from my comp`. Build 4 min 25 s (201 files), again
+  a full rebuild because the tutorial directory changed. The text in
+  `tutorials.rst` uses the old `gsystree` alias and `void *__this`;
+  `solution/` is the reference.
+- A wire (`vp::WireMaster<T>` / `vp::WireSlave<T>`, `vp/itf/wire.hpp`) is a
+  direct function call, like an `io` request: binding copies the slave's
+  handler into the master, `sync(value)` calls it. No event, no delay, no
+  stored value. The whole exchange (`my_comp` -> `my_comp2` -> back into
+  `my_comp`) runs inside the core's `c.lw` at cycle 158, with the calls
+  nested.
+- The signature string is only a label both ends must match
+  (`Invalid signature` otherwise); GVSoC never compares it with the C++
+  types. Same signature with different C++ types builds and binds, then
+  crashes (`Segmentation fault`, exit 139).
+- `sync()` on an unbound `WireMaster` crashes with a segmentation fault;
+  checked with a print to `stderr` showing `is_bound()` = 0 just before the
+  call. Unlike tutorial 0's unbound `o_DATA_DEBUG`, this is not harmless.
+  Models' `printf` output is lost in such a crash (stdout is buffered).
+- One master can be bound to several slaves; each receives the value in
+  turn (`next` chain in `WireMaster`). Tried with two `MyComp2`.
+- A pointer sent on a wire is only valid during the receiver's handler when
+  it points to the sender's stack, as in the tutorial.
+- The two classes are both called `MyComp`; this is fine because each
+  model is its own library with its own `gv_new`.
+- The working copy keeps the `solution/` files; the page shows the same
+  code with comments, which was built and run on the check machine.
+- Impression after tutorial 2: GVSoC is more involved than expected and
+  its documentation is weak (out-of-date text, few comments, behaviour found
+  by experiment). An input for GVS4.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -319,3 +358,13 @@ Differences from the GVSoC website docs: the tutorials are in
   reading stale data (checked on the RV64 core, not on Snitch).
 - GVSoC's `gvtest` with a `testset.cfg` and a `Checker` on the output is a
   ready pattern for regression tests of our components.
+- `start` / `busy` / interrupt lines map to `WireMaster<bool>` /
+  `WireSlave<bool>`, but a wire call takes zero time and nests inside the
+  caller. An accelerator model that should react a cycle later must
+  schedule a clock event in its wire handler (tutorial 6), and must have
+  its state consistent before it drives any wire, since the callee may call
+  back into it.
+- Optional output wires of our components should be guarded with
+  `is_bound()`; `sync()` on an unbound wire crashes.
+- An interrupt line to several cores can be one master bound to several
+  slaves.
