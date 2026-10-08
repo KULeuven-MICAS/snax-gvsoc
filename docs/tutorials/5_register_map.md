@@ -82,6 +82,10 @@ a wrong access now traps. `my_comp.py` has no `gen_gtkw` any more. `main.c`
 reads `0x20000000` once. `solution/` holds `main.c`, `my_comp.cpp` and
 `regmap.md`.
 
+Do not run `make prepare` here. It copies `solution/` over the working
+files, and that `my_comp.cpp` includes the generated headers, so
+`make gvsoc` fails until step 5 is done.
+
 ## Step 2: build and run the starting point
 
 ```
@@ -260,7 +264,7 @@ The register offsets are relative to the start of the map, not of the
 component. Generate the headers:
 
 ```
-regmap-gen --input-md regmap.md --header headers/mycomp
+PYTHONPATH=/work/gvsoc/engine/python /work/gvsoc/engine/bin/regmap-gen --input-md regmap.md --header headers/mycomp
 ls headers
 ```
 
@@ -270,11 +274,23 @@ Expected: no output from `regmap-gen`, and 12 files in `headers/`
 positions and widths as macros) and `mycomp_gvsoc.h` (the C++ classes). The
 rest are headers for software running on the simulated chip.
 
-`regmap-gen` is on the `PATH` after `source gvsoc/sourceme.sh`. The tutorial's
-`make regmap` does not work here: the Makefile looks for the script at
-`../../../../../engine`, which only exists inside the GVSoC tree.
-`make regmap GVSOC_ENGINE=$GVSOC_ROOT/engine` does the same as the command
-above.
+`regmap-gen` is not a separate tool. It is a Python script in the gvsoc
+submodule, `gvsoc/engine/bin/regmap-gen`, and its module is in
+`gvsoc/engine/python/regmap/`; the `PYTHONPATH` in front lets the script find
+the module. Called this way it needs neither the GVSoC build nor
+`sourceme.sh`, only the Python packages of the container.
+
+Two other ways, which both depend on more:
+
+- Plain `regmap-gen`, as in the tutorial text. The GVSoC build installs the
+  script in `build/install/bin` and the module in `build/install/python`,
+  and `sourceme.sh` puts both on the paths. It needs a finished build and a
+  sourced `sourceme.sh`; otherwise `bash: regmap-gen: command not found`.
+  It worked on the check machine and not in the container on micaseb19.
+- The tutorial's `make regmap`. The Makefile looks for the script at
+  `../../../../../engine`, which only exists inside the GVSoC tree, so in a
+  copy it needs
+  `PYTHONPATH=/work/gvsoc/engine/python make regmap GVSOC_ENGINE=/work/gvsoc/engine`.
 
 ## Step 6 (part 3): use the generated map in the model
 
@@ -662,8 +678,12 @@ no separate step. The working copy keeps the tutorial's form.
 - **`make regmap` fails with `../../../../../engine/bin/regmap-gen: No such
   file or directory`:** the copy is outside the GVSoC tree. Call
   `regmap-gen` directly (step 5).
+- **`bash: regmap-gen: command not found`:** the script is not on the
+  `PATH`. Call it from the source tree with `PYTHONPATH` set (step 5).
+- **`ModuleNotFoundError: No module named 'regmap'`:** the script was called
+  by its path without the `PYTHONPATH` in front.
 - **`fatal error: headers/mycomp_regfields.h: No such file or directory`:**
-  step 5 was skipped.
+  step 5 was skipped or failed, so `headers/` does not exist.
 - **A change in `regmap.md` has no effect:** `regmap-gen` was not run again.
 - **`'REGMAP_REG0_FIELD0_BIT' was not declared in this scope`:** the two
   includes are in the wrong order; `mycomp_regfields.h` goes first.
