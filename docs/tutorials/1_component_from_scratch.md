@@ -135,23 +135,35 @@ class MyComp(gvsoc.systree.Component):
 
 ## Step 3: write the model
 
-Create `my_comp.cpp`:
+Create `my_comp.cpp`. The code is the same as `solution/my_comp.cpp`; the
+comments are added here and do not change the build.
 
 ```cpp
+// vp.hpp: the engine API (vp::Component, traces, clocks, registers).
+// io.hpp: the memory-mapped request interface (vp::IoSlave, vp::IoReq).
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
 
+// One C++ class per model. vp::Component is the base class of every GVSoC
+// model; it gives the name, the parent, the clock, traces and the port list.
 class MyComp : public vp::Component
 {
 
 public:
+    // The engine builds the config object; we only pass it to the base class.
     MyComp(vp::ComponentConf &config);
 
 private:
+    // Called for every request that arrives on the input port. Static,
+    // because the port stores a plain function pointer, not a member pointer.
+    // The engine passes the instance back as the first argument.
     static vp::IoReqStatus handle_req(vp::Block *__this, vp::IoReq *req);
 
+    // The input port. A slave port receives requests; its name ("input") is
+    // given in the constructor and must match i_INPUT() in my_comp.py.
     vp::IoSlave input_itf;
 
+    // The value returned on a read at offset 0, set from the Python side.
     uint32_t value;
 };
 
@@ -159,45 +171,128 @@ private:
 MyComp::MyComp(vp::ComponentConf &config)
     : vp::Component(config)
 {
+    // Tell the port which function handles its requests.
     this->input_itf.set_req_meth(&MyComp::handle_req);
+    // Register the port under the name used by the bindings in my_system.py.
     this->new_slave_port("input", &this->input_itf);
 
+    // Read the "value" property that my_comp.py put in the JSON config.
+    // A missing property gives 0, with no error.
     this->value = this->get_js_config()->get_child_int("value");
 }
 
 vp::IoReqStatus MyComp::handle_req(vp::Block *__this, vp::IoReq *req)
 {
+    // Get our instance back from the generic pointer.
     MyComp *_this = (MyComp *)__this;
 
+    // req->get_addr() is the offset inside our window: the router already
+    // removed the base 0x20000000 (rm_base=True).
     printf("Received request at offset 0x%lx, size 0x%lx, is_write %d\n",
         req->get_addr(), req->get_size(), req->get_is_write());
+
+    // Only a 4-byte read at offset 0 is served. get_data() points to the
+    // master's buffer; for a core load it is the destination register itself.
     if (!req->get_is_write() && req->get_addr() == 0 && req->get_size() == 4)
     {
         *(uint32_t *)req->get_data() = _this->value;
     }
+
+    // Done now, no added latency. Anything else is also answered OK and
+    // left untouched (see "What the model does not do").
     return vp::IO_REQ_OK;
 }
 
 
+// Entry point of the shared library. When the engine loads
+// gen_my_comp_cpp_<hash>.so it looks up this symbol by name and calls it to
+// create the instance. extern "C" keeps the name unmangled.
 extern "C" vp::Component *gv_new(vp::ComponentConf &config)
 {
     return new MyComp(config);
 }
 ```
 
-- **The class** inherits from `vp::Component`. `config` is only passed on to
-  the base class.
-- **The port** is a `vp::IoSlave` member. The constructor gives it a handler
-  with `set_req_meth` and registers it under a name with `new_slave_port`.
-- **The handler** is a static function, because a port stores a plain
-  function pointer. It gets the instance as its first argument, hence the
-  cast to `MyComp *`.
-- **The request** carries the address (already a local offset, the router
-  removed the base), the size, the direction and a pointer to the data
-  buffer of the master. For a read, the model writes into that buffer.
-- **`IO_REQ_OK`** means the request is done now.
-- **`gv_new`** is the C function that the engine calls to create the
-  instance when it loads the library.
+The file has four parts: the includes, the class, the constructor and the
+request handler, plus the `gv_new` entry point. They are explained in that
+order below, then put on a timeline.
+
+### The includes
+
+| Line | What it brings in |
+|---|---|
+| `#include <vp/vp.hpp>` | The engine API: `vp::Component`, traces, clock events, registers. `vp` is the engine's namespace (most likely "virtual platform"; the source never spells it out). The headers are in `gvsoc/engine/engine/include/vp/`. |
+| `#include <vp/itf/io.hpp>` | The `io` port type used for memory-mapped requests: `vp::IoSlave`, `vp::IoMaster`, `vp::IoReq` and the status values. Each port type has its own header in `vp/itf/` (`wire.hpp`, `clock.hpp`, ...). |
+
+### The class
+
+| Line | What it does |
+|---|---|
+| `class MyComp : public vp::Component` | Every model is a C++ class derived from `vp::Component`. The base class holds the instance name and path (`/soc/my_comp`), the parent, the clock it inherits, the trace object and the list of ports. `vp::Component` itself derives from `vp::Block`, which is why the handler receives a `vp::Block *`. |
+| `MyComp(vp::ComponentConf &config);` | The constructor signature the engine expects. `ComponentConf` carries the instance name, the parent, this instance's JSON config and pointers to the engine's time, trace and power engines. The model never reads it directly; it hands it to the base class. |
+| `static vp::IoReqStatus handle_req(vp::Block *__this, vp::IoReq *req);` | The function that serves requests. It has the signature `vp::IoReqMeth` from `io.hpp`. It is `static` because a port stores a plain C function pointer, which cannot point to a member function; the instance comes in as the first argument instead. |
+| `vp::IoSlave input_itf;` | The port object. A slave port receives requests; a `vp::IoMaster` would send them. Declaring the member does not create a port in the system yet; `new_slave_port` in the constructor does. |
+| `uint32_t value;` | Model state. A real model keeps its registers, buffers and FSM state in members like this one. |
+
+### The constructor
+
+It runs once, when the engine creates the instance, before any binding
+exists. Its job is to declare the ports and read the parameters.
+
+| Line | What it does |
+|---|---|
+| `: vp::Component(config)` | Builds the base part from the engine's config. After this, `this->get_js_config()`, `this->get_path()` and the traces work. |
+| `this->input_itf.set_req_meth(&MyComp::handle_req);` | Stores the handler's address in the port. Nothing is called yet. |
+| `this->new_slave_port("input", &this->input_itf);` | Registers the port under the name `input`, with this instance as its context (the pointer that will come back as `__this`). The name is what bindings refer to: it must be the name in `i_INPUT()` in `my_comp.py`, or the run stops with `Binding from invalid slave port`. With `--trace=my_comp` this shows up as `New slave port (name: input, ...)`. |
+| `this->value = this->get_js_config()->get_child_int("value");` | `get_js_config()` is this instance's part of `gvsoc_config.json`, the `/target/soc/my_comp` object with `"value": 305419896`. `get_child_int` reads one field. A missing field returns 0 without any message (`gvsoc/engine/engine/src/json.cpp`), so a typo in the property name gives a silent 0. `get_child_bool` and `get_child_str` exist too. |
+
+### The request handler
+
+It runs every time a master sends a request that the router maps to this
+component, here once, during the program's load from `0x20000000`.
+
+| Line | What it does |
+|---|---|
+| `MyComp *_this = (MyComp *)__this;` | Gets the instance back. `__this` is the context given in `new_slave_port`, so the cast is safe. |
+| `printf(...)` | Prints straight to the host's standard output, with no time stamp and no way to switch it off. Tutorial 3 replaces this with `vp::Trace`, which `--trace` filters. |
+| `req->get_addr()` | The address of the access, already relative to this component: the router subtracted the mapping base because of `rm_base=True` in `my_system.py`. The core sent `0x20000000`; the model sees `0x0`. |
+| `req->get_size()` | Size in bytes: 4 for `lw`, 1 for `lbu`. |
+| `req->get_is_write()` | `true` for a store, `false` for a load. Atomics carry an opcode as well (`get_opcode()`); this model ignores it. |
+| `req->get_data()` | A pointer to the master's data. For a store the model reads from it; for a load the model writes into it. The core does not pass a temporary buffer: for a load it passes a pointer to the destination register itself (`Lsu::load` in `gvsoc/core/models/cpu/iss/include/lsu_implem.hpp`, "the target will write directly to the register"). |
+| `*(uint32_t *)req->get_data() = _this->value;` | Writes the value into that register. When the handler returns, the load is complete. |
+| `return vp::IO_REQ_OK;` | Tells the master that the request is finished, now. The other values are `IO_REQ_INVALID` (error; the core takes a load or store fault), `IO_REQ_PENDING` (the answer comes later through `resp()`) and `IO_REQ_DENIED` (not accepted now; the master waits for a grant). Pending and denied are covered in tutorial 7. |
+
+Things the request can carry that this model does not use: a latency
+(`set_latency()`, in cycles, added on top of the current one), which is the
+simplest way to make an access cost time; `get_initiator()`, the hart ID of
+the core that sent it; and a debug flag for GDB accesses.
+
+### The entry point
+
+| Line | What it does |
+|---|---|
+| `extern "C" vp::Component *gv_new(vp::ComponentConf &config)` | The engine opens `gen_my_comp_cpp_<hash>.so` and looks up the symbol `gv_new` by name (`gvsoc/engine/engine/src/component.cpp`). `extern "C"` keeps the name as is; without it, C++ name mangling would hide it. Each model library has exactly one. |
+| `return new MyComp(config);` | Creates the instance. The engine owns it from here. |
+
+### When each part runs
+
+The order, seen with `make run runner_args="--trace=my_comp"` and read from
+the engine source:
+
+1. **Start-up, before time 0.** The engine loads the library, calls
+   `gv_new`, and the constructor runs. The trace shows the five
+   `New slave port` lines: `clock`, `reset`, `power_supply` and `voltage`
+   from the base class, then `input` from our constructor.
+2. **Binding.** Once every instance exists, the engine connects the ports
+   from the platform tree (`Creating final bindings`). For an `io` binding it
+   copies the slave's handler pointer and context into the master port
+   (`IoMaster::bind_to` in `io.hpp`).
+3. **Reset.** `Reset (active: 1)` then `Reset (active: 0)` at cycle 0. A
+   model can override `reset(bool active)` to clear its state; this one has
+   nothing to clear.
+4. **Simulation.** At cycle 158 the core executes `c.lw`; the router calls
+   `handle_req`, which writes the register and returns. No event is
+   scheduled; the call finishes inside that instruction.
 
 ## Step 4: add the component to the system
 
@@ -380,8 +475,8 @@ request and only acts on a 4-byte read at offset 0. Tried on this system:
 
 | Access from the program | What happens |
 |---|---|
-| 4-byte read at offset 4 | `IO_REQ_OK`, buffer untouched: the program gets stale data (`0x978` in the run) |
-| 1-byte read at offset 0 | Same, the size check fails: reads `0x0` |
+| 4-byte read at offset 4 | `IO_REQ_OK`, register untouched: the program gets the old content of `a1` (`0x978` in the run), because `lw` passes the register itself and does not clear it first |
+| 1-byte read at offset 0 | The size check fails, nothing written: reads `0x0`, because `lbu` clears the register before the request (zero extension) |
 | 4-byte write at offset 0 | Accepted and dropped; the next read still gives the value |
 | Read at `0x30000000`, not mapped | The router returns `IO_REQ_INVALID`; see below |
 
