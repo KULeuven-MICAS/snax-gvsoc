@@ -28,23 +28,32 @@ export GVSOC_ROOT=/work/gvsoc
 
 ## The system
 
+```mermaid
+flowchart LR
+    subgraph top["Rv64 (top)"]
+        clock["clock<br/>100 MHz"]
+        subgraph soc["soc"]
+            loader["loader<br/>ELF loader"]
+            host["host<br/>RV64 core (ISS)"]
+            ico["ico<br/>router"]
+            mem["mem<br/>1 MB memory"]
+            gdbserver["gdbserver<br/>no bindings"]
+        end
+    end
+
+    clock -- clock --> soc
+    loader -- out --> ico
+    loader -. "start, entry" .-> host
+    host -- fetch --> ico
+    host -- data --> ico
+    host -- data_debug --> ico
+    ico -- "mem: 0x0000_0000 .. 0x000F_FFFF" --> mem
 ```
-  Rv64 (top)
-  +--------------------------------------------------------------+
-  |  clock (100 MHz) ----clock----> soc                          |
-  |                                                              |
-  |  soc                                                         |
-  |  +--------------------------------------------------------+  |
-  |  |  loader --out--------+                                 |  |
-  |  |    |  start, entry   |                                 |  |
-  |  |    v                 v                                 |  |
-  |  |  host --fetch-->  ico (router) --mem--> mem (1 MB)     |  |
-  |  |       --data--->   0x0000_0000 .. 0x000f_ffff          |  |
-  |  |       --data_debug->                                   |  |
-  |  |  gdbserver                                             |  |
-  |  +--------------------------------------------------------+  |
-  +--------------------------------------------------------------+
-```
+
+Inside `soc`, solid arrows are `io` bindings (memory-mapped requests) and
+the dotted one stands for two `wire` bindings; the arrow into `soc` is the
+`clock` binding. Edge labels are port names. The arrow points from the
+master port to the slave port.
 
 | Instance | Generator class | What it is |
 |---|---|---|
@@ -149,8 +158,9 @@ class Target(gvsoc.runner.Target):
 Reading it from the bottom up:
 
 - **`Target`** is what `gvrun --target=my_system` looks for. The file name
-  is the target name. `GAPY_TARGET = True` marks the file as a target, and
-  `model` names the top component class.
+  is the target name, and `model` names the top component class.
+  `GAPY_TARGET = True` is not needed: nothing in the pinned tree reads it,
+  and tutorial 1's `my_system.py` builds and runs without it.
 - **`Rv64`** is a thin wrapper with two jobs. It declares the `binary`
   parameter, which is what `gvrun --parameter binary=<elf>` sets. It also
   creates the clock and binds it to `soc`. A clock bound to a component is
@@ -456,8 +466,7 @@ the GVS2 findings in `docs/notes/NOTES.md`).
 ## Things that can go wrong
 
 - **`Invalid target specified: my_system`** during `make gvsoc`:
-  `my_system.py` is not next to the `Makefile`, or `GAPY_TARGET = True` is
-  missing.
+  `my_system.py` is not next to the `Makefile`.
 - **`Received error during copy (addr: 0x4, ...)`** from `/soc/loader` at
   run time: the ELF does not fit the router map. Check `base` and `size` in
   `o_MAP` against the `MEMORY` line in `../utils/link.ld`.
