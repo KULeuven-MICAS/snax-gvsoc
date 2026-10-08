@@ -549,6 +549,7 @@ works over several cycles needs clock events, which is tutorial 6.
 | `tutorials/1_how_to_write_a_component_from_scratch/my_comp.cpp` | The model |
 | `tutorials/1_how_to_write_a_component_from_scratch/my_system.py` | The system |
 | `tutorials/1_how_to_write_a_component_from_scratch/main.c` | The program |
+| `tutorials/1_how_to_write_a_component_from_scratch/testset.cfg` | GVSoC's own regression test for this tutorial (`gvtest`); not used here |
 | `build/install/models/gen_my_comp_cpp_<hash>.so` | The compiled model |
 | `build/build/gvsoc/configs/my_system.config` | Models to build |
 | `build/build/gvsoc/configs/my_system.tree.cpp` | Instances and bindings |

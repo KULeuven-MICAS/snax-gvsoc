@@ -210,6 +210,56 @@ Differences from the GVSoC website docs: the tutorials are in
 - A run leaves `__pycache__/` next to the generator; it should be ignored
   by git.
 
+### GVS1 step 5: tutorial 1, component from scratch
+
+- 2026-10-08. Working copy in
+  `tutorials/1_how_to_write_a_component_from_scratch`; write-up in
+  `docs/tutorials/1_component_from_scratch.md`.
+- The figures in this entry are from the check run of the same steps on a
+  2-core Ubuntu 24.04 machine at the same pins, outside the container.
+- `make prepare gvsoc all run` prints
+  `Received request at offset 0x0, size 0x4, is_write 0` then
+  `Hello, got 0x12345678 from my comp`. The tutorial text matches
+  `solution/`, except one handler declaration with `void *__this` instead
+  of `vp::Block *__this`.
+- The first `make gvsoc` takes 4 min 1 s (197 files), as long as a first
+  build of tutorial 0. The tutorial directory is a module root and an
+  include path of every model, so switching tutorials recompiles all models
+  of `my_system`, the RV64 core included, in four variants (`optim`,
+  `debug`, `asserts`, `profile`). Expect this once per tutorial. Editing
+  `my_comp.cpp` and rebuilding: 7 to 14 s.
+- The library name `gen_my_comp_cpp_<hash>` hashes the source names and
+  flags, not the file content; it stays the same across edits.
+- Changing `value` in `my_system.py` needs no rebuild and gives no platform
+  tree warning: the property is only in `gvsoc_config.json`, and the tree
+  node of `my_comp` has no compiled config.
+- `get_child_int` returns 0 with no message when the property is missing,
+  so a misspelled property name is silent.
+- Without `extern "C" gv_new` the build passes and the run aborts with
+  `couldn't find gv_new loaded module`.
+- An IO request is a direct function call through pointers copied at bind
+  time (`IoMaster::bind_to`); router, model and the core's `c.lw` all show
+  in cycle 158. For a load, `get_data()` points to the core's destination
+  register. `lw` does not clear it first and `lbu` does, so an unanswered
+  4-byte read returns the old register value and a 1-byte one returns 0.
+- The model answers `IO_REQ_OK` to everything. Returning `IO_REQ_INVALID`,
+  or reading an unmapped address, makes the RV64 core take a load fault;
+  the runtime exits 1 and `gvrun` prints
+  `Input error: Platform returned an error (exitcode: 1)`, with no message
+  naming the address. Not checked on the Snitch target.
+- Nothing in the pinned tree reads `GAPY_TARGET`; tutorial 1's
+  `my_system.py` has none and works. The tutorial 0 page was corrected.
+- Tutorial 1's `my_system.py` creates no `Gdbserver`; the runner adds one
+  at the top level (`gvsoc/engine/python/gvsoc/runner_gvrun2.py`).
+- Questions answered. `vp` is the engine's C++ namespace and headers
+  (`gvsoc/engine/engine/include/vp/`): base classes, port types, clocks,
+  traces, registers; the source never spells it out, the docs call GVSoC a
+  virtual platform. `testset.cfg` is GVSoC's own regression test for the
+  tutorial (`gvtest`): it builds `solution/` in its own build directory,
+  runs it and checks the two output lines; not used here.
+- The page has a commented `my_comp.cpp` and a line-by-line explanation of
+  step 3. Both tutorial pages draw the system in Mermaid.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -257,3 +307,15 @@ Differences from the GVSoC website docs: the tutorials are in
 - GVSoC does not check that a component's ports are all bound, unless the
   model does it itself. Our SNAX components should check their mandatory
   ports in C++, as the core does for `data`.
+- A model reads its parameters from `gvsoc_config.json` with
+  `get_js_config()`, so a value that only goes through `add_properties` can
+  be swept with no rebuild (tutorial 1). Our components should read their
+  sizes and latencies that way, and check that each one is present, since
+  a missing property reads as 0 with no message.
+- Our module root (`snax/`) should stay at one path: moving it, like
+  switching tutorial directories, recompiles every model of the target.
+- A register window should return `IO_REQ_INVALID` for offsets and sizes it
+  does not serve, so a wrong access from the program traps instead of
+  reading stale data (checked on the RV64 core, not on Snitch).
+- GVSoC's `gvtest` with a `testset.cfg` and a `Checker` on the output is a
+  ready pattern for regression tests of our components.
