@@ -102,12 +102,43 @@ about 6 s.
 
 The handler gets the offset inside the component's window
 (`req->get_addr()`, the router removed the base). A register by hand is one
-more branch on that offset. In `my_comp.cpp`, in `handle_req`, add the
-`else if` after the block for offset 0:
+more branch on that offset. The new branch goes inside the
+`if (req->get_size() == 4)` block, right after the closing brace of the
+`if (req->get_addr() == 0)` block, so the two offsets form one
+`if` / `else if` chain. `handle_req` in `my_comp.cpp` after the edit, with
+the new lines marked:
 
 ```cpp
+vp::IoReqStatus MyComp::handle_req(vp::Block *__this, vp::IoReq *req)
+{
+    MyComp *_this = (MyComp *)__this;
+
+    _this->trace.msg(vp::TraceLevel::DEBUG, "Received request at offset 0x%lx, size 0x%lx, is_write %d\n",
+        req->get_addr(), req->get_size(), req->get_is_write());
+
+    if (req->get_size() == 4)
+    {
+        if (req->get_addr() == 0)
+        {
+            if (!req->get_is_write())
+            {
+                *(uint32_t *)req->get_data() = _this->value;
+            }
+            else
+            {
+                uint32_t value = *(uint32_t *)req->get_data();
+                if (value == 5)
+                {
+                    _this->vcd_value.release();
+                }
+                else
+                {
+                    _this->vcd_value.set(value);
+                }
+            }
             return vp::IO_REQ_OK;
         }
+        // ---- new: from here ----
         else if (req->get_addr() == 4)
         {
             // Register at 0x4, read-only: twice the value from the generator.
@@ -118,9 +149,11 @@ more branch on that offset. In `my_comp.cpp`, in `handle_req`, add the
             }
             return vp::IO_REQ_OK;
         }
+        // ---- new: to here ----
     }
 
     return vp::IO_REQ_INVALID;
+}
 ```
 
 In `main.c`, add a second read before `return 0;`:
@@ -215,6 +248,25 @@ The 4-byte store sets the register; the 1-byte store at `0x20000009`
 replaces byte 1 only (`0x33` becomes `0x77`). `Modified register` is at
 `TRACE` level, so `--trace-level=trace` is needed to see it.
 
+The four arguments of `update`, from
+`gvsoc/engine/engine/include/vp/register.hpp`:
+
+```cpp
+void update(uint64_t reg_offset, int size, uint8_t *value, bool is_write)
+```
+
+| Argument | What it is |
+|---|---|
+| `reg_offset` | The byte offset inside the register, not a bus address. Hence `req->get_addr() - 8`: 0 for the store to `0x20000008`, 1 for the byte store to `0x20000009`. |
+| `size` | The number of bytes to copy, for a read as well as a write. |
+| `value` | A pointer to the request's data, used in both directions: the source on a write, the destination on a read. |
+| `is_write` | The direction, not a write enable. With `false` the call copies the register into the buffer. |
+
+One call serves both the store and the load, which is why the four fields
+of the request are passed straight through. It is a `memcpy` with no bounds
+check: the caller has to make sure `reg_offset + size` fits the register
+(see "Beyond the tutorial").
+
 ## Step 5 (part 3): describe the map and generate the code
 
 Copy the description:
@@ -261,7 +313,8 @@ register:
 ```
 
 The register offsets are relative to the start of the map, not of the
-component. Generate the headers:
+component. The full format, with what the tool checks and does not check,
+is in `docs/reference/regmap.md`. Generate the headers:
 
 ```
 PYTHONPATH=/work/gvsoc/engine/python /work/gvsoc/engine/bin/regmap-gen --input-md regmap.md --header headers/mycomp
@@ -285,8 +338,8 @@ Two other ways, which both depend on more:
 - Plain `regmap-gen`, as in the tutorial text. The GVSoC build installs the
   script in `build/install/bin` and the module in `build/install/python`,
   and `sourceme.sh` puts both on the paths. It needs a finished build and a
-  sourced `sourceme.sh`; otherwise `bash: regmap-gen: command not found`.
-  It worked on the check machine and not in the container on micaseb19.
+  sourced `sourceme.sh` in the current container; otherwise
+  `bash: regmap-gen: command not found`.
 - The tutorial's `make regmap`. The Makefile looks for the script at
   `../../../../../engine`, which only exists inside the GVSoC tree, so in a
   copy it needs
@@ -663,6 +716,14 @@ model.
 regenerates them and rebuilds the model (7 s). No `headers/` directory and
 no separate step. The working copy keeps the tutorial's form.
 
+## Reference
+
+- `docs/reference/regmap.md`: the register map tool on its own: how to call
+  it, the `regmap.md` format, the generated files, and a `start` / `status`
+  example with a read-only register.
+- `docs/reference/gvsoc_api.md`: the signatures of `vp::Register`,
+  `vp::regmap` and the other classes used so far.
+
 ## SNAX-MODEL counterparts
 
 | GVSoC | SNAX-MODEL |
@@ -714,4 +775,3 @@ no separate step. The working copy keeps the tutorial's form.
 
 `build/test/test`, `build/work/` and the `my_system` build are shared with
 the other tutorials and overwritten by this one.
-

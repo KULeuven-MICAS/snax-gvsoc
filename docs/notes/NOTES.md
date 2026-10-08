@@ -42,8 +42,9 @@ snax-gvsoc/
   tutorials/        working copies of the GVSoC tutorials (added in GVS1)
   sw/               C programs (GVS3)
   build/            GVSoC build, install and run output; not tracked
-  docs/             notes (this file), plans, and one page per tutorial in
-                    docs/tutorials/
+  docs/             notes (this file), plans, one page per tutorial in
+                    docs/tutorials/, and the API and tool reference in
+                    docs/reference/
 ```
 
 SNAX models stay outside the GVSoC tree. GVSoC picks up an external module
@@ -385,6 +386,99 @@ Differences from the GVSoC website docs: the tutorials are in
 - `gvrun` does not clean `build/work/`; files from earlier runs
   (`stats.txt`, trace files) stay.
 
+### GVS1 step 9: tutorial 5, register map
+
+- 2026-10-08. Working copy in
+  `tutorials/5_how_to_add_a_register_map_in_a_component` (the `solution/`
+  files, with the generated `headers/`); write-up in
+  `docs/tutorials/5_register_map.md`.
+- Gone through on micaseb19 in the container. The figures in this entry are
+  from the check run of the same steps on a 2-core Ubuntu 24.04 machine at
+  the same pins, outside the container. The build time after a tutorial
+  switch was not measured there (it was a first build of everything,
+  5 min 56 s for 334 files); a rebuild after an edit of `my_comp.cpp` took
+  6 s.
+- Three ways to make a register. By hand: one more branch on
+  `req->get_addr()` in the handler. `vp::Register<uint32_t>`: a value with a
+  name, a trace (`<name>/trace`) and a VCD signal, and `update()` for
+  partial accesses. Generated: `regmap-gen` turns `regmap.md` into one
+  `vp::Register` class per register and a map class `vp_regmap_regmap`,
+  which is a `vp::Block`; `regmap.access()` picks the register from the
+  offset.
+- The finished model prints `REG0 callback`, the two `Hello, got ...` lines,
+  `Hit value`, `Hello, got 0x11227744 at 0x20000008`, `REG0 callback`. The
+  first callback is the reset at time 0 (registered with `true`), the last
+  one the store to `0x20000100` at cycle 4249. With
+  `--trace=my_comp/regmap --trace-level=trace` each access is printed with
+  its fields, e.g. `value: { FIELD0=0x78, FIELD1=0x123456 }`.
+- The code in `tutorials.rst` matches `solution/`, but its trace paths
+  (`/soc/my_comp/reg0`) and cycle numbers are out of date; the registers
+  are under `/soc/my_comp/regmap/`. The starting `my_comp.cpp` now returns
+  `IO_REQ_INVALID` for what it does not serve.
+- `regmap-gen` is a Python script of the gvsoc submodule
+  (`gvsoc/engine/bin/regmap-gen`, module in `gvsoc/engine/python/regmap/`),
+  not a separate install; the container's Python packages are enough. Three
+  ways to call it:
+  `PYTHONPATH=/work/gvsoc/engine/python /work/gvsoc/engine/bin/regmap-gen ...`
+  works with no build and no `sourceme.sh`, and is what the page uses; plain
+  `regmap-gen` needs a finished build (the install step copies it to
+  `build/install/bin`) and `sourceme.sh` sourced in the current container,
+  otherwise `command not found`; the tutorial's `make regmap` fails in a
+  copy outside the GVSoC tree (relative path to the engine).
+- `regmap-gen` is the first tutorial command that needs `sourceme.sh`: the
+  `make` targets call `gvrun` by its full path. Easy to miss in a new
+  container.
+- `make prepare` copies `solution/my_comp.cpp`, which includes the generated
+  headers, so `make gvsoc` then fails with
+  `headers/mycomp_regfields.h: No such file or directory` until the headers
+  are generated.
+- `update(reg_offset, size, value, is_write)`: byte offset inside the
+  register (not a bus address), number of bytes, the request's data pointer
+  (source on a write, destination on a read), direction (not a write
+  enable). A `memcpy` with no bounds check: an 8-byte store into the 32-bit
+  `my_reg` was accepted and read back as 8 bytes.
+- A callback replaces the default read and write of its register, for loads
+  as well as stores, and must call `update` itself; without it a store is
+  lost and a load returns a stale value.
+- An access to an offset of the map with no register prints
+  `Accessing invalid register` and ends the run with exit code 1: model
+  warnings are errors by default (`force_warning` calls `exit(1)`).
+  `--no-werror` lets the run go on. The tutorial model ignores the return
+  value of `regmap.access` and answers `IO_REQ_OK`.
+- An access the model refuses (size other than 4 in the hand-made part) ends
+  as `Platform returned an error (exitcode: 1)` with no address. GCC splits
+  a misaligned 4-byte store into 2-byte accesses, so a request crossing two
+  registers could not be produced from C.
+- The `Default` of the register table is the reset value; a field's
+  `Default` is not. An `Access Type` of `R` sets a write mask in the header
+  that `vp::Register` does not apply: read-only needs a callback.
+- Registers show up in the VCD (`--vcd --event=my_comp`: `my_reg`,
+  `regmap/reg0`, `regmap/reg1`).
+- Questions answered:
+  - The `regmap.md` format has no documentation; it is what
+    `gvsoc/engine/python/regmap/regmap_md.py` accepts. A `# Title` and a
+    `## Registers` table are required; columns are found by name; one
+    `### <register>` section per register holds its fields. The tool does
+    not check overlaps or field ranges, and a misspelled column name gives a
+    misleading error. Written up in `docs/reference/regmap.md`, with the
+    options that work (`--name`, `--header-headers`, `--input-hjson`,
+    `--rst`, `--json`) and those that do not at the pin (`--table`).
+  - All 12 files in `headers/` are generated. The model needs
+    `_regfields.h` and `_gvsoc.h`; `_regs.h` and `_regfields.h` are usable
+    from the C program; the accessor headers need `GAP_READ` / `GAP_WRITE`
+    macros that `tutorials/utils` does not have.
+  - The stock Snitch cluster peripheral generates its map at build time
+    from the reggen HJSON of snitch_cluster, in a `gen()` method of its
+    Python generator. Tried with `regmap.md`: headers go to
+    `build/build/engine/<dir>/`, and an edit of `regmap.md` followed by
+    `make gvsoc` regenerates and rebuilds in 7 s.
+  - A `start` / `status` example with a read-only status register and a
+    program using the generated offsets was built and run; it is in
+    `docs/reference/regmap.md`.
+- New: `docs/reference/gvsoc_api.md`, the classes and calls used in
+  tutorials 0 to 5 by class, with their arguments and whether each was run
+  or only read. Later steps add to it.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -420,6 +514,12 @@ Differences from the GVSoC website docs: the tutorials are in
   Snitch FP subsystem; whether custom CSR accesses can be routed out
   through it is not checked. Fallback: memory-mapped accelerator registers,
   which changes the SNAX software.
+- `regmap-gen` reads reggen HJSON (`--input-hjson`, or `regmap_hjson` in a
+  generator's `gen()`); run on the stock
+  `snitch_cluster_peripheral_reg.hjson`, 52 register classes. If SNAX
+  describes an accelerator's registers in that format for the RTL, the same
+  file can generate the GVSoC model's map. How SNAX's CSR manager lists its
+  registers has not been read yet.
 
 ### GVS3
 
@@ -491,3 +591,28 @@ Differences from the GVSoC website docs: the tutorials are in
   occupancy and bank-conflict pulses as signals (VCD, looked at per run);
   totals such as busy cycles and conflicts as statistics (`--stats`, every
   profiling run).
+- Register maps can be generated end to end: a description (`regmap.md` or
+  HJSON) next to the component, and a `gen()` method in its Python
+  generator that writes the headers during `make gvsoc` (run in step 9,
+  7 s after an edit). SNAX-FORGE could write that description from the
+  accelerator's interface, as one more item of the per-design-point bundle
+  (snax-forge D111; the layout is D36, the mapping onto SNAX's CSRs is open
+  item 9). Details and a worked example in `docs/reference/regmap.md`.
+- What generation does not cover: the behaviour (callbacks, written once
+  per kind of block), and checking. `regmap-gen` accepts overlapping
+  registers and fields silently, so whatever writes the description has to
+  check it.
+- The map is compiled into the model: a new register layout is a rebuild of
+  that model, a new value is not. A sweep over register counts rebuilds per
+  point.
+- `vp::Register::update` has no bounds check and the generated write mask
+  is not applied. Our register windows should check `offset + size`
+  themselves, make read-only registers read-only in a callback, and return
+  `IO_REQ_INVALID` when `regmap.access` reports no register.
+- A warning from a model (`vp_warning_always`, as `vp::regmap` uses for an
+  unknown offset) ends the run with exit code 1 unless `--no-werror` is
+  given. Useful for our own "this must not happen" checks.
+- The generated `_regs.h` and `_regfields.h` give the C program the same
+  offsets and bit positions as the model (used in the example of
+  `docs/reference/regmap.md`). A candidate source for the header of CSR
+  names in GEN2.

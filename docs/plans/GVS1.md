@@ -18,7 +18,8 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 - Every command is read from the GVSoC source at the pinned commit and run in
   the container before it is handed over. Anything not verified is said so.
 - After each step: the `NOTES.md` text for it, a write-up of the tutorial in
-  `docs/tutorials/`, and the steps that remain.
+  `docs/tutorials/`, the step's classes added to
+  `docs/reference/gvsoc_api.md`, and the steps that remain.
 
 ## Steps
 
@@ -32,7 +33,7 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 6 | Tutorial 2: components communicating | Wire interfaces | 30 min | done 2026-10-08 |
 | 7 | Tutorial 3: system traces | `vp::Trace`, `--trace` paths | 15 min | done 2026-10-08 |
 | 8 | Tutorial 4: VCD traces | `vp::Signal`, GTKWave | 20 min | done 2026-10-08 |
-| 9 | Tutorial 5: register map | By hand, `vp::Register`, `regmap-gen` | 45 min | |
+| 9 | Tutorial 5: register map | By hand, `vp::Register`, `regmap-gen` | 45 min | done 2026-10-08 |
 | 10 | Tutorial 6: timing | `ClockEvent` | 30 min | |
 | 11 | Tutorial 7: IO request interface | Synchronous latency, pending and `resp()` | 45 min | |
 | 12 | Tutorial 10: interconnect timing | Router latency and bandwidth | 20 min | |
@@ -41,7 +42,7 @@ out, what was learned. Tick a step here when its entry is in `NOTES.md`.
 | 15 | Read the HWPE tutorial, no build | A full accelerator: config port, FSM, streamer into L1 | 60 min | |
 | 16 | Close `NOTES.md` | | 15 min | |
 
-Tutorials 0 to 4 have been built and run. Tutorials 5 onward have not been
+Tutorials 0 to 5 have been built and run. Tutorials 6 onward have not been
 run yet.
 
 Tutorial 7 only covers the slave side of an IO request. Step 15 is where a
@@ -81,6 +82,9 @@ is.
   them.
 - Write-ups: `docs/tutorials/<number>_<topic>.md`, one per tutorial, written
   against the pinned source.
+- Reference: `docs/reference/gvsoc_api.md` (classes and calls used so far,
+  by class, with their arguments) and `docs/reference/regmap.md` (the
+  register map tool). Added in step 9, because GVSoC documents neither.
 - The website (gvsoc-developer.readthedocs.io) is behind the source: it
   gives the old path and the old `gvsoc --binary` launcher.
 - Per new container: `source gvsoc/sourceme.sh`. For the tutorials also
