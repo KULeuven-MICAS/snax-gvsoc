@@ -479,6 +479,60 @@ Differences from the GVSoC website docs: the tutorials are in
   tutorials 0 to 5 by class, with their arguments and whether each was run
   or only read. Later steps add to it.
 
+### GVS1 step 10: tutorial 6, timing
+
+- 2026-10-08. Working copy in `tutorials/6_how_to_add_timing`; write-up in
+  `docs/tutorials/6_timing.md`.
+- Gone through on micaseb19 in the container. The figures in this entry are
+  from the check run of the same steps on a 2-core Ubuntu 24.04 machine at
+  the same pins, outside the container.
+- Tutorial 6 starts from tutorial 2's two components, with a trace in
+  `my_comp2`; `solution/` holds only `my_comp2.cpp`. Build after the
+  tutorial switch: 2 min 33 s (201 files); a rebuild after an edit: 4 s.
+  The text in `tutorials.rst` guards the enqueue with `is_enqueued()`,
+  `solution/` does not; the behaviour is the same at the pin.
+- Before: `Received notif` and `Sending result` are both in cycle 158,
+  inside the core's `c.lw`. After, with `event.enqueue(10)` in the
+  notification handler and the sending moved into the event's callback:
+  `Received notif` at cycle 158, `Sending result` at cycle 168, and the
+  core runs 8 instructions in between. The program's output is the same
+  three lines; the delay only shows in the traces.
+- A `vp::ClockEvent` is a callback plus a cycle. `enqueue(n)` puts it in the
+  list of the owner block's clock engine at `now + n` and returns at once;
+  nothing in the model blocks. The count is in cycles of the owner's clock
+  (100 MHz here). The core's instruction step has the same callback
+  signature (`Exec::exec_instr`; read, not run), so core and model are
+  callbacks of one clock engine.
+- One event holds one pending call. Two notifications one cycle apart with
+  `enqueue(10)` gave one callback, at cycle 168: an enqueue on a pending
+  event is ignored when its cycle is later, and replaces the pending one
+  when it is earlier (`enqueue(2)` gave cycle 161). No message either way.
+- Also tried: `enqueue(0)` runs in the same cycle; re-enqueueing from the
+  callback gives a periodic event (cycles 160, 162, 164); `enable()` runs
+  the callback at every cycle from the next one until `disable()`;
+  `cancel()` drops the pending call; `get_args()` carries values to the
+  callback but belongs to the event, so a second enqueue overwrites them.
+- A pending event does not keep the run alive: with `enqueue(1000000)` the
+  run ended when the program exited (about cycle 1500) and the callback
+  never ran, with no message.
+- Cost: an event enabled at every cycle with an empty callback made a
+  20-million-iteration loop about 25 % slower (6.0 s against 4.8 s, default
+  build).
+- A busy flag with a duration, tried in `my_comp`: a store starts a run of
+  100 cycles (`busy = true`, `done_event.enqueue(n)`), the callback clears
+  the flag, the program polls it. `Start` at cycle 161, `Done` at cycle 261,
+  `done after 21 polls`.
+- Question answered: yes, the idea is to compute the result at once in
+  plain C++ and let the event decide when it becomes visible. Tried with an
+  fadd of 4 cycles and an fmul of 6, four operations started one cycle
+  apart: each result arrived its own latency after its start (cycles 162,
+  164, 165, 167). One event is enough for several operations in flight,
+  with a list of pending results in the model. The list must be ordered by
+  ready cycle: a first version with a FIFO delivered the second fadd a cycle
+  late, behind the slower fmul. Latency and back-pressure are separate: a
+  unit that holds one operation at a time also needs a `busy` check.
+- `vp::ClockEvent` added to `docs/reference/gvsoc_api.md`.
+
 ## Findings for later tasks
 
 ### GVS2
@@ -616,3 +670,22 @@ Differences from the GVSoC website docs: the tutorials are in
   offsets and bit positions as the model (used in the example of
   `docs/reference/regmap.md`). A candidate source for the header of CSR
   names in GEN2.
+- Timing of an accelerator model in GVSoC: compute at once, delay the
+  arrival with a `vp::ClockEvent`. The accelerator entry's `latency` is the
+  number given to `enqueue`; its `ii` is a busy check before a new
+  operation is accepted. Several operations in flight need one event and a
+  list of pending results ordered by ready cycle (run in step 10 with fadd
+  and fmul).
+- Two styles of clock event: enqueue per occurrence, or enabled at every
+  cycle. A per-cycle callback cost about 25 % of run time on the tutorial
+  system even when empty, so a streamer or accelerator should enqueue for
+  the next cycle in which something happens, not tick every cycle, unless
+  it really works every cycle.
+- An enqueue on a pending event is silently ignored or replaces the pending
+  one. A model that can be asked again while busy has to handle that itself
+  (a queue, or a refusal), or requests are lost with no message.
+- A pending event does not keep the simulation alive. A program that exits
+  before the accelerator is done ends the run without the result; the
+  program has to wait (poll `busy`, or an interrupt).
+- `this->clock.get_cycles()` gives a model the current cycle, for
+  `busy_cycles` counters and for stamping events for the run viewer.

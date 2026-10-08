@@ -364,6 +364,89 @@ A poll takes about 5 cycles (a load, an add and a taken branch), so 100
 busy cycles are 20 polls that read 1 and one that reads 0. The working copy
 keeps the tutorial's files; this model is only shown here.
 
+**Operations with different latencies, several in flight.** The usual
+shape of an accelerator model: do the arithmetic at once in plain C++, and
+let a clock event decide when the result becomes visible. Here an fadd
+takes 4 cycles and an fmul 6, and a new operation can start every cycle.
+Tried by replacing `my_comp2.cpp`, with notifications starting an fadd and
+an fmul in turn; the parts that matter:
+
+```cpp
+    enum Op { FADD, FMUL };
+    struct Pending
+    {
+        int64_t ready_cycle; Op op; float result;
+        bool operator>(const Pending &o) const { return ready_cycle > o.ready_cycle; }
+    };
+    // Ordered by ready cycle, earliest on top: a later fadd can overtake an
+    // earlier fmul. Needs #include <queue>.
+    std::priority_queue<Pending, std::vector<Pending>, std::greater<Pending>> pending;
+
+// Do the arithmetic now, in plain C++; only the result's arrival is delayed.
+void MyComp::start(Op op, float a, float b)
+{
+    int latency = op == FADD ? 4 : 6;
+    float result = op == FADD ? a + b : a * b;
+    int64_t now = this->clock.get_cycles();
+
+    this->trace.msg(vp::TraceLevel::INFO, "Start %s (latency: %d)\n", op == FADD ? "fadd" : "fmul", latency);
+    this->pending.push({ now + latency, op, result });
+
+    // One event serves the whole queue, set for the earliest entry. An
+    // enqueue with a later cycle than the pending one is ignored and one
+    // with an earlier cycle replaces it, so this call is always right.
+    this->event.enqueue(this->pending.top().ready_cycle - now);
+}
+
+void MyComp::handle_event(vp::Block *__this, vp::ClockEvent *event)
+{
+    MyComp *_this = (MyComp *)__this;
+    int64_t now = _this->clock.get_cycles();
+
+    // Deliver everything that is due in this cycle.
+    while (!_this->pending.empty() && _this->pending.top().ready_cycle <= now)
+    {
+        Pending p = _this->pending.top();
+        _this->pending.pop();
+        _this->trace.msg(vp::TraceLevel::INFO, "Done %s (result: %f)\n", p.op == FADD ? "fadd" : "fmul", p.result);
+    }
+
+    // Re-arm for the next entry.
+    if (!_this->pending.empty())
+    {
+        event->enqueue(_this->pending.top().ready_cycle - now);
+    }
+}
+```
+
+With a program that loads `0x20000000` four times in a row, and
+`--trace=my_comp2/fpu --trace-level=info`:
+
+```
+1580000: 158: [/soc/my_comp2/fpu             ] Start fadd (latency: 4)
+1590000: 159: [/soc/my_comp2/fpu             ] Start fmul (latency: 6)
+1600000: 160: [/soc/my_comp2/fpu             ] Start fadd (latency: 4)
+1610000: 161: [/soc/my_comp2/fpu             ] Start fmul (latency: 6)
+1620000: 162: [/soc/my_comp2/fpu             ] Done fadd (result: 3.750000)
+1640000: 164: [/soc/my_comp2/fpu             ] Done fadd (result: 3.750000)
+1650000: 165: [/soc/my_comp2/fpu             ] Done fmul (result: 3.375000)
+1670000: 167: [/soc/my_comp2/fpu             ] Done fmul (result: 3.375000)
+```
+
+Each result arrives its own latency after its start. Three points:
+
+- One event is enough for many pending operations: the model keeps the list
+  of what is due and when, and the event is always set for the earliest
+  entry. This is also the answer to the "worth a thought" line above.
+- The list has to be ordered by ready cycle, not by arrival. A first
+  version with a plain FIFO delivered the second fadd at cycle 165 in place
+  of 164, stuck behind the slower fmul.
+- The latency says nothing about back-pressure. This unit accepts a new
+  operation every cycle, like a fully pipelined one. A unit that holds one
+  operation at a time needs a `busy` check before it accepts, as in the
+  busy-flag model above. "Takes 4 cycles" and "can start again after how
+  many cycles" are two parameters.
+
 ## SNAX-MODEL counterparts
 
 | GVSoC | SNAX-MODEL |
@@ -373,6 +456,7 @@ keeps the tutorial's files; this model is only shown here.
 | The callback | The handler of that event |
 | `enable()`, one call per cycle | A block that is stepped every cycle |
 | A `busy` member cleared by an event | The busy time of a block, from `latency` and the element count |
+| A list of pending results with their ready cycles | `latency` of an accelerator entry; the `busy` check is its `ii` |
 
 One difference: in SNAX-MODEL everything is an event. In GVSoC only what the
 model schedules is; requests and wires stay plain calls in the current

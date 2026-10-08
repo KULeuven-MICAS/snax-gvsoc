@@ -10,7 +10,7 @@ Pinned to gvsoc `93cedc4`. Signatures can change with the pin.
 Only what has been used is listed, not everything a header offers. The
 "Checked" column says how far an entry is trusted:
 
-- **T0** to **T5**: built and run in that tutorial (pages in
+- **T0** to **T6**: built and run in that tutorial (pages in
   `docs/tutorials/`).
 - **read**: read from the source at the pin, not run.
 
@@ -28,6 +28,7 @@ Headers are relative to `gvsoc/engine/engine/include/`; Python files to
 - [VCD signals: vp::Signal](#vcd-signals-vpsignal)
 - [Registers: vp::Register](#registers-vpregister)
 - [Register maps: vp::regmap](#register-maps-vpregmap)
+- [Clock events: vp::ClockEvent](#clock-events-vpclockevent)
 - [Statistics and sub-blocks](#statistics-and-sub-blocks)
 - [Python generator of a component](#python-generator-of-a-component)
 - [Python generator of a system](#python-generator-of-a-system)
@@ -260,6 +261,48 @@ this->regmap.build(this, &this->trace);
 Traces: `<register path>/trace`, with `Register access (name: ..., value: {
 FIELD=... })` at `DEBUG` level.
 
+## Clock events: vp::ClockEvent
+
+`vp/clock/clock_event.hpp` (every method is commented there),
+`engine/engine/src/clock/clock_engine.cpp`. A function call that the clock
+engine makes for the model at a later cycle. The only way a model gets a
+duration of its own.
+
+```cpp
+static void handle_event(vp::Block *__this, vp::ClockEvent *event);
+vp::ClockEvent event;
+
+// in the initializer list
+event(this, MyComp::handle_event)
+
+// anywhere
+this->event.enqueue(10);
+```
+
+| Call | Arguments and meaning | Checked |
+|---|---|---|
+| `ClockEvent(Block *comp, ClockEventMeth *meth)` | Owner block, which gives the event its clock, and the callback. No default constructor, so it goes in the initializer list | T6 |
+| Callback: `void (vp::Block *__this, vp::ClockEvent *event)` | Static; the instance as first argument, the event that fired as second | T6 |
+| `enqueue(int64_t cycles = 1)` | Calls the callback once, `cycles` cycles of the owner's clock from now, and returns at once. 0 runs it in the current cycle. On an event that is already pending: ignored when the new cycle is later or equal, replaces the pending one when it is earlier. One event holds one pending call | T6 |
+| `is_enqueued()` | `true` from the enqueue until the callback starts or the event is cancelled; `false` inside the callback, so the callback can enqueue again | T6 |
+| `cancel()` | Removes a pending call. Allowed when nothing is pending | T6; the second half read |
+| `enable()` / `disable()` | The other way to use an event: the callback runs at every cycle, from the cycle after `enable()` until `disable()`. Do not mix with `enqueue` on the same event | T6 |
+| `stall_cycle_set(n)`, `stall_cycle_inc(n)`, `stall_cycle_get()` | For an enabled event: skip the next `n` cycles | read |
+| `get_args()` | `void **`, 8 slots for the model's own use, carried from the enqueue to the callback. They belong to the event: a second enqueue overwrites them | T6 |
+| `set_callback(meth)`, `exec()` | Change the callback; run it now | read |
+| `this->clock.get_cycles()` | In a model: the current cycle of its clock, `int64_t` | T6 |
+| `this->clock.get_period()`, `get_frequency()` | Period in ps, frequency in Hz | read |
+
+A pending event does not keep the simulation alive: the run ends when the
+program exits, and what is still pending never runs. An event enabled at
+every cycle with an empty callback cost about 25 % of run time on the
+tutorial system (T6). The core is itself a clock event callback
+(`Exec::exec_instr`; read).
+
+Pattern for several operations in flight: keep a list of pending results
+ordered by ready cycle, and one event set for the earliest entry
+(`docs/tutorials/6_timing.md`, "Beyond the tutorial").
+
 ## Statistics and sub-blocks
 
 | Call | Meaning | Checked |
@@ -344,6 +387,8 @@ Passed in the tutorials as `make run runner_args="..."`.
 - A request, a wire `sync` and a register access are plain function calls.
   They happen inside the caller and take no simulated time. Time comes from
   latency on a request (tutorial 7) or from a clock event (tutorial 6).
+- Compute a result at once and delay only its arrival: the function is
+  plain C++, the timing is the number given to `enqueue`.
 - Have the model's state consistent before driving a wire: the callee may
   call back into it.
 - Check mandatory ports and properties in the model. GVSoC reports neither
