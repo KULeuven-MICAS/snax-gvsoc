@@ -19,25 +19,24 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `container/` | The development image; `toolchain/` pins its RISC-V toolchain |
 | `docs/plans/` | One checklist per task (`SG0.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
-| `build/` | Build, install and run output; not tracked |
+| `build/`, `install/` | GVSoC's build and run output, and what it installs; not tracked |
 
 ## Quick start
 
 The image holds the tools only: GVSoC's build tools and Python packages,
 snax_cluster's RISC-V toolchain (clang 21.1.6, bender 0.28.2) and zsh. This
-repo is mounted at `/work` and GVSoC is built there. Build the image and push
-it (Docker):
+repo is mounted at its own path and GVSoC is built there. Build the image and
+push it (Docker):
 
     docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:main container
     docker push ghcr.io/kuleuven-micas/snax-gvsoc:main
 
-Run it from the repo root (Podman); it opens zsh in `/work`:
+Run it from the repo root (Podman); it opens zsh in the same folder:
 
-    podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:main
+    podman run --rm -it -v "$PWD":"$PWD" -w "$PWD" ghcr.io/kuleuven-micas/snax-gvsoc:main
 
-Inside, build GVSoC for the Snitch target (about 9 minutes on 2 cores the
-first time) and run the bundled program, which exits with 0 and prints
-nothing:
+Inside, build GVSoC for the Snitch target (a few minutes the first time) and
+run the bundled program, which exits with 0 and prints nothing:
 
     make build TARGETS=snitch
     source sourceme.sh

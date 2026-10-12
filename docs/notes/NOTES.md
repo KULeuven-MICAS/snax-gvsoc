@@ -69,3 +69,15 @@ stay there.
   Claude's run.
 - Not checked in the sandbox: the image build, the conda packages, the zsh
   prompt.
+- On the author's side the checks of P2 passed: the lock made with pixi
+  0.81.0, the image built (2.26 GB), the toolchain checks in it, and on the
+  MICAS server the zsh prompt, the GVSoC build and the bundled ELF.
+- P2b: the image no longer sets `GVSOC_WORKDIR` or `WORKDIR /work`. The repo
+  is mounted at its own path (`-v "$PWD":"$PWD" -w "$PWD"`, as in
+  snax_cluster's README), and GVSoC writes to `build/` and `install/` in the
+  repo, both in upstream's `.gitignore`. Checked in Claude's sandbox: the
+  build lands there, `git status` stays clean, `gvrun` comes from
+  `install/bin` and the bundled ELF exits 0. A build tree made under `/work`
+  has that path in its CMake cache, so `build/` is deleted once.
+- Build times are not tracked; GVSoC builds in a few minutes on the MICAS
+  servers.

@@ -1,8 +1,9 @@
 # snax-gvsoc development container.
 #
 # Holds GVSoC's build tools, its Python packages, snax_cluster's RISC-V
-# toolchain and zsh. GVSoC itself is NOT in the image: mount this repo at
-# /work and build it there, so edits and build output stay on the host.
+# toolchain and zsh. GVSoC itself is NOT in the image: mount this repo at its
+# own path and build it there, so edits and build output stay on the host.
+# GVSoC then writes to build/ and install/ in the repo.
 #
 # Two stages, as in snax_cluster's util/container/Dockerfile: pixi installs the
 # locked toolchain in the first, and only the environment is copied into the
@@ -10,8 +11,8 @@
 #
 # Build (from the repo root; container/toolchain/pixi.lock must exist):
 #   docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:main container
-# Run:
-#   podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:main
+# Run (from the repo root):
+#   podman run --rm -it -v "$PWD":"$PWD" -w "$PWD" ghcr.io/kuleuven-micas/snax-gvsoc:main
 
 ########################################################################
 # Stage 1: the RISC-V toolchain, installed with pixi
@@ -85,11 +86,9 @@ RUN git init -q /root/.oh-my-zsh \
 
 # The toolchain goes last on PATH, so nothing in it can shadow the host tools
 # GVSoC builds with.
-ENV PATH=/opt/venv/bin:$PATH:/opt/toolchain/.pixi/envs/default/bin \
-    GVSOC_WORKDIR=/work/build
+ENV PATH=/opt/venv/bin:$PATH:/opt/toolchain/.pixi/envs/default/bin
 
 # The repo is bind-mounted and owned by the host user.
 RUN git config --system --add safe.directory '*'
 
-WORKDIR /work
 CMD ["zsh"]
