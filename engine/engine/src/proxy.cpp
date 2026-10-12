@@ -1,0 +1,768 @@
+/*
+ * Copyright (C) 2020 GreenWaves Technologies, SAS, ETH Zurich and
+ *                    University of Bologna
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
+ */
+
+
+#include <sstream>
+#include <string>
+#include <stdio.h>
+#include <vp/vp.hpp>
+#include <vp/memcheck.hpp>
+#include <inttypes.h>
+#include <stdio.h>
+#include "string.h"
+#include <sstream>
+#include <string>
+#include <dlfcn.h>
+#include <string>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <regex>
+#include <sys/types.h>
+#include <unistd.h>
+#include <vp/proxy.hpp>
+#include <vp/controller.hpp>
+#include <vp/clock/clock_engine.hpp>
+#include "vp/top.hpp"
+
+
+static std::vector<std::string> split(const std::string& s, char delimiter)
+{
+   std::vector<std::string> tokens;
+   std::string token;
+   std::istringstream tokenStream(s);
+   while (std::getline(tokenStream, token, delimiter))
+   {
+      tokens.push_back(token);
+   }
+   return tokens;
+}
+
+
+gv::GvProxy::GvProxy(vp::TimeEngine *engine, vp::Component *top, int req_pipe, int reply_pipe)
+  : top(top), req_pipe(req_pipe), reply_pipe(reply_pipe),
+    logger("PROXY")
+{
+    this->logger.info("Instantiating proxy\n");
+}
+
+void gv::GvProxy::listener(void)
+{
+    int client_fd;
+    while(1)
+    {
+        this->logger.info("Waiting for connection\n");
+
+        if ((client_fd = accept(this->telnet_socket, NULL, NULL)) == -1)
+        {
+            if(errno == EAGAIN) continue;
+            // Expected when stop() closed the listening socket to break us out of accept().
+            if (this->stopping) return;
+            fprintf(stderr, "Failed to accept connection: %s\n", strerror(errno));
+            return;
+        }
+
+        this->logger.info("Client connected, creating new session\n");
+
+        this->sockets.push_back(client_fd);
+        std::unique_lock<std::mutex> lock(this->mutex);
+        this->sessions.push_back(new GvProxySession(this, client_fd, client_fd));
+        this->cond.notify_all();
+        lock.unlock();
+    }
+}
+
+
+
+int gv::GvProxy::open(int port, int *out_port)
+{
+    if (this->req_pipe == -1)
+    {
+        struct sockaddr_in addr;
+        int yes = 1;
+
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = INADDR_ANY;
+        socklen_t size = sizeof(addr.sin_zero);
+        memset(addr.sin_zero, '\0', sizeof(addr.sin_zero));
+
+        this->telnet_socket = socket(PF_INET, SOCK_STREAM, 0);
+
+        if (this->telnet_socket < 0)
+        {
+            fprintf(stderr, "Unable to create comm socket: %s\n", strerror(errno));
+            return -1;
+        }
+
+        if (setsockopt(this->telnet_socket, SOL_SOCKET, SO_REUSEADDR, &yes,
+                sizeof(int)) == -1) {
+            fprintf(stderr, "Unable to setsockopt on the socket: %s\n", strerror(errno));
+            return -1;
+        }
+
+        if (::bind(this->telnet_socket, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+            fprintf(stderr, "Unable to bind the socket: %s\n", strerror(errno));
+            return -1;
+        }
+
+        if (listen(this->telnet_socket, 1) == -1) {
+            fprintf(stderr, "Unable to listen: %s\n", strerror(errno));
+            return -1;
+        }
+
+        getsockname(this->telnet_socket, (sockaddr*)&addr, &size);
+
+        if (out_port)
+        {
+            *out_port = ntohs(addr.sin_port);
+        }
+
+        this->listener_thread = new std::thread(&gv::GvProxy::listener, this);
+    }
+    else
+    {
+        this->sessions.push_back(new GvProxySession(this, this->req_pipe, this->reply_pipe));
+    }
+
+    return 0;
+}
+
+
+void gv::GvProxy::wait_connected()
+{
+    std::unique_lock<std::mutex> lock(this->mutex);
+    while(this->sessions.size() == 0)
+    {
+        this->cond.wait(lock);
+    }
+    lock.unlock();
+}
+
+int gv::GvProxy::join()
+{
+    // TODO not used anymore
+    std::unique_lock<std::mutex> lock(this->mutex);
+    while(!this->has_finished)
+    {
+        this->cond.wait(lock);
+    }
+    lock.unlock();
+
+    for (auto x: this->sockets)
+    {
+        shutdown(x, SHUT_RDWR);
+    }
+
+    for (auto x: this->sessions)
+    {
+        x->wait();
+    }
+
+    return this->exit_status;
+}
+
+void gv::GvProxy::send_quit(int status)
+{
+    for (auto x: this->sockets)
+    {
+        dprintf(x, "req=-1;exit=%d\n", status);
+    }
+}
+
+void gv::GvProxySession::notify(const std::string &msg)
+{
+    dprintf(this->reply_fd, "%s", msg.c_str());
+}
+
+void gv::GvProxySession::send_step_reply(const std::string &reason)
+{
+    // Caller must hold proxy->mutex. Flush trace output so it is available before the reply.
+    fflush(stdout);
+    int64_t time = gv::Controller::get().top_get()->get_time_engine()->get_time();
+    if (reason.empty())
+    {
+        dprintf(this->reply_fd, "req=%s;msg=%ld\n", this->step_req.c_str(), time);
+    }
+    else
+    {
+        // Step interrupted before completion: append the reason so the front-end can report why.
+        // `reason` is engine-controlled plain text (no ';'/'=') so it does not break the
+        // key=value;... reply framing the clients parse.
+        dprintf(this->reply_fd, "req=%s;msg=%ld;step_stopped=%s\n", this->step_req.c_str(), time,
+            reason.c_str());
+    }
+}
+
+void gv::GvProxy::step_end(void *data, const std::string &reason)
+{
+    // The step data is the issuing session (set by the session's step command). Match it against
+    // our live sessions before using it, so a step issued by a non-proxy client (whose data is
+    // something else entirely) is ignored rather than mis-cast.
+    std::unique_lock<std::mutex> lock(this->mutex);
+    for (auto session: this->sessions)
+    {
+        if ((void *)session == data)
+        {
+            session->send_step_reply(reason);
+            return;
+        }
+    }
+}
+
+void gv::GvProxy::notify_running()
+{
+    std::unique_lock<std::mutex> lock(this->mutex);
+    // Uses the run-state notification format the proxy clients already understand (gvsoc_control
+    // parses msg=running=1 / msg=stopped=<time> to track run-state).
+    for (auto session: this->sessions)
+    {
+        session->notify("req=-1;msg=running=1\n");
+    }
+}
+
+void gv::GvProxy::notify_stopped()
+{
+    std::unique_lock<std::mutex> lock(this->mutex);
+    int64_t time = gv::Controller::get().top_get()->get_time_engine()->get_time();
+    std::string msg = "req=-1;msg=stopped=" + std::to_string(time) + "\n";
+    for (auto session: this->sessions)
+    {
+        session->notify(msg);
+    }
+}
+
+void gv::GvProxy::notify_syscall_stop()
+{
+    std::unique_lock<std::mutex> lock(this->mutex);
+    for (auto session: this->sessions)
+    {
+        session->notify("req=-1;msg=syscall_stop\n");
+    }
+}
+
+void gv::GvProxy::notify_binaries_changed()
+{
+    std::unique_lock<std::mutex> lock(this->mutex);
+    // Data-less "the binary set changed" signal; clients re-query with get_binaries. Uses the same
+    // req=-1;msg=... notification framing the clients already parse.
+    for (auto session: this->sessions)
+    {
+        session->notify("req=-1;msg=binaries_changed\n");
+    }
+}
+
+
+void gv::GvProxy::send_reply(std::string msg)
+{
+    std::unique_lock<std::mutex> lock(this->mutex);
+    for (auto x: this->sockets)
+    {
+        dprintf(x, "%s", msg.c_str());
+    }
+    lock.unlock();
+}
+
+
+bool gv::GvProxy::send_payload(FILE *reply_file, std::string req, uint8_t *payload, int size)
+{
+    fprintf(reply_file, "req=%s;payload=%d\n", req.c_str(), size);
+    if (size > 0)
+    {
+        int write_size = fwrite(payload, 1, size, reply_file);
+        fflush(reply_file);
+        return write_size != size;
+    }
+    else
+    {
+        fflush(reply_file);
+        return false;
+    }
+}
+
+gv::GvProxySession::GvProxySession(GvProxy *proxy, int req_fd, int reply_fd)
+: logger("PROXY_SESSION(" + std::to_string(req_fd) + ")"), proxy(proxy),
+    socket_fd(req_fd), reply_fd(reply_fd)
+{
+    // Each session owns a control client: a gating client distinct from the always-on host (the
+    // GUI's database client driving the engine through the gvsoc API, or the standalone main.cpp
+    // client). It does not bind a Gvsoc_user — engine events arrive as wire notifications pushed by
+    // the controller (step_end / notify_running / notify_stopped / notify_syscall_stop).
+    this->gvsoc = gvsoc_new(NULL, "PROXY_SESSION(" + std::to_string(req_fd) + ")");
+    this->loop_thread = new std::thread(&gv::GvProxySession::proxy_loop, this);
+}
+
+
+void gv::GvProxySession::wait()
+{
+    this->loop_thread->join();
+}
+
+void gv::GvProxy::stop()
+{
+    this->stopping = true;
+
+    // Stop accepting connections: closing the listening socket breaks the listener's accept().
+    if (this->telnet_socket >= 0)
+    {
+        ::shutdown(this->telnet_socket, SHUT_RDWR);
+        ::close(this->telnet_socket);
+        this->telnet_socket = -1;
+    }
+    if (this->listener_thread)
+    {
+        this->listener_thread->join();
+        delete this->listener_thread;
+        this->listener_thread = nullptr;
+    }
+
+    // Force any session blocked in fgets() to return (EOF) so its thread exits and releases the
+    // FILE lock; then join it.
+    {
+        std::unique_lock<std::mutex> lock(this->mutex);
+        for (int fd : this->sockets)
+        {
+            ::shutdown(fd, SHUT_RDWR);
+        }
+    }
+    for (GvProxySession *session : this->sessions)
+    {
+        session->wait();
+    }
+}
+
+void gv::GvProxySession::proxy_loop()
+{
+    FILE *sock = fdopen(socket_fd, "r");
+    FILE *reply_sock = fdopen(reply_fd, "w");
+    gv::Controller &controller = gv::Controller::get();
+
+    while(1)
+    {
+        // Re-fetch each iteration so commands track the current system, which may have been
+        // rebuilt by a restart (the old engine pointer would otherwise be stale).
+        vp::TimeEngine *engine = controller.top_get()->get_time_engine();
+        std::string line;
+
+        char buffer[1024];
+        this->logger.info("Wait for command\n");
+        while (fgets(buffer, sizeof(buffer), sock))
+        {
+            line += buffer;
+            if (line.back() == '\n') {
+                break;
+            }
+        }
+
+        this->logger.info("Got command (cmd: %s)\n", buffer);
+
+        // Check for errors or exit conditions
+        if (line.empty())
+        {
+            return;
+        }
+
+        int start = 0;
+        int end = line.find(";");
+        std::vector<std::string> tokens;
+        while (end != -1) {
+            tokens.push_back(line.substr(start, end - start));
+            start = end + 1;
+            end = line.find(";", start);
+        }
+        tokens.push_back(line.substr(start, end - start));
+
+        std::string req = "";
+        std::string cmd = "";
+
+        for (auto x: tokens)
+        {
+            int start = 0;
+            int index = x.find("=");
+            std::string name = x.substr(start, index - start);
+            std::string value = x.substr(index + 1, x.size());
+
+            if (name == "req")
+            {
+                req = value;
+            }
+            else if (name == "cmd")
+            {
+                cmd = value;
+            }
+        }
+
+        std::regex regex{R"([\s]+)"};
+        std::sregex_token_iterator it{cmd.begin(), cmd.end(), regex, -1};
+        std::vector<std::string> words{it, {}};
+
+        if (words.size() > 0)
+        {
+            if (words[0] == "run")
+            {
+                this->gvsoc->run();
+                std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                dprintf(reply_fd, "req=%s\n", req.c_str());
+                lock.unlock();
+            }
+            else if (words[0] == "step")
+            {
+                if (words.size() != 2)
+                {
+                    fprintf(stderr, "This command requires 1 argument: step timestamp");
+                }
+                else
+                {
+                    int64_t duration = strtol(words[1].c_str(), NULL, 0);
+                    // Step asynchronously, passing this session as the step data; the controller
+                    // routes the step-end back to it through GvProxy::step_end, which sends the
+                    // reply (see step_async_handler).
+                    this->step_req = req;
+                    this->gvsoc->step(duration, false, (void *)this);
+                }
+            }
+            else if (words[0] == "step_cycles")
+            {
+                if (words.size() != 3)
+                {
+                    fprintf(stderr, "This command requires 2 arguments: step_cycles <clock_index> <count>");
+                }
+                else
+                {
+                    int clock_idx = strtol(words[1].c_str(), NULL, 0);
+                    int64_t count = strtoll(words[2].c_str(), NULL, 0);
+                    auto &clocks = engine->get_clock_engines();
+                    bool can_step = clock_idx >= 0 && clock_idx < (int)clocks.size() && count > 0;
+                    if (can_step)
+                    {
+                        // Step exactly `count` cycles of the selected clock domain via a clock event
+                        // (cycle-accurate, immune to frequency changes). The reply is routed back
+                        // through GvProxy::step_end by matching this session pointer, the same
+                        // mechanism the "step" command uses. The session client is always a
+                        // ControllerClient (created by gvsoc_new in this session's constructor).
+                        //
+                        // A clock-gated domain (period 0) is handled too: the clock event is parked in
+                        // the domain's queue and stays pending until another domain gives this clock a
+                        // frequency (apply_frequency_handler re-enqueues it), at which point it ticks
+                        // the requested cycles and the reply is sent. The step does not return early.
+                        this->step_req = req;
+                        static_cast<gv::ControllerClient *>(this->gvsoc)->step_cycles(
+                            clock_idx, count, false, (void *)this);
+                    }
+                    else
+                    {
+                        // Invalid index or non-positive count: nothing to do, reply immediately.
+                        std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                        dprintf(reply_fd, "req=%s;msg=%ld\n", req.c_str(), engine->get_time());
+                        lock.unlock();
+                    }
+                }
+            }
+            else if (words[0] == "stop")
+            {
+                this->gvsoc->stop();
+                std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                dprintf(reply_fd, "req=%s\n", req.c_str());
+                lock.unlock();
+            }
+            else if (words[0] == "terminate")
+            {
+                std::unique_lock<std::mutex> lock(this->proxy->mutex);
+
+                dprintf(reply_fd, "req=%s\n", req.c_str());
+                lock.unlock();
+
+                this->gvsoc->terminate();
+            }
+            else if (words[0] == "quit")
+            {
+                std::unique_lock<std::mutex> lock(this->proxy->mutex);
+
+                this->proxy->exit_status = strtol(words[1].c_str(), NULL, 0);
+                this->proxy->has_finished = true;
+                this->proxy->cond.notify_all();
+
+                dprintf(reply_fd, "req=%s\n", req.c_str());
+                lock.unlock();
+
+                this->gvsoc->quit(this->proxy->exit_status);
+            }
+            else
+            {
+                // Before interacting with the engine, we must lock it since our requests will come
+                // from a different thread.
+                this->gvsoc->lock();
+
+                if (words[0] == "get_component")
+                {
+                    vp::Block *comp = this->proxy->top->get_block_from_path(split(words[1], '/'));
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    if (comp)
+                    {
+                        dprintf(reply_fd, "req=%s;msg=%p\n", req.c_str(), comp);
+                    }
+                    else
+                    {
+                        dprintf(reply_fd, "req=%s;msg=0x0\n", req.c_str());
+                    }
+                    lock.unlock();
+                }
+                else if (words[0] == "get_clock_domains")
+                {
+                    std::string result;
+                    for (auto clock : engine->get_clock_engines())
+                    {
+                        clock->sync();
+                        if (!result.empty())
+                            result += "|";
+                        char buf[512];
+                        snprintf(buf, sizeof(buf), "%s period=%ld frequency=%ld cycles=%ld",
+                            clock->get_path().c_str(), clock->get_period(),
+                            clock->get_frequency(), clock->get_cycles());
+                        result += buf;
+                    }
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), result.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "get_binaries")
+                {
+                    // Return the engine's registered ELF binaries (pipe-separated) so a client can
+                    // auto-load their symbols. Authoritative list, kept by the controller as models
+                    // declare binaries (at reset or dynamically).
+                    std::string result;
+                    for (auto &binary : gv::Controller::get().get_binaries())
+                    {
+                        if (!result.empty())
+                            result += "|";
+                        result += binary;
+                    }
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), result.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "get_cores")
+                {
+                    // Return the handles of every CPU core, so a client can set breakpoints and
+                    // watchpoints on all of them (each core only checks its own).
+                    std::string result;
+                    for (auto core : gv::Controller::get().get_cores())
+                    {
+                        if (!result.empty())
+                            result += "|";
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), "%p", (void *)core);
+                        result += buf;
+                    }
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), result.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "watchpoint_insert" || words[0] == "watchpoint_remove")
+                {
+                    // Generic memory watchpoint: matched centrally as any master declares its
+                    // accesses (BlockTrace::declare_access), so it catches cores, DMA, accelerators.
+                    // Args: <is_write> <addr> <size> [master-path-pattern...]. The optional patterns
+                    // scope the watchpoint to masters whose path contains one of them (default: all).
+                    bool is_write = words.size() > 1 && words[1] != "0";
+                    uint64_t addr = words.size() > 2 ? strtoull(words[2].c_str(), NULL, 0) : 0;
+                    uint64_t size = words.size() > 3 ? strtoull(words[3].c_str(), NULL, 0) : 0;
+                    vp::TraceEngine *te = this->proxy->top->traces.get_trace_engine();
+                    if (words[0] == "watchpoint_insert")
+                    {
+                        std::vector<std::string> masters;
+                        for (size_t i = 4; i < words.size(); i++)
+                            masters.push_back(words[i]);
+                        te->watchpoint_insert(addr, size, is_write, masters);
+                    }
+                    else
+                        te->watchpoint_remove(addr, size, is_write);
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=ok\n", req.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "get_masters")
+                {
+                    // List the masters (component paths) that participate in watchpoints, so a client
+                    // can scope a watchpoint to a subset. Populated as masters declare accesses.
+                    std::string result;
+                    for (auto &m : this->proxy->top->traces.get_trace_engine()->get_masters())
+                    {
+                        if (!result.empty())
+                            result += "|";
+                        result += m;
+                    }
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), result.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "watchpoint_status")
+                {
+                    vp::TraceEngine *te = this->proxy->top->traces.get_trace_engine();
+                    char buf[512];
+                    if (te->watchpoint_hit)
+                        snprintf(buf, sizeof(buf), "hit=1 addr=0x%lx is_write=%d master=%s",
+                            (unsigned long)te->watchpoint_hit_addr, te->watchpoint_hit_is_write ? 1 : 0,
+                            te->watchpoint_hit_master.c_str());
+                    else
+                        snprintf(buf, sizeof(buf), "hit=0");
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), buf);
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "memcheck_status")
+                {
+                    // Structured report of the last memcheck fault. Fixed key=value
+                    // fields first; msg= comes last and takes the line remainder
+                    // since the formatted report contains spaces.
+                    vp::MemCheck *mc = this->proxy->top->get_memcheck();
+                    const vp::MemCheckFaultInfo &fault = mc->fault;
+                    std::string buf;
+                    if (fault.valid)
+                    {
+                        char tmp[1024];
+                        snprintf(tmp, sizeof(tmp),
+                            "hit=1 kind=%s time=%" PRId64 " core=%s pc=0x%" PRIx64
+                            " addr=0x%" PRIx64 " size=%d is_write=%d buffer=%u",
+                            fault.kind.c_str(), fault.time, fault.core.c_str(),
+                            fault.pc, fault.addr, fault.size, fault.is_write ? 1 : 0,
+                            fault.buffer_id);
+                        buf = tmp;
+                        vp::MemCheckBuffer *buffer = mc->get_buffer(fault.buffer_id);
+                        if (buffer != NULL)
+                        {
+                            vp::MemCheckRegion *region = mc->get_region(buffer->mem_id);
+                            snprintf(tmp, sizeof(tmp),
+                                " region=%s base=0x%" PRIx64 " buf_size=0x%" PRIx64
+                                " alloc_pc=0x%" PRIx64 " alloc_ra=0x%" PRIx64
+                                " freed=%d free_pc=0x%" PRIx64 " free_ra=0x%" PRIx64,
+                                region != NULL ? region->name.c_str() : "??",
+                                buffer->base, buffer->size, buffer->alloc_pc,
+                                buffer->alloc_ra, buffer->freed ? 1 : 0,
+                                buffer->free_pc, buffer->free_ra);
+                            buf += tmp;
+                        }
+                        buf += " msg=" + fault.message;
+                    }
+                    else
+                    {
+                        buf = "hit=0";
+                    }
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), buf.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "memcheck_clear")
+                {
+                    // Consume the last fault so front-ends do not re-report it on
+                    // the next stop
+                    this->proxy->top->get_memcheck()->fault.valid = false;
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=done\n", req.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "watchpoint_resume")
+                {
+                    this->proxy->top->traces.get_trace_engine()->watchpoint_clear_hit();
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=ok\n", req.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "component")
+                {
+                    vp::Component *comp = (vp::Component *)strtoll(words[1].c_str(), NULL, 0);
+                    std::string retval = comp->handle_command(this->proxy, sock, reply_sock, {words.begin() + 2, words.end()}, req);
+                    std::unique_lock<std::mutex> lock(this->proxy->mutex);
+                    fprintf(reply_sock, "req=%s;msg=%s\n", req.c_str(), retval.c_str());
+                    fflush(reply_sock);
+                    lock.unlock();
+                }
+                else if (words[0] == "trace")
+                {
+                    if (words.size() != 3)
+                    {
+                        fprintf(stderr, "This command requires 2 arguments: trace [add|remove] regexp");
+                    }
+                    else
+                    {
+                        if (words[1] == "add")
+                        {
+                            this->proxy->top->traces.get_trace_engine()->add_trace_path(0, words[2]);
+                            this->proxy->top->traces.get_trace_engine()->check_traces();
+                        }
+                        else if (words[1] == "level")
+                        {
+                            this->proxy->top->traces.get_trace_engine()->set_trace_level(words[2].c_str());
+                            this->proxy->top->traces.get_trace_engine()->check_traces();
+                        }
+                        else
+                        {
+                            this->proxy->top->traces.get_trace_engine()->add_exclude_trace_path(0, words[2]);
+                            this->proxy->top->traces.get_trace_engine()->check_traces();
+                        }
+                        fprintf(reply_sock, "req=%s\n", req.c_str());
+                        fflush(reply_sock);
+                    }
+                }
+                else if (words[0] == "event")
+                {
+                    if (words.size() != 3)
+                    {
+                        fprintf(stderr, "This command requires 2 arguments: event [add|remove] regexp");
+                    }
+                    else
+                    {
+                        vp::TraceEngine *te = this->proxy->top->traces.get_trace_engine();
+                        if (words[1] == "add")
+                        {
+                            te->event_subscribe(words[2],
+                                gv::Vcd::MatchKind::Regex);
+                        }
+                        else
+                        {
+                            te->event_unsubscribe(words[2],
+                                gv::Vcd::MatchKind::Regex);
+                        }
+                        fprintf(reply_sock, "req=%s\n", req.c_str());
+                    }
+                }
+                else
+                {
+                    printf("Ignoring invalid command: %s\n", words[0].c_str());
+                }
+
+                this->gvsoc->unlock();
+            }
+        }
+    }
+}
+
+

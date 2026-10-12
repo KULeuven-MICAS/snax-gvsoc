@@ -1,0 +1,952 @@
+// SPDX-FileCopyrightText: 2026 ETH Zurich, University of Bologna and EssilorLuxottica SAS
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Authors: Germain Haugou (germain.haugou@gmail.com)
+
+#pragma once
+
+#include <map>
+#include <memory>
+#include <new>
+
+#include "vp/queue.hpp"
+#include "vp/vp.hpp"
+
+// IO v2 protocol — burst conventions
+// ----------------------------------
+//
+// For a full walkthrough of the v2 protocol (object, ports, the three
+// request statuses, sync / async / DENIED-retry flows, burst protocol
+// with the three response forms, latency annotation, multiplexed
+// ports and v1->v2 migration), see the developer-manual page at
+// gvsoc/engine/docs/developer_manual/interfaces/io_v2.rst.
+//
+//
+// Any single IoReq submitted via IoMaster::req() may be answered by the slave in
+// one of three forms. All three are valid and must be tolerated by masters.
+// (This applies to reads and to writes on non-beat bindings; write beats on a
+// beat binding follow the per-burst acknowledgement rules further down —
+// "Write acknowledgement".)
+//
+//   1. Sync big-packet:   slave returns IO_REQ_DONE inline with req->data filled
+//                         and req->status set. No later resp() fires.
+//   2. Async big-packet:  slave returns IO_REQ_GRANTED, later calls resp() once
+//                         with is_first = is_last = true and the full size.
+//   3. Beat stream:       slave returns IO_REQ_GRANTED, later calls resp() N
+//                         times, once per beat (data, size, is_first, is_last
+//                         set per beat). Cumulative response sizes equal request
+//                         size. burst_id is preserved across the beats. Final
+//                         beat carries is_last = true and the burst's final
+//                         status. Under the initiator-owned request convention
+//                         each read beat is a DISTINCT object correlated by
+//                         req->initiator (the request is never reused as a
+//                         response beat); reusing one object is bare-protocol-
+//                         legal but breaks initiator-owned masters.
+//
+// DENIED / retry: when a slave returns IO_REQ_DENIED the master holds the
+// request and re-sends it when the slave later calls retry(). The re-send MUST
+// happen synchronously, inside the retry() callback (same cycle) — never
+// deferred to a later cycle. See IoSlave::retry() below and the developer
+// manual for why (some slaves only keep their accept window open during the
+// synchronous call; deferring deadlocks). retry() carries an IoRetryChannel
+// (READ / WRITE / ANY, default ANY) so read and write back-pressure can be
+// independent on masters that split the two; see IoRetryChannel.
+//
+//                         The slave MAY also mutate addr to carry the per-beat
+//                         start address (= burst_addr + cumulative emitted
+//                         bytes). This deviates from AXI — where one AxADDR
+//                         covers the whole burst and per-beat addresses are
+//                         implicit — but is a cheap convenience for tracing
+//                         and debugging on the master side, and the slave
+//                         already tracks the cumulative offset internally.
+//                         Masters MUST tolerate either convention: addr left
+//                         at burst_addr, or addr updated per beat.
+//
+// Reads vs writes (the AXI mental model):
+//
+//   - A read burst is always submitted as exactly one req() with
+//     size = total_burst_bytes, is_first = is_last = true. The response shape is
+//     the slave's choice (any of the three forms above). READS ARE UNCHANGED
+//     by the write-acknowledgement rules below.
+//   - A write burst may be submitted as either one req() carrying the full
+//     payload (big-packet-form write) or N req() calls each carrying one beat
+//     of data with is_first/is_last/burst_id set per beat (beat-form write).
+//
+// Write acknowledgement (AXI B-channel semantics — beat bindings only):
+//
+//   On a binding whose slave side speaks the beat protocol, a write burst is
+//   acknowledged once per BURST, not once per beat. The rule is keyed purely
+//   on is_last (a big-packet-form write is a one-beat burst and follows the
+//   last-beat rule). Non-beat bindings (big-packet / sync / single-req slave
+//   ports) keep the classic per-req round-trip.
+//
+//   - Non-last write beat (is_last == false):
+//       IO_REQ_GRANTED — the target takes ownership of the beat, consumes its
+//                        payload and eventually frees it (req->free()). It
+//                        NEVER calls resp() for this beat.
+//       IO_REQ_DENIED  — per-beat back-pressure, unchanged: the master keeps
+//                        the beat and re-sends it inside retry().
+//   - Last write beat (is_last == true):
+//       IO_REQ_DONE    — inline burst ack (the fast path): the burst's final
+//                        IO_RESP_OK/INVALID is set on the request, timing is
+//                        annotated via latency/duration, and the master KEEPS
+//                        its beat (ownership never transferred).
+//       IO_REQ_GRANTED — the target consumes and frees this beat too, and
+//                        later calls resp() exactly ONCE with a data-less,
+//                        allocator-backed ack object carrying the burst's
+//                        final status (see "The write ack" below).
+//       IO_REQ_DENIED  — back-pressure, unchanged.
+//
+//   - Atomic opcodes (LR/SC/SWAP/ADD/...) are exempt: they carry response
+//     data, so they keep the classic round-trip — the initiator's own request
+//     comes back via resp() and nobody else frees it. Targets must key the
+//     write rules on opcode == WRITE, not get_is_write() (which is true for
+//     every non-READ opcode).
+//   - Error escape hatch: a target may reject a malformed write beat (size
+//     over width, continuation without an open burst) inline with
+//     IO_REQ_DONE + IO_RESP_INVALID, regardless of is_last. The master keeps
+//     the beat and must treat the burst as aborted.
+//
+// The write ack:
+//
+//   - A dedicated request, allocated from the size-0 IoReqAllocator pool and
+//     prepare()'d by the producer. A producer that owns the burst's consumed
+//     pool-backed last beat frees it and MUST NOT recycle it as the ack: it
+//     cannot know which pool the beat came from, and a sized pool promises
+//     its co-allocated payload to the next allocation. The one exception is
+//     a master-owned object (no allocator back-pointer: a classic round-trip
+//     write on a non-beat flow), which is not the producer's to free and
+//     travels back itself. io_v2_write_ack() implements both cases; the
+//     initiator must never correlate by object identity either way.
+//   - Fields: opcode WRITE; data == NULL (mandatory); is_first = is_last =
+//     true; burst_id = the id carried by the burst's beats (routers remap and
+//     restore it exactly as for read beats); initiator = copied from the
+//     beats — all beats of one burst MUST carry the same initiator; status =
+//     the burst's final IO_RESP_OK/INVALID (any beat error latches INVALID);
+//     addr/size SHOULD carry the burst base address / total byte count but
+//     are informational only — masters must not rely on them.
+//   - The ack is an ordinary response beat: it participates in IoRespAck
+//     response back-pressure (a consumer may return IO_RESP_DENIED; the
+//     producer holds the ack and re-sends it on resp_retry(IO_RETRY_WRITE)),
+//     and it may carry latency/duration annotations (read them with
+//     get_full_latency()).
+//   - The initiator consumes the final status and frees the ack
+//     (ack->free()).
+//
+// Write-beat ownership travels with the beat, BUFFER INCLUDED: GRANTED
+// transfers ownership to the callee, and the caller must not touch the beat
+// afterwards — snapshot any field you still need (size, is_last, addr)
+// BEFORE calling req(). The buffer behind data is valid exactly as long as
+// the beat is alive (not freed): once the initiator has passed a write beat
+// it can assume nothing about the buffer anymore — it must not touch, modify
+// or reuse it, and may only reclaim it after the burst's ack (the ack
+// implies every beat of the burst has been consumed and freed; a target must
+// not issue the ack before that). The current owner keeps the buffer usable
+// simply by holding the unfreed beat, and is free to pass the beat on to a
+// forwarder to keep the buffer alive without reallocation or copy. A
+// consumer must NOT free a write beat while it (or anything it handed out)
+// still references the payload — freeing the beat is what releases the
+// buffer. A mid-chain forwarder (beat router, clock bridge) passes the SAME
+// object downstream; the single component that terminates the beat frees it
+// once fully done with the payload. The burst's ack flows back through the
+// chain as a normal resp(), correlated by burst_id/initiator like a read
+// beat.
+//
+// Request allocation (beat protocol): any request that crosses a
+// consumer-frees boundary — a read burst request freed downstream, a read
+// response beat freed by the terminal master, a WRITE BEAT freed by the
+// target that consumes it, a write ack freed by the initiator — must come
+// from an IoReqAllocator (see below) and be released with req->free(), never
+// bare new/delete. Allocators are shared per payload size (always a beat
+// width, or 0 for data-less requests) and recycle request + payload as one
+// block, removing the per-beat malloc/free round-trip. The rules that come
+// with it:
+//
+//   - A read burst request carries no data (data == NULL). The producer of
+//     the response allocates each beat from its allocator; the beat's
+//     co-allocated payload holds the read data (the producer points its own
+//     downstream, non-beat read request at that payload so the target fills
+//     it directly, without an extra copy). The terminal master copies each
+//     beat's payload into its destination buffer, then frees the beat.
+//   - Write beats are allocated from the size-0 pool with data pointing into
+//     the initiator's source buffer — no per-beat payload copy. Buffer
+//     lifetime follows beat ownership (see "Write-beat ownership" above). A
+//     component that repacks write data anyway (e.g. the beat width adapter)
+//     may instead draw its downstream beats from a payload pool and copy;
+//     those beats are freed by the target like any other.
+//   - The data-pointer discipline is per pool kind: for payload pools
+//     (size > 0) req->data is the co-allocated payload, set once at block
+//     creation, and must never be repointed. For the size-0 pool req->data
+//     is CALLER-MANAGED: alloc() reinitializes nothing, so the caller must
+//     set data on EVERY allocation — NULL for data-less requests (read burst
+//     requests, write acks) or the source-buffer pointer for write beats.
+//     free() never touches data. As before, alloc() reinitializes no other
+//     field either: callers set addr/size/opcode/is_first/is_last/burst_id
+//     per beat, as after new.
+//   - Downstream requests to non-beat protocols (big-packet / sync /
+//     single-req) are never freed by the target; components keep reusing
+//     their own request objects there and may repoint their data (e.g. at a
+//     response beat's payload).
+//
+// Beat-fidelity components (cycle-accurate routers, cycle-accurate iDMAs) can
+// route their outgoing IoMaster through a BeatResponseAdapter (see
+// gvsoc/core/models/utils/io_v2_beat_adapter.hpp) which normalises whatever
+// response form the slave produces into a uniform per-beat callback stream.
+// That lets the same beat-fidelity component interoperate with a fast
+// functional memory (sync DONE) as well as with a beat-aware DRAM controller.
+//
+// Synchronous sub-protocol (IoV2Sync):
+//
+//   The above lists the general v2 contract. A slave port may *additionally*
+//   advertise the synchronous sub-protocol on the Python side via
+//   :class:`gvsoc.signature.IoV2Sync`. That contract tightens the surface to
+//   "form 1 only" — the slave always answers inline:
+//
+//     - Always returns IO_REQ_DONE from req_meth (never GRANTED / DENIED).
+//     - Never calls resp() / retry().
+//     - May still annotate req->latency; the master reads it inline on
+//       return and stalls by that amount (the latency is *not* deferred).
+//
+//   A master that also declares IoV2Sync on its output may rely on this and
+//   skip its async resp()/retry() code paths (it still honours the inline
+//   latency). The C++ API surface is unchanged: the contract is enforced by
+//   Python signature checks plus model-author discipline. memory_v3 is the
+//   canonical IoV2Sync slave.
+
+namespace vp {
+
+class IoSlave;
+class IoReq;
+class IoReqAllocator;
+
+typedef enum
+{
+  READ=0,
+  WRITE=1,
+  LR=2,
+  SC=3,
+  SWAP=4,
+  ADD=5,
+  XOR=6,
+  AND=7,
+  OR=8,
+  MIN=9,
+  MAX=10,
+  MINU=11,
+  MAXU=12,
+} IoReqOpcode;
+
+typedef enum { IO_REQ_GRANTED, IO_REQ_DENIED, IO_REQ_DONE } IoReqStatus;
+
+typedef enum { IO_RESP_OK, IO_RESP_INVALID } IoRespStatus;
+
+// Flow-control result of IoSlave::resp() — the response-path analogue of
+// IoReqStatus on the request path. A response is terminal, so it has only two
+// outcomes: the consumer accepted the beat (IO_RESP_ACCEPTED, ownership returns
+// to the producer's caller) or back-pressured it (IO_RESP_DENIED, the producer
+// holds the beat unchanged and re-sends it on resp_retry()). This is kept
+// separate from IoRespStatus, which reports the response *payload* status
+// (OK / INVALID error) — an orthogonal axis a beat carries regardless of whether
+// it was accepted.
+typedef enum { IO_RESP_ACCEPTED, IO_RESP_DENIED } IoRespAck;
+
+// Channel a retry() pertains to. A master that splits traffic into independent
+// read / write channels (AXI AR/AW vs R) can be back-pressured on one channel
+// while the other keeps flowing. A slave names the channel it became ready on;
+// IO_RETRY_ANY (the default) means "all channels". The READ/WRITE values match
+// the request direction (is_write) so a master can index its per-channel state
+// directly. A channel-agnostic slave always uses IO_RETRY_ANY, and a
+// single-channel master ignores the value.
+typedef enum { IO_RETRY_READ = 0, IO_RETRY_WRITE = 1, IO_RETRY_ANY = 2 } IoRetryChannel;
+
+typedef IoReqStatus(IoSlaveReqMeth)(vp::Block *, vp::IoReq *);
+typedef IoReqStatus(IoSlaveReqMethMuxed)(vp::Block *, IoReq *, int id);
+
+// The response callback returns IoRespAck: the consumer answers IO_RESP_ACCEPTED
+// to take the beat, or IO_RESP_DENIED to back-pressure it (the producer then
+// holds the beat and re-sends on resp_retry()). A consumer that always accepts
+// simply returns IO_RESP_ACCEPTED.
+typedef IoRespAck(IoMasterRespMeth)(vp::Block *, vp::IoReq *);
+typedef IoRespAck(IoMasterRespMethMuxed)(vp::Block *, vp::IoReq *, int id);
+typedef void(IoMasterRetryMeth)(vp::Block *, IoRetryChannel channel);
+typedef void(IoMasterRetryMethMuxed)(vp::Block *, int id, IoRetryChannel channel);
+
+// Response-path back-pressure (the AXI R/RREADY analogue), symmetric to the
+// request-path retry above. A producer replies with IoSlave::resp(); the
+// consumer's resp callback returns IO_RESP_DENIED to refuse the beat this cycle
+// (IoSlave::resp() propagates that return). The producer then holds the beat and
+// re-sends it when the consumer later calls IoMaster::resp_retry(), which
+// dispatches to the producer's resp_retry_meth. A consumer that always accepts
+// returns IO_RESP_ACCEPTED and no producer ever needs a resp_retry_meth — the
+// whole mechanism is free when unused.
+typedef void(IoSlaveRespRetryMeth)(vp::Block *, IoRetryChannel channel);
+typedef void(IoSlaveRespRetryMethMuxed)(vp::Block *, int id, IoRetryChannel channel);
+
+class IoReq : public vp::QueueElem {
+    friend class IoMaster;
+    friend class IoSlave;
+
+  public:
+    IoReq() {}
+
+    IoReq(uint64_t addr, uint8_t *data, uint64_t size, bool is_write)
+        : addr(addr), data(data), size(size), opcode((IoReqOpcode)is_write) {}
+
+    void set_next(IoReq *req) { next = req; }
+    IoReq *get_next() { return next; }
+
+    uint64_t get_addr() { return addr; }
+    void set_addr(uint64_t value) { addr = value; }
+
+    bool get_is_write() { return (bool)this->opcode; }
+    void set_is_write(bool is_write) { this->opcode = (IoReqOpcode)is_write; }
+
+    IoReqOpcode get_opcode() { return this->opcode; }
+    void set_opcode(IoReqOpcode opcode) { this->opcode = opcode; }
+
+    void set_size(uint64_t size) { this->size = size; }
+    uint64_t get_size() { return size; }
+
+    uint8_t *get_data() { return data; }
+    void set_data(uint8_t *data) { this->data = data; }
+
+    uint8_t *get_second_data() { return this->second_data; }
+    void set_second_data(uint8_t *data) { this->second_data = data; }
+
+    // Optional byte strobe for writes: one byte per data byte, non-zero to
+    // commit it. NULL (the default, restored by prepare()) means every byte
+    // of the request is written, which is what all initiators except the
+    // masked vector store do. Targets that hold storage must honour it;
+    // pure forwarders pass the request through untouched and need no change.
+    uint8_t *get_strb() { return this->strb; }
+    void set_strb(uint8_t *strb) { this->strb = strb; }
+
+    // Memcheck shadow transport, only active in debug builds (VP_MEMCHECK_ACTIVE)
+    // with memory checking enabled. memcheck_data points to a per-byte validity
+    // shadow of `data` (0xFF = initialized); NULL means the initiator carries no
+    // shadow, in which case targets assume written data is initialized.
+    // memcheck_data_id is the provenance of the transferred word: on a write it is
+    // the ID attached to the stored register, on a read the target returns the ID
+    // stored in the accessed word slot, so that pointers spilled to memory keep
+    // their provenance. The buffer checks themselves happen in the core models at
+    // issue time, requests do not carry the address provenance.
+    uint8_t *get_memcheck_data() { return this->memcheck_data; }
+    void set_memcheck_data(uint8_t *data) { this->memcheck_data = data; }
+
+    uint8_t *get_second_memcheck_data() { return this->second_memcheck_data; }
+    void set_second_memcheck_data(uint8_t *data) { this->second_memcheck_data = data; }
+
+    uint32_t get_memcheck_data_id() { return this->memcheck_data_id; }
+    void set_memcheck_data_id(uint32_t id) { this->memcheck_data_id = id; }
+
+    IoRespStatus get_resp_status() { return this->status; }
+    void set_resp_status(IoRespStatus status) { this->status = status; }
+
+    // Accumulated latency annotation (in cycles) imposed along the forwarding path.
+    //
+    // Components (routers, targets) that model timing without scheduling ClockEvents
+    // — i.e. that return IO_REQ_DONE inline after a logical delay — use this to tell
+    // the master how many cycles the transaction "should have" taken. The master can
+    // then stall its own cycle counter by this amount.
+    //
+    // For models that already use wall-clock scheduling (ClockEvent-based deferred
+    // resp), leaving the field at 0 is fine — the delay is reflected in the real
+    // cycle at which resp() fires.
+    //
+    // For beat-stream responses the slave can set this field per beat to give the
+    // master a per-beat earliest-ready offset (in addition to the natural pacing of
+    // when resp() actually fires).
+    //
+    // Masters reusing a request should call prepare() (or reset this field
+    // explicitly) before each send.
+    int64_t get_latency() const { return this->latency; }
+    void set_latency(int64_t v) { this->latency = std::max(this->latency, v); }
+    void inc_latency(int64_t v) { this->latency += v; }
+
+    // Bandwidth-occupancy annotation (in cycles), kept *separate* from the head
+    // latency above. Unlike latency, duration combines with **max**, not sum:
+    // series resources that overlap (e.g. two bandwidth routers streaming the
+    // same packet) each occupy the link for `duration` cycles but those
+    // occupations pipeline, so the end-to-end transfer time is the bottleneck
+    // (the max), not the total. A component that models throughput as
+    // ceil(size / bandwidth) reports it here via set_duration().
+    //
+    // The full transaction time a master should stall by is get_full_latency()
+    // = head latency (additive) + occupancy (max). Defaults to 0, so a request
+    // that never traverses a bandwidth-limited resource has get_full_latency()
+    // == get_latency().
+    int64_t get_duration() const { return this->duration; }
+    void set_duration(int64_t v) { this->duration = std::max(this->duration, v); }
+    int64_t get_full_latency() const { return this->latency + this->duration; }
+
+    // Return this request to its home pool. Only valid on allocator-provided
+    // requests (see IoReqAllocator); any component may call it, regardless of
+    // who allocated the request.
+    inline void free();
+
+    // Reset per-send fields. Call before resubmitting a request object.
+    void prepare()
+    {
+        this->latency = 0; this->duration = 0; this->status = IO_RESP_OK;
+        this->strb = NULL;
+#ifdef VP_MEMCHECK_ACTIVE
+        this->memcheck_data = NULL;
+        this->second_memcheck_data = NULL;
+        this->memcheck_data_id = 0;
+#endif
+    }
+
+    uint64_t addr;
+    uint8_t *data;
+    // Non-initialized flags for additional atomics data
+    uint8_t *second_data;
+    // Optional per-byte write strobe, see the accessors above.
+    uint8_t *strb = NULL;
+    // Memcheck shadow transport, see the accessors above. Kept unconditionally in
+    // the struct so the request layout does not depend on VP_MEMCHECK_ACTIVE.
+    uint8_t *memcheck_data = NULL;
+    uint8_t *second_memcheck_data = NULL;
+    uint32_t memcheck_data_id = 0;
+    uint64_t size;
+    IoReqOpcode opcode;
+    // Response status. Defaults to IO_RESP_OK; slaves only need to set it
+    // explicitly when reporting an error (IO_RESP_INVALID). prepare() also
+    // resets it to IO_RESP_OK so masters reusing a request object don't
+    // observe a stale error status from a previous send.
+    IoRespStatus status = IO_RESP_OK;
+    bool is_first = true;
+    bool is_last = true;
+    int64_t burst_id = -1;
+    int64_t latency = 0;
+    int64_t duration = 0;
+
+    IoReq *next;
+    IoReq *parent;
+    void *initiator;
+    // Home pool of an allocator-provided request (see IoReqAllocator), so any
+    // consumer can free it to the right pool through free(). NULL on requests
+    // not obtained from an allocator.
+    IoReqAllocator *allocator = nullptr;
+    // Temporary field
+    uint64_t remaining_size;
+};
+
+// Pooled allocator for beat-protocol requests. One shared allocator per
+// payload size (see get()). For payload pools (size > 0) the payload is
+// co-allocated with the request in a single block and req->data is set once
+// to it and must never be repointed. For the size-0 pool req->data is
+// caller-managed: set it on every allocation — NULL for data-less requests
+// (read burst requests, write acks) or the source-buffer pointer for write
+// beats; free() never touches it. Any component can return a request to its
+// home pool with req->free(), regardless of who allocated it — the request
+// carries a back-pointer to its allocator. Single-threaded by design, like
+// the rest of the engine core.
+class IoReqAllocator
+{
+public:
+    // Return the shared allocator serving the given payload size, creating it
+    // on first use. Components fetch their allocator(s) once at construction —
+    // their beat width is static. Size 0 serves data-less requests (e.g. read
+    // burst requests, which carry no data).
+    static inline IoReqAllocator *get(uint64_t data_size);
+
+    // Pop a recycled request or lazily create one. No field is reinitialized
+    // on recycle: callers set addr/size/opcode/is_first/is_last/burst_id
+    // themselves, exactly as after a bare new.
+    inline IoReq *alloc();
+
+    // Push a request back to this pool. Usually reached through IoReq::free().
+    inline void free(IoReq *req);
+
+    // Releases the recycled blocks at process teardown (through the registry).
+    inline ~IoReqAllocator();
+
+private:
+    IoReqAllocator(uint64_t data_size) : data_size(data_size) {}
+
+    // Payload size co-allocated with every request of this pool
+    uint64_t data_size;
+    // Intrusive freelist threaded through IoReq::next
+    IoReq *first_free = nullptr;
+};
+
+inline IoReqAllocator *IoReqAllocator::get(uint64_t data_size)
+{
+    // Function-local static so the registry is unique across all translation
+    // units and torn down at process exit (the unique_ptrs free the pools so
+    // recycled blocks don't show up as leaks).
+    static std::map<uint64_t, std::unique_ptr<IoReqAllocator>> allocators;
+    std::unique_ptr<IoReqAllocator> &allocator = allocators[data_size];
+    if (allocator == nullptr)
+    {
+        allocator.reset(new IoReqAllocator(data_size));
+    }
+    return allocator.get();
+}
+
+inline IoReq *IoReqAllocator::alloc()
+{
+    IoReq *req = this->first_free;
+    if (req != NULL)
+    {
+        this->first_free = req->next;
+        return req;
+    }
+
+    // Grow path: a single block holding the request and its payload, so a
+    // request costs one allocation and request + payload share cache lines.
+    size_t data_offset = (sizeof(IoReq) + 7) & ~(size_t)7;
+    uint8_t *block = new uint8_t[data_offset + this->data_size];
+    req = new (block) IoReq();
+    req->data = this->data_size != 0 ? block + data_offset : NULL;
+    req->allocator = this;
+    return req;
+}
+
+inline void IoReqAllocator::free(IoReq *req)
+{
+    req->next = this->first_free;
+    this->first_free = req;
+}
+
+inline IoReqAllocator::~IoReqAllocator()
+{
+    while (this->first_free != NULL)
+    {
+        IoReq *req = this->first_free;
+        this->first_free = req->next;
+        delete[] (uint8_t *)req;
+    }
+}
+
+inline void IoReq::free()
+{
+    // A request reaching free() without a home pool means an unported
+    // component sent a heap/embedded object across a consumer-frees boundary
+    // (e.g. a non-pooled write beat to a beat target) — fail loudly instead
+    // of corrupting a pool.
+    vp_assert(this->allocator != nullptr, (vp::Trace *)nullptr,
+        "IoReq::free() on a request without an allocator back-pointer\n");
+    this->allocator->free(this);
+}
+
+/*
+ * Build the single data-less ack of a write burst from its consumed last
+ * beat (see "The write ack" above). A pool-backed beat goes back to its
+ * pool and the ack is a dedicated request from the size-0 pool; a
+ * master-owned object (no allocator back-pointer, a classic round-trip
+ * write) must travel back itself, so it is prepared in place. Either way
+ * the result carries the burst's burst_id and initiator, opcode WRITE,
+ * data NULL and is_first = is_last = true; the caller sets addr, size,
+ * status and any timing annotation.
+ */
+inline IoReq *io_v2_write_ack(IoReq *beat)
+{
+    int64_t burst_id = beat->burst_id;
+    void *initiator = beat->initiator;
+    IoReq *ack = beat;
+    if (beat->allocator != nullptr)
+    {
+        beat->free();
+        ack = IoReqAllocator::get(0)->alloc();
+    }
+    ack->prepare();
+    ack->set_is_write(true);
+    ack->set_data(nullptr);
+    ack->is_first = true;
+    ack->is_last = true;
+    ack->burst_id = burst_id;
+    ack->initiator = initiator;
+    return ack;
+}
+
+/*
+ * Class for IO master ports
+ */
+class IoMaster : public vp::MasterPort {
+    friend class IoSlave;
+
+  public:
+    // Constructor
+    inline IoMaster(IoMasterRetryMeth *retry_meth, IoMasterRespMeth *resp_meth);
+
+    inline IoMaster(int id, IoMasterRetryMethMuxed *retry_meth, IoMasterRespMethMuxed *resp_meth);
+
+    /*
+     * Master binding methods
+     */
+
+    // Return if this master port is bound.
+    bool is_bound();
+
+    // True if the bound slave registered a resp_retry handler — i.e. it can be
+    // told to re-send a back-pressured response. A consumer must not deny a
+    // resp() (nor call resp_retry()) on a slave that lacks one.
+    inline bool is_resp_retry_bound() { return this->slave_resp_retry_meth != NULL; }
+
+    // Can be called by master component to send an IO request.
+    inline IoReqStatus req(IoReq *req);
+
+    // Signals the bound slave (the producer of responses) that this master is
+    // ready to accept responses again after a previous resp() it denied (by
+    // returning IO_RESP_DENIED). Carries no request, symmetric to IoSlave::retry()
+    // on the request path: the master does not track which beats it denied, it
+    // just announces readiness and the producer re-sends its held beat.
+    //
+    // Like request-path retry, this MUST be serviced synchronously: the producer
+    // re-submits its held beat inside its resp_retry callback (same cycle). The
+    // `channel` names which response channel became ready (READ/WRITE/ANY).
+    inline void resp_retry(IoRetryChannel channel = IO_RETRY_ANY);
+
+    /*
+     * Reserved for framework
+     */
+
+    // Called by the framework to bind the master port to a slave port.
+    virtual inline void bind_to(vp::Port *port, js::Config *config);
+
+    // Called by the framework to finalize the binding, for example in order
+    // to take into account cross-domains bindings
+    void finalize();
+
+  private:
+    /*
+     * Master callbacks
+     */
+
+    // Grant callback set by the user.
+    // This gets called anytime the slave is granting an IO request.
+    // This is set to an empty callback by default.
+    void *retry_meth;
+
+    // Response callback set by the user.
+    // This gets called anytime the slave is sending back a response.
+    // This is set to an empty callback by default.
+    void *resp_meth;
+
+    /*
+     * Slave callbacks
+     */
+
+    // Callback set by the user on slave port and retrieved during binding
+    void *slave_req_meth;
+
+    // Slave resp_retry callback, retrieved from the slave port during binding.
+    // Lets this master signal the producer that responses can flow again. NULL
+    // when the producer did not register one (it never expects to be denied).
+    void *slave_resp_retry_meth;
+
+    /*
+     * Stubs
+     */
+
+    // This is a stub setup when the slave is multiplexing the port so that we
+    // can capture the master call and transform it into the slave call with the
+    // right mux ID.
+    static inline IoReqStatus req_muxed_stub(IoMaster *_this, IoReq *req);
+
+    // Same idea for resp_retry: inject the slave mux ID on the master->slave
+    // response-retry call when the slave port is multiplexed.
+    static inline void resp_retry_muxed_stub(IoMaster *_this, IoRetryChannel channel);
+
+    /*
+     * Internal data
+     */
+
+    // Slave context when slave port is multiplexed.
+    // We keep here a copy of the slave context when the slave port is multiplexed
+    // as the normal variable for this context is used to store ourself so that
+    // the stub is working well.
+    vp::Block *slave_context_for_mux;
+
+    void *slave_req_meth_for_mux;
+
+    void *slave_resp_retry_meth_for_mux;
+
+    // This data is the multiplex ID that we need to send to the slave when the slave port
+    // is multiplexed.
+    int slave_mux_id;
+
+    // Multiplexed ID set by the slave when port is multiplxed
+    int mux_id = -1;
+};
+
+/*
+ * Class for IO slave ports
+ */
+class IoSlave : public vp::SlavePort {
+
+    friend class IoMaster;
+
+  public:
+
+    // Constructor. resp_retry_meth is optional: a producer only needs it if its
+    // bound consumer may deny a resp() (response-path back-pressure). Leave it
+    // NULL for the common case where responses are always accepted.
+    inline IoSlave(IoSlaveReqMeth *meth, IoSlaveRespRetryMeth *resp_retry_meth = nullptr);
+    inline IoSlave(int id, IoSlaveReqMethMuxed *meth,
+                   IoSlaveRespRetryMethMuxed *resp_retry_meth = nullptr);
+
+    /*
+     * Slave binding methods
+     */
+
+    // Signals the bound master that this slave is ready to accept again after a
+    // previous IO_REQ_DENIED. Carries no request: the slave does not track which
+    // requests it denied; it just announces readiness and the master re-sends.
+    //
+    // `channel` names which channel became ready (see IoRetryChannel). A
+    // channel-agnostic slave leaves it at the default IO_RETRY_ANY ("all
+    // channels"); a master that splits read/write back-pressure re-sends only
+    // the held request(s) on that channel. A single-channel master ignores it.
+    //
+    // Synchronous-retry constraint: the master MUST re-submit its held
+    // request(s) inside its retry callback — same cycle, before the call
+    // returns — and must NOT defer the re-send to a later cycle. Some slaves
+    // (e.g. the zero-buffer arbiter log_ico_v2) only keep their accept window
+    // open for the duration of this call; a master that re-sends a cycle later
+    // misses it and the two sides live-lock. See the developer manual
+    // (interfaces/io_v2.rst, "Retry must be serviced synchronously").
+    inline void retry(IoRetryChannel channel = IO_RETRY_ANY)
+    {
+        IoMasterRetryMeth *meth = (IoMasterRetryMeth *)this->master_retry_meth;
+        meth((vp::Block *)this->get_remote_context(), channel);
+    }
+
+    // Can be called to reply to an IO request.
+    // Replying means that the slave has finished handing the request and it is now
+    // owned back by the master which can then proceed with the request.
+    //
+    // Returns the consumer's IoRespAck: IO_RESP_ACCEPTED when it took the beat
+    // (ownership returns to the master) or IO_RESP_DENIED when it refused it this
+    // cycle (response-path back-pressure) — in which case the producer keeps
+    // ownership, must hold the beat unchanged, and re-send it when the consumer
+    // later calls IoMaster::resp_retry(). A consumer that always accepts simply
+    // returns IO_RESP_ACCEPTED.
+    inline IoRespAck resp(IoReq *req)
+    {
+        IoMasterRespMeth *meth = (IoMasterRespMeth *)this->master_resp_meth;
+        return meth((vp::Block *)this->get_remote_context(), req);
+    }
+
+    /*
+     * Reserved for framework
+     */
+
+    // Called by the framework to bind the slave port to a master port.
+    inline void bind_to(vp::Port *_port, js::Config *config);
+
+    // Called by the framework to finalize the binding, for example in order
+    // to take into account cross-domains bindings
+    void finalize();
+
+  private:
+    /*
+     * Slave callbacks
+     */
+
+    // Request callback set by the user.
+    // This gets called anytime the master is sending a request.
+    // This is set to an empty callback by default.
+    void *req_meth;
+
+    // Response-retry callback set by the user (optional). Invoked when the bound
+    // master calls IoMaster::resp_retry() to announce it can accept responses
+    // again. NULL when this producer never expects its responses to be denied.
+    void *resp_retry_meth;
+
+    /*
+     * Master callbacks
+     */
+
+    // Response callback set by the user on master port and retrived during binding
+    void *master_resp_meth;
+
+    // Grant callback set by the user on master port and retrived during binding
+    void *master_retry_meth;
+
+    /*
+     * Stubs
+     */
+
+    // This is a stub setup when the slave is multiplexing the port so that we
+    // can capture the master call and transform it into the slave call with the
+    // right mux ID.
+    static inline void retry_muxed_stub(IoSlave *_this, IoRetryChannel channel);
+
+    // This is a stub setup when the slave is multiplexing the port so that we
+    // can capture the master call and transform it into the slave call with the
+    // right mux ID.
+    static inline IoRespAck resp_muxed_stub(IoSlave *_this, IoReq *req);
+
+    /*
+     * Internal data
+     */
+
+    // Multiplexed ID set by the slave when port is multiplxed
+    int mux_id = -1;
+
+    // This data is the multiplex ID that we need to send to the slave when the slave port
+    // is multiplexed.
+    int master_mux_id = -1;
+
+    // Slave context when slave port is multiplexed.
+    // We keep here a copy of the slave context when the slave port is multiplexed
+    // as the normal variable for this context is used to store ourself so that
+    // the stub is working well.
+    vp::Block *master_context_for_mux = NULL;
+
+    void *master_retry_meth_for_mux;
+
+    void *master_resp_meth_for_mux;
+
+};
+
+inline IoMaster::IoMaster(IoMasterRetryMeth *retry_meth, IoMasterRespMeth *resp_meth)
+    : resp_meth((void *)resp_meth), retry_meth((void *)retry_meth)
+{
+}
+
+inline IoMaster::IoMaster(int id, IoMasterRetryMethMuxed *retry_meth, IoMasterRespMethMuxed *resp_meth)
+    : mux_id(id), resp_meth((void *)resp_meth), retry_meth((void *)retry_meth)
+{
+}
+
+inline IoReqStatus IoMaster::req(IoReq *req)
+{
+    IoSlaveReqMeth *meth = (IoSlaveReqMeth *)this->slave_req_meth;
+    return meth((vp::Block *)this->get_remote_context(), req);
+}
+
+inline void IoMaster::resp_retry(IoRetryChannel channel)
+{
+    // Only valid against a producer that registered a resp_retry_meth — i.e. one
+    // that can be denied. A master that denies a resp() must be bound to such a
+    // producer, otherwise the held beat could never be re-sent.
+    vp_assert(this->slave_resp_retry_meth != NULL, this->get_owner()->get_trace(),
+        "resp_retry() on a slave that did not register a resp_retry_meth\n");
+    IoSlaveRespRetryMeth *meth = (IoSlaveRespRetryMeth *)this->slave_resp_retry_meth;
+    meth((vp::Block *)this->get_remote_context(), channel);
+}
+
+inline void IoMaster::bind_to(vp::Port *_port, js::Config *config) {
+    IoSlave *port = (IoSlave *)_port;
+    this->remote_port = port;
+
+    vp_assert(port != NULL, this->get_owner()->get_trace(), "Binding to NULL slave port\n");
+
+    if (port->mux_id == -1)
+    {
+        // Normal binding, just register the method and context into the master
+        // port for fast access
+        this->slave_req_meth = port->req_meth;
+        this->slave_resp_retry_meth = port->resp_retry_meth;
+        this->set_remote_context(port->get_context());
+    }
+    else
+    {
+        // Multiplexed binding, tweak the normal callback so that we enter
+        // the stub to insert the multiplex ID.
+        this->slave_req_meth_for_mux = port->req_meth;
+        this->slave_req_meth = (void *)&IoMaster::req_muxed_stub;
+
+        // Same for the response-retry signal — only route through the stub when
+        // the producer registered a muxed resp_retry handler; otherwise leave it
+        // NULL so the resp_retry() assert fires on misuse instead of calling a
+        // stub with a NULL underlying handler.
+        if (port->resp_retry_meth != NULL)
+        {
+            this->slave_resp_retry_meth_for_mux = port->resp_retry_meth;
+            this->slave_resp_retry_meth = (void *)&IoMaster::resp_retry_muxed_stub;
+        }
+        else
+        {
+            this->slave_resp_retry_meth = NULL;
+        }
+
+        this->set_remote_context(this);
+        this->slave_context_for_mux = (vp::Block *)port->get_context();
+        this->slave_mux_id = port->mux_id;
+    }
+}
+
+inline bool IoMaster::is_bound() { return this->remote_port != NULL; }
+
+inline IoReqStatus IoMaster::req_muxed_stub(IoMaster *_this, IoReq *req)
+{
+    // The normal callback was tweaked in order to get there when the master is sending a
+    // request. Now generate the normal call with the mux ID using the saved handler
+    IoSlaveReqMethMuxed *meth = (IoSlaveReqMethMuxed *)_this->slave_req_meth_for_mux;
+    return meth((vp::Block *)_this->slave_context_for_mux, req, _this->slave_mux_id);
+}
+
+inline void IoMaster::resp_retry_muxed_stub(IoMaster *_this, IoRetryChannel channel)
+{
+    // Same pattern as req_muxed_stub but for the response-retry signal: inject
+    // the slave mux ID on the way to the muxed resp_retry handler.
+    IoSlaveRespRetryMethMuxed *meth =
+        (IoSlaveRespRetryMethMuxed *)_this->slave_resp_retry_meth_for_mux;
+    meth((vp::Block *)_this->slave_context_for_mux, _this->slave_mux_id, channel);
+}
+
+inline void IoMaster::finalize()
+{
+}
+
+inline IoSlave::IoSlave(IoSlaveReqMeth *meth, IoSlaveRespRetryMeth *resp_retry_meth)
+: req_meth((void *)meth), resp_retry_meth((void *)resp_retry_meth)
+{
+}
+
+inline IoSlave::IoSlave(int id, IoSlaveReqMethMuxed *meth,
+                        IoSlaveRespRetryMethMuxed *resp_retry_meth)
+: req_meth((void *)meth), resp_retry_meth((void *)resp_retry_meth), mux_id(id)
+{
+}
+
+inline void IoSlave::retry_muxed_stub(IoSlave *_this, IoRetryChannel channel) {
+    // The normal callback was tweaked in order to get there when the master is sending a
+    // request. Now generate the normal call with the mux ID using the saved handler
+    IoMasterRetryMethMuxed *meth = (IoMasterRetryMethMuxed *)_this->master_retry_meth_for_mux;
+    meth((vp::Block *)_this->master_context_for_mux, _this->master_mux_id, channel);
+}
+
+inline IoRespAck IoSlave::resp_muxed_stub(IoSlave *_this, IoReq *req) {
+    // The normal callback was tweaked in order to get there when the master is sending a
+    // request. Now generate the normal call with the mux ID using the saved handler
+    IoMasterRespMethMuxed *meth = (IoMasterRespMethMuxed *)_this->master_resp_meth_for_mux;
+    return meth((vp::Block *)_this->master_context_for_mux, req, _this->master_mux_id);
+}
+
+inline void IoSlave::bind_to(vp::Port *_port, js::Config *config) {
+    // Instantiate a new slave port which is just used as a reference to reply
+    // to the correct master port
+    SlavePort::bind_to(_port, config);
+    IoMaster *port = (IoMaster *)_port;
+
+    if (port->mux_id == -1)
+    {
+        this->master_resp_meth = port->resp_meth;
+        this->master_retry_meth = port->retry_meth;
+        this->set_remote_context(port->get_context());
+    }
+    else
+    {
+        this->master_retry_meth_for_mux = port->retry_meth;
+        this->master_retry_meth = (void *)&IoSlave::retry_muxed_stub;
+
+        this->master_resp_meth_for_mux = port->resp_meth;
+        this->master_resp_meth = (void *)&IoSlave::resp_muxed_stub;
+
+        this->set_remote_context(this);
+        this->master_context_for_mux = (vp::Block *)port->get_context();
+        this->master_mux_id = port->mux_id;
+    }
+}
+
+inline void IoSlave::finalize()
+{
+}
+
+};
