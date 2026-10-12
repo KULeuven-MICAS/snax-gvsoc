@@ -1,0 +1,11 @@
+*~
+__pycache__/
+.pytest_cache/
+
+# Artifacts left by building/running examples and tests in place (gvrun)
+build/
+gvsoc_config.json
+power_report.csv
+trace_file.txt
+*.vcd
+*.fst
