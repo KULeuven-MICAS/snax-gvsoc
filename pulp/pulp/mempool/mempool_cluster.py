@@ -1,0 +1,107 @@
+#
+# Copyright (C) 2024 ETH Zurich and University of Bologna
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Discription: This file is the GVSoC configuration file for the MemPool Cluster.
+# Author: Yichao Zhang (ETH Zurich) (yiczhang@iis.ee.ethz.ch)
+#         Yinrong Li (ETH Zurich) (yinrli@student.ethz.ch)
+
+import interco.router as router
+import gvsoc.systree as st
+import math
+from pulp.mempool.mempool_group import Group
+
+class Cluster(st.Component):
+
+    def __init__(self, parent, name, parser, async_l1_interco: bool=False, terapool: bool=False, nb_cores_per_tile: int=4, nb_sub_groups_per_group: int=1, nb_groups: int=4, total_cores: int= 256, bank_factor: int=4, axi_data_width: int=64, nb_axi_masters_per_group: int=1, nb_dmas_per_group: int=1, terapool_group_latency: int=7, nb_fus_per_core: int=1):
+        super().__init__(parent, name)
+
+        ################################################################
+        ##########               Design Variables             ##########
+        ################################################################
+        # Hardware parameters 
+        nb_tiles_per_group = int((total_cores/nb_groups)/nb_cores_per_tile)
+        nb_banks_per_group = int(total_cores/nb_groups) * bank_factor * nb_fus_per_core
+
+        ################################################################
+        ##########              Design Components             ##########
+        ################################################################
+        # TIles
+        self.group_list = []
+        for i in range(0, nb_groups):
+            self.group_list.append(Group(self, f'group_{i}', parser=parser, async_l1_interco=async_l1_interco, terapool=terapool, group_id=i, nb_cores_per_tile=nb_cores_per_tile, 
+                nb_sub_groups_per_group=nb_sub_groups_per_group, nb_groups=nb_groups, total_cores=total_cores, bank_factor=bank_factor, axi_data_width=axi_data_width,
+                nb_dmas_per_group=nb_dmas_per_group, terapool_group_latency=terapool_group_latency, nb_fus_per_core=nb_fus_per_core))
+
+        # AXI Interface
+        if terapool:
+            axi_itf = []
+            for i in range(0, nb_groups * nb_axi_masters_per_group):
+                itf = router.Router(self, f'axi_itf_{i}', bandwidth=axi_data_width, latency=2)
+                itf.add_mapping('output')
+                axi_itf.append(itf)
+
+        ################################################################
+        ##########               Design Bindings              ##########
+        ################################################################
+
+        #Group master output -> Group slave input
+        if terapool:
+            for ini in range(0, nb_groups):
+                for tgt in range(0, nb_groups):
+                    if (ini != tgt):
+                        for sg in range(0, nb_sub_groups_per_group):
+                            for tile in range(0, nb_tiles_per_group):
+                                debug_router=router.Router(self, 'debug_router_ini%d_tgt%d_sg%d_tile%d' % (ini, tgt, sg, tile))
+                                debug_router.add_mapping("output")
+                                self.bind(self.group_list[ini], f'grp_remt{ini^tgt}_sg{sg}_tile{tile}_master_out', debug_router, 'input')
+                                self.bind(debug_router, 'output', self.group_list[tgt], f'grp_remt{ini^tgt}_sg{sg}_tile{tile}_slave_in')
+        else:
+            for ini in range(0, nb_groups):
+                for tgt in range(0, nb_groups):
+                    if (ini != tgt):
+                        for tile in range(0, nb_tiles_per_group):
+                            debug_router=router.Router(self, 'debug_router_ini%d_tgt%d_tile%d' % (ini, tgt, tile))
+                            debug_router.add_mapping("output")
+                            self.bind(self.group_list[ini], f'grp_remt{ini^tgt}_tile{tile}_master_out', debug_router, 'input')
+                            self.bind(debug_router, 'output', self.group_list[tgt], f'grp_remt{ini^tgt}_tile{tile}_slave_in')
+
+        # Propagate barrier signals from group to cluster boundary
+        for i in range(0, nb_groups):
+            for j in range(0, nb_tiles_per_group):
+                for k in range(0, nb_cores_per_tile):
+                    self.bind(self, f'barrier_ack_{i*nb_cores_per_tile*nb_tiles_per_group+j*nb_cores_per_tile+k}', self.group_list[i], f'barrier_ack_{j*nb_cores_per_tile+k}')
+
+        for i in range(0, nb_groups):
+            self.bind(self, 'loader_start', self.group_list[i], 'loader_start')
+            self.bind(self, 'loader_entry', self.group_list[i], 'loader_entry')
+
+        if terapool:
+            for i in range(0, nb_groups):
+                for j in range(0, nb_axi_masters_per_group):
+                    self.bind(self.group_list[i], f'axi_out_{j}', axi_itf[i * nb_axi_masters_per_group + j], 'input')
+            for i in range(0, nb_groups * nb_axi_masters_per_group):
+                self.bind(axi_itf[i], 'output', self, f'axi_{i}')
+        else:
+            for i in range(0, nb_groups):
+                for j in range(0, nb_axi_masters_per_group):
+                    self.bind(self.group_list[i], f'axi_out_{j}', self, 'axi_%d' % (i * nb_axi_masters_per_group + j))
+
+        for i in range(0, nb_groups):
+            self.bind(self, 'rocache_cfg', self.group_list[i], 'rocache_cfg')
+
+        for i in range(0, nb_groups):
+            for j in range(0, nb_dmas_per_group):
+                self.bind(self, f'dma_tcdm_{i}_{j}', self.group_list[i], f'dma_tcdm_{j}')
+                self.bind(self, f'dma_axi_{i}_{j}', self.group_list[i], f'dma_axi_{j}')

@@ -1,0 +1,158 @@
+#
+# Copyright (C) 2024 ETH Zurich and University of Bologna
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Discription: This file is the GVSoC configuration file for the MemPool Sub-group.
+# Author: Yichao Zhang (ETH Zurich) (yiczhang@iis.ee.ethz.ch)
+#         Yinrong Li (ETH Zurich) (yinrli@student.ethz.ch)
+
+import gvsoc.systree as st
+import interco.router as router
+from interco.interleaver import Interleaver
+import math
+from pulp.mempool.mempool_tile import Tile
+from pulp.mempool.l2_interconnect.hierarchical_interco import Hierarchical_Interco
+
+class Sub_group(st.Component):
+
+    def __init__(self, parent, name, parser, terapool: bool=False, async_l1_interco: bool=False, sub_group_id: int=0, group_id: int=0, nb_cores_per_tile: int=4, nb_sub_groups_per_group: int=4, nb_groups: int=4, total_cores: int=1024, bank_factor: int=4, axi_data_width: int=64, terapool_group_latency: int=7, nb_fus_per_core: int=1):
+        super().__init__(parent, name)
+
+        ################################################################
+        ##########               Design Variables             ##########
+        ################################################################
+        # Hardware parameters
+        nb_remote_group_ports = nb_groups - 1
+        nb_remote_sub_group_ports = nb_sub_groups_per_group - 1
+        nb_tiles_per_sub_group = int((total_cores/nb_groups/nb_sub_groups_per_group)/nb_cores_per_tile)
+        nb_banks_per_tile = nb_cores_per_tile * bank_factor * nb_fus_per_core
+
+        ################################################################
+        ##########              Design Components             ##########
+        ################################################################
+        # TIles
+        self.tile_list = []
+        for i in range(0, nb_tiles_per_sub_group):
+            self.tile_list.append(Tile(self, f'tile_{i}',parser=parser, terapool=terapool, async_l1_interco=async_l1_interco, tile_id=i, sub_group_id=sub_group_id, group_id=group_id, nb_cores_per_tile=nb_cores_per_tile,
+                nb_sub_groups_per_group=nb_sub_groups_per_group, nb_groups=nb_groups, total_cores=total_cores, bank_factor=bank_factor, terapool_group_latency=terapool_group_latency, nb_fus_per_core=nb_fus_per_core))
+
+        #Sub Group local interconnect
+        sub_group_local_interleaver = Interleaver(self, 'sub_group_local_interleaver', nb_slaves=nb_tiles_per_sub_group, nb_masters=nb_tiles_per_sub_group,
+            interleaving_bits=int(math.log2(4*nb_cores_per_tile*bank_factor*nb_fus_per_core)), offset_translation=False)
+
+        #Sub Group Remote Slave Interconnect
+        sub_group_remote_master_interleavers = []
+        for i in range(0, nb_remote_sub_group_ports):
+            sub_group_remote_master_interleavers.append(Interleaver(self, f'sub_group_remote_slave_interleaver_{i}', nb_slaves=nb_tiles_per_sub_group, nb_masters=nb_tiles_per_sub_group, interleaving_bits=int(math.log2(4*nb_cores_per_tile*bank_factor*nb_fus_per_core)), offset_translation=False))
+
+        sub_group_out_interfaces = []
+        for port in range(0, nb_remote_group_ports):
+            tile_itf_list = []
+            for i in range(0, nb_tiles_per_sub_group):
+                itf = router.Router(self, f'sub_group_remote_out_itf{port}_tile{i}', latency=1, bandwidth=4, shared_rw_bandwidth=True, synchronous=not async_l1_interco, max_input_pending_size=4)
+                itf.add_mapping('output')
+                tile_itf_list.append(itf)
+            sub_group_out_interfaces.append(tile_itf_list)
+
+        # DMA network(virtual, to emulate multiple backends)
+        # DMA Traffic Demux
+        dma_mux = router.Router(self, 'dma_mux', latency=4, bandwidth=axi_data_width)
+        dma_mux.add_mapping('tcdm', base=0x0, size=total_cores * bank_factor * 1024)
+        dma_mux.add_mapping('axi')
+        # DMA TCDM Interleaver
+        dma_tcdm_interleaver = Interleaver(self, f'dma_tcdm_interleaver', nb_slaves=nb_tiles_per_sub_group, nb_masters=1, interleaving_bits=int(math.log2(nb_banks_per_tile*4)), offset_translation=False)
+
+        # SG-level AXI Interconnect
+        # L2 cache rules
+        l2_cache_rules = []
+        l2_cache_rules.append((0x80000000, 0x80001000))
+        l2_cache_rules.append((0xA0000000, 0xA0001000))
+        l2_cache_rules.append((0x00000008, 0x0000000C))
+        l2_cache_rules.append((0x0000000C, 0x00000010))
+
+        # AXI Interconnect
+        axi_ico = Hierarchical_Interco(self, 'axi_ico', nb_slaves=nb_tiles_per_sub_group+1, enable_cache=True, cache_rules=l2_cache_rules, bandwidth=axi_data_width)
+        axi_itf = router.Router(self, 'axi_itf', bandwidth=axi_data_width, latency=2)
+        axi_itf.add_mapping('output')
+
+        ################################################################
+        ##########               Design Bindings              ##########
+        ################################################################
+
+        #Tile local master -> Group local interconnect
+        for i in range(0, nb_tiles_per_sub_group):
+            self.bind(self.tile_list[i], 'loc_remt_master_out', sub_group_local_interleaver, 'in_%d' % i)
+
+        #Group local interconnect -> Tile local slave
+        for i in range(0, nb_tiles_per_sub_group):
+            self.bind(sub_group_local_interleaver, 'out_%d' % i, self.tile_list[i], 'loc_remt_slave_in')
+
+        #Tile sub group remote master -> Sub Group remote interleavers
+        for port in range(0, nb_remote_sub_group_ports):
+            for i in range(0, nb_tiles_per_sub_group):
+                self.bind(self.tile_list[i], f'sub_grp_remt{port}_master_out', sub_group_remote_master_interleavers[port], 'in_%d' % i)
+
+        #Sub group remote interleavers -> Sub group remote routers
+        for port in range(0, nb_remote_sub_group_ports):
+            for i in range(0, nb_tiles_per_sub_group):
+                self.bind(sub_group_remote_master_interleavers[port], 'out_%d' % i, sub_group_out_interfaces[port][i], 'input')
+
+        #Tile axi port -> axi interconnect
+        for i in range(0, nb_tiles_per_sub_group):
+           self.bind(self.tile_list[i], 'axi_out', axi_ico, f'input_{i}')
+
+        # axi interconnect -> axi port
+        self.bind(axi_ico, 'output', axi_itf, 'input')
+
+        # DMA network(virtual, to emulate multiple backends)
+        self.bind(dma_mux, 'tcdm', dma_tcdm_interleaver, 'in_0')
+        self.bind(dma_mux, 'axi', axi_ico, f'input_{nb_tiles_per_sub_group}')
+        for i in range(0, nb_tiles_per_sub_group):
+            self.bind(dma_tcdm_interleaver, f'out_{i}', self.tile_list[i], 'dma_tcdm')
+
+        #Group loader -> Tile loader
+        for i in range(0, nb_tiles_per_sub_group):
+            self.bind(self, 'loader_start', self.tile_list[i], 'loader_start')
+            self.bind(self, 'loader_entry', self.tile_list[i], 'loader_entry')
+
+        ################################################################
+        ##########               Group Interfaces             ##########
+        ################################################################
+
+        # Remote TCDM interface between tiles to the group
+        for port in range(0, nb_remote_group_ports):
+            for i in range(0, nb_tiles_per_sub_group):
+                self.bind(self, f'grp_remt{port}_tile{i}_slave_in', self.tile_list[i], f'grp_remt{port}_slave_in')
+                self.bind(self.tile_list[i], f'grp_remt{port}_master_out', self, f'grp_remt{port}_tile{i}_master_out')
+
+        # Remote TCDM interface between tiles to the sub group
+        for port in range(0, nb_remote_sub_group_ports):
+            for i in range(0, nb_tiles_per_sub_group):
+                self.bind(self, f'sub_grp_remt{port+1}_tile{i}_slave_in', self.tile_list[i], f'sub_grp_remt{port}_slave_in')
+                self.bind(sub_group_out_interfaces[port][i], 'output', self, f'sub_grp_remt{port+1}_tile{i}_master_out')
+
+        # Propagate the barrier signals from the tiles to the group boundary
+        for i in range(0, nb_tiles_per_sub_group):
+            for j in range(0, nb_cores_per_tile):
+                self.bind(self, f'barrier_ack_{i*nb_cores_per_tile+j}', self.tile_list[i], f'barrier_ack_{j}')
+
+        # L2 ro-cache configuration
+        self.bind(self, 'rocache_cfg', axi_ico, 'rocache_cfg')
+
+        # AXI
+        self.bind(axi_itf, 'output', self, 'axi_out')
+
+        # DMA
+        self.bind(self, 'dma_tcdm_0', dma_mux, 'input')
+        self.bind(self, 'dma_axi_0', dma_mux, 'input')

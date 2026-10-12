@@ -1,0 +1,7 @@
+add_subdirectory(pulp)
+add_subdirectory(siracusa)
+add_subdirectory(rv64)
+add_subdirectory(spatz)
+add_subdirectory(occamy)
+add_subdirectory(chimera)
+add_subdirectory(soft_hier_old)

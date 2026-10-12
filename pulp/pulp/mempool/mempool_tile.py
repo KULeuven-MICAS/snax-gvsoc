@@ -1,0 +1,171 @@
+#
+# Copyright (C) 2024 ETH Zurich and University of Bologna
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Discription: This file is the GVSoC configuration file for the MemPool Tile.
+# Author: Yichao Zhang (ETH Zurich) (yiczhang@iis.ee.ethz.ch)
+#         Yinrong Li (ETH Zurich) (yinrli@student.ethz.ch)
+
+from pulp.mempool.hierarchical_cache import Hierarchical_cache
+import pulp.mempool.l1_subsystem as l1_subsystem
+import interco.router as router
+import gvsoc.systree as st
+from pulp.mempool.l1_interconnect.l1_address_scrambler import L1AddressScrambler
+from pulp.cpu.iss.snitch_mempool import SnitchMempoolConfig, SnitchMempool
+
+class Tile(st.Component):
+
+    def __init__(self, parent, name, parser, terapool: bool=False, async_l1_interco: bool=False, tile_id: int=0, sub_group_id: int=0, group_id: int=0, nb_cores_per_tile: int=4, nb_sub_groups_per_group: int=1, nb_groups: int=4, total_cores: int= 256, bank_factor: int=4, axi_data_width: int=64, terapool_group_latency: int=7, nb_fus_per_core: int=1):
+        super().__init__(parent, name)
+
+        [args, __] = parser.parse_known_args()
+        use_spatz = nb_fus_per_core > 1
+
+        ################################################################
+        ##########               Design Variables             ##########
+        ################################################################
+        # Hardware parameters
+        nb_remote_group_ports = nb_groups - 1
+        nb_remote_sub_group_ports = nb_sub_groups_per_group - 1
+        nb_tiles_per_sub_group = int((total_cores/nb_groups/nb_sub_groups_per_group)/nb_cores_per_tile)
+        # global_tile_id = tile_id + group_id * nb_tiles_per_group
+        # stack_size_per_tile = 0x800
+        mem_size = nb_cores_per_tile * bank_factor * nb_fus_per_core * 1024
+
+        # core complex
+        self.cores = []
+
+        ################################################################
+        ##########              Design Components             ##########
+        ################################################################
+
+        # Snitch TCDM (L1 subsystem)
+        # nb_pe is the number of local master ports within the tile
+        nb_pe = nb_cores_per_tile * (nb_fus_per_core + 1) if use_spatz else nb_cores_per_tile
+        l1 = l1_subsystem.L1_subsystem(self, 'l1', terapool=terapool, \
+                                        async_l1_interco=async_l1_interco, tile_id=tile_id, sub_group_id=sub_group_id, group_id=group_id, \
+                                        nb_tiles_per_sub_group=nb_tiles_per_sub_group, nb_sub_groups_per_group=nb_sub_groups_per_group, \
+                                        nb_groups=nb_groups, nb_remote_local_masters=1, nb_remote_group_masters=nb_remote_group_ports, \
+                                        nb_remote_sub_group_masters=nb_remote_sub_group_ports, nb_pe=nb_pe, size=mem_size, \
+                                        bandwidth=4, nb_banks_per_tile=nb_cores_per_tile*nb_fus_per_core*bank_factor, axi_data_width=axi_data_width, \
+                                        terapool_group_latency=terapool_group_latency)
+        # Shared icache
+        icache = Hierarchical_cache(self, 'shared_icache', nb_cores=nb_cores_per_tile, nb_fus_per_core=nb_fus_per_core)
+
+        # Address Scrambler
+        l1_addr_scrambler_list = []
+        for i in range(0, nb_cores_per_tile):
+            l1_addr_scrambler_list.append(L1AddressScrambler(self, f'addr_scrambler{i}',
+                                                       bypass=False, num_tiles=int(total_cores/nb_cores_per_tile),
+                                                       seq_mem_size_per_tile=512*nb_cores_per_tile, byte_offset=2,
+                                                       num_banks_per_tile=nb_cores_per_tile*nb_fus_per_core*bank_factor))
+
+        # Route
+        ico_list=[]
+        for i in range(0, nb_pe):
+            ico_list.append(router.Router(self, 'ico%d' % i, bandwidth=4, latency=0))
+        axi_ico = router.Router(self, 'axi_ico', bandwidth=axi_data_width, latency=1)
+        axi_ico.add_mapping('output')
+
+        # Core Complex
+        for core_id in range(0, nb_cores_per_tile):
+            core_global_id = group_id*nb_sub_groups_per_group*nb_tiles_per_sub_group*nb_cores_per_tile+sub_group_id*nb_tiles_per_sub_group*nb_cores_per_tile+tile_id*nb_cores_per_tile+core_id
+
+            if use_spatz:
+                config = SnitchMempoolConfig(isa="rv32imafv", fetch_enable=False,
+                    boot_addr=0, hart_id=core_global_id, htif=False, nb_outstanding=8, 
+                    vector=True, nb_lanes=nb_fus_per_core, lane_width=4)
+                self.cores.append(SnitchMempool(self, f'pe{core_id}', config=config))
+
+            else:
+                config = SnitchMempoolConfig(isa="rv32imaf", fetch_enable=False,
+                    boot_addr=0, hart_id=core_global_id, htif=False, nb_outstanding=8, 
+                    vector=False)
+                self.cores.append(SnitchMempool(self, f'pe{core_id}', config=config))
+
+        ################################################################
+        ##########               Design Bindings              ##########
+        ################################################################
+
+        ##########################################################################
+        #                        |--> stack_ico --> stack_mem                    #
+        # Core --> ico router -->|--> L1 submodule --> Remote TCDM interfaces    #
+        #                        |--> AXI router --> ROM, CSR, L2 Memory, Dummy  #
+        ##########################################################################
+
+        # ICO --> L1 TCDM
+        for i in range(0, nb_pe):
+            ico_list[i].add_mapping('l1', base=0x00000000, remove_offset=0x00000000, size=total_cores * nb_fus_per_core * bank_factor * 1024)
+            self.bind(ico_list[i], 'l1', l1, f'pe_in{i}')
+
+        # L1 TCDM --> Remote TCDM interfaces
+        self.bind(self, 'loc_remt_slave_in', l1, 'remote_local_in0')
+        self.bind(l1, 'remote_local_out0', self, 'loc_remt_master_out')
+
+        for i in range(0, nb_remote_sub_group_ports):
+            self.bind(self, f'sub_grp_remt{i}_slave_in', l1, f'remote_sub_group_in{i}')
+            self.bind(l1, f'remote_sub_group_out{i}', self, f'sub_grp_remt{i}_master_out')
+
+        for i in range(0, nb_remote_group_ports):
+            self.bind(self, f'grp_remt{i}_slave_in', l1, f'remote_group_in{i}')
+            self.bind(l1, f'remote_group_out{i}', self, f'grp_remt{i}_master_out')
+
+        self.bind(self, 'dma_tcdm', l1, 'dma')
+
+        # ICO -> AXI -> L2 Memory
+        for i in range(0, nb_cores_per_tile):
+            # Add default mapping for the others
+            core_id = i * (1 + nb_fus_per_core) if use_spatz else i
+            ico_list[core_id].add_mapping('axi', latency=4)
+            self.bind(ico_list[core_id], 'axi', axi_ico, 'input')
+
+        ###########################################################
+        #                                       |--> ROM          #
+        # Core -->|--icache--> |-->AXI router-->|--> CSR          #
+        #                                       |--> L2 Memory    #
+        #                                       |--> Dummy Memory #
+        ###########################################################
+
+        # Icache -> AXI
+        self.bind(icache, 'refill', axi_ico, 'input')
+        
+        # AXI -> Remote AXI port
+        self.bind(axi_ico, 'output', self, 'axi_out')
+
+        # Sync barrier
+        for core_id in range(0, nb_cores_per_tile):
+            self.bind(self, f'barrier_ack_{core_id}', self.cores[core_id], 'barrier_ack')
+
+        # Core Interconnections
+        pe_id = 0
+        for core_id in range(0, nb_cores_per_tile):
+            # Icache
+            self.bind(self.cores[core_id], 'flush_cache_req', icache, 'flush')
+            self.bind(icache, 'flush_ack', self.cores[core_id], 'flush_cache_ack')
+
+            # Snitch integer cores
+            self.bind(self.cores[core_id], 'data', l1_addr_scrambler_list[pe_id], 'input')
+            self.bind(self.cores[core_id], 'fetch', icache, 'input_%d' % core_id)
+            self.bind(self, 'loader_start', self.cores[core_id], 'fetchen')
+            self.bind(self, 'loader_entry', self.cores[core_id], 'bootaddr')
+            
+            # Scrambler
+            self.bind(l1_addr_scrambler_list[pe_id], 'output', ico_list[pe_id], 'input')
+            pe_id += 1
+
+            if use_spatz:
+                for port in range(0, nb_fus_per_core):
+                    self.bind(self.cores[core_id], f'vlsu_{port}', l1_addr_scrambler_list[pe_id], 'input')
+                    self.bind(l1_addr_scrambler_list[pe_id], 'output', ico_list[pe_id], 'input')
+                    pe_id += 1
