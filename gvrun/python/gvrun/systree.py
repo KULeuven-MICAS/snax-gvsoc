@@ -1,0 +1,866 @@
+#
+# Copyright (C) 2025 Germain Haugou
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+#
+# Authors: Germain Haugou (germain.haugou@gmail.com)
+#
+
+from dataclasses import fields, is_dataclass
+
+import argparse
+import logging
+import abc
+import rich.table
+import rich.tree
+import traceback
+from typing import final
+try:
+    from typing import override  # Python 3.12+
+except ImportError:
+    from typing_extensions import override  # Python 3.10–3.11
+from config_tree import Config
+from typing_extensions import Any, Callable
+from gvrun.builder import Builder
+from gvrun.parameter import (Parameter, get_parameter_arg_value, set_parameters_from_node,
+    SystemTreeNodeParameter)
+import gvrun.timing
+
+__attribute_arg_values: dict[str, str] = {}
+__consumed_paths: set[str] = set()
+
+def set_attributes(attributes: list[str]):
+    global __attribute_arg_values
+
+    for prop in attributes:
+        key, value = prop.split('=', 1)
+        __attribute_arg_values[key] = value
+
+
+def get_attribute_arg_value(name: str) -> str | None:
+    value = __attribute_arg_values.get(name)
+    if value is not None:
+        __consumed_paths.add(name)
+    return value
+
+
+def get_attribute_arg_keys() -> set[str]:
+    """Return the set of override keys submitted so far."""
+    return set(__attribute_arg_values.keys())
+
+
+def get_consumed_attribute_paths() -> set[str]:
+    """Return the set of override keys consumed by Component.__init__."""
+    return set(__consumed_paths)
+
+
+def hex_grouped(value: int, group: int = 4) -> str:
+    s = f"{value:x}"
+    parts = [s[max(i - group, 0):i] for i in range(len(s), 0, -group)]
+    return "0x" + "_".join(reversed(parts))
+
+class Executable(object, metaclass=abc.ABCMeta):
+    """ Interface class for executable classes
+    """
+    @abc.abstractmethod
+    def get_binary(self) -> str:
+        """
+        Return the filesystem path of the binary for this executable.
+
+        Returns:
+            str: Path to the binary
+        """
+        ...
+
+@final
+class ExecutableContainer(Executable):
+    """ Simple container for executable
+    It can be used to register a binary which has been compiled externally, so that components
+    like the ISS can get accessed to it.
+
+    Attributes
+    ----------
+    binary (str): Path to the binary
+    """
+    def __init__(self, binary: str):
+        self.binary = binary
+
+    @override
+    def get_binary(self) -> str:
+        return self.binary
+
+
+class SystemTreeNode(SystemTreeNodeParameter):
+    """
+    Common type for the system tree nodes
+
+    The system tree describes the system to be simulated. It can contain various kinds of nodes,
+    such as the target, the architecture omponents or the build process nodes.
+    All these types share this class as common parent.
+    It provides features for declaring all kinds of parameters (arch, target and build).
+
+    Attributes
+    ----------
+    name (str): Name of the node.
+    parent (SystemTreeNode | None): Parent of this node, can be None if it has no parent, only
+        for the top node.
+    """
+
+    def __init__(self, name: str, parent: "SystemTreeNode | None"=None, config: Config|None=None):
+        self.__name = name
+        self.__childs: list[SystemTreeNode] = []
+        self.__childs_from_name: dict[str,SystemTreeNode] = {}
+        self.__parameters: dict[str,Parameter] = {}
+        self.__arch_parameters: dict[str,Parameter] = {}
+        self.__build_parameters: dict[str,Parameter] = {}
+        self.__target_parameters: dict[str,Parameter] = {}
+        self.__executables: list[Executable] = []
+        self.__parent = parent
+        self.__binary_handlers: list[Callable[[str], None]] = []
+        self.__commands: dict[str, tuple[Callable[["SystemTreeNode", argparse.Namespace], "int | None"], str]] = {}
+        self.__has_tree_content = False
+        self.__attributes = None
+        self.__flashes: dict[str, object] = {}
+        self.__node_type = 'Component'
+        self.__target_name = None
+        if config is not None:
+            self.set_attributes(config)
+
+        paths: list[str] = []
+
+        if parent is not None:
+            parent_path = parent.get_path()
+            if parent_path != '':
+                paths.append(parent_path)
+
+            parent.__childs.append(self)
+            parent.__childs_from_name[name] = self
+
+        paths.append(name)
+
+        self.__path = '/'.join(paths)
+
+    def set_target_name(self, name: str) -> None:
+        """Set target name.
+
+        In case this part of the system tree needs to refered by other tools, such as the build
+        process, a target name can be attached with this method.
+        The build process will for example use this information to know how to compile an
+        executable for this node.
+        For simple systems, a single executable is needed and thus a target name must be attached
+        only at the top-most node.
+        For more complex systems which need severall executables because they aggregate together
+        several simple systems (like a multi-board system), one target name must be attached to
+        each simple system, so that all the executables can be built. This naturally happens
+        when simple systems are aggregated if they already have a target name, which is the case
+        if they also used stand-alone.
+
+        Parameters
+        ----------
+        name (str): The target name.
+        """
+        self.__target_name = name
+
+    def get_target_name(self) -> str | None:
+        """Get target name.
+
+        The target name should be attached to any node which can be executed stand-alone.
+        This is used for example by the build process to know how to compile the executable for
+        this node
+
+        Returns
+        -------
+        str | None : The target name or None, if no target name was attached.
+        """
+        return self.__target_name
+
+    def get_parameter(self, name: str) -> str | None:
+        """Get parameter values.
+
+        Parameters are declared when building the system tree. They can be assigned default values
+        which can be overwritten by the command line.
+        This method can be called to get the value of a parameter.
+        The name is relative to this node and allow reaching parameters of its child hierarchy.
+        In this case, childs are separated by '/' like in this example: child1/child2/property_name.
+        The name can starts with '/' to get the property from the top like in this example:
+        /top_comp/child1/property_value.
+
+        Parameters
+        ----------
+        name (str): The property name.
+
+        Returns
+        -------
+        str | None : The property value, or None if it is not found.
+        """
+        if name[0] == '/':
+            desc = self.__get_top_parameter(name[1:])
+        else:
+            desc = self.__get_parameter(name)
+        if desc is not None:
+            return desc.value
+        return None
+
+    def set_parameter(self, name: str, value: str | int | bool | float) -> None:
+        """Set parameter value.
+
+        Equivalent of ``--parameter name=value`` on the command line: the override is
+        stored in the node-parameter registry and consulted lazily when the matching
+        parameter is declared, so the call is order-independent — it works whether the
+        ``*Parameter()`` declaration runs before or after this call (e.g. from a
+        component reached through ``configure_all()``).
+
+        Priority: a CLI ``--parameter`` for the same name still wins, matching the
+        existing CLI > node > default order in :func:`gvrun.parameter.get_parameter_arg_value`.
+
+        The name is relative to this node and allow reaching parameters of its child hierarchy.
+        In this case, childs are separated by '/' like in this example: child1/child2/property_name.
+        The name can starts with '/' to set the parameter from the top like in this example:
+        /top_comp/child1/property_value.
+
+        Parameters
+        ----------
+        name (str): The parameter name.
+        value (Any): The parameter value.
+        """
+        # Compute the full hierarchical name used as the key in the global override
+        # registries (matches Parameter.full_name built in parameter.py).
+        if name.startswith('/'):
+            full_name = name[1:]
+        else:
+            path = self.get_path()
+            full_name = f'{path}/{name}' if path else name
+
+        # Push into the node-parameter registry so any later declare_parameter() picks
+        # it up via get_parameter_arg_value().
+        set_parameters_from_node([(full_name, value)])
+
+        # If the parameter is already declared, re-resolve via the same CLI-first
+        # lookup that declare_parameter() uses, so CLI --parameter continues to win
+        # regardless of declaration order.
+        if name.startswith('/'):
+            desc = self.__get_top_parameter(name[1:])
+        else:
+            desc = self.__get_parameter(name, check=False)
+        if desc is not None:
+            resolved = get_parameter_arg_value(desc.full_name)
+            self.__set_parameter(name, resolved)
+
+    def set_timing_level(self, level: str) -> None:
+        """Set the timing-accuracy level of this node's subtree.
+
+        The level applies to this node and everything below it, unless a
+        deeper node sets its own. Models that exist in several timing
+        flavours read it through :meth:`get_timing_level` at generation
+        time. See :mod:`gvrun.timing` for the available levels and the
+        full precedence rules.
+
+        Parameters
+        ----------
+        level (str): One of ``gvrun.timing.LEVELS`` ('functional', 'timed', 'cycle').
+        """
+        gvrun.timing.check_level(level)
+        self._gv_timing_level = level
+
+    def get_timing_level(self, supported: "list[str] | None" = None) -> str:
+        """Resolve the timing-accuracy level applying to this node.
+
+        Returns the level set on this node or its nearest ancestor via
+        :meth:`set_timing_level` or a CLI ``timing.`` qualifier, else the
+        global ``timing`` parameter (``name:timing=<level>`` in the target
+        string), else ``gvrun.timing.DEFAULT_LEVEL``.
+
+        Parameters
+        ----------
+        supported (list[str] | None): Levels this model implements. When given,
+            the resolved level is snapped to the nearest supported one
+            (preferring less accurate, see ``gvrun.timing.nearest_supported``).
+
+        Returns
+        -------
+        str : The resolved timing level.
+        """
+        return gvrun.timing.resolve_level(self, supported)
+
+    def set_attributes(self, attributes: Config):
+        """Set the attributes of this node.
+
+        The attributes are the high-level characterics of the hardware system.
+        They can for example be memory size, number of cores and so on.
+        Attributes are described as a tree of key/value properties.
+        Setting the attributes will allow all the tools to query about the architecture.
+        The build process will for example be able to know the memory size for each level.
+
+        Parameters
+        ----------
+        attributes (Tree): The tree of attributes
+        """
+        self.__attributes = attributes
+
+    def get_attributes(self) -> Config | None:
+        """Get the attributes of this node.
+
+        The attributes are the high-level characterics of the hardware system.
+        They can for example be memory size, number of cores and so on.
+        Attributes are described as a tree of key/value properties.
+        The build process will for example be able to know the memory size for each level.
+
+        Returns
+        -------
+        Tree | None : The attributes or None if no attribute was assigned.
+        """
+        return self.__attributes
+
+    def get_child(self, name: str) -> "SystemTreeNode | None":
+        """Get a child from his name.
+
+        The tree of nodes is organized based on each node name.
+        This node references his childs using their names.
+
+        Returns
+        -------
+        SystemTreeNode | None : The child or None if no child of this name was found.
+        """
+        return self.__childs_from_name.get(name)
+
+    def register_binary_handler(self, handler: Callable[[str], None]):
+        """Register a binary handler.
+
+        This allow getting notified when an executable is registered, so that it is taken into
+        account, for example for configuring an ELF loader in the platform.
+        The provided callback will be called for any executable which is registered in this node
+        or parent nodes.
+
+        Parameters
+        ----------
+        handler (Callable[[str]]): The callback to be called when an executable is registered
+        """
+        self.__binary_handlers.append(handler)
+
+    def register_command(self, name: str,
+                         handler: Callable[["SystemTreeNode", argparse.Namespace], "int | None"],
+                         description: str = "") -> None:
+        """Register a user-defined top-level gvrun command.
+
+        Intended to be called from a ``config.py``'s ``declare(target)``
+        function. The command name becomes invocable on the CLI as
+        ``gvrun --target <t> <name>``. The handler runs sequentially on
+        the main thread when the command is dispatched. Returning ``None``
+        or ``0`` is treated as success; any other integer is propagated as
+        the process exit code.
+
+        Collisions with a gvrun built-in name and duplicate registrations
+        are rejected with a ``RuntimeError`` at registration time.
+        """
+        if not callable(handler):
+            raise RuntimeError(
+                f"register_command: handler for '{name}' is not callable")
+
+        # Lazy import to avoid the circular dependency
+        # (gvrun.commands imports SystemTreeNode).
+        from gvrun.commands import commands as _builtin_commands
+        if name in {c[0] for c in _builtin_commands}:
+            raise RuntimeError(
+                f"Cannot register command '{name}': "
+                "name reserved by a gvrun built-in")
+
+        if name in self.__commands:
+            raise RuntimeError(f"Command '{name}' is already registered")
+
+        self.__commands[name] = (handler, description)
+
+    def get_registered_commands(self) -> "dict[str, tuple[Callable, str]]":
+        """Return a snapshot of user-registered commands (name -> (handler, description))."""
+        return dict(self.__commands)
+
+    def dispatch_registered_command(self, name: str, args: argparse.Namespace):
+        """Run a user-registered command if ``name`` matches.
+
+        Returns ``False`` if no command is registered under ``name`` (so
+        the caller can fall through to the built-in dispatch). Otherwise
+        returns the handler's int exit code with ``None`` normalised to
+        ``0``. A bool return from the handler is rejected to avoid
+        clashing with the sentinel.
+        """
+        entry = self.__commands.get(name)
+        if entry is None:
+            return False
+        handler, _ = entry
+        rc = handler(self, args)
+        if isinstance(rc, bool):
+            raise RuntimeError(
+                f"Registered command '{name}' returned a bool ({rc}); "
+                "return None or an integer exit code instead.")
+        if rc is None:
+            return 0
+        if not isinstance(rc, int):
+            raise RuntimeError(
+                f"Registered command '{name}' returned "
+                f"{type(rc).__name__}; expected None or an integer exit code.")
+        return rc
+
+    def get_name(self) -> str | None:
+        """Get the name of this node
+
+        The name is defined when the node is instantiated. Some nodes like the top one may not have
+        a name.
+
+        Returns
+        -------
+        str | None : The node name or None if it has no name.
+        """
+        return self.__name
+
+    @override
+    def get_path(self, child_path: str | None=None) -> str:
+        """Get the node path
+
+        The node path is the concatenation of his name and all his parents names, separated by '/'.
+        The top-most parent’s name appears on the left, and this node’s name appears on the right.
+        The path is '' if no name is found neither in this node nor in his parents.
+        If provided, the additional path is appended to the end.
+
+        Parameters
+        ----------
+        child_path (str | None): Additional path appended to the end
+
+        Returns
+        -------
+        str: The node path with the additional path appended to the end
+        """
+        path = self.__path
+        if child_path is not None:
+            path = f'{path}/{child_path}'
+
+        return path
+
+    def get_executables(self) -> list[Executable]:
+        """Get executables
+
+        This returns all the executables which has been attached to this node and all its childs.
+
+        Returns
+        -------
+        list[Component]: The list of executables
+        """
+        executables: list[Executable] = []
+        executables += self.__executables
+        if self.__parent is not None:
+            executables += self.__parent.get_executables()
+
+        return executables
+
+    def add_executable(self, executable: Executable):
+        """Add executable
+
+        Attach an executable to this node. Any node in the child hierarchy of this node which
+        query for executables will get this one.
+
+        Parameters
+        ----------
+        executable (Executable): Executable to be registered
+        """
+        self._add_executable(executable)
+
+    def register_flash(self, flash: object):
+        """Register a flash memory.
+
+        Flashes are declared by targets to describe available flash hardware.
+        Tests then add sections to them via ``target.get_flash(name).add_section(...)``.
+
+        Parameters
+        ----------
+        flash : Flash
+            The flash to register.
+        """
+        self.__flashes[flash.name] = flash
+        # Let the flash reach back to the system tree node that owns it — used
+        # by sections like AppBinarySection to register executables.
+        if hasattr(flash, 'owner'):
+            flash.owner = self
+        # Derive a path-based on-disk image filename so two flashes that share
+        # the same logical ``name`` (e.g. each chip's on-chip MRAM in a
+        # multi-chip board) don't write to the same ``<workdir>/<name>.bin``.
+        # Tests still address the flash by ``flash.name`` via ``get_flash``.
+        if hasattr(flash, 'image_name') and flash.image_name is None:
+            path = self.get_path().replace('/', '_')
+            flash.image_name = f'{path}_{flash.name}' if path else flash.name
+
+    def get_flash(self, name: str) -> object:
+        """Get a registered flash by name.
+
+        Parameters
+        ----------
+        name : str
+            The flash name.
+
+        Returns
+        -------
+        Flash
+            The flash object.
+        """
+        flash = self.__flashes.get(name)
+        if flash is None:
+            # Search in parent
+            if self.__parent is not None:
+                return self.__parent.get_flash(name)
+            raise RuntimeError(f'Flash not found: {name}')
+        return flash
+
+    def get_flashes(self) -> dict:
+        """Get all registered flashes.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping flash names to Flash objects.
+        """
+        flashes = dict(self.__flashes)
+        if self.__parent is not None:
+            parent_flashes = self.__parent.get_flashes()
+            for name, flash in parent_flashes.items():
+                if name not in flashes:
+                    flashes[name] = flash
+        return flashes
+
+    def configure_all(self) -> None:
+        """Call all configure methods of the tree
+
+        Do not call it, this is used by the framework to recursively call the configure method
+        of the nodes
+        """
+        pass
+
+    def regmap_gen(self, template: str, outdir: str, name: str, block: str|None=None,
+            headers: list[str]|None=None):
+        if headers is None:
+            headers = ['regfields', 'gvsoc']
+        import regmap.regmap
+        import regmap.regmap_md
+        import regmap.regmap_c_header
+        outfile = f'{outdir}/{name}'
+        logging.debug(f'Generating regmap (template: {template}, file: {outfile}*)')
+        regmap_instance = regmap.regmap.Regmap(name)
+        regmap.regmap_md.import_md(regmap_instance, template, block=block)
+        regmap.regmap_c_header.dump_to_header(regmap=regmap_instance, name=name,
+            header_path=outfile, headers=headers)
+
+    def _add_executable(self, executable: Executable):
+        """Add an executable to this node. This will notify any registered binary handler"""
+        self.__executables.append(executable)
+        self.__notify_binary_handlers(executable)
+
+    def _get_childs(self) -> "list[SystemTreeNode]":
+        """Get all childs"""
+        return self.__childs
+
+    def _get_parent(self) -> "SystemTreeNode | None":
+        """Get parent"""
+        return self.__parent
+
+    def _dump_parameter_title(self, name: str | None, type_name: str, class_name: str) -> str:
+        """Returns a title for this node suitable for tree dumping"""
+        title = f'[cyan]{type_name}[/]([bold magenta]{class_name}[/])'
+        if name is not None:
+            title = f'[bold magenta]{name}[/]: ' + title
+        return title
+
+    def _dump_tree_properties(self, tree: rich.tree.Tree):
+        """Dump the tree of properties. By default empty, implemented by GVSOC nodes to dump
+        GVSOC model properties"""
+        _ = tree
+        pass
+
+    def _process_has_tree_property(self) -> bool:
+        """Tell if this node has properties. Overriden by GVSOC nodes"""
+        return False
+
+    def _has_tree_content(self) -> bool:
+        """Tell if this node has parameters"""
+        return self.__has_tree_content
+
+    def __get_value(self, value: int | bool | str | float, fmt: str) -> str:
+        if fmt == 'hex' and isinstance(value, int):
+            value_str = hex_grouped(value)
+        else:
+            value_str = str(value)
+
+        return value_str
+
+    def __dump_dataclass(self, tree: rich.tree.Tree, attr: Config):
+        table = rich.table.Table()
+        table.add_column('Name')
+        table.add_column('Value')
+        table.add_column('Full name')
+        table.add_column('Allowed values')
+        table.add_column('Description')
+        _ = tree.add(table)
+        for f in fields(attr):
+            # Only display the fields which has been assigned
+            if f.repr and hasattr(attr, f.name):
+                value = getattr(attr, f.name)
+                desc = f.metadata.get("description", "")
+                format = f.metadata.get("format", "")
+
+                allowed_values = f.metadata.get("allowed_values", "")
+                if allowed_values is None:
+                    if isinstance(value, int):
+                        allowed_values = 'any integer'
+                    else:
+                        allowed_values = 'any string'
+                else:
+                    allowed_values = ', '.join(allowed_values)
+
+                value_str = self.__get_value(value, fmt=format)
+
+                path = self.get_path(f.name)
+                # In case the value is itself a config with inlined fields, we display them withing
+                # the path to let the user know they can be set
+                if isinstance(value, Config):
+                    child_paths: list[str] = []
+                    for value_f in fields(value):
+                        if value_f.repr and hasattr(value, value_f.name):
+                            if value_f.metadata.get("inlined_dump") == True:
+                                child_paths.append(value_f.name)
+                    if len(child_paths) != 0:
+                        path += f'/({"|".join(child_paths)})'
+
+                table.add_row(f.name, value_str, path, allowed_values,
+                    desc)
+
+                if isinstance(value, Config):
+                    for value_f in fields(value):
+                        if value_f.repr and hasattr(value, value_f.name):
+                            if value_f.metadata.get("dump") == True:
+                                child_path = f'{path}/{value_f.name}'
+                                child_value = getattr(value, value_f.name)
+                                child_fmt = value_f.metadata.get("format", "")
+                                child_value_str = self.__get_value(child_value, fmt=child_fmt)
+                                indent = '    '
+                                table.add_row(
+                                    indent + value_f.name,
+                                    indent + child_value_str,
+                                    indent + child_path,
+                                    "",
+                                    indent + value_f.metadata.get("description", ""))
+
+    def _dump_node_parameters(self, tree: rich.tree.Tree, inc_arch: bool, inc_build: bool,
+            inc_target: bool, inc_attr: bool, inc_prop: bool):
+        """Dump the parameters, attributes and properties for this node"""
+        if inc_attr:
+            attr = self.get_attributes()
+            if attr is not None:
+                sub_tree = tree.add(f'[yellow italic]Attributes[/]')
+
+                if is_dataclass(attr):
+                    self.__dump_dataclass(sub_tree, attr)
+                else:
+                    attr._dump_attributes(sub_tree)
+        if inc_arch and len(self.__arch_parameters) > 0:
+            self.__dump_tree_parameter_table(tree, 'Arch', self.__arch_parameters)
+        if inc_build and len(self.__build_parameters) > 0:
+            self.__dump_tree_parameter_table(tree, 'Build', self.__build_parameters)
+        if inc_target and len(self.__target_parameters) > 0:
+            self.__dump_tree_parameter_table(tree, 'Target', self.__target_parameters)
+        if inc_prop:
+            self._dump_tree_properties(tree)
+
+    def _process_has_tree_content(self, inc_arch: bool, inc_build: bool, inc_target: bool,
+            inc_attr: bool, inc_prop: bool) -> bool:
+        """Determine for the whole hierarchy of this node, if it has parameters, attributes,
+        or properties to be displayed, when the tree is dumped. Return True if this node has
+        something to display"""
+        self.__has_tree_content = inc_arch and len(self.__arch_parameters) > 0 or \
+            inc_build and len(self.__build_parameters) > 0 or \
+            inc_target and len(self.__target_parameters) > 0 or \
+            inc_attr and self.get_attributes() != None or \
+            inc_prop and self._process_has_tree_property()
+
+        for child in self.__childs:
+            if child._process_has_tree_content(inc_arch, inc_build, inc_target, inc_attr, inc_prop):
+                self.__has_tree_content = True
+
+        return self.__has_tree_content
+
+    @override
+    def declare_parameter(self, descriptor: Parameter) -> Any:
+        """Declare a parameter and return its value. Reserved for infrastructure."""
+
+        if self.__parameters.get(descriptor.name) is not None:
+            traceback.print_stack()
+            raise RuntimeError(f'parameter {descriptor.name} already declared')
+
+        self.__parameters[descriptor.name] = descriptor
+        if descriptor.is_arch:
+            self.__arch_parameters[descriptor.name] = descriptor
+        if descriptor.is_build:
+            self.__build_parameters[descriptor.name] = descriptor
+        if descriptor.is_target:
+            self.__target_parameters[descriptor.name] = descriptor
+
+
+        value = get_parameter_arg_value(descriptor.full_name)
+        if value is None:
+            value = descriptor.value
+
+        self.__set_parameter(descriptor.name, value)
+
+        return value
+
+    def __get_top_parameter(self, name: str) -> Parameter | None:
+        """Get a parameter from the top"""
+        prop = self.__get_parameter(name, check=False)
+        if prop is not None:
+            return prop
+        if self.__parent is not None:
+            return self.__parent.__get_top_parameter(name)
+        return None
+
+    def __get_parameter(self, name: str, check: bool=True) -> Parameter | None:
+        """Get a parameter"""
+        if name.find('/') != -1:
+            desc = None
+            comp_name, prop_name = name.split('/', 1)
+            comp = self.get_child(comp_name)
+            if comp is not None:
+                desc = comp.__get_parameter(prop_name)
+        else:
+            desc = self.__parameters.get(name)
+        if check and desc is None:
+            raise RuntimeError(f'Trying to get invalid parameter (name: {name})')
+
+        return desc
+
+    def __set_parameter(self, name: str, value: Any):
+        """Set a parameter value. This will check if the value fits the allowed values and may
+        cast the value if specified when declaring the parameter"""
+        desc = self.__get_parameter(name)
+        if desc is None:
+            raise RuntimeError(f'Trying to set invalid parameter (name: {name})')
+
+        if desc.allowed_values is not None:
+            if value not in desc.allowed_values:
+                raise RuntimeError((f'Trying to set parameter to invalid value '
+                    f'(name: {desc.full_name}, value: {value}, '
+                    f'allowed_values: {", ".join(desc.allowed_values)})'))
+
+        if desc.cast is not None:
+            if desc.cast == int:
+                if isinstance(value, str):
+                    value = int(value, 0)
+                else:
+                    value = int(value)
+            elif desc.cast == bool:
+                if isinstance(value, str):
+                    value = value.strip().lower() in ("true", "1", "yes", "y")
+
+        desc.value = value
+
+    def __dump_tree_parameter_table(self, tree: rich.tree.Tree, name: str,
+            parameters: dict[str, Parameter]):
+        """Dump the parameters of one kind for this node into a table"""
+        table = rich.table.Table(title=f'[yellow]{name} parameters[/]', title_justify="left")
+        table.add_column('Name')
+        table.add_column('Value')
+        table.add_column('Full name')
+        table.add_column('Allowed values')
+        table.add_column('Description')
+
+        for prop_name, prop in parameters.items():
+            prop_full_name = prop.full_name
+            value_str = prop.value
+            if prop.format is not None:
+                value_str = prop.format % prop.value
+            value_str = str(value_str)
+
+            if prop.allowed_values is None:
+                if prop.cast == int:
+                    allowed_values = 'any integer'
+                else:
+                    allowed_values = 'any string'
+            else:
+                allowed_values = ', '.join(prop.allowed_values)
+
+            table.add_row(prop_name, value_str, prop_full_name, allowed_values, prop.description)
+
+        _ = tree.add(table)
+
+    def __notify_binary_handlers(self, executable: Executable):
+        """Notify a new executable to all callbacks registered in the child hierarchy of this node"""
+        for child in self.__childs:
+            child.__notify_binary_handlers(executable)
+
+        for handler in self.__binary_handlers:
+            handler(executable.get_binary())
+
+    def _set_node_type(self, node_type: str):
+        """Set the node type to be displayed when dumping the tree"""
+        self.__node_type = node_type
+
+    def _dump_tree(self, tree: rich.tree.Tree | None, inc_arch: bool, inc_build: bool,
+            inc_target: bool, inc_attr: bool, inc_prop: bool):
+        """Dump the tree whole child hierarchy of this node"""
+        new_tree = tree
+        if new_tree is None:
+            new_tree = rich.tree.Tree(self._dump_parameter_title(self.get_name(), 'Target', self.__class__.__name__))
+
+        if self._has_tree_content():
+            if tree is not None:
+                new_tree = tree.add(self._dump_parameter_title(self.get_name(), self.__node_type,
+                    self.__class__.__name__))
+            self._dump_node_parameters(new_tree, inc_arch, inc_build, inc_target, inc_attr, inc_prop)
+
+            for component in self._get_childs():
+                component._dump_tree(new_tree, inc_arch, inc_build, inc_target, inc_attr, inc_prop)
+
+        if tree is None:
+            rich.print(new_tree)
+
+    def _compile(self, builder: Builder, builddir: str):
+        """Compile step, should be overriden by build process nodes"""
+        _ = builder
+        _ = builddir
+        pass
+
+    def compile_all(self, builder: Builder, builddir: str):
+        """Reserved for internal usage. Call the compile step for every node of the child hierarchy"""
+        for child in self._get_childs():
+            child.compile_all(builder, builddir)
+
+        self._compile(builder, builddir)
+
+    def _dump_asm(self, builder: Builder, builddir: str):
+        """Dump-asm step, should be overriden by build process nodes producing an executable"""
+        _ = builder
+        _ = builddir
+        pass
+
+    def dump_asm_all(self, builder: Builder, builddir: str):
+        """Reserved for internal usage. Call the dump-asm step for every node of the child hierarchy"""
+        for child in self._get_childs():
+            child.dump_asm_all(builder, builddir)
+
+        self._dump_asm(builder, builddir)
+
+    def target_gen(self, builddir:str):
+        _ = builddir
+        pass
+
+    def target_gen_walk(self, builddir:str):
+        """Reserved for internal usage."""
+        for child in self._get_childs():
+            child.target_gen_walk(builddir)
+
+        self.target_gen(builddir)

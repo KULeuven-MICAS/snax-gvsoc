@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [  -n "${ZSH_VERSION:-}" ]; then
+        SCRIPT_PATH="$(readlink -f -- "${(%):-%x}")"
+else
+        SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+fi
+
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+SDK_ROOT="$(readlink -f "$SCRIPT_DIR/..")"
+
+INSTALL_DIR="$SDK_ROOT/install"
+if [ ! -d "$INSTALL_DIR" ]; then
+        INSTALL_DIR="$SDK_ROOT"
+fi
+
+VENV_GVRUN="$SDK_ROOT/.venv/bin/gvrun"
+
+export LD_LIBRARY_PATH=$INSTALL_DIR/lib:$LD_LIBRARY_PATH
+export PATH=$INSTALL_DIR/bin:$PATH
+export PYTHONPATH=$INSTALL_DIR/python:$PYTHONPATH
+export USE_GVRUN=1
+export USE_GVRUN2=1
+
+if [ -z "$GVRUN_MODEL_PATH" ]; then
+    GVRUN_MODEL_PATH=$INSTALL_DIR/models
+fi
+
+if [ -x "$VENV_GVRUN" ]; then
+        exec "$VENV_GVRUN" --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
+fi
+
+exec python3 -m gvrun --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"

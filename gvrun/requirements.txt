@@ -1,0 +1,10 @@
+pyelftools>=0.24
+prettytable
+pexpect
+lz4
+pycryptodome
+ppk2_api
+rich
+psutil
+typing_extensions
+six
