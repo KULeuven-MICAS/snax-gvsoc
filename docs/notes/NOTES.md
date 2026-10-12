@@ -33,10 +33,39 @@ stay there.
   Upstream's CI workflow and CODEOWNERS removed (listed in `UPSTREAM.md`).
 - `container/` imported from snax-gvsoc-experiment `386e433`, unchanged
   apart from its header comments and line endings (CRLF in the experiment,
-  LF here); the image is now `snax-gvsoc:sg0`.
+  LF here); the image was `snax-gvsoc:sg0` (renamed in P2).
 - Checked in Claude's sandbox, not in the container (Ubuntu 24.04, a Python
   3.13 venv with `container/requirements.txt`, 2 cores): at the repo root
   `make build TARGETS=snitch` took 9 min 11 s; the bundled
   `fp32_computation_vector.elf` exits 0 in 2 s; `--trace=pe0/insn` gives 484
   lines from cycle 7909 to 23862, as in the experiment. The figures are from
   Claude's run.
+
+### SG0 step 4: P2, snax_cluster's toolchain
+
+- 2026-10-12. `container/` has two stages, after snax_cluster's
+  `util/container/Dockerfile` at `8ebd422`: pixi 0.81.0 installs
+  `container/toolchain` (the exact builds of snax_cluster's `pixi.lock`:
+  clang, lld, llvm-tools, clang-format 21.1.6, bender 0.28.2 from
+  kuleuven-micas), and only the environment is copied into the image, at the
+  same path, its `bin` last on PATH. rv64 GCC and Snitch LLVM 12 are gone;
+  the tutorials keep them in the experiment's `gvs1` image.
+- zsh with oh-my-zsh `083c339` and zsh-autosuggestions `v0.7.1`, as
+  snax_cluster's image had them at `53efdeb`, but at fixed versions and with
+  oh-my-zsh's update check off. GVSoC's `sourceme.sh` handles zsh.
+- The image is `snax-gvsoc:main` from now on; `:gvs1` stays for the
+  experiment.
+- Rehearsed in Claude's sandbox with a stand-in toolchain: conda-forge and
+  ghcr.io are blocked there and it has no Docker daemon, so LLVM 21.1.6 came
+  from the GitHub release and bender 0.28.2 from its GitHub release.
+  snax_cluster `8ebd422` needs its own submodules
+  (`git submodule update --init --recursive`) and internet on its first build
+  (bender fetches `register_interface`); then
+  `make sw CFG_OVERRIDE=cfg/snitch_cluster.hjson` in `target/snitch_cluster`
+  builds 17 test ELFs with the image's Python packages.
+- Probe preview with that build: `simple.elf` stops at cycle 3946 with
+  `Accessing unsupported CSR (id: 0xbc1, name: unknown)` and exits 1;
+  `printf_simple.elf` prints nothing. Step 5 confirms it. The figures are from
+  Claude's run.
+- Not checked in the sandbox: the image build, the conda packages, the zsh
+  prompt.

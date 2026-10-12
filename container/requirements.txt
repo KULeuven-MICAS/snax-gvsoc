@@ -26,7 +26,8 @@ sphinx_rtd_theme
 tabulate
 typing_extensions
 
-# snitch_cluster 4652c6b: generating the runtime headers.
+# snax_cluster 8ebd422: generating the runtime headers (enough for its
+# `make sw`, checked in SG0 P2).
 jsonref
 jsonschema
 # Its register tool imports pkg_resources, which setuptools 81 and later no

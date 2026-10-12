@@ -16,22 +16,24 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | Path | What |
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `container/` | The development image |
+| `container/` | The development image; `toolchain/` pins its RISC-V toolchain |
 | `docs/plans/` | One checklist per task (`SG0.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/` | Build, install and run output; not tracked |
 
 ## Quick start
 
-The image holds the tools only; this repo is mounted at `/work` and GVSoC is
-built there. Build the image once and push it (Docker):
+The image holds the tools only: GVSoC's build tools and Python packages,
+snax_cluster's RISC-V toolchain (clang 21.1.6, bender 0.28.2) and zsh. This
+repo is mounted at `/work` and GVSoC is built there. Build the image and push
+it (Docker):
 
-    docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:sg0 container
-    docker push ghcr.io/kuleuven-micas/snax-gvsoc:sg0
+    docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:main container
+    docker push ghcr.io/kuleuven-micas/snax-gvsoc:main
 
-Run it from the repo root (Podman):
+Run it from the repo root (Podman); it opens zsh in `/work`:
 
-    podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:sg0
+    podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:main
 
 Inside, build GVSoC for the Snitch target (about 9 minutes on 2 cores the
 first time) and run the bundled program, which exits with 0 and prints

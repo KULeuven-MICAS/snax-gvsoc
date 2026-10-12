@@ -1,22 +1,50 @@
 # snax-gvsoc development container.
 #
-# Holds the compilers, Python packages and the two prebuilt RISC-V toolchains.
-# GVSoC itself is NOT in the image: mount this repo at /work and build it
-# there, so edits and build output stay on the host.
+# Holds GVSoC's build tools, its Python packages, snax_cluster's RISC-V
+# toolchain and zsh. GVSoC itself is NOT in the image: mount this repo at
+# /work and build it there, so edits and build output stay on the host.
 #
-# Imported unchanged from KULeuven-MICAS/snax-gvsoc-experiment (386e433),
-# apart from these comments. SG0 P2 moves the toolchain to snax_cluster's.
+# Two stages, as in snax_cluster's util/container/Dockerfile: pixi installs the
+# locked toolchain in the first, and only the environment is copied into the
+# second, at the same path, since a conda environment has its path built in.
 #
-# Build (from the repo root):
-#   docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:sg0 container
+# Build (from the repo root; container/toolchain/pixi.lock must exist):
+#   docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:main container
 # Run:
-#   podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:sg0
+#   podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:main
 
+########################################################################
+# Stage 1: the RISC-V toolchain, installed with pixi
+########################################################################
+FROM ubuntu:24.04 AS toolchain
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG PIXI_VERSION=0.81.0
+ARG PIXI_SHA256=7aa3ec39aecceff9062fa2ed4d42cbaa0bdc25ddea727d048e061cf188d434f6
+RUN curl -fsSL --retry 5 -o /tmp/pixi.tar.gz \
+        "https://github.com/prefix-dev/pixi/releases/download/v${PIXI_VERSION}/pixi-x86_64-unknown-linux-musl.tar.gz" \
+    && echo "${PIXI_SHA256}  /tmp/pixi.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/pixi.tar.gz -C /usr/local/bin pixi \
+    && rm /tmp/pixi.tar.gz
+
+# clang, lld, llvm-tools, clang-format 21.1.6 and bender 0.28.2: the exact
+# builds snax_cluster's pixi.lock holds (see toolchain/pixi.toml).
+COPY toolchain/pixi.toml toolchain/pixi.lock /opt/toolchain/
+RUN cd /opt/toolchain && pixi install --locked
+
+########################################################################
+# Stage 2: the image
+########################################################################
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Host compiler and build tools for GVSoC, plus what the downloads need.
+# Host compiler and build tools for GVSoC, plus zsh.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
@@ -28,35 +56,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-venv \
         zlib1g-dev \
+        zsh \
     && rm -rf /var/lib/apt/lists/*
 
-# RISC-V GCC 14.2 (rv64, newlib): compiles the GVSoC tutorial programs.
-# Same release the GVSoC Makefile downloads in its `riscv` target.
-ARG RISCV_GCC_URL=https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2025.01.17/riscv64-elf-ubuntu-22.04-gcc-nightly-2025.01.17-nightly.tar.xz
-ARG RISCV_GCC_SHA256=d676a5cbff9160e40dbc0092b716d6f63ad66302bb8d0de9ef78bb007f14a340
-RUN curl -fsSL --retry 5 -o /tmp/riscv.tar.xz "$RISCV_GCC_URL" \
-    && echo "$RISCV_GCC_SHA256  /tmp/riscv.tar.xz" | sha256sum -c - \
-    && tar -xJf /tmp/riscv.tar.xz -C /opt \
-    && rm /tmp/riscv.tar.xz
-
-# Snitch LLVM 0.12.0 (clang 12.0.1, rv32 + Snitch extensions): compiles the
-# snitch_cluster runtime and programs.
-ARG SNITCH_LLVM_URL=https://github.com/pulp-platform/llvm-project/releases/download/0.12.0/riscv32-pulp-llvm-ubuntu2004-0.12.0.tar.gz
-ARG SNITCH_LLVM_SHA256=70534a8946cad71698be9d7bf4edcc0c1b322aabfe6c47a416e82a035c627451
-RUN curl -fsSL --retry 5 -o /tmp/llvm.tar.gz "$SNITCH_LLVM_URL" \
-    && echo "$SNITCH_LLVM_SHA256  /tmp/llvm.tar.gz" | sha256sum -c - \
-    && mkdir -p /opt/snitch-llvm \
-    && tar -xzf /tmp/llvm.tar.gz -C /opt/snitch-llvm --strip-components=1 \
-    && rm /tmp/llvm.tar.gz
-
-# Bender 0.27.1: the snitch_cluster makefiles call it to locate the register
-# tool when they generate the runtime headers.
-ARG BENDER_URL=https://github.com/pulp-platform/bender/releases/download/v0.27.1/bender-0.27.1-x86_64-linux-gnu-ubuntu18.04.tar.gz
-ARG BENDER_SHA256=ddc7c7c81685194e2a9a1e69e763f8e4e7077515309a66c1ae2219bc0c0f8b81
-RUN curl -fsSL --retry 5 -o /tmp/bender.tar.gz "$BENDER_URL" \
-    && echo "$BENDER_SHA256  /tmp/bender.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/bender.tar.gz -C /usr/local/bin bender \
-    && rm /tmp/bender.tar.gz
+COPY --from=toolchain /opt/toolchain/.pixi/envs/default /opt/toolchain/.pixi/envs/default
 
 # Python packages in a venv, so nothing fights the system Python.
 COPY requirements.txt /tmp/requirements.txt
@@ -64,15 +67,29 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
-# The Snitch LLVM directory goes last on PATH: its makefiles need clang-format
-# from there, and last place keeps it from shadowing any host tool. The
-# compiler itself is picked through LLVM_BINROOT.
-ENV PATH=/opt/venv/bin:/opt/riscv/bin:$PATH:/opt/snitch-llvm/bin \
-    LLVM_BINROOT=/opt/snitch-llvm/bin \
+# zsh with oh-my-zsh and the autosuggestions plugin, as snax_cluster's image
+# had them (53efdeb), but at fixed versions and with oh-my-zsh's update
+# check off, so a rebuild gives the same shell.
+ARG OMZ_COMMIT=083c339e0622bfc144b66ebf1a2e8dbe7d2ada0d
+ARG ZSH_AUTOSUGGESTIONS_TAG=v0.7.1
+RUN git init -q /root/.oh-my-zsh \
+    && git -C /root/.oh-my-zsh fetch -q --depth 1 https://github.com/ohmyzsh/ohmyzsh.git "$OMZ_COMMIT" \
+    && git -C /root/.oh-my-zsh -c advice.detachedHead=false checkout -q FETCH_HEAD \
+    && sed "s|^# zstyle ':omz:update' mode disabled|zstyle ':omz:update' mode disabled|" \
+        /root/.oh-my-zsh/templates/zshrc.zsh-template > /root/.zshrc \
+    && git clone -q --depth 1 --branch "$ZSH_AUTOSUGGESTIONS_TAG" \
+        https://github.com/zsh-users/zsh-autosuggestions.git \
+        /root/.oh-my-zsh/custom/plugins/zsh-autosuggestions \
+    && echo "source ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" >> /root/.zshrc \
+    && chsh -s /usr/bin/zsh
+
+# The toolchain goes last on PATH, so nothing in it can shadow the host tools
+# GVSoC builds with.
+ENV PATH=/opt/venv/bin:$PATH:/opt/toolchain/.pixi/envs/default/bin \
     GVSOC_WORKDIR=/work/build
 
 # The repo is bind-mounted and owned by the host user.
 RUN git config --system --add safe.directory '*'
 
 WORKDIR /work
-CMD ["/bin/bash"]
+CMD ["zsh"]
