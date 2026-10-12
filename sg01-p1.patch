@@ -1,0 +1,472 @@
+diff --git a/.github/CODEOWNERS b/.github/CODEOWNERS
+deleted file mode 100644
+index ef1935e0..00000000
+--- a/.github/CODEOWNERS
++++ /dev/null
+@@ -1 +0,0 @@
+-* @haugoug
+\ No newline at end of file
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+deleted file mode 100644
+index 3ea8fa17..00000000
+--- a/.github/workflows/build.yml
++++ /dev/null
+@@ -1,59 +0,0 @@
+-name: check_build_works
+-on: [push, pull_request]
+-
+-jobs:
+-  build_ubuntu:
+-    name: Try build on ubuntu latest
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Check out repository code
+-        uses: actions/checkout@v3
+-        with:
+-          submodules: recursive
+-      - name: Install system software requirements
+-        run: |
+-          sudo apt update
+-          sudo apt-get install -y build-essential git doxygen python3-pip libsdl2-dev curl cmake gtkwave libsndfile1-dev rsync autoconf automake texinfo libtool pkg-config libsdl2-ttf-dev libxtensor-dev libxsimd-dev ccache
+-      - name: Install python requirements
+-        run: |
+-          pwd
+-          ls -la
+-          sudo pip3 install -r core/requirements.txt
+-          sudo pip3 install -r gapy/requirements.txt
+-          sudo pip3 install -r gvtest/requirements.txt
+-          sudo pip3 install --ignore-installed -r pulp/requirements.txt
+-
+-      - name: build all targets
+-        run: |
+-          set -x
+-          source sourceme.sh
+-          #source sourceme_systemc.sh
+-          #make dramsys_preparation
+-          #make all TARGETS=pulp-open-ddr
+-          make all CMAKE_FLAGS="-j 16"
+-      - name: Run examples
+-        run: |
+-          set -x
+-          source sourceme_systemc.sh
+-          make github.test
+-      - name: Publish test results
+-        if: always()
+-        uses: dorny/test-reporter@v1
+-        with:
+-          name: JUnit Tests
+-          path: junit-reports/*.xml
+-          reporter: java-junit  # or `python-pytest`, `jest`, etc.
+-
+-  # Removed due to no space left on eth machine
+-  # build_eth:
+-  #   name: Try to build on ETH internal servers
+-  #   runs-on: ubuntu-latest
+-  #   steps:
+-  #     - name: Mirror and check
+-  #       uses: pulp-platform/pulp-actions/gitlab-ci@v2
+-  #       # Skip on forks or pull requests from forks due to missing secrets.
+-  #       if: github.repository == 'gvsoc/gvsoc' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+-  #       with:
+-  #         domain: iis-git.ee.ethz.ch
+-  #         repo: github-mirror/gvsoc
+-  #         token: ${{ secrets.GITLAB_TOKEN }}
+diff --git a/README.md b/README.md
+index e218f9c7..ddf84815 100644
+--- a/README.md
++++ b/README.md
+@@ -1,88 +1,51 @@
+-# GVSoC
++# snax-gvsoc
+ 
+-GVSoC is the PULP chips simulator that is natively included in the Pulp SDK and is described and evaluated fully in Bruschi et al. [\[arXiv:2201.08166v1\]](https://arxiv.org/abs/2201.08166).
++SNAX-GVSoC is a GVSoC model of the SNAX cluster
++([snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)) in which a
++Snitch core runs the real program. It is part of
++[SNAX-FORGE](https://github.com/KULeuven-MICAS/snax-forge) (M16).
+ 
++It starts as a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at
++`93cedc4`. `UPSTREAM.md` lists the upstream commits, the license and every
++file we changed. This file replaces GVSoC's README; GVSoC's own documentation
++is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
++[gvsoc-developer.readthedocs.io](https://gvsoc-developer.readthedocs.io/en/latest/).
+ 
+-## GVSoC documentations
++## Layout
+ 
+-The user documentation, focusing on how to use GVSOC, is available [here](https://gvsoc.readthedocs.io/en/latest/).
++| Path | What |
++|---|---|
++| `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
++| `container/` | The development image |
++| `docs/plans/` | One checklist per task (`SG0.md`) |
++| `docs/notes/NOTES.md` | The log: what was run and what came out |
++| `build/` | Build, install and run output; not tracked |
+ 
+-The developer documentation, focusing on how to develop models or extend GVSOC is available [here] (https://gvsoc-developer.readthedocs.io/en/latest/).
++## Quick start
+ 
+-## GVSoC Tutorial
++The image holds the tools only; this repo is mounted at `/work` and GVSoC is
++built there. Build the image once and push it (Docker):
+ 
+-If you want to learn more about GVSoC, get started through the tutorial available [here](https://gvsoc-developer.readthedocs.io/en/latest/tutorials.html). This tutorial provides hands-on practice on building systems on GVSoC and extracting the performance results.
++    docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:sg0 container
++    docker push ghcr.io/kuleuven-micas/snax-gvsoc:sg0
+ 
++Run it from the repo root (Podman):
+ 
+-## OS Requirements installation
++    podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:sg0
+ 
+-These instructions were developed using a fresh Ubuntu 22.04 (Jammy Jellyfish).
++Inside, build GVSoC for the Snitch target (about 9 minutes on 2 cores the
++first time) and run the bundled program, which exits with 0 and prints
++nothing:
+ 
+-The following packages needed to be installed:
++    make build TARGETS=snitch
++    source sourceme.sh
++    gvrun --target snitch --work-dir build/work/snitch \
++        --param chip/soc/binary=$PWD/pulp/examples/snitch/fp32_computation_vector.elf run
+ 
+-~~~~~shell
+-sudo apt-get install -y build-essential git doxygen python3-pip libsdl2-dev curl cmake gtkwave libsndfile1-dev rsync autoconf automake texinfo libtool pkg-config libsdl2-ttf-dev wget sphinx-build doxygen
+-~~~~~
++Every new container needs `source sourceme.sh` again. Adding
++`--trace=pe0/insn` before `run` prints core 0's instructions: 484 lines, from
++cycle 7909 to 23862.
+ 
+-These are the packages neded on a Fedora:
++## License
+ 
+-~~~~~shell
+-sudo dnf install -y make gcc cmake ninja-build.x86_64 g++ pip lz4-devel ccache glibc-devel.i686 zlib-ng-compat-devel.i686 SDL2 SDL2-devel SDL2_ttf-devel.x86_64 SDL2_image-devel.x86_64 wget2 sphinx-build doxygen
+-~~~~~
+-
+-Please also check any README.md in the submodules for target-specific requirements, like for example pulp/README.md.
+-
+-## Python requirements
+-
+-Additional Python packages are needed and can be installed with the following commands from root folder:
+-
+-```bash
+-git submodule update --init --recursive -j8
+-pip3 install -r core/requirements.txt
+-pip3 install -r gapy/requirements.txt
+-pip3 install -r pulp/requirements.txt
+-```
+-
+-## Installation
+-
+-Get submodules and compile GVSoC with this command:
+-
+-~~~~~shell
+-make all TARGETS=<target>
+-~~~~~
+-
+-<target> should indicate the target for which GVSoC must be build. This can for example be generic targets rv32 or rv64. 
+-
+-On ETH network, please use this command to get the proper version of gcc and cmake:
+-
+-~~~~~shell
+-CXX=g++-14.2.0 CC=gcc-14.2.0 CMAKE=cmake-3.18.1 make all TARGETS=pulp-open
+-~~~~~
+-
+-## Usage
+-
+-The following example can be launched on pulp-open:
+-
+-~~~~~shell
+-./install/bin/gvsoc --target=pulp-open --binary examples/pulp-open/hello image flash run
+-~~~~~
+-
+-## Citing
+-
+-If you intend to use or reference GVSoC for an academic publication, please consider citing it:
+-
+-```
+-@INPROCEEDINGS{9643828,
+-	author={Bruschi, Nazareno and Haugou, Germain and Tagliavini, Giuseppe and Conti, Francesco and Benini, Luca and Rossi, Davide},
+-	booktitle={2021 IEEE 39th International Conference on Computer Design (ICCD)},
+-	title={GVSoC: A Highly Configurable, Fast and Accurate Full-Platform Simulator for RISC-V based IoT Processors},
+-	year={2021},
+-	volume={},
+-	number={},
+-	pages={409-416},
+-	doi={10.1109/ICCD53106.2021.00071}}
+-```
+-
+-## Using GVSoC with DRAMsys
+-
+-If you want to use DRAMsys with GVSoC follow the steps mentioned in [DRAMsys.md](./DRAMSys.md)
++Apache 2.0, see `LICENSE` and `UPSTREAM.md`.
+diff --git a/UPSTREAM.md b/UPSTREAM.md
+new file mode 100644
+index 00000000..1332c229
+--- /dev/null
++++ b/UPSTREAM.md
+@@ -0,0 +1,48 @@
++# Upstream
++
++This repository is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc)
++at `93cedc4`, made on 2026-10-12. It is developed on its own and is never
++merged or rebased from upstream (D116 in
++[snax-forge](https://github.com/KULeuven-MICAS/snax-forge)).
++
++## Upstream commits
++
++| Path | Upstream | Commit | Date |
++|---|---|---|---|
++| `/` | [gvsoc/gvsoc](https://github.com/gvsoc/gvsoc) | `93cedc4cb2970a28ff38aef4393d8d69eae503a4` | 2026-09-25 |
++| `config_tree/` | [gvsoc/config_tree](https://github.com/gvsoc/config_tree) | `d134f4100bffdc0de196f6672e005ff3b58ad083` | 2026-06-30 |
++| `core/` | [gvsoc/gvsoc-core](https://github.com/gvsoc/gvsoc-core) | `731f80406b24653ea908f1f25a548cbe03bf5de7` | 2026-09-25 |
++| `engine/` | [gvsoc/gvsoc-engine](https://github.com/gvsoc/gvsoc-engine) | `df1011495fc040615a81c4b2b061064a08e46acc` | 2026-09-22 |
++| `gvrun/` | [gvsoc/gvrun](https://github.com/gvsoc/gvrun) | `84a40e04fd96af749bed31bc28a38f01de518718` | 2026-09-05 |
++| `gvtest/` | [gvsoc/gvtest](https://github.com/gvsoc/gvtest) | `99db3b5bc5f8f5483558a655f87325e8044c0668` | 2026-07-28 |
++| `pulp/` | [gvsoc/gvsoc-pulp](https://github.com/gvsoc/gvsoc-pulp) | `1af311ae1ab92f90a196a5236dddb0bb750d28f9` | 2026-09-24 |
++| `pulpos/` | [gvsoc/pulpos](https://github.com/gvsoc/pulpos) | `4a4f9f2aaf244bcb4e4bb7fe276ebcf481213342` | 2026-09-24 |
++
++## How the copy was made
++
++GVSoC was cloned and checked out at `93cedc4`. One commit removed the seven
++submodules and `.gitmodules`, then each submodule was folded in with
++`git subtree add --prefix=<path> <upstream> <commit>`, keeping its history.
++Only `main` was pushed. A folded file's older history uses paths without the
++prefix, so it is read through the pin:
++`git log 731f804 -- models/cpu/iss/src/csr.cpp`.
++
++## License
++
++GVSoC is Apache 2.0: the root `LICENSE`, and `core/`, `engine/`, `gvrun/`
++and `pulp/` each carry the same license. `config_tree/`, `gvtest/` and
++`pulpos/` ship no LICENSE file of their own. Upstream has no NOTICE file.
++Files with a header of their own (e.g. `.gitlab-ci.yml`, SHL-0.51) keep it.
++Files we add are Apache 2.0 too.
++
++## Changed files
++
++Every upstream file we edit gets one comment line near its top,
++`Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md`, and a row here
++(Apache 2.0, section 4(b)). A replaced or removed file only gets a row.
++
++| File | Change | Step |
++|---|---|---|
++| `README.md` | Replaced with a short SNAX-GVSoC README | SG0 P1 |
++| `.github/workflows/build.yml` | Removed: upstream CI that builds every target on each push | SG0 P1 |
++| `.github/CODEOWNERS` | Removed: named the upstream maintainer as owner of every file | SG0 P1 |
+diff --git a/container/Dockerfile b/container/Dockerfile
+new file mode 100644
+index 00000000..58a0c914
+--- /dev/null
++++ b/container/Dockerfile
+@@ -0,0 +1,78 @@
++# snax-gvsoc development container.
++#
++# Holds the compilers, Python packages and the two prebuilt RISC-V toolchains.
++# GVSoC itself is NOT in the image: mount this repo at /work and build it
++# there, so edits and build output stay on the host.
++#
++# Imported unchanged from KULeuven-MICAS/snax-gvsoc-experiment (386e433),
++# apart from these comments. SG0 P2 moves the toolchain to snax_cluster's.
++#
++# Build (from the repo root):
++#   docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:sg0 container
++# Run:
++#   podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:sg0
++
++FROM ubuntu:24.04
++
++ARG DEBIAN_FRONTEND=noninteractive
++
++# Host compiler and build tools for GVSoC, plus what the downloads need.
++RUN apt-get update && apt-get install -y --no-install-recommends \
++        build-essential \
++        cmake \
++        ccache \
++        git \
++        ca-certificates \
++        curl \
++        xz-utils \
++        python3 \
++        python3-venv \
++        zlib1g-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# RISC-V GCC 14.2 (rv64, newlib): compiles the GVSoC tutorial programs.
++# Same release the GVSoC Makefile downloads in its `riscv` target.
++ARG RISCV_GCC_URL=https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2025.01.17/riscv64-elf-ubuntu-22.04-gcc-nightly-2025.01.17-nightly.tar.xz
++ARG RISCV_GCC_SHA256=d676a5cbff9160e40dbc0092b716d6f63ad66302bb8d0de9ef78bb007f14a340
++RUN curl -fsSL --retry 5 -o /tmp/riscv.tar.xz "$RISCV_GCC_URL" \
++    && echo "$RISCV_GCC_SHA256  /tmp/riscv.tar.xz" | sha256sum -c - \
++    && tar -xJf /tmp/riscv.tar.xz -C /opt \
++    && rm /tmp/riscv.tar.xz
++
++# Snitch LLVM 0.12.0 (clang 12.0.1, rv32 + Snitch extensions): compiles the
++# snitch_cluster runtime and programs.
++ARG SNITCH_LLVM_URL=https://github.com/pulp-platform/llvm-project/releases/download/0.12.0/riscv32-pulp-llvm-ubuntu2004-0.12.0.tar.gz
++ARG SNITCH_LLVM_SHA256=70534a8946cad71698be9d7bf4edcc0c1b322aabfe6c47a416e82a035c627451
++RUN curl -fsSL --retry 5 -o /tmp/llvm.tar.gz "$SNITCH_LLVM_URL" \
++    && echo "$SNITCH_LLVM_SHA256  /tmp/llvm.tar.gz" | sha256sum -c - \
++    && mkdir -p /opt/snitch-llvm \
++    && tar -xzf /tmp/llvm.tar.gz -C /opt/snitch-llvm --strip-components=1 \
++    && rm /tmp/llvm.tar.gz
++
++# Bender 0.27.1: the snitch_cluster makefiles call it to locate the register
++# tool when they generate the runtime headers.
++ARG BENDER_URL=https://github.com/pulp-platform/bender/releases/download/v0.27.1/bender-0.27.1-x86_64-linux-gnu-ubuntu18.04.tar.gz
++ARG BENDER_SHA256=ddc7c7c81685194e2a9a1e69e763f8e4e7077515309a66c1ae2219bc0c0f8b81
++RUN curl -fsSL --retry 5 -o /tmp/bender.tar.gz "$BENDER_URL" \
++    && echo "$BENDER_SHA256  /tmp/bender.tar.gz" | sha256sum -c - \
++    && tar -xzf /tmp/bender.tar.gz -C /usr/local/bin bender \
++    && rm /tmp/bender.tar.gz
++
++# Python packages in a venv, so nothing fights the system Python.
++COPY requirements.txt /tmp/requirements.txt
++RUN python3 -m venv /opt/venv \
++    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
++    && rm /tmp/requirements.txt
++
++# The Snitch LLVM directory goes last on PATH: its makefiles need clang-format
++# from there, and last place keeps it from shadowing any host tool. The
++# compiler itself is picked through LLVM_BINROOT.
++ENV PATH=/opt/venv/bin:/opt/riscv/bin:$PATH:/opt/snitch-llvm/bin \
++    LLVM_BINROOT=/opt/snitch-llvm/bin \
++    GVSOC_WORKDIR=/work/build
++
++# The repo is bind-mounted and owned by the host user.
++RUN git config --system --add safe.directory '*'
++
++WORKDIR /work
++CMD ["/bin/bash"]
+diff --git a/container/requirements.txt b/container/requirements.txt
+new file mode 100644
+index 00000000..a85de229
+--- /dev/null
++++ b/container/requirements.txt
+@@ -0,0 +1,34 @@
++# Python packages for the snax-gvsoc container.
++
++# GVSoC: union of core/, gapy/ and gvrun/ requirements.txt at gvsoc 93cedc4.
++beautifulsoup4>=4.11.1
++breathe
++hjson>=3.1.0
++html2text>=2020.1.16
++lz4
++Mako>=1.1.3
++marko>=2.0.3
++matplotlib>=3.8.2
++mistune>=3.0.2
++pandas>=2.2.2
++pexpect>=4.9.0
++ppk2_api
++prettytable>=0.7.2
++psutil
++pycryptodome
++pyelftools>=0.29
++pytablewriter>=1.2.0
++pyvcd
++PyYAML>=6.0.1
++rich>=13.7.1
++six>=1.16.0
++sphinx_rtd_theme
++tabulate
++typing_extensions
++
++# snitch_cluster 4652c6b: generating the runtime headers.
++jsonref
++jsonschema
++# Its register tool imports pkg_resources, which setuptools 81 and later no
++# longer ship.
++setuptools>=59.6.0,<81
+\ No newline at end of file
+diff --git a/docs/notes/NOTES.md b/docs/notes/NOTES.md
+new file mode 100644
+index 00000000..94598a81
+--- /dev/null
++++ b/docs/notes/NOTES.md
+@@ -0,0 +1,42 @@
++# SNAX-GVSoC notes
++
++The log of SNAX-GVSoC, from SG0 on (M16 in snax-forge, D116). One entry per
++step: what was run, what came out, what was learned. GVSoC itself was learnt
++in `KULeuven-MICAS/snax-gvsoc-experiment` (X1); its notes and tutorial pages
++stay there.
++
++## Pins
++
++| What | Commit |
++|---|---|
++| GVSoC and its seven folded submodules | see `UPSTREAM.md` |
++| snax_cluster, the probe and the RTL reference | `8ebd42299c1db2ab26006f68f76896097b64b278` (2026-09-16) |
++
++## Log
++
++### SG0 step 1: detached copy
++
++- 2026-10-12. Done as written in `UPSTREAM.md` under "How the copy was made";
++  rehearsed in Claude's sandbox first with the same result.
++- The git on micas-lapserv1 has no `subtree` command. The clone and the
++  folding ran in the `snax-gvsoc:gvs1` container (Ubuntu 24.04, git 2.43),
++  the push from the host.
++- Checks: each folded folder's tree equals its upstream pin; commit counts
++  config_tree 4, core 2080, engine 2013, gvrun 54, gvtest 67, pulp 607,
++  pulpos 63. About 210 MB pushed. Only `main`; upstream has no tags.
++- GitHub Actions was turned off before the first push, since upstream's
++  workflow builds every target on each push. P1 removes it.
++
++### SG0 step 2: P1
++
++- 2026-10-12. `UPSTREAM.md`, a short README, this file and the SG0 plan.
++  Upstream's CI workflow and CODEOWNERS removed (listed in `UPSTREAM.md`).
++- `container/` imported from snax-gvsoc-experiment `386e433`, unchanged
++  apart from its header comments and line endings (CRLF in the experiment,
++  LF here); the image is now `snax-gvsoc:sg0`.
++- Checked in Claude's sandbox, not in the container (Ubuntu 24.04, a Python
++  3.13 venv with `container/requirements.txt`, 2 cores): at the repo root
++  `make build TARGETS=snitch` took 9 min 11 s; the bundled
++  `fp32_computation_vector.elf` exits 0 in 2 s; `--trace=pe0/insn` gives 484
++  lines from cycle 7909 to 23862, as in the experiment. The figures are from
++  Claude's run.
+diff --git a/docs/plans/SG0.md b/docs/plans/SG0.md
+new file mode 100644
+index 00000000..8af7e2b4
+--- /dev/null
++++ b/docs/plans/SG0.md
+@@ -0,0 +1,34 @@
++# SG0 plan: the repository, the images and the probe
++
++SG0 is the first task of M16 in snax-forge (SNAX-GVSoC aligned with
++snax_cluster, D116). Acceptance: the probe result and the chosen GVSoC commit
++are logged, and both images build and run on the MICAS server.
++
++This file is the checklist; `docs/notes/NOTES.md` is the log. A step is
++ticked here when its entry is in the notes.
++
++## How the steps are run
++
++- One step at a time: rehearsed in Claude's sandbox first, then the commands
++  and the output to expect, then run on the MICAS server.
++- Files come as `.patch` files applied with `git apply`; commits and pushes
++  are done by hand.
++- Anything not verified is said so.
++
++## Steps
++
++| # | Step | Status |
++|---|---|---|
++| 1 | Detached copy of GVSoC `93cedc4`, submodules folded in, pushed | done 2026-10-12 |
++| 2 | P1: `UPSTREAM.md`, short README, upstream CI and CODEOWNERS removed, container imported from the experiment, this plan and the notes | done 2026-10-12 |
++| 3 | Image `snax-gvsoc:sg0` built from `container/` and run on micaseb19: GVSoC builds, the bundled ELF runs | todo |
++| 4 | P2: snax_cluster's toolchain in the image (clang, lld, llvm-tools 21.1.6, bender 0.28); rv64 GCC and Snitch LLVM 12 dropped | todo |
++| 5 | Probe: snax_cluster `8ebd4229` tests built with its own flow (`cfg/snitch_cluster.hjson`, generic LLVM, `rtl-generic`) and run on `gvrun --target snitch` | todo |
++| 6 | P3, if the probe fails on CSRs 0xBC1 to 0xBC3: the Snitch core patch; probe run again, commit chosen | todo |
++| 7 | P4: snax-forge's image FROM `snax-gvsoc:sg0`, pixi last | todo |
++| 8 | P5: SG0 closed here, and the STATUS.md update for snax-forge | todo |
++
++## Decided
++
++- Probe result: not yet.
++- Chosen GVSoC commit: not yet.
+
+

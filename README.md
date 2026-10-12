@@ -1,88 +1,51 @@
-# GVSoC
+# snax-gvsoc
 
-GVSoC is the PULP chips simulator that is natively included in the Pulp SDK and is described and evaluated fully in Bruschi et al. [\[arXiv:2201.08166v1\]](https://arxiv.org/abs/2201.08166).
+SNAX-GVSoC is a GVSoC model of the SNAX cluster
+([snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)) in which a
+Snitch core runs the real program. It is part of
+[SNAX-FORGE](https://github.com/KULeuven-MICAS/snax-forge) (M16).
 
+It starts as a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at
+`93cedc4`. `UPSTREAM.md` lists the upstream commits, the license and every
+file we changed. This file replaces GVSoC's README; GVSoC's own documentation
+is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
+[gvsoc-developer.readthedocs.io](https://gvsoc-developer.readthedocs.io/en/latest/).
 
-## GVSoC documentations
+## Layout
 
-The user documentation, focusing on how to use GVSOC, is available [here](https://gvsoc.readthedocs.io/en/latest/).
+| Path | What |
+|---|---|
+| `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
+| `container/` | The development image |
+| `docs/plans/` | One checklist per task (`SG0.md`) |
+| `docs/notes/NOTES.md` | The log: what was run and what came out |
+| `build/` | Build, install and run output; not tracked |
 
-The developer documentation, focusing on how to develop models or extend GVSOC is available [here] (https://gvsoc-developer.readthedocs.io/en/latest/).
+## Quick start
 
-## GVSoC Tutorial
+The image holds the tools only; this repo is mounted at `/work` and GVSoC is
+built there. Build the image once and push it (Docker):
 
-If you want to learn more about GVSoC, get started through the tutorial available [here](https://gvsoc-developer.readthedocs.io/en/latest/tutorials.html). This tutorial provides hands-on practice on building systems on GVSoC and extracting the performance results.
+    docker build -t ghcr.io/kuleuven-micas/snax-gvsoc:sg0 container
+    docker push ghcr.io/kuleuven-micas/snax-gvsoc:sg0
 
+Run it from the repo root (Podman):
 
-## OS Requirements installation
+    podman run --rm -it -v "$PWD":/work ghcr.io/kuleuven-micas/snax-gvsoc:sg0
 
-These instructions were developed using a fresh Ubuntu 22.04 (Jammy Jellyfish).
+Inside, build GVSoC for the Snitch target (about 9 minutes on 2 cores the
+first time) and run the bundled program, which exits with 0 and prints
+nothing:
 
-The following packages needed to be installed:
+    make build TARGETS=snitch
+    source sourceme.sh
+    gvrun --target snitch --work-dir build/work/snitch \
+        --param chip/soc/binary=$PWD/pulp/examples/snitch/fp32_computation_vector.elf run
 
-~~~~~shell
-sudo apt-get install -y build-essential git doxygen python3-pip libsdl2-dev curl cmake gtkwave libsndfile1-dev rsync autoconf automake texinfo libtool pkg-config libsdl2-ttf-dev wget sphinx-build doxygen
-~~~~~
+Every new container needs `source sourceme.sh` again. Adding
+`--trace=pe0/insn` before `run` prints core 0's instructions: 484 lines, from
+cycle 7909 to 23862.
 
-These are the packages neded on a Fedora:
+## License
 
-~~~~~shell
-sudo dnf install -y make gcc cmake ninja-build.x86_64 g++ pip lz4-devel ccache glibc-devel.i686 zlib-ng-compat-devel.i686 SDL2 SDL2-devel SDL2_ttf-devel.x86_64 SDL2_image-devel.x86_64 wget2 sphinx-build doxygen
-~~~~~
-
-Please also check any README.md in the submodules for target-specific requirements, like for example pulp/README.md.
-
-## Python requirements
-
-Additional Python packages are needed and can be installed with the following commands from root folder:
-
-```bash
-git submodule update --init --recursive -j8
-pip3 install -r core/requirements.txt
-pip3 install -r gapy/requirements.txt
-pip3 install -r pulp/requirements.txt
-```
-
-## Installation
-
-Get submodules and compile GVSoC with this command:
-
-~~~~~shell
-make all TARGETS=<target>
-~~~~~
-
-<target> should indicate the target for which GVSoC must be build. This can for example be generic targets rv32 or rv64. 
-
-On ETH network, please use this command to get the proper version of gcc and cmake:
-
-~~~~~shell
-CXX=g++-14.2.0 CC=gcc-14.2.0 CMAKE=cmake-3.18.1 make all TARGETS=pulp-open
-~~~~~
-
-## Usage
-
-The following example can be launched on pulp-open:
-
-~~~~~shell
-./install/bin/gvsoc --target=pulp-open --binary examples/pulp-open/hello image flash run
-~~~~~
-
-## Citing
-
-If you intend to use or reference GVSoC for an academic publication, please consider citing it:
-
-```
-@INPROCEEDINGS{9643828,
-	author={Bruschi, Nazareno and Haugou, Germain and Tagliavini, Giuseppe and Conti, Francesco and Benini, Luca and Rossi, Davide},
-	booktitle={2021 IEEE 39th International Conference on Computer Design (ICCD)},
-	title={GVSoC: A Highly Configurable, Fast and Accurate Full-Platform Simulator for RISC-V based IoT Processors},
-	year={2021},
-	volume={},
-	number={},
-	pages={409-416},
-	doi={10.1109/ICCD53106.2021.00071}}
-```
-
-## Using GVSoC with DRAMsys
-
-If you want to use DRAMsys with GVSoC follow the steps mentioned in [DRAMsys.md](./DRAMSys.md)
+Apache 2.0, see `LICENSE` and `UPSTREAM.md`.
