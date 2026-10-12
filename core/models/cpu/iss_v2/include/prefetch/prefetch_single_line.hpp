@@ -1,0 +1,124 @@
+/*
+ * Copyright (C) 2020 GreenWaves Technologies, SAS, ETH Zurich and
+ *                    University of Bologna
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
+ */
+
+#pragma once
+
+#include <vp/vp.hpp>
+#include <cpu/iss_v2/include/types.hpp>
+
+class PrefetchSingleLine
+{
+public:
+    PrefetchSingleLine(Iss &iss);
+
+    void start() {}
+    void stop() {}
+
+    // Reset the prefetcher, which will flush it to make it empty
+    void reset(bool active);
+
+    // Flush the prefetch buffer
+    void flush();
+
+    // Response callback for the refill
+#ifdef CONFIG_GVSOC_ISS_LSU_V2
+    static vp::IoRespAck fetch_response(vp::Block *__this, vp::IoReq *req);
+#else
+    static void fetch_response(vp::Block *__this, vp::IoReq *req);
+#endif
+
+#ifdef CONFIG_GVSOC_ISS_LSU_V2
+    // io_v2 retry callback. A fetch CAN be denied: several cores share one
+    // outstanding-limited path whenever their instruction caches are bypassed
+    // (the cluster hierarchical icache boots that way), and the loser of the
+    // arbitration gets IO_REQ_DENIED. The request object is held and re-sent
+    // from here, as the io_v2 deny/retry handshake requires.
+    static void fetch_retry(vp::Block *__this, vp::IoRetryChannel);
+
+    // Refill interface (io_v2 form: retry + resp set at construction).
+    vp::IoMaster fetch_itf{&PrefetchSingleLine::fetch_retry, &PrefetchSingleLine::fetch_response};
+#else
+    // Refill interface (io v1 form: methods set in constructor body).
+    vp::IoMaster fetch_itf;
+#endif
+
+    // Fetch the given instruction from prefetch buffer
+    bool fetch(iss_reg_t pc);
+
+private:
+    // Refill of the prefetch buffer
+    bool fetch_refill(iss_insn_t *insn, iss_addr_t addr, int index);
+
+    // Callback called when the fetch of the low part is received asynchronously.
+    static void fetch_resume_after_low_refill(PrefetchSingleLine *_this);
+
+    // Check if the current instruction fits entirely in the buffer and if not trigger another fetch
+    bool fetch_check_overflow(iss_insn_t *insn, int index);
+
+    // Callback called when the high part of the instruction is received asynchronously
+    static void fetch_resume_after_high_refill(PrefetchSingleLine *_this);
+
+    // Send a fetch request to refill the buffer
+    int fill(iss_addr_t addr);
+
+    // Send the fetch request
+    int send_fetch_req(uint64_t addr, uint8_t *data, uint64_t size, bool is_write);
+
+    // Can be called to stall the core after a pending refill.
+    // The core will be unstalled automatically once the refill is done
+    void handle_stall(void (*callback)(PrefetchSingleLine *), iss_insn_t *current_insn);
+
+    // Top component used to access other blocks
+    Iss &iss;
+
+    // Prefetch buffer
+    uint8_t data[CONFIG_GVSOC_ISS_PREFETCH_SIZE];
+
+    // Start address of the prefetch buffer. Can be -1 to indicate it is empty
+    iss_addr_t buffer_start_addr;
+
+    // Request used for sending fetch request to the fetch interface
+    vp::IoReq fetch_req;
+
+#ifdef CONFIG_GVSOC_ISS_LSU_V2
+    // True while fetch_req has been denied and is waiting for a retry() to be
+    // re-sent. No response is coming for it; only the retry can unblock it.
+    bool fetch_denied;
+#endif
+
+    // Callback called when a pending fetch response is received
+    void (*fetch_stall_callback)(PrefetchSingleLine *_this);
+
+    // Instruction being fetched, used by callbacks
+    iss_insn_t *prefetch_insn;
+
+    // Pending opcode, used by callback when the instruction is split on 2 lines
+    iss_opcode_t fetch_stall_opcode;
+
+    // Prefetcher trace
+    vp::Trace trace;
+
+    iss_reg_t current_pc;
+
+#ifdef CONFIG_PREFETCHER_FI
+    bool registered_with_fic=false;
+#endif
+};

@@ -1,0 +1,101 @@
+/*
+ * Copyright (C) 2020 GreenWaves Technologies, SAS, ETH Zurich and
+ *                    University of Bologna
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
+ */
+
+#pragma once
+
+#include <cpu/iss/include/types.hpp>
+#include <vp/debug_mem.hpp>
+
+class Watchpoint
+{
+public:
+    Watchpoint(iss_addr_t addr, int size) : addr(addr), size(size) {}
+    iss_addr_t addr;
+    int size;
+};
+
+class Gdbserver : public vp::Gdbserver_core
+{
+public:
+    Gdbserver(Iss &iss);
+    void build();
+    void start();
+    void reset(bool active);
+
+    bool is_enabled() { return this->gdbserver != NULL; }
+
+    int gdbserver_get_id() override;
+    void gdbserver_set_id(int id) override;
+    std::string gdbserver_get_name() override;
+    int gdbserver_reg_set(int reg, uint8_t *value) override;
+    int gdbserver_reg_get(int reg, uint8_t *value) override;
+    int gdbserver_regs_get(int *nb_regs, int *reg_size, uint8_t *value) override;
+    int gdbserver_stop() override;
+    int gdbserver_cont() override;
+    int gdbserver_stepi() override;
+    int gdbserver_state() override;
+    void gdbserver_breakpoint_insert(uint64_t addr) override;
+    void gdbserver_breakpoint_remove(uint64_t addr) override;
+    void gdbserver_watchpoint_insert(bool is_write, uint64_t addr, int size) override;
+    void gdbserver_watchpoint_remove(bool is_write, uint64_t addr, int size) override;
+    int gdbserver_io_access(uint64_t addr, int size, uint8_t *data, bool is_write) override;
+
+    void enable_breakpoint(iss_addr_t addr);
+    void disable_breakpoint(iss_addr_t addr);
+    void enable_all_breakpoints();
+    bool watchpoint_check(bool is_write, iss_addr_t addr, int size);
+
+    void breakpoint_stub_insert(iss_insn_t *insn, iss_reg_t pc);
+    void breakpoint_stub_remove(iss_insn_t *insn, iss_reg_t pc);
+    bool breakpoint_check_pc(iss_addr_t pc);
+
+    // When no gdb front-end is attached (console/proxy debugging), actively stop the simulation and
+    // notify proxy clients on a breakpoint/watchpoint hit, so the front-end can free-run and be
+    // woken on the hit instead of polling the engine in small steps.
+    void stop_for_debug();
+
+    void decode_insn(iss_insn_t *insn, iss_addr_t pc);
+
+    Iss &iss;
+    // Backdoor debug-memory interface of the component behind the LSU data
+    // port, resolved at start(). All debug accesses (gdb memory accesses,
+    // semi-hosting) go through it inline, so they complete even while the
+    // simulation is paused (mandatory with buffering io_v2 routers, whose
+    // timed responses only come from clock events). Without it, debug
+    // accesses are reported as errors.
+    vp::DebugMemIf *debug_mem = nullptr;
+    vp::Trace trace;
+    vp::Gdbserver_engine *gdbserver;
+    std::list<iss_addr_t> breakpoints;
+    bool halt_on_reset;
+    std::list<Watchpoint *> write_watchpoints;
+    std::list<Watchpoint *> read_watchpoints;
+    int id;
+    bool breakpoint_hit = false;
+    iss_addr_t breakpoint_hit_addr = 0;
+    bool watchpoint_hit = false;
+    iss_addr_t watchpoint_hit_addr = 0;
+    bool watchpoint_hit_is_write = false;
+    // One-shot "step over the breakpoint at this PC" set by resume, so a continue past a breakpoint
+    // executes the instruction once instead of immediately re-triggering the same breakpoint.
+    bool bp_skip_active = false;
+    iss_addr_t bp_skip_pc = 0;
+};
