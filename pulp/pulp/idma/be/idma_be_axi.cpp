@@ -47,6 +47,9 @@ IDmaBeAxi::IDmaBeAxi(vp::Component *idma, std::string itf_name, IdmaBeProducer *
 
     // Get the top parameter giving the maximum burst size for AXI transactions. TCDM will alight to this parameter
     this->burst_size = idma->get_js_config()->get_int("burst_size");
+    // SNAX: the DMA's own read path latency
+    js::Config *read_latency = idma->get_js_config()->get("read_latency");
+    this->read_latency = read_latency ? read_latency->get_int() : 0;
 
     // Use it to size the array of bursts and associated timestamps
     this->bursts.resize(burst_queue_size);
@@ -220,11 +223,14 @@ void IDmaBeAxi::read_handle_req_end(vp::IoReq *req)
 {
     // Remember at which timestamp the burst must be notified
     this->trace.msg(vp::Trace::LEVEL_TRACE, "Handling end of read request (req: %p, latency %d)\n", req, req->get_latency());
-    this->read_timestamps[req->id] = this->clock.get_cycles() + req->get_latency();
+    // SNAX: the DMA's own read path latency comes on top of the interconnect's. Bursts are
+    // sent ahead (burst_queue_size), so back-to-back bursts overlap it.
+    uint64_t latency = req->get_latency() + this->read_latency;
+    this->read_timestamps[req->id] = this->clock.get_cycles() + latency;
     // Queue the requests, they will be notified in order.
     this->read_waiting_bursts.push(req);
     // Enqueue fsm event at desired timestamp in case the event is not already enqueued before
-    this->fsm_event.enqueue(std::max(req->get_latency(), (uint64_t)1));
+    this->fsm_event.enqueue(std::max(latency, (uint64_t)1));
 }
 
 

@@ -67,6 +67,18 @@ def snax_alu_acc(parent, name):
 # SNAX accelerators per core index: the compute core (hart 0) drives the ALU.
 SNAX_ACC = {0: snax_alu_acc}
 
+# The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4):
+# one 64 B beat per cycle into L1 (dma_data_width 512), 3 transfers queued
+# (dma_req_fifo_depth) and 3 bursts in flight (dma_axi_req_fifo_depth). A DMA
+# read's first beat comes 5 cycles after its request from L1 and 11 from DRAM:
+# the 5 common to both are the DMA's own read path (read_latency), the other 6
+# are the DRAM's. The cores' fetches and loads from DRAM take the same path;
+# their latency on the RTL is not measured (SG5).
+SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
+    'read_latency': 5}
+DRAM_LATENCY = 6
+DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
+
 
 class SnaxAluAttr(Tree):
     """The address map and cluster of the target, as SnitchAttr gives them."""
@@ -99,13 +111,14 @@ class SnaxAluAttr(Tree):
                     description='DRAM range')
                 self.cluster = Area(self, 'cluster', 0x1000_0000, 0x0004_0000,
                     description='Cluster range')
+                self.hbm_latency = DRAM_LATENCY
                 self.floonoc = False
                 self.use_spatz = False
                 self.nb_cluster = 1
                 self.clusters = [
                     ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
                         nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
-                        snax_acc=SNAX_ACC)
+                        snax_acc=SNAX_ACC, dma=SNAX_DMA)
                 ]
 
             def get_cluster_base(self, id: int):
@@ -126,6 +139,7 @@ class SnaxAluBoard(gvsoc.systree.Component):
             properties = SnitchArchProperties()
             properties.nb_core_per_cluster = NB_CORE
             properties.snax_acc = SNAX_ACC
+            properties.dma = SNAX_DMA
             arch = SnitchArch(self, properties=properties)
         else:
             arch = SnaxAluAttr(self, 'snax_alu')
@@ -134,7 +148,7 @@ class SnaxAluBoard(gvsoc.systree.Component):
 
         chip = Snitch(self, 'chip', parser, arch.chip, None, [])
         mem = memory.memory.Memory(self, 'mem', size=arch.hbm.size, atomics=True,
-            width_log2=2)
+            width_log2=DRAM_WIDTH_LOG2)
 
         self.bind(clock, 'out', chip, 'clock')
         self.bind(clock, 'out', mem, 'clock')

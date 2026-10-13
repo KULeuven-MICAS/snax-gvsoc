@@ -383,3 +383,253 @@ stay there.
   the `Makefile`; rows in `UPSTREAM.md`.
 - Next: a housekeeping pass on this branch, then SG2 (the DMA), from the
   list under "SG2 starts from" in `docs/plans/SG1.md`.
+
+### SG2 step 1: P1, the plan
+
+- 2026-10-13. `docs/plans/SG2.md` written: the iDMA model is adapted to
+  snax_cluster's iDMA RTL, checked with a timing program on both sides. The
+  housekeeping pass over SG1's code moves to after SG5.
+- Read from source, not run (snax_cluster `b2672f8`, the iDMA fork's
+  `master` at `e859ffc`, upstream v0.6.5; the fork is taken at
+  `rev: master` with no lock file, so the commit in the RTL build may
+  differ). The backend `idma_backend_rw_axi` is generated at build time
+  (`make idma-rtl-gen`); read here from the fork's templates through
+  `util/gen_idma.py`. The values are in SG2.md under "The DMA path".
+- RTL and GVSoC differ in: bursts in flight (3 per direction in the iDMA, 2
+  at the testbench DRAM; 24 in GVSoC), the burst split (both sides in the
+  RTL, the AXI side only in GVSoC), read data (one 64 B beat per cycle; the
+  whole burst at once in GVSoC), the L1 write width (64 B; 4096 B), the end
+  of a transfer (the last write response; the last L1 write), the request
+  queue (3; 8) and the DRAM (no latency of its own behind cuts, 64 B per
+  beat; 100 cycles and 4 B per cycle).
+- `snax-alu` does not wait for its two copies: the DMA core starts them and
+  goes to the barrier, which does not wait for the DMA. The compute core
+  starts the streamers about 1000 cycles of CSR setup later. Matters for
+  SG3 to SG5, not for the stub.
+- The cluster's perf counters (`perf_cnt.h`, `snitch_cluster_peripheral`)
+  count `DMA_BUSY` from the iDMA's `busy_o`, the signal `snrt_dma_wait_all`
+  polls; DMA events do not depend on `hart_select`. The enable is a posted
+  store, so the program reads it back before starting the DMA. In
+  `idma_inst64_events.sv` the buffer lines overwrite `r_stall` and
+  `w_stall`, and `buf_r_stall` / `buf_w_stall` are never set. GVSoC's
+  cluster registers come from an identical `snitch_cluster_peripheral_reg.hjson`
+  but hold the counters as plain registers: they read 0.
+
+### SG2 step 2: P2, the timing program
+
+- 2026-10-13. `tests/snax/dma-timing/`: one ELF for the RTL and for
+  `snax_alu`, built like `snax-alu` against the runtime of `../snax_cluster`.
+  Its README lists the cases and the fields. Source words come from a seeded
+  `data.h` (8 KiB in `.data`, which `base.ld` puts in DRAM); the L1 buffer
+  starts at `snrt_l1_next()` rounded to 64 B.
+- Two details of the measured window, from the disassembly:
+  `snrt_mcycle()` has a `"memory"` clobber, so case fields read through a
+  pointer were reloaded from DRAM between the marks (105 cycles of `issue`
+  for the idle case at first); they are now read into locals before the
+  first mark. The enable read-back is used by an `mv`, since a load into
+  `x0` would not stall the core. The window now holds only `csrr 0xbc2`, the
+  `dmsrc`, `dmdst`, `dmcpyi` of each copy and the loop.
+- Results on `snax_alu` today (Claude's sandbox: LLVM 21.1.6 and bender
+  0.28.2 from their GitHub releases, Python 3.12 venv with the image's
+  requirements): exit 0, no warning, 0 errors, every counter 0 (the cluster
+  registers store them but nothing counts).
+
+  | Case | issue | done |
+  |---|---|---|
+  | idle | 3 | 6 |
+  | l2l1 1x64 | 16 | 119 |
+  | l2l1 1x256 | 16 | 119 |
+  | l2l1 1x800 | 16 | 121 |
+  | l2l1 1x4096 | 16 | 915 |
+  | l2l1 1x8192 | 16 | 1939 |
+  | l2l1 2x800 | 25 | 222 |
+  | l2l1 4x800 | 43 | 622 |
+  | l1l2 1x800 | 16 | 21 |
+
+- Read against the model as it is: a copy issues in 16 cycles and each
+  further copy adds 9; up to 800 B the 100-cycle DRAM latency dominates;
+  from 4 KiB to 8 KiB `done` grows by 1024 cycles, 4 B per cycle, the DRAM's
+  `width_log2=2` (why one 4 KiB copy takes 915 and not about 1140 is not
+  read yet); each extra 800 B copy adds about 200 cycles for the same
+  reason; L1 to L2 ignores the DRAM latency, as `idma_be_axi.cpp` does for
+  writes.
+
+### SG2 step 3: the RTL run
+
+- 2026-10-13. Author's run of P2's ELF on snax_cluster's RTL built from
+  `snax_alu_cluster_old.hjson` at `b2672f8`. Bender took the iDMA fork at
+  `e859ffc`, the commit read in step 1. `Number of errors: 0`.
+
+  | Case | issue | done | busy | r | w | ar_stall | w_stall | r_stall |
+  |---|---|---|---|---|---|---|---|---|
+  | idle | 6 | 12 | 0 | 0 | 0 | 0 | 67 | 0 |
+  | l2l1 1x64 | 18 | 34 | 14 | 1 | 1 | 0 | 88 | 0 |
+  | l2l1 1x256 | 18 | 39 | 17 | 4 | 4 | 0 | 90 | 0 |
+  | l2l1 1x800 | 18 | 44 | 26 | 13 | 13 | 0 | 86 | 0 |
+  | l2l1 1x4096 | 18 | 99 | 77 | 64 | 64 | 0 | 90 | 0 |
+  | l2l1 1x8192 | 18 | 159 | 141 | 128 | 128 | 0 | 86 | 0 |
+  | l2l1 2x800 | 28 | 59 | 39 | 26 | 26 | 0 | 88 | 0 |
+  | l2l1 4x800 | 48 | 84 | 65 | 52 | 52 | 0 | 87 | 0 |
+  | l1l2 1x800 | 18 | 39 | 20 | 13 | 13 | 0 | 81 | 0 |
+
+- `dma_trace_00001_00000.log` (the iDMA's own trace, hart 1) is kept by
+  the author; 814 lines, one per cycle with backend activity.
+
+### SG2 step 4: what the RTL does
+
+- 2026-10-13. Read from step 3's numbers and trace. The trace's busy
+  windows equal the `busy` counter in every case (two runs per case).
+  In the trace, `bus.axi_rsp_valid` is a read beat and `bus.axi_req_valid`
+  a write beat.
+- Per copy, counting from the cycle the backend takes it: the read request
+  in cycle 1; the first read beat `L_rd` cycles later (11 from DRAM, 5 from
+  L1); then one read beat per cycle, with no gap between bursts or between
+  back-to-back copies; each write beat one cycle after its read beat; busy
+  drops after the last write beat; the write response (`rsp_valid`) comes 5
+  cycles later for an L1 write and 11 for a DRAM write. So
+  `busy = L_rd + N_beats + 2`, with `N_beats` the 64 B beats the copy
+  touches (800 B is 13, also at +800); exact for all eight copy cases.
+- 8 KiB: both 4 KiB bursts are requested at the start and the beats run on
+  through the page boundary, so the burst split costs nothing. 4x800: the
+  backend takes a copy every 10 cycles, the issue cost per copy, and the
+  beats stay continuous.
+- `snrt_dma_wait_all` polls `busy_o`, which drops before the write
+  response: software never waits for it.
+- `ar_stall` and `r_stall` are 0 in every case: the testbench's 2-read
+  limit and the 3-beat buffer never bite here. `w_stall` counts cycles in
+  which the memory side is ready, whether a copy runs or not (67 when
+  idle); it says nothing about a copy.
+- Outside the engine, `done - busy` is 18 to 22 cycles: issue and the
+  poll. One copy issues in 18 cycles, each further copy adds 10 (GVSoC
+  today: 16 and 9). The idle case (6 and 12, GVSoC 3 and 6) is the cost of
+  `mcycle` and `dmstati` in the core, an SG5 matter.
+- Against GVSoC today (step 2): the DRAM is 100 cycles away there against
+  about 11 for a first beat, and 4 B per cycle against 64; GVSoC moves L1
+  to L2 without the DRAM latency. These set P4's values; P5 keeps only what
+  P4's run leaves.
+
+### SG2 step 5: P3, the perf counters
+
+- 2026-10-13. GVSoC's cluster registers count four events of
+  `snitch_cluster_peripheral.sv`: `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and
+  `DMA_BUSY`. Accesses to the perf range (0x000 to 0x17F) are handled before
+  the generated regmap: enable, hart select and a 48-bit value per counter,
+  8 bytes apart, any access inside one register. A counter counts the event
+  of its lowest enable bit, as the RTL's if-else chain does; the other
+  events count nothing. `CYCLE` and `DMA_BUSY` are brought up to date from
+  timestamps before any change and any read, with no per-cycle event. The
+  RTL's one-cycle register on the events is not modelled; it changes a
+  count only when an event crosses the moment a counter starts or stops.
+- The iDMA frontend drives three wires: `busy`, from the transfer IDs as
+  `dmstat 2` returns them, and `r_beats` / `w_beats`, the 64 B beats of
+  each copy when it is queued (`beat_size`, a `SnitchDma` property). A beat
+  never straddles a 4 KiB page, so the sum per copy equals the RTL's sum
+  per burst. Unbound wires are not driven, so other users of `SnitchDma`
+  (magia) are unchanged. `SnitchCluster` binds them, except with Spatz,
+  whose cluster registers are another model.
+- Results in Claude's sandbox: `dma-timing` on `snax_alu` exits 0 with 0
+  errors; `issue` and `done` as in step 2; `r` and `w` equal the RTL's
+  beats in every case; `busy` is the model's engine time today (103, 103,
+  106, 900, 1924, 206, 606 and 6 for the copy cases, RTL 14 to 141).
+  `snax-csr` gives four lines of `0 errors`; `snax-alu` still ends with
+  `Accelerator Cycles: 0` and 100 errors. The 17 plain tests (9-core
+  build) exit 0 on `snitch`; `perf_cnt` now prints `End: 1531 cycles`
+  (0 before) and still 0 for its DMA byte counters, which count
+  `DMA_AR_BW` and `DMA_AW_BW`.
+
+### SG2 step 6: P4, the parameters
+
+- 2026-10-13. `snax_alu.py` sets what step 4 measured, through two new
+  arch values: `ClusterArch(dma=...)` replaces `SnitchCluster`'s `SnitchDma`
+  defaults (`tcdm_width` 64, `transfer_queue_size` 3, `burst_queue_size` 3,
+  for the RTL's 512-bit beat, `dma_req_fifo_depth` and
+  `dma_axi_req_fifo_depth`), and `Soc`'s `hbm_latency` (default 100) is 6.
+  The DRAM memory is 64 B per cycle (`width_log2=6`). Targets that set
+  neither keep today's values.
+- The 6 is only the DRAM's share of a read's latency: 11 cycles to a first
+  beat from DRAM against 5 from L1. The 5 common to both are the wide
+  crossbar's cuts and the AXI-to-memory conversion, which belong to the DMA
+  model (P5). The cores' fetches and loads from DRAM take the same chip
+  mapping, so they now see 6 cycles there too; their RTL latency is not
+  measured (SG5).
+- Results in Claude's sandbox: `dma-timing` exits 0 with 0 errors and no
+  warning; `r` and `w` as in step 5.
+
+  | Case | busy | RTL | done | RTL |
+  |---|---|---|---|---|
+  | idle | 0 | 0 | 6 | 12 |
+  | l2l1 1x64 | 9 | 14 | 25 | 34 |
+  | l2l1 1x256 | 12 | 17 | 27 | 39 |
+  | l2l1 1x800 | 21 | 26 | 37 | 44 |
+  | l2l1 1x4096 | 72 | 77 | 87 | 99 |
+  | l2l1 1x8192 | 136 | 141 | 151 | 159 |
+  | l2l1 2x800 | 34 | 39 | 50 | 59 |
+  | l2l1 4x800 | 60 | 65 | 76 | 84 |
+  | l1l2 1x800 | 15 | 20 | 31 | 39 |
+
+- `busy` is 5 under the RTL in every copy case: GVSoC now gives
+  `busy = (L_rd - 5) + N_beats + 2`, so the beat rate, the page crossing,
+  the back-to-back copies and the 2 fixed cycles already match; only the
+  common read path is missing. `done - busy` is 15 to 16 here against 18
+  to 22 on the RTL: issue and polling in the core, as the idle case (SG5).
+- `snax-csr` gives four lines of `0 errors`; `snax-alu` is unchanged; the
+  17 plain tests (9-core build) exit 0 on `snitch`, `perf_cnt` printing
+  what it did after P3.
+
+### SG2 step 7: P5, the DMA's read path
+
+- 2026-10-13. The 5 cycles a DMA read waits on the RTL before its first
+  beat, from L1 and DRAM alike (the wide crossbar's cuts and the
+  AXI-to-memory conversion), are a `SnitchDma` argument, `read_latency`,
+  set to 5 by `snax_alu.py`; DRAM reads add `hbm_latency` (6) on top, 11 in
+  all. Default 0, and the backends read it only when present, so the other
+  users of `pulp/idma/` (`reg_dma`, `cheshire_dma`, `pulp_open_dma`, magia's
+  `SnitchDma`) are unchanged.
+- AXI reads (`idma_be_axi.cpp`): added to each burst's latency. Bursts are
+  sent ahead (3 in flight), so back-to-back bursts overlap it, as on the
+  RTL. L1 reads (`idma_be_tcdm.cpp`): this side keeps one line request open,
+  so a per-line latency would be paid on every line; it is paid only when a
+  line does not follow the previous one on the next cycle, once per read
+  stream.
+- Results in Claude's sandbox: `dma-timing` exits 0 with 0 errors and no
+  warning; `busy` equals the RTL in all eight copy cases.
+
+  | Case | busy | RTL | done | RTL |
+  |---|---|---|---|---|
+  | idle | 0 | 0 | 6 | 12 |
+  | l2l1 1x64 | 14 | 14 | 29 | 34 |
+  | l2l1 1x256 | 17 | 17 | 33 | 39 |
+  | l2l1 1x800 | 26 | 26 | 41 | 44 |
+  | l2l1 1x4096 | 77 | 77 | 93 | 99 |
+  | l2l1 1x8192 | 141 | 141 | 157 | 159 |
+  | l2l1 2x800 | 39 | 39 | 54 | 59 |
+  | l2l1 4x800 | 65 | 65 | 80 | 84 |
+  | l1l2 1x800 | 20 | 20 | 35 | 39 |
+
+- The rest of `done` is issue and polling in the core: 15 to 16 cycles
+  here, 18 to 22 on the RTL, a gap of 2 to 6 per case; the idle case (6
+  against 12) shows the same core cost. SG5's.
+- `snax-csr` gives four lines of `0 errors`; `snax-alu` is unchanged; the
+  17 plain tests (9-core build) exit 0 on `snitch`, `dma_simple` and
+  `perf_cnt` printing what they did after P4.
+
+### SG2 step 8: SG2 closed
+
+- 2026-10-13. All steps done; acceptance met: `dma-timing` runs on the RTL
+  and on `snax_alu`, its cycles per case are logged on both sides (steps 3
+  and 7) and the gap is explained: the DMA's engine time equals the RTL in
+  all eight copy cases, and `done` is 2 to 6 cycles under it, the core's
+  issue and polling (SG5).
+- Settled (the list is in `docs/plans/SG2.md` under "Decided"): GVSoC's
+  iDMA model kept and fitted by measurement; the read latency split into
+  the DRAM's 6 cycles (`hbm_latency`) and the DMA's 5 (`read_latency`); the
+  target's DMA values through `ClusterArch(dma=...)`; the cluster's perf
+  counters for `CYCLE`, `DMA_BUSY`, `DMA_R_DONE`, `DMA_W_DONE`. In
+  snax-forge: D121.
+- Upstream files changed in SG2: the iDMA frontend and backends
+  (`pulp/pulp/idma/fe/idma_fe_xdma.*`, `be/idma_be_axi.*`,
+  `be/idma_be_tcdm.*`), `pulp/pulp/idma/snitch_dma.py`, the cluster
+  registers (`cluster_registers.cpp`, `.py`), `snitch_cluster.py` and the
+  chip's `snitch.py`; rows in `UPSTREAM.md`.
+- Next: SG3, the streamer, planned in its own round from the list under
+  "SG3 starts from" in `docs/plans/SG2.md`.

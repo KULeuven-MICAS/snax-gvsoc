@@ -114,4 +114,7 @@ private:
 
     // Width in bytes of AXI burst.
     int burst_size;
+    // SNAX: cycles the DMA's own read path adds before a burst's data is there, on top of
+    // the latency the interconnect returns (property read_latency, 0 when absent)
+    uint64_t read_latency;
 };

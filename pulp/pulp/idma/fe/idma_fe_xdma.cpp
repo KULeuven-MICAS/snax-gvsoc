@@ -46,6 +46,14 @@ IDmaFeXdma::IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me)
 
     // Declare offload master interface for granting blocked transfers
     idma->new_master_port("offload_grant", &this->offload_grant_itf, this);
+
+    // SNAX: perf event wires and the beat size they count in
+    idma->new_master_port("busy", &this->busy_itf, this);
+    idma->new_master_port("r_beats", &this->r_beats_itf, this);
+    idma->new_master_port("w_beats", &this->w_beats_itf, this);
+    js::Config *beat_size = idma->get_js_config()->get("beat_size");
+    this->beat_size = beat_size ? beat_size->get_int() : 64;
+    this->busy = false;
 }
 
 
@@ -131,6 +139,7 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
     // Allocate transfer ID
     uint32_t transfer_id = this->next_transfer_id.get();
     this->next_transfer_id.set(transfer_id + 1);
+    this->update_busy();
 
     this->trace.msg(vp::Trace::LEVEL_TRACE, "Allocated transfer ID (id: %d)\n", transfer_id);
 
@@ -148,6 +157,8 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
         "size: %llx, src_stride: %llx, dst_stride: %llx, reps: %llx, config: %llx)\n",
         transfer_id, transfer->src, transfer->dst, transfer->size, transfer->src_stride,
         transfer->dst_stride, transfer->reps, transfer->config);
+
+    this->send_beats(transfer);
 
     // In case size is 0 or reps is 0 with 2d transfer, directly terminate the transfer.
     // This could be done few cycles after to better match HW.
@@ -183,7 +194,52 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
 void IDmaFeXdma::ack_transfer(IdmaTransfer *transfer)
 {
     this->completed_id.inc(1);
+    this->update_busy();
     delete transfer;
+}
+
+void IDmaFeXdma::update_busy()
+{
+    bool busy = this->next_transfer_id.get() - this->completed_id.get() != 1;
+    if (busy != this->busy)
+    {
+        this->busy = busy;
+        if (this->busy_itf.is_bound())
+        {
+            this->busy_itf.sync(busy);
+        }
+    }
+}
+
+uint64_t IDmaFeXdma::beats(uint64_t base, uint64_t size)
+{
+    if (size == 0)
+    {
+        return 0;
+    }
+    return (base + size - 1) / this->beat_size - base / this->beat_size + 1;
+}
+
+void IDmaFeXdma::send_beats(IdmaTransfer *transfer)
+{
+    // A 2D copy is reps rows of size bytes; a 1D copy is one row. Beats never straddle a
+    // 4 KiB page, so the sum over rows equals the sum over the bursts the RTL emits.
+    bool is_2d = (transfer->config >> 1) & 1;
+    uint64_t rows = is_2d ? transfer->reps : 1;
+    uint64_t r_beats = 0, w_beats = 0;
+    for (uint64_t i = 0; i < rows; i++)
+    {
+        r_beats += this->beats(transfer->src + i * transfer->src_stride, transfer->size);
+        w_beats += this->beats(transfer->dst + i * transfer->dst_stride, transfer->size);
+    }
+    if (r_beats > 0 && this->r_beats_itf.is_bound())
+    {
+        this->r_beats_itf.sync((int)r_beats);
+    }
+    if (w_beats > 0 && this->w_beats_itf.is_bound())
+    {
+        this->w_beats_itf.sync((int)w_beats);
+    }
 }
 
 
@@ -213,4 +269,8 @@ void IDmaFeXdma::update()
 
 void IDmaFeXdma::reset(bool active)
 {
+    if (active)
+    {
+        this->busy = false;
+    }
 }

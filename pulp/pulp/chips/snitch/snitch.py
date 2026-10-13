@@ -220,6 +220,9 @@ class Soc(gvsoc.systree.Component):
 
         # Spatz RTL benchmarks do HBM accesses with zero latency memory
         hbm_latency = 0 if arch.use_spatz else 100
+        # SNAX: a target may set its own DRAM latency
+        if getattr(arch, 'hbm_latency', None) is not None:
+            hbm_latency = arch.hbm_latency
 
         #
         # Components

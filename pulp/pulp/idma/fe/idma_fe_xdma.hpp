@@ -54,6 +54,12 @@ private:
     uint32_t enqueue_copy(uint32_t config, uint32_t size, bool &granted);
     // Return status
     uint32_t get_status(uint32_t status);
+    // Drive the busy wire from the transfer IDs, the state dmstat 2 returns (SNAX)
+    void update_busy();
+    // Send the beats a copy reads and writes on the beat wires (SNAX)
+    void send_beats(IdmaTransfer *transfer);
+    // Number of AXI beats the byte range [base, base + size) touches (SNAX)
+    uint64_t beats(uint64_t base, uint64_t size);
 
     // Pointer to middle-end
     IdmaTransferConsumer *me;
@@ -82,4 +88,14 @@ private:
     vp::Signal<bool> do_transfer_grant;
     // In case a transfer was blocked, gives the transfer which was blocked
     IdmaTransfer *stalled_transfer;
+    // SNAX: the cluster's DMA perf events (snitch_cluster_peripheral.sv). The busy wire
+    // follows dmstat 2; the beat wires carry the beats of a copy when it is queued, the
+    // sum of what the RTL's R and W handshakes count. Unbound wires are not driven.
+    vp::WireMaster<bool> busy_itf;
+    vp::WireMaster<int> r_beats_itf;
+    vp::WireMaster<int> w_beats_itf;
+    // Last value sent on the busy wire
+    bool busy;
+    // Bytes per AXI beat (64 for the 512-bit DMA)
+    uint64_t beat_size;
 };

@@ -38,6 +38,11 @@ class SnitchDma(gvsoc.systree.Component):
         Size of the local area.
     tcdm_width: int
         Width of the local interconnect, in bytes.
+    beat_size: int
+        Bytes per AXI beat, the unit of the beat counts on o_R_BEATS / o_W_BEATS (SNAX).
+    read_latency: int
+        Cycles the DMA's own read path adds before the first data of a read stream, on top of
+        the latency the memory side returns (SNAX). 0 keeps the model as it was.
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str,
@@ -46,7 +51,9 @@ class SnitchDma(gvsoc.systree.Component):
             burst_size: int=0,
             loc_base: int=0,
             loc_size: int=0,
-            tcdm_width: int=0):
+            tcdm_width: int=0,
+            beat_size: int=64,
+            read_latency: int=0):
 
         super().__init__(parent, name)
 
@@ -66,6 +73,8 @@ class SnitchDma(gvsoc.systree.Component):
             "loc_base": loc_base,
             "loc_size": loc_size,
             "tcdm_width": tcdm_width,
+            "beat_size": beat_size,
+            "read_latency": read_latency,
         })
 
     def i_OFFLOAD(self) -> gvsoc.systree.SlaveItf:
@@ -118,3 +127,19 @@ class SnitchDma(gvsoc.systree.Component):
         """
         self.itf_bind('tcdm_read', itf, signature='io')
         self.itf_bind('tcdm_write', itf, signature='io')
+
+    def o_BUSY(self, itf: gvsoc.systree.SlaveItf):
+        """Binds the busy output (SNAX).
+
+        High while a transfer is queued or running, the state dmstat 2 returns, as the
+        RTL's busy_o that the cluster's DMA_BUSY perf counter counts.
+        """
+        self.itf_bind('busy', itf, signature='wire<bool>')
+
+    def o_R_BEATS(self, itf: gvsoc.systree.SlaveItf):
+        """Binds the read beat output (SNAX): the AXI read beats of each queued copy."""
+        self.itf_bind('r_beats', itf, signature='wire<int>')
+
+    def o_W_BEATS(self, itf: gvsoc.systree.SlaveItf):
+        """Binds the write beat output (SNAX): the AXI write beats of each queued copy."""
+        self.itf_bind('w_beats', itf, signature='wire<int>')

@@ -57,3 +57,13 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/snitch/snitch_core.py` | `Snitch.o_SNAX_CSR` binds that port | SG1 P4 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `snax_acc`; `SnitchCluster` builds each accelerator and binds it to its core's `snax_csr` port | SG1 P5 |
 | `core/models/cpu/iss/src/snitch/snitch.cpp` | `SnaxCsr::handle()` tests `rd = x0` against `ISS_NB_REGS`, the index the decoder gives it | SG1 P5 |
+| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | Wires `busy` (the state `dmstat 2` returns) and `r_beats` / `w_beats` (the AXI beats of each queued copy); unbound wires are not driven | SG2 P3 |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `beat_size` (64) and gains `o_BUSY`, `o_R_BEATS`, `o_W_BEATS` | SG2 P3 |
+| `pulp/pulp/snitch/snitch_cluster/cluster_registers.cpp` | The perf counters of `snitch_cluster_peripheral.sv` count `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and `DMA_BUSY`; the other events count nothing | SG2 P3 |
+| `pulp/pulp/snitch/snitch_cluster/cluster_registers.py` | `ClusterRegisters` gains `i_DMA_BUSY`, `i_DMA_R_BEATS`, `i_DMA_W_BEATS` | SG2 P3 |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` binds the iDMA's wires to the cluster registers (not with Spatz) | SG2 P3 |
+| `pulp/pulp/chips/snitch/snitch.py` | `Soc` takes `hbm_latency` from the arch when a target sets it; the default stays 100 (0 with Spatz) | SG2 P4 |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `dma`, `SnitchDma` arguments that replace the cluster's defaults | SG2 P4 |
+| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | `read_latency` (0 when absent) added to each read burst's latency | SG2 P5 |
+| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `read_latency` (0 when absent) paid once per read stream: a line read on the cycle after the previous one does not pay it again | SG2 P5 |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) | SG2 P5 |

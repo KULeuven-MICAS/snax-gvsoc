@@ -75,8 +75,9 @@ if os.environ.get('USE_GVRUN') is None:
             self.use_spatz = properties.use_spatz
             self.spatz_nb_lanes = properties.spatz_nb_lanes
             self.isa = properties.isa
-            # SNAX accelerators, see the run-time ClusterArch below.
+            # SNAX accelerators and DMA arguments, see the run-time ClusterArch below.
             self.snax_acc = getattr(properties, 'snax_acc', None)
+            self.dma = getattr(properties, 'dma', None)
 
         class Tcdm:
             def __init__(self, base, nb_masters):
@@ -92,7 +93,8 @@ else:
     class ClusterArch(Tree):
         def __init__(self, parent, name, base, first_hartid, auto_fetch=False,
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
-                core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None):
+                core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None,
+                dma=None):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -133,6 +135,9 @@ else:
             # component is built in the cluster and bound to that core's snax_csr port
             # through its i_INPUT(). None for a cluster without accelerators.
             self.snax_acc = snax_acc
+            # SNAX: SnitchDma arguments that replace the cluster's defaults, e.g.
+            # {'tcdm_width': 64}. None keeps them all.
+            self.dma = dma
 
         class Tcdm(Tree):
             def __init__(self, parent, name, base, nb_masters):
@@ -268,8 +273,11 @@ class SnitchCluster(gvsoc.systree.Component):
             cores[core_id].o_SNAX_CSR(acc.i_INPUT())
 
         # Cluster DMA
+        # SNAX: the arch may replace these defaults (ClusterArch's dma)
+        dma_args = dict(tcdm_width=4096, transfer_queue_size=8, burst_queue_size=24)
+        dma_args.update(getattr(arch, 'dma', None) or {})
         idma = SnitchDma(self, 'idma', loc_base=arch.tcdm.area.base, loc_size=arch.tcdm.area.size,
-            tcdm_width=4096, transfer_queue_size=8, burst_queue_size=24)
+            **dma_args)
 
         #
         # Bindings
@@ -380,6 +388,12 @@ class SnitchCluster(gvsoc.systree.Component):
         # Cluster DMA
         idma.o_AXI(wide_axi.i_INPUT())
         idma.o_TCDM(tcdm.i_DMA_INPUT())
+        # SNAX: the DMA's perf events into the cluster's perf counters (not modelled by the
+        # Spatz cluster registers)
+        if not arch.use_spatz:
+            idma.o_BUSY(cluster_registers.i_DMA_BUSY())
+            idma.o_R_BEATS(cluster_registers.i_DMA_R_BEATS())
+            idma.o_W_BEATS(cluster_registers.i_DMA_W_BEATS())
 
         # Zero mem
         wide_axi.o_MAP(zero_mem.i_INPUT(), base=arch.zero_mem.base, size=arch.zero_mem.size, rm_base=True)
