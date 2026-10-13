@@ -11,6 +11,7 @@ stay there.
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
 | snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
+| common_cells, read for the TCDM arbiter (SG3) | `v1.40.0` (`1281545`); the RTL build's commit is checked in SG3 step 4 |
 
 ## Log
 
@@ -633,3 +634,37 @@ stay there.
   chip's `snitch.py`; rows in `UPSTREAM.md`.
 - Next: SG3, the streamer, planned in its own round from the list under
   "SG3 starts from" in `docs/plans/SG2.md`.
+
+### SG3 step 1: P1, the plan
+
+- 2026-10-13. `docs/plans/SG3.md` written: a streamer model with the
+  hjson's parameter names, a crossbar that arbitrates the 12 SNAX ports per
+  bank as the plain interconnect does, a test datapath in the ALU's place,
+  and a reader-only timing program run on both sides.
+- Read from source, not run (snax_cluster `b2672f8`, common_cells
+  `v1.40.0`; the values are in SG3.md under "The streamer on the RTL" and
+  "The path around it"):
+  - The streamer's CSRs are 5 per mover (pointer low and high, spatial
+    stride, temporal bound, temporal stride), the start CSR, then `busy`
+    and the counter: 960 to 977. The ALU's are 978 to 982, reached through
+    a combinational mux that subtracts 18.
+  - The start write waits only while the streamer is busy; the core feels
+    it only when the 2-deep offload cut is full or a later CSR read queues
+    behind it. `snax-alu` starts an idle streamer.
+  - A reader is done at its last grant, with data still buffered, so a
+    reader-only run ends without the ALU when each lane reads at most
+    `fifo_depth` (8) beats and the writer's bound is 0.
+  - The plain interconnect is one `rr_arb_tree` per bank (`FairArb`,
+    `LockIn`, no priority), not the sparse interconnect's arbiter that
+    SNAX-MODEL copied (D31 in snax-forge). Read data comes one cycle after
+    the grant.
+  - On the RTL `csrrw` only writes and `csrrs` / `csrrc` only read; D120
+    reads before a write when `rd` is not `x0`. `snax-alu` does not hit
+    this; noted for SG5.
+- GVSoC today: `L1_interleaver` does not arbitrate; a second access to a
+  bank in a cycle gets one cycle of latency from the bank's cyclestamp, in
+  call order. A sync `Router` with bandwidth 0 adds no latency, so a CSR
+  access through it passes in its cycle (checked by run in P2).
+- `snax-alu`'s buffers start at banks 0 (A), 4 (B) and 8 (O); the writer
+  can meet a reader in the same banks when the readers run two beats ahead.
+  Not run yet; `snax-stream` shows it in P5.
