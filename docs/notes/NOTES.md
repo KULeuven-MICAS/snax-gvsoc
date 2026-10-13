@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the probe and the RTL reference | `8ebd42299c1db2ab26006f68f76896097b64b278` (2026-09-16) |
+| snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
 
 ## Log
 
@@ -176,3 +176,24 @@ stay there.
   left is generating it from the hjson (for snax_alu's 2-core cluster with
   `rv32ima` cores, for one), and recording cycles per test against the RTL.
 - SG2 starts from the list under "SG2 starts from" in `docs/plans/SG0.md`.
+
+### SG1 step 1: P1, the plan
+
+- 2026-10-13. `docs/plans/SG1.md` written: SG1 builds the `snax_alu`
+  target from `cfg/snax_alu_cluster_old.hjson` by hand and adds the CSR
+  port; the DMA (SG2), the streamer (SG3), the ALU (SG4) and the cycle
+  comparison (SG5) follow.
+- The snax_cluster pin moves to `b2672f8`, which adds
+  `snax_alu_cluster_old.hjson`: the `snax_alu` cluster with the plain
+  interconnect (`sparse_interconnect: false`, 12 narrow TCDM ports). The
+  sparse interconnect comes after SG5.
+- The reference: `snax-alu` on the RTL built from that file prints
+  `Accelerator Done!`, `Accelerator Cycles: 25` and `Number of errors: 0`
+  (author's run). 25 is `LOOP_ITER` (`LENGTH` 100 over 4 lanes): the ALU's
+  counter is set to 1 by the CSR write and counts each busy cycle up to the
+  last output, so 25 is one output per cycle. Neither number depends on the
+  data values.
+- At `b2672f8` snax_cluster's own build does not make the app for the old
+  file: `sw/Makefile` names `snax_multi_alu_cluster_old.hjson`, and
+  `sw/apps/Makefile` has no branch for it. The copy in step 2 does not need
+  either.
