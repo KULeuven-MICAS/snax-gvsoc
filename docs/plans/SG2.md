@@ -73,7 +73,7 @@ last start and after `snrt_dma_wait_all`; then read the counters.
 | 5 | P3: counting in GVSoC's cluster registers (`CYCLES`, `DMA_BUSY`, read and write beats) and a busy signal out of the iDMA model; the program prints counters on both sides | done 2026-10-13 |
 | 6 | P4: parameters from step 4, through arch values: the DRAM's 6 of the 11 cycles to a first beat (`hbm_latency`), DRAM 64 B per cycle, `tcdm_width` 64 B, request queue 3, bursts in flight 3. `hbm_latency` also moves the cores' DRAM fetches and loads, which are not measured (SG5). `busy` ends 5 cycles under the RTL in every case | done 2026-10-13 |
 | 7 | P5: the 5-cycle read path common to L1 and DRAM (the wide crossbar's cuts and the AXI-to-memory conversion) as one read latency in the iDMA model, paid once per burst, the beats after it one per cycle; the L1 read side, which keeps one line request open, pipelined so it is not paid per line. Target: `busy` equal to the RTL in all eight copy cases. Gap per case logged | done 2026-10-13 |
-| 8 | P6: SG2 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | |
+| 8 | P6: SG2 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | done 2026-10-13 |
 
 ## Decided
 
@@ -83,4 +83,27 @@ last start and after `snrt_dma_wait_all`; then read the counters.
   testbench's memory. Core costs around the DMA (issue, polling) are SG5's.
 - The DRAM's share of a DMA read's latency (6 cycles) is a target value
   (`hbm_latency`); the share common to L1 and DRAM (5 cycles) belongs to
-  the DMA model (P5).
+  the DMA model (`read_latency`, P5).
+- GVSoC's iDMA model is kept and fitted to the RTL by measurement, not
+  replaced: a target sets the DMA through `ClusterArch(dma=...)` and the
+  DRAM through `hbm_latency`; other targets keep upstream's values (D121 in
+  snax-forge).
+- The cluster's perf counters count `CYCLE`, `DMA_BUSY`, `DMA_R_DONE` and
+  `DMA_W_DONE`, so the same program reads the same counters on both sides.
+- Result: the DMA's engine time (`busy`) equals the RTL in all eight copy
+  cases of `dma-timing`; `done` is 2 to 6 cycles under the RTL, all of it
+  issue and polling in the core.
+
+## SG3 starts from
+
+- `snax-alu` starts its two copies (2 x 800 B, `busy` 39 cycles) and goes
+  to the barrier without `snrt_dma_wait_all`; the barrier does not wait for
+  the DMA. The compute core starts the streamers about 1000 cycles of CSR
+  setup later, so the data is in L1 by then on both sides; a streamer model
+  that reads earlier would see stale data.
+- `dma-timing` is the DMA's regression: its expected lines are in the
+  notes (SG2 step 7). Rerun it after any change to the iDMA, the cluster or
+  `snax_alu.py`.
+- The core costs around the DMA (`mcycle`, `dmstati`: 3 against 6 cycles;
+  issue and polling 15 to 16 against 18 to 22) are SG5's.
+- The housekeeping pass over SG1's and SG2's code comes after SG5.

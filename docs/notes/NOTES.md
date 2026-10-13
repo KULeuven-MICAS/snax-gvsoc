@@ -612,3 +612,24 @@ stay there.
 - `snax-csr` gives four lines of `0 errors`; `snax-alu` is unchanged; the
   17 plain tests (9-core build) exit 0 on `snitch`, `dma_simple` and
   `perf_cnt` printing what they did after P4.
+
+### SG2 step 8: SG2 closed
+
+- 2026-10-13. All steps done; acceptance met: `dma-timing` runs on the RTL
+  and on `snax_alu`, its cycles per case are logged on both sides (steps 3
+  and 7) and the gap is explained: the DMA's engine time equals the RTL in
+  all eight copy cases, and `done` is 2 to 6 cycles under it, the core's
+  issue and polling (SG5).
+- Settled (the list is in `docs/plans/SG2.md` under "Decided"): GVSoC's
+  iDMA model kept and fitted by measurement; the read latency split into
+  the DRAM's 6 cycles (`hbm_latency`) and the DMA's 5 (`read_latency`); the
+  target's DMA values through `ClusterArch(dma=...)`; the cluster's perf
+  counters for `CYCLE`, `DMA_BUSY`, `DMA_R_DONE`, `DMA_W_DONE`. In
+  snax-forge: D121.
+- Upstream files changed in SG2: the iDMA frontend and backends
+  (`pulp/pulp/idma/fe/idma_fe_xdma.*`, `be/idma_be_axi.*`,
+  `be/idma_be_tcdm.*`), `pulp/pulp/idma/snitch_dma.py`, the cluster
+  registers (`cluster_registers.cpp`, `.py`), `snitch_cluster.py` and the
+  chip's `snitch.py`; rows in `UPSTREAM.md`.
+- Next: SG3, the streamer, planned in its own round from the list under
+  "SG3 starts from" in `docs/plans/SG2.md`.
