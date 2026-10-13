@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 import gvsoc.runner
 import pulp.snitch.snitch_core as iss
@@ -232,7 +233,9 @@ class SnitchCluster(gvsoc.systree.Component):
             else:
                 cores.append(iss.Snitch(self, f'pe{core_id}', isa=arch.isa,
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,
-                    core_id=arch.first_hartid + core_id, htif=True, binaries=binaries))
+                    core_id=arch.first_hartid + core_id, htif=True, binaries=binaries,
+                    snax_cluster_base_addr=arch.base, snax_cluster_nb_cores=arch.nb_core,
+                    snax_cluster_core_idx=core_id))
 
                 fp_cores.append(iss.Snitch_fp_ss(self, f'fp_ss{core_id}', isa=arch.isa,
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,

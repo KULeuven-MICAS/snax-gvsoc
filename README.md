@@ -47,6 +47,37 @@ Every new container needs `source sourceme.sh` again. Adding
 `--trace=pe0/insn` before `run` prints core 0's instructions: 484 lines, from
 cycle 7909 to 23862.
 
+## Running snax_cluster's tests
+
+Programs are built with snax_cluster's own flow, in a snax_cluster checkout
+beside this repo; only the ELF files are run here. Clone it next to this
+repo, at the commit in `docs/notes/NOTES.md`, with its submodules:
+
+    git clone https://github.com/KULeuven-MICAS/snax_cluster.git ../snax_cluster
+    git -C ../snax_cluster checkout 8ebd42299c1db2ab26006f68f76896097b64b278
+    git -C ../snax_cluster submodule update --init --recursive
+
+Start the container one folder up, so it sees both repos, then go into this
+one:
+
+    cd .. && podman run --rm -it -v "$PWD":"$PWD" -w "$PWD" ghcr.io/kuleuven-micas/snax-gvsoc:main
+    cd snax-gvsoc
+
+Build snax_cluster's plain tests (the first build needs internet: bender
+fetches a dependency) and run them all; each prints `exit 0`, and
+`printf_simple` prints `Hello, World!` once per core:
+
+    make -C ../snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snitch_cluster.hjson
+    source sourceme.sh
+    mkdir -p build/work
+    T=../snax_cluster/target/snitch_cluster/sw/tests/build
+    for e in $T/*.elf; do
+      n=$(basename $e .elf)
+      gvrun --target snitch --work-dir build/work/$n --param chip/soc/binary=$PWD/$e run > build/work/$n.log 2>&1
+      echo "$n exit $?"
+    done
+    cat build/work/printf_simple.log
+
 ## License
 
 Apache 2.0, see `LICENSE` and `UPSTREAM.md`.

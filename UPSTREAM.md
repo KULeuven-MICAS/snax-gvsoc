@@ -46,3 +46,7 @@ Every upstream file we edit gets one comment line near its top,
 | `README.md` | Replaced with a short SNAX-GVSoC README | SG0 P1 |
 | `.github/workflows/build.yml` | Removed: upstream CI that builds every target on each push | SG0 P1 |
 | `.github/CODEOWNERS` | Removed: named the upstream maintainer as owner of every file | SG0 P1 |
+| `core/models/cpu/iss/include/cores/snitch/class.hpp` | Three CSR registers for snax_cluster's 0xBC1 to 0xBC3 | SG0 P3 |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | 0xBC1 to 0xBC3 declared read-only, values from the core's properties | SG0 P3 |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes the cluster base, core count and core index as properties | SG0 P3 |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | Passes them to each Snitch core | SG0 P3 |

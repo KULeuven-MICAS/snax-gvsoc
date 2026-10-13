@@ -19,6 +19,7 @@
  * Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
  *          Kexin Li, ETH Zurich (likexi@ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include "cpu/iss/include/iss.hpp"
 #include <string.h>
@@ -39,6 +40,20 @@ Iss::Iss(IssWrapper &top)
     this->csr_ssr.register_callback(std::bind(&Iss::ssr_access, this, std::placeholders::_1,
         std::placeholders::_2));
     this->csr.declare_csr(&this->csr_fmode, "fmode", 0x800);
+
+    // snax_cluster's start-up code reads its cluster base address (0xBC1 low,
+    // 0xBC2 high) and {core count, core index} (0xBC3) from these CSRs, which
+    // the RTL makes read-only: a write mask of 0 ignores writes as it does.
+    js::Config *config = this->top.get_js_config();
+    iss_reg_t snax_base = (uint32_t)config->get_child_int("snax_cluster_base_addr");
+    iss_reg_t snax_core_id = ((uint32_t)config->get_child_int("snax_cluster_nb_cores") << 16)
+        | ((uint32_t)config->get_child_int("snax_cluster_core_idx") & 0xFFFF);
+    this->csr.declare_csr(&this->snax_base_addr_l, "snax_base_addr_l", 0xBC1, snax_base, 0);
+    this->csr.declare_csr(&this->snax_base_addr_h, "snax_base_addr_h", 0xBC2, 0, 0);
+    this->csr.declare_csr(&this->snax_cluster_core_id, "snax_cluster_core_id", 0xBC3, snax_core_id, 0);
+    this->snax_base_addr_l.value = snax_base;
+    this->snax_base_addr_h.value = 0;
+    this->snax_cluster_core_id.value = snax_core_id;
 
     this->barrier_ack_itf.set_sync_meth(&Iss::barrier_sync);
     this->top.new_slave_port("barrier_ack", &this->barrier_ack_itf, (vp::Block *)this);

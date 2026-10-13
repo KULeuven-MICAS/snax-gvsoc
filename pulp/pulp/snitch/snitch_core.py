@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 import cpu.iss.riscv
 from pulp.snitch.snitch_isa import *
@@ -116,7 +117,10 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
             core_id: int=0,
             htif: bool=False,
             pulp_v2: bool=False,
-            nb_outstanding: int=1):
+            nb_outstanding: int=1,
+            snax_cluster_base_addr: int=0,
+            snax_cluster_nb_cores: int=0,
+            snax_cluster_core_idx: int=0):
 
         isa_instance = isa_instances.get(isa)
 
@@ -142,6 +146,13 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
 
         if pulp_v2:
             self.add_c_flags([f'-DCONFIG_GVSOC_ISS_SNITCH_PULP_V2=1'])
+
+        # Values of snax_cluster's cluster CSRs 0xBC1 to 0xBC3 (snitch.cpp).
+        self.add_properties({
+            'snax_cluster_base_addr': snax_cluster_base_addr,
+            'snax_cluster_nb_cores': snax_cluster_nb_cores,
+            'snax_cluster_core_idx': snax_cluster_core_idx,
+        })
 
         self.add_c_flags([
             "-DPIPELINE_STAGES=1",

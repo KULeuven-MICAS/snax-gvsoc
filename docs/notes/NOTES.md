@@ -81,3 +81,41 @@ stay there.
   has that path in its CMake cache, so `build/` is deleted once.
 - Build times are not tracked; GVSoC builds in a few minutes on the MICAS
   servers.
+
+### SG0 step 5: the probe
+
+- 2026-10-12. snax_cluster `8ebd422` checked out beside the repo with its
+  submodules; its plain tests built with its own flow
+  (`make sw CFG_OVERRIDE=cfg/snitch_cluster.hjson`: clang 21.1.6,
+  `rtl-generic` runtime, its start-up code and linker script) and run on
+  `gvrun --target snitch` at `93cedc4`. Commands in the README.
+- Result: `simple.elf` stops at cycle 3946 with
+  `Accessing unsupported CSR (id: 0xbc1, name: unknown)` and exits 1;
+  `printf_simple.elf` prints nothing.
+- Cause: snax_cluster's start-up code (`sw/snRuntime/src/start.S`,
+  `team.h`) reads the cluster base address from 0xBC1 and 0xBC2 and
+  {core count, core index} from 0xBC3, three CSRs snax_cluster added to
+  Snitch (`hw/snitch/src/snitch_pkg.sv`; 0xBC3 is `{NrCores, i}` in
+  `snitch_cluster.sv`). Upstream's start-up code works these out from
+  `mhartid`, so the experiment's upstream tests never needed them.
+- What matches: boot address 0x1000, cluster base 0x1000_0000, TCDM 128 KiB
+  in 32 banks, peripherals and zero memory, DRAM at 0x8000_0000, nine cores,
+  and the peripheral register file (byte-identical). snax_cluster forked
+  upstream snitch_cluster at `8cae8d2` (2023-12-07), inside the range GVSoC's
+  model follows.
+- Run in Claude's sandbox (the toolchain stand-in of step 4).
+
+### SG0 step 6: P3, the cluster CSRs
+
+- 2026-10-12. The accurate Snitch core declares 0xBC1, 0xBC2 and 0xBC3 next
+  to its barrier CSR, read-only (write mask 0, as the RTL ignores writes).
+  The cluster generator passes each core its cluster's base (`arch.base`),
+  the core count (`arch.nb_core`) and its index. Four upstream files,
+  listed in `UPSTREAM.md`.
+- Limits: only the `accurate` core (the default) has them, not `fast`, Spatz
+  or the FP subsystem; the base is read as an `int`, so below 2^31; 0xBC2 is
+  always 0.
+- Result in Claude's sandbox: all 17 tests exit 0 with no CSR warnings;
+  `printf_simple` prints `Hello, World!` nine times; core 8 reads
+  0xBC1 = 0x10000000 and 0xBC3 = 0x00090008 (9 cores, index 8), as the RTL
+  gives. `perf_cnt` reads all zeros, as on upstream (GVS2).

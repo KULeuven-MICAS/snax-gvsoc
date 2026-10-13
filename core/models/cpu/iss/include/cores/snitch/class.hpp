@@ -19,6 +19,7 @@
  * Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
  *          Kexin Li, ETH Zurich (likexi@ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 
 #pragma once
@@ -143,6 +144,11 @@ private:
 
     vp::Trace trace_iss;
     CsrReg csr_ssr;
+
+    // snax_cluster's cluster CSRs 0xBC1 to 0xBC3 (hw/snitch/src/snitch_pkg.sv)
+    CsrReg snax_base_addr_l;
+    CsrReg snax_base_addr_h;
+    CsrReg snax_cluster_core_id;
 };
 
 
