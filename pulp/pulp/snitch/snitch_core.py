@@ -192,6 +192,14 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
     def o_BARRIER_REQ(self, itf: gvsoc.systree.SlaveItf):
         self.itf_bind('barrier_req', itf, signature='wire<bool>')
 
+    def o_SNAX_CSR(self, itf: gvsoc.systree.SlaveItf):
+        """Binds the port of snax_cluster's accelerator CSRs 0x3C0 to 0x5FF.
+
+        Every CSR instruction in that range becomes a 32-bit IO request at byte address
+        4 * CSR number. Left unbound, those CSRs stay unsupported.
+        """
+        self.itf_bind('snax_csr', itf, signature='io')
+
 
 class SnitchFast(cpu.iss.riscv.RiscvCommon):
 

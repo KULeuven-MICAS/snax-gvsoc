@@ -247,3 +247,57 @@ stay there.
   `init_global_pointer` at cycle 3460 (3944 on `snitch`, which reads
   0x4004112d and runs the setup). `snax-alu` stops on `0x3c0` at cycle 8730
   (9528 on `snitch`).
+- On the author's side: all four checks pass (`simple` and `printf_simple`
+  on `snax_alu`, the skipped FP setup, `snax-alu` stopping on `0x3c0`, a
+  plain 9-core ELF on `snitch`).
+
+### SG1 step 4: how a CSR instruction can leave the core
+
+- 2026-10-13. Read at `93cedc4`, no code. `csrrw` and `csrrwi`
+  (`core/models/cpu/iss/include/isa/priv.hpp`) first ask
+  `iss->csr.get_csr(number)`; if a register object is declared there, its
+  virtual `handle()` runs the whole instruction and returns the next PC.
+  `csrrs`, `csrrc` and their immediate forms never call `handle()`: they
+  call `check_access()` and then `iss_csr_read()` / `iss_csr_write()`, which
+  run the object's callbacks. The callbacks get `(is_write, value)` only,
+  not the instruction or the CSR number.
+- The default `handle()` reads before every write, whatever `rd` is, so a
+  plain callback would turn each `csrw` into a read and a write.
+- `snax-alu` uses both paths: 18 `csrw` and 2 `csrwi` (`csrrw`, `csrrwi`)
+  and 3 `csrr` (`csrrs`, on 976, 981, 982). objdump names 0x3C0 and up
+  `pmpaddr16` and on.
+- A CSR can make the core wait: the barrier CSR 0x7C2
+  (`src/snitch/snitch.cpp`) sends a request from its callback and calls
+  `exec.insn_stall()` if not answered; the answer calls `stalled_dec()` and
+  `insn_terminate()`. `dmcpy` (`include/isa/xdma.hpp`) does the same for a
+  value, parking `rd` in `exec.stall_reg` until `Exec::offload_grant`.
+- The core's `acc_req` / `acc_rsp` ports carry FP instructions to the FP
+  subsystem, and `offload` is the DMA core's link to the iDMA: neither is
+  the SNAX CSR path.
+
+### SG1 step 5: P4, the CSR port
+
+- 2026-10-13. The accurate Snitch core declares 0x3C0 to 0x5FF in one loop,
+  one `SnaxCsr` object each (it carries its number, which the callback path
+  does not see), named `snax_csr_<number>`. Every access becomes a 32-bit IO
+  request on the new master port `snax_csr`, at byte address 4 * CSR
+  number. `csrrw` / `csrrwi` go through `SnaxCsr::handle()`: one write, after
+  one read only when `rd` is not `x0`. The other CSR instructions go through
+  the callback. `Snitch.o_SNAX_CSR` binds the port; nothing binds it yet.
+- Answers: `IO_REQ_OK` gives the value at once and its latency is counted
+  as stall cycles. A pending or denied answer is a fatal error naming the
+  CSR, until a block needs one (SG5 looks at the RTL's response timing).
+- Unbound port: the same "unsupported CSR" warning as before, now with the
+  CSR's name (`snax_csr_960`), and exit 1.
+- Cost: only Snitch's own files change, so only that core recompiles. Other
+  instructions are untouched; a CSR instruction does the map lookup it did
+  before, in a map with 576 more entries. The one `IoReq` is reused, not
+  allocated. `handle()` does not go through `iss_csr_write()`, so a `csrw`
+  does not switch the core out of its fast execution mode.
+- Results in Claude's sandbox: the 17 plain ELFs (9-core build) exit 0 on
+  `snitch`; on `snax_alu`, `simple` and `printf_simple` exit 0 and
+  `snax-alu` stops at cycle 8730 with `Accessing unsupported CSR (id:
+  0x3c0, name: snax_csr_960)`. With a plain memory bound to pe0's port in a
+  throwaway edit, every `csrw` was one write and the `csrr` reads returned
+  the memory's contents, so the busy loop never ended (P5's stub answers
+  0).

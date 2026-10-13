@@ -52,3 +52,6 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | Passes them to each Snitch core | SG0 P3 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `misa` and passes it to each Snitch core; `None` keeps the value the ISA string gives | SG1 P3 |
 | `Makefile` | `snax/` added to `GVSOC_MODULES` | SG1 P3 |
+| `core/models/cpu/iss/include/cores/snitch/class.hpp` | `SnaxCsr` and the `snax_csr` port: snax_cluster's accelerator CSRs 0x3C0 to 0x5FF | SG1 P4 |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | The 0x3C0 to 0x5FF CSRs declared in a loop and sent out as IO requests | SG1 P4 |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch.o_SNAX_CSR` binds that port | SG1 P4 |
