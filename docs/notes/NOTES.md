@@ -282,7 +282,8 @@ stay there.
   does not see), named `snax_csr_<number>`. Every access becomes a 32-bit IO
   request on the new master port `snax_csr`, at byte address 4 * CSR
   number. `csrrw` / `csrrwi` go through `SnaxCsr::handle()`: one write, after
-  one read only when `rd` is not `x0`. The other CSR instructions go through
+  one read only when `rd` is not `x0` (as shipped, P4 also read for `x0`;
+  fixed in P5, see SG1 step 6). The other CSR instructions go through
   the callback. `Snitch.o_SNAX_CSR` binds the port; nothing binds it yet.
 - Answers: `IO_REQ_OK` gives the value at once and its latency is counted
   as stall cycles. A pending or denied answer is a fatal error naming the
@@ -298,6 +299,43 @@ stay there.
   `snitch`; on `snax_alu`, `simple` and `printf_simple` exit 0 and
   `snax-alu` stops at cycle 8730 with `Accessing unsupported CSR (id:
   0x3c0, name: snax_csr_960)`. With a plain memory bound to pe0's port in a
-  throwaway edit, every `csrw` was one write and the `csrr` reads returned
-  the memory's contents, so the busy loop never ended (P5's stub answers
-  0).
+  throwaway edit, the `csrr` reads returned the memory's contents, so the
+  busy loop never ended (P5's stub answers 0). That run was also read as
+  "every `csrw` was one write", which was wrong: see SG1 step 6.
+- On the author's side: the 17 plain ELFs pass on `snitch` and `snax-alu`
+  stops on `snax_csr_960` at the same cycle as with P3.
+
+### SG1 step 6: P5, the stub register block
+
+- 2026-10-13. `snax/snax_csr_stub.py` / `.cpp`: an IO slave holding a list
+  of read-write CSRs (read back what was written, 0 after reset) and
+  read-only CSRs (read 0). The rules follow snax_cluster's
+  `ReqRspManager.scala`: read-write registers first, then read-only ones;
+  a write past the read-write ones, or any access past the end, fires an
+  assertion there. The stub refuses those with a warning naming the CSR.
+  The start handshake (bit 0 of the last read-write CSR raises `valid` and
+  the write waits for `ready`) is not modelled; it is SG3 / SG4's.
+- `snitch_cluster.py`: `ClusterArch` takes `snax_acc`, `{core index:
+  function(parent, name) -> component}`; `SnitchCluster` builds each as
+  `snax_acc<core>` and binds the core's `o_SNAX_CSR` to its `i_INPUT()`.
+  Both arch classes carry it, since `make build` reads the build-time one to
+  find the sources to compile. `snax_alu.py` sets `{0: snax_alu_acc}` with
+  960 to 975 and 978 to 980 read-write, 976, 977, 981, 982 read-only.
+- GVSoC runs with `werror: true` (`gvsoc_config.json`): any
+  `force_warning` ends the run at once with exit 1. That is how the
+  unsupported-CSR warning stopped `snax-alu`, and how a refused stub access
+  stops; the core's fatal for a non-OK answer is then not reached.
+- P4 fix: the decoder gives `rd = x0` the index `ISS_NB_REGS` (32), not 0
+  (`core/models/cpu/iss/src/decode.cpp`), so `handle()`'s `!= 0` check made
+  every `csrw` read first. Upstream's `csrrw_exec` has the same check,
+  harmless there. Now `!= ISS_NB_REGS`. Found by counting the stub's
+  accesses for `snax-csr`: 129 before, 108 after (66 reads, 42 writes).
+- `tests/snax/snax-csr/`: four parts, one per CSR instruction path (see its
+  README); returns its error count.
+- Results in Claude's sandbox: `snax-csr` prints four lines of `0 errors`,
+  exits 0, 108 stub accesses; the 17 plain ELFs (9-core build) exit 0 on
+  `snitch`; `simple` and `printf_simple` exit 0 on `snax_alu`. Throwaway
+  programs: a write to 976 stops with `Write to read-only CSR 976 (value:
+  0x1)`, a read of 983 with `CSR 983 is not held by this block`.
+  `snax-alu` runs to the end with no CSR warning: `Accelerator Cycles: 0`,
+  `Number of errors: 100`, exit code 100 (nothing computes the output).

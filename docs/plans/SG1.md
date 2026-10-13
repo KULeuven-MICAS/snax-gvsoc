@@ -41,9 +41,9 @@ written by hand with these values; reading the hjson comes later.
 | 2 | P2: the `snax-alu` app copied into `tests/snax/snax-alu/` (app, library, seeded `data.h`, `streamer_csr_addr_map.h`), linked against the runtime of `../snax_cluster` built with the old hjson; on `snitch` it stops at the first SNAX CSR | done 2026-10-13 |
 | 3 | P3: the `snax_alu` target in `snax/`: 2 cores, `misa` of `rv32ima`; `simple` and `printf_simple` exit 0, `Hello, World!` twice | done 2026-10-13 |
 | 4 | Read how a CSR instruction can send an IO request and stall until the response; findings only | done 2026-10-13 |
-| 5 | P4: the core patch for the CSR port; the 17 plain tests still pass on `snitch` | |
+| 5 | P4: the core patch for the CSR port; the 17 plain tests still pass on `snitch` | done 2026-10-13 |
 | 6 | P5: the stub register block (registers over 960 to 982, busy reads 0) and a CSR test program; every written value reads back | |
-| 7 | `snax-alu` on the stub runs to exit with no CSR warnings | |
+| 7 | `snax-alu` on the stub runs to the end with no CSR warnings: `Accelerator Cycles: 0`, `Number of errors: 100`, exit code 100 (nothing computes the output yet) | |
 | 8 | P6: SG1 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | |
 
 ## Decided

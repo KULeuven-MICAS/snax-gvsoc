@@ -175,10 +175,11 @@ bool Iss::snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value)
 
 
 // csrrw and csrrwi on a SNAX CSR: one write request, after a read only when rd is not x0
-// (a csrw sends no read, as in the RISC-V spec).
+// (a csrw sends no read, as in the RISC-V spec). The decoder gives rd = x0 the index
+// ISS_NB_REGS, a register nothing reads, not 0.
 iss_reg_t SnaxCsr::handle(Iss *iss, iss_insn_t *insn, iss_reg_t pc, iss_reg_t reg_value)
 {
-    if (insn->out_regs[0] != 0)
+    if (insn->out_regs[0] != ISS_NB_REGS)
     {
         iss_reg_t value = 0;
         if (iss->snax_csr_request(this->address, false, value))

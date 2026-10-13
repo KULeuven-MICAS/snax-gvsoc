@@ -75,6 +75,8 @@ if os.environ.get('USE_GVRUN') is None:
             self.use_spatz = properties.use_spatz
             self.spatz_nb_lanes = properties.spatz_nb_lanes
             self.isa = properties.isa
+            # SNAX accelerators, see the run-time ClusterArch below.
+            self.snax_acc = getattr(properties, 'snax_acc', None)
 
         class Tcdm:
             def __init__(self, base, nb_masters):
@@ -90,7 +92,7 @@ else:
     class ClusterArch(Tree):
         def __init__(self, parent, name, base, first_hartid, auto_fetch=False,
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
-                core_type='accurate', isa=None, alias_base=None, misa=None):
+                core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -127,6 +129,10 @@ else:
             self.isa = isa
             # Value of the misa CSR, None for the one the ISA string gives.
             self.misa = misa
+            # SNAX accelerators: {core index: function(parent, name) -> component}. Each
+            # component is built in the cluster and bound to that core's snax_csr port
+            # through its i_INPUT(). None for a cluster without accelerators.
+            self.snax_acc = snax_acc
 
         class Tcdm(Tree):
             def __init__(self, parent, name, base, nb_masters):
@@ -254,6 +260,12 @@ class SnitchCluster(gvsoc.systree.Component):
         else:
             cluster_registers = pulp.snitch.snitch_cluster.cluster_registers.ClusterRegisters(
                 self, 'cluster_registers', nb_cores=arch.nb_core, boot_addr=entry)
+
+        # SNAX accelerators, each on the snax_csr port of the core that drives it
+        snax_acc = getattr(arch, 'snax_acc', None) or {}
+        for core_id, make_acc in snax_acc.items():
+            acc = make_acc(self, f'snax_acc{core_id}')
+            cores[core_id].o_SNAX_CSR(acc.i_INPUT())
 
         # Cluster DMA
         idma = SnitchDma(self, 'idma', loc_base=arch.tcdm.area.base, loc_size=arch.tcdm.area.size,
