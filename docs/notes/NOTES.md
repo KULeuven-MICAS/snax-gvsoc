@@ -263,7 +263,8 @@ stay there.
   not the instruction or the CSR number.
 - The default `handle()` reads before every write, whatever `rd` is, so a
   plain callback would turn each `csrw` into a read and a write.
-- `snax-alu` uses both paths: 18 `csrw` and 2 `csrwi` (`csrrw`, `csrrwi`)
+- `snax-alu` uses both paths: 17 `csrw` and 2 `csrwi` (`csrrw`, `csrrwi`;
+  first counted as 18 and 2, see SG1 step 7)
   and 3 `csrr` (`csrrs`, on 976, 981, 982). objdump names 0x3C0 and up
   `pmpaddr16` and on.
 - A CSR can make the core wait: the barrier CSR 0x7C2
@@ -339,3 +340,46 @@ stay there.
   0x1)`, a read of 983 with `CSR 983 is not held by this block`.
   `snax-alu` runs to the end with no CSR warning: `Accelerator Cycles: 0`,
   `Number of errors: 100`, exit code 100 (nothing computes the output).
+- On the author's side: P5's checks pass (`snax-csr` four lines of `0
+  errors`, 108 stub accesses, the 17 plain ELFs on `snitch`).
+
+### SG1 step 7: snax-alu on the stub
+
+- 2026-10-13. `snax-alu` runs to the end with no CSR warning:
+  `Accelerator Done!`, `Accelerator Cycles: 0`, `Number of errors: 100`,
+  exit code 100. Nothing computes `local_o`, so all 100 outputs differ.
+- The stub sees 22 accesses (`--trace=snax_acc0`), cycles from Claude's
+  sandbox:
+
+  | Cycle | CSR | Value | What |
+  |---|---|---|---|
+  | 8730 to 9237 | 960 to 964 | `0x10000000`, 0, 8, 25, 32 | reader 0: base `local_a`, spatial stride 8 B, 25 steps of 32 B |
+  | 9459 to 9573 | 965 to 969 | `0x10000320`, ... | reader 1: base `local_b` (+800 B) |
+  | 9693 to 9697 | 970 to 974 | `0x10000640`, ... | writer 0: base `local_o` |
+  | 9815, 9914 | 978, 979 | 0, 25 | ALU mode, length |
+  | 9919 | 975 | 1 | streamer start |
+  | 10034 | 980 | 1 | ALU start |
+  | 10040, 10046 | 981, 976 | 0 | ALU busy, streamer busy |
+  | 21814 | 982 | 0 | ALU counter, after the check loop and `printf` |
+
+- For SG3 and SG4: the streamer is started before the ALU, and each start
+  is a write of 1 to the last read-write CSR of its block, the write that
+  raises `valid` in `ReqRspManager.scala` and waits for `ready`. Each
+  streamer runs 25 steps of 4 lanes of 64 bit.
+- The ELF holds 19 SNAX CSR writes (17 `csrw`, 2 `csrwi`), one per write
+  that runs; step 4's count of 18 `csrw` was one too many.
+
+### SG1 step 8: SG1 closed
+
+- 2026-10-13. All steps done; acceptance met: `snax-csr` reads back every
+  written value, `snax-alu` runs to the end on the stub, the 17 plain tests
+  still pass on `snitch`.
+- Settled (the list is in `docs/plans/SG1.md` under "Decided"): the
+  `snax_alu` target by hand, the CSR port at 4 * CSR, accelerators per core
+  through `snax_acc`, the stub's rules. In snax-forge: D119 (M16's order)
+  and D120 (the CSR path).
+- Upstream files changed in SG1: the Snitch core (`class.hpp`,
+  `snitch.cpp`, `snitch_core.py`), the cluster (`snitch_cluster.py`) and
+  the `Makefile`; rows in `UPSTREAM.md`.
+- Next: a housekeeping pass on this branch, then SG2 (the DMA), from the
+  list under "SG2 starts from" in `docs/plans/SG1.md`.

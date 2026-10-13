@@ -42,10 +42,34 @@ written by hand with these values; reading the hjson comes later.
 | 3 | P3: the `snax_alu` target in `snax/`: 2 cores, `misa` of `rv32ima`; `simple` and `printf_simple` exit 0, `Hello, World!` twice | done 2026-10-13 |
 | 4 | Read how a CSR instruction can send an IO request and stall until the response; findings only | done 2026-10-13 |
 | 5 | P4: the core patch for the CSR port; the 17 plain tests still pass on `snitch` | done 2026-10-13 |
-| 6 | P5: the stub register block (registers over 960 to 982, busy reads 0) and a CSR test program; every written value reads back | |
-| 7 | `snax-alu` on the stub runs to the end with no CSR warnings: `Accelerator Cycles: 0`, `Number of errors: 100`, exit code 100 (nothing computes the output yet) | |
-| 8 | P6: SG1 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | |
+| 6 | P5: the stub register block (registers over 960 to 982, busy reads 0) and a CSR test program; every written value reads back | done 2026-10-13 |
+| 7 | `snax-alu` on the stub runs to the end with no CSR warnings: `Accelerator Cycles: 0`, `Number of errors: 100`, exit code 100 (nothing computes the output yet) | done 2026-10-13 |
+| 8 | P6: SG1 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | done 2026-10-13 |
 
 ## Decided
 
+- The target is written by hand from `snax_alu_cluster_old.hjson` (D119 in
+  snax-forge); reading the hjson comes with LNK2 in snax-forge.
+- The CSR path (D120): the accurate Snitch core sends CSRs 0x3C0 to 0x5FF as
+  32-bit IO requests at byte address 4 * CSR on its `snax_csr` port; `csrw`
+  sends one write, `csrrw` with `rd` not `x0` a read then a write, `csrrs`
+  and `csrrc` a read then a write. The answer must be `IO_REQ_OK`; a pending
+  one waits until a block has to stall a write (SG4).
+- An accelerator is a cluster component per core: `ClusterArch(snax_acc=
+  {core: function(parent, name)})`, bound to that core's `snax_csr` port.
+- The stub follows `ReqRspManager.scala`: read-write CSRs read back and
+  reset to 0, read-only CSRs read 0, anything else is refused with a
+  warning naming the CSR.
+- GVSoC runs with `werror: true`: any warning ends the run with exit 1.
+
 ## SG2 starts from
+
+- First a housekeeping pass over SG1's code on this branch: loose code,
+  formatting, and what costs simulation time. Planned in its own round.
+- Then the DMA: `snax-alu` moves 2 x 800 B from L2 to L1 with
+  `snrt_dma_start_1d` before the barrier. SG2 needs a timing program at a
+  few sizes, run on the RTL and here, and GVSoC's iDMA parameters
+  (`SnitchDma` in `snitch_cluster.py`: `tcdm_width`, queue sizes) and the
+  DRAM model next to the testbench's latency.
+- The stub's trace (`--trace=snax_acc0`) is the reference for SG3 and SG4:
+  19 writes, then the busy reads of 981 and 976 and the counter 982.
