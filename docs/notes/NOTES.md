@@ -383,3 +383,34 @@ stay there.
   the `Makefile`; rows in `UPSTREAM.md`.
 - Next: a housekeeping pass on this branch, then SG2 (the DMA), from the
   list under "SG2 starts from" in `docs/plans/SG1.md`.
+
+### SG2 step 1: P1, the plan
+
+- 2026-10-13. `docs/plans/SG2.md` written: the iDMA model is adapted to
+  snax_cluster's iDMA RTL, checked with a timing program on both sides. The
+  housekeeping pass over SG1's code moves to after SG5.
+- Read from source, not run (snax_cluster `b2672f8`, the iDMA fork's
+  `master` at `e859ffc`, upstream v0.6.5; the fork is taken at
+  `rev: master` with no lock file, so the commit in the RTL build may
+  differ). The backend `idma_backend_rw_axi` is generated at build time
+  (`make idma-rtl-gen`); read here from the fork's templates through
+  `util/gen_idma.py`. The values are in SG2.md under "The DMA path".
+- RTL and GVSoC differ in: bursts in flight (3 per direction in the iDMA, 2
+  at the testbench DRAM; 24 in GVSoC), the burst split (both sides in the
+  RTL, the AXI side only in GVSoC), read data (one 64 B beat per cycle; the
+  whole burst at once in GVSoC), the L1 write width (64 B; 4096 B), the end
+  of a transfer (the last write response; the last L1 write), the request
+  queue (3; 8) and the DRAM (no latency of its own behind cuts, 64 B per
+  beat; 100 cycles and 4 B per cycle).
+- `snax-alu` does not wait for its two copies: the DMA core starts them and
+  goes to the barrier, which does not wait for the DMA. The compute core
+  starts the streamers about 1000 cycles of CSR setup later. Matters for
+  SG3 to SG5, not for the stub.
+- The cluster's perf counters (`perf_cnt.h`, `snitch_cluster_peripheral`)
+  count `DMA_BUSY` from the iDMA's `busy_o`, the signal `snrt_dma_wait_all`
+  polls; DMA events do not depend on `hart_select`. The enable is a posted
+  store, so the program reads it back before starting the DMA. In
+  `idma_inst64_events.sv` the buffer lines overwrite `r_stall` and
+  `w_stall`, and `buf_r_stall` / `buf_w_stall` are never set. GVSoC's
+  cluster registers come from an identical `snitch_cluster_peripheral_reg.hjson`
+  but hold the counters as plain registers: they read 0.

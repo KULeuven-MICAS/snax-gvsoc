@@ -64,12 +64,10 @@ written by hand with these values; reading the hjson comes later.
 
 ## SG2 starts from
 
-- First a housekeeping pass over SG1's code on this branch: loose code,
-  formatting, and what costs simulation time. Planned in its own round.
-- Then the DMA: `snax-alu` moves 2 x 800 B from L2 to L1 with
-  `snrt_dma_start_1d` before the barrier. SG2 needs a timing program at a
-  few sizes, run on the RTL and here, and GVSoC's iDMA parameters
-  (`SnitchDma` in `snitch_cluster.py`: `tcdm_width`, queue sizes) and the
-  DRAM model next to the testbench's latency.
+- The housekeeping pass over SG1's code (loose code, formatting, what costs
+  simulation time) moves to after SG5, after all SG tasks.
+- The DMA: `snax-alu` moves 2 x 800 B from L2 to L1 with
+  `snrt_dma_start_1d` before the barrier. SG2's plan is
+  `docs/plans/SG2.md`.
 - The stub's trace (`--trace=snax_acc0`) is the reference for SG3 and SG4:
   19 writes, then the busy reads of 981 and 976 and the counter 982.
