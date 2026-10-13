@@ -65,7 +65,7 @@ last start and after `snrt_dma_wait_all`; then read the counters.
 | # | Step | Status |
 |---|---|---|
 | 1 | P1: this plan; SG1.md and snax-forge's STATUS say the housekeeping pass moves after SG5 | done 2026-10-13 |
-| 2 | P2: the timing program in `tests/snax/dma-timing/`: L2 to L1 at 64 B, 256 B, 800 B, 4 KiB and 8 KiB, 2 x and 4 x 800 B back to back, L1 to L2 at 800 B; each case run twice, the second kept; one line per case and the error count. On `snax_alu`: `mcycle` only, 0 errors | |
+| 2 | P2: the timing program in `tests/snax/dma-timing/`: L2 to L1 at 64 B, 256 B, 800 B, 4 KiB and 8 KiB, 2 x and 4 x 800 B back to back, L1 to L2 at 800 B; each case run twice, the second kept; one line per case and the error count. On `snax_alu`: `mcycle` only, 0 errors | done 2026-10-13 |
 | 3 | The same ELF on the RTL (author's run): the printed lines, the iDMA commit, `dma_trace_00001_00000.log` | |
 | 4 | From the RTL numbers: issue cost, startup, first-beat latency, beat rate, effect of the 2-read limit, done delay. Findings only | |
 | 5 | P3: counting in GVSoC's cluster registers (`CYCLES`, `DMA_BUSY`, read and write beats) and a busy signal out of the iDMA model; the program prints counters on both sides | |

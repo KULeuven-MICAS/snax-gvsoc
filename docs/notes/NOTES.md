@@ -414,3 +414,42 @@ stay there.
   `w_stall`, and `buf_r_stall` / `buf_w_stall` are never set. GVSoC's
   cluster registers come from an identical `snitch_cluster_peripheral_reg.hjson`
   but hold the counters as plain registers: they read 0.
+
+### SG2 step 2: P2, the timing program
+
+- 2026-10-13. `tests/snax/dma-timing/`: one ELF for the RTL and for
+  `snax_alu`, built like `snax-alu` against the runtime of `../snax_cluster`.
+  Its README lists the cases and the fields. Source words come from a seeded
+  `data.h` (8 KiB in `.data`, which `base.ld` puts in DRAM); the L1 buffer
+  starts at `snrt_l1_next()` rounded to 64 B.
+- Two details of the measured window, from the disassembly:
+  `snrt_mcycle()` has a `"memory"` clobber, so case fields read through a
+  pointer were reloaded from DRAM between the marks (105 cycles of `issue`
+  for the idle case at first); they are now read into locals before the
+  first mark. The enable read-back is used by an `mv`, since a load into
+  `x0` would not stall the core. The window now holds only `csrr 0xbc2`, the
+  `dmsrc`, `dmdst`, `dmcpyi` of each copy and the loop.
+- Results on `snax_alu` today (Claude's sandbox: LLVM 21.1.6 and bender
+  0.28.2 from their GitHub releases, Python 3.12 venv with the image's
+  requirements): exit 0, no warning, 0 errors, every counter 0 (the cluster
+  registers store them but nothing counts).
+
+  | Case | issue | done |
+  |---|---|---|
+  | idle | 3 | 6 |
+  | l2l1 1x64 | 16 | 119 |
+  | l2l1 1x256 | 16 | 119 |
+  | l2l1 1x800 | 16 | 121 |
+  | l2l1 1x4096 | 16 | 915 |
+  | l2l1 1x8192 | 16 | 1939 |
+  | l2l1 2x800 | 25 | 222 |
+  | l2l1 4x800 | 43 | 622 |
+  | l1l2 1x800 | 16 | 21 |
+
+- Read against the model as it is: a copy issues in 16 cycles and each
+  further copy adds 9; up to 800 B the 100-cycle DRAM latency dominates;
+  from 4 KiB to 8 KiB `done` grows by 1024 cycles, 4 B per cycle, the DRAM's
+  `width_log2=2` (why one 4 KiB copy takes 915 and not about 1140 is not
+  read yet); each extra 800 B copy adds about 200 cycles for the same
+  reason; L1 to L2 ignores the DRAM latency, as `idma_be_axi.cpp` does for
+  writes.
