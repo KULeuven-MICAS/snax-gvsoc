@@ -197,3 +197,22 @@ stay there.
   file: `sw/Makefile` names `snax_multi_alu_cluster_old.hjson`, and
   `sw/apps/Makefile` has no branch for it. The copy in step 2 does not need
   either.
+
+### SG1 step 2: P2, the snax-alu app copied in
+
+- 2026-10-13. `tests/snax/snax-alu/` holds snax_cluster `b2672f8`'s app,
+  its library and `datagen.py` unchanged, the streamer header that
+  `rtl-gen` wrote for the old hjson (from the author's RTL build: streamer
+  registers 960 to 977, the ALU's 978 to 982 in `snax-alu-lib.h`), and a
+  `data.h` made with NumPy seed 0. Its Makefile builds against the runtime
+  of the snax_cluster checkout beside the repo, built with
+  `make sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson` (no sbt needed;
+  `CFG_CLUSTER_NR_CORES 2`). That build also rebuilds `sw/tests/build/` for
+  2 cores, so the 17 plain ELFs of SG0 are kept aside for step 5.
+- With the same `data.h`, snax_cluster's own build of the app gives a
+  byte-identical ELF.
+- On the stock `snitch` target (9 cores): pe0 stops at cycle 9528 with
+  `Accessing unsupported CSR (id: 0x3c0, name: unknown)` and exits 1, at
+  the first streamer register write.
+- Figures from Claude's sandbox run (LLVM 21.1.6 and bender 0.28.2 from
+  their GitHub releases, as in SG0 step 4).
