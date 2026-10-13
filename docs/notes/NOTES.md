@@ -119,6 +119,8 @@ stay there.
   `printf_simple` prints `Hello, World!` nine times; core 8 reads
   0xBC1 = 0x10000000 and 0xBC3 = 0x00090008 (9 cores, index 8), as the RTL
   gives. `perf_cnt` reads all zeros, as on upstream (GVS2).
+- On the author's side, in the container on the MICAS server: all 17 tests
+  pass with P3.
 
 ### SG0 step 7: one image, in snax-forge
 
@@ -143,3 +145,34 @@ stay there.
 - On the author's side: the image built and pushed; on micaseb19 pixi 0.41.4
   runs, snax-forge's `pixi install`, `pixi run check` and `pixi run test`
   pass, and GVSoC builds and runs the bundled ELF in it.
+
+### SG0 step 8: SG0 closed
+
+- 2026-10-13. All steps done.
+- Settled:
+  - The repository: a detached copy of GVSoC `93cedc4` with its seven
+    submodules folded in, history kept; `UPSTREAM.md` holds the pins, the
+    license and every changed file.
+  - The chosen commit: `93cedc4` with P3 (the cluster CSRs 0xBC1 to 0xBC3).
+    snax_cluster `8ebd422`'s plain tests (17, built with its own flow) all
+    pass on the `snitch` target. Nothing else differed: boot address, memory
+    map, core count and peripheral registers match.
+  - The tools: one image, `snax-forge:main` from snax-forge's `container/`
+    (D118), with GVSoC's build tools, snax_cluster's clang 21.1.6 and bender
+    0.28.2, pixi 0.41.4 and zsh. Programs are built with clang only, as
+    snax_cluster builds them for its RTL; there is no RISC-V GCC in the image.
+  - The way of working: one container started from the folder that holds
+    snax-forge, snax-gvsoc and snax_cluster, mounted at its own path;
+    snax_cluster is a plain checkout beside this repo, and only its ELF files
+    are run here.
+- Where GVSoC keeps the Snitch model (an SG1 item, read for P3): the
+  generator is `pulp/pulp/snitch/snitch_core.py` (class `Snitch`, the
+  `accurate` core), the cluster `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py`,
+  the core's C++ in `core/models/cpu/iss/src/snitch/` with the shared ISS in
+  `core/models/cpu/iss/src/`. The `fast` core, Spatz and the FP subsystem are
+  separate models.
+- SG1 starts from: the stock `snitch` target already matches snax_cluster's
+  `cfg/snitch_cluster.hjson` (9 cores, 128 KiB TCDM in 32 banks); what is
+  left is generating it from the hjson (for snax_alu's 2-core cluster with
+  `rv32ima` cores, for one), and recording cycles per test against the RTL.
+- SG2 starts from the list under "SG2 starts from" in `docs/plans/SG0.md`.

@@ -1,8 +1,10 @@
-# SG0 plan: the repository, the images and the probe
+# SG0 plan: the repository, the image and the probe
 
 SG0 is the first task of M16 in snax-forge (SNAX-GVSoC aligned with
 snax_cluster, D116). Acceptance: the probe result and the chosen GVSoC commit
-are logged, and both images build and run on the MICAS server.
+are logged, and the development image builds and runs on the MICAS server.
+
+SG0 was closed on 2026-10-13 (step 8); the summary is in `NOTES.md`.
 
 This file is the checklist; `docs/notes/NOTES.md` is the log. A step is
 ticked here when its entry is in the notes.
@@ -24,9 +26,9 @@ ticked here when its entry is in the notes.
 | 3 | Image built from P1's `container/` | folded into step 4 |
 | 4 | P2: two-stage image `snax-gvsoc:main` with snax_cluster's toolchain (clang, lld, llvm-tools, clang-format 21.1.6, bender 0.28.2) and zsh; rv64 GCC and Snitch LLVM 12 dropped; built, pushed and run on micaseb19 | done 2026-10-12 |
 | 5 | Probe: snax_cluster `8ebd4229` tests built with its own flow (`cfg/snitch_cluster.hjson`, generic LLVM, `rtl-generic`) and run on `gvrun --target snitch` | done 2026-10-12 |
-| 6 | P3: snax_cluster's cluster CSRs 0xBC1 to 0xBC3 in the Snitch core; the probe run again, commit chosen | wip |
+| 6 | P3: snax_cluster's cluster CSRs 0xBC1 to 0xBC3 in the Snitch core; the probe run again, commit chosen | done 2026-10-13 |
 | 7 | P4a/P4b: one image, `snax-forge:main` from snax-forge's `container/` with pixi 0.41.4 (D118); `container/` removed here; built, pushed and run on micaseb19 | done 2026-10-13 |
-| 8 | P5: SG0 closed here, and the STATUS.md update for snax-forge | todo |
+| 8 | P5: SG0 closed here, and the STATUS.md update for snax-forge | done 2026-10-13 |
 
 ## Later
 
