@@ -64,3 +64,6 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` binds the iDMA's wires to the cluster registers (not with Spatz) | SG2 P3 |
 | `pulp/pulp/chips/snitch/snitch.py` | `Soc` takes `hbm_latency` from the arch when a target sets it; the default stays 100 (0 with Spatz) | SG2 P4 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `dma`, `SnitchDma` arguments that replace the cluster's defaults | SG2 P4 |
+| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | `read_latency` (0 when absent) added to each read burst's latency | SG2 P5 |
+| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `read_latency` (0 when absent) paid once per read stream: a line read on the cycle after the previous one does not pay it again | SG2 P5 |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) | SG2 P5 |

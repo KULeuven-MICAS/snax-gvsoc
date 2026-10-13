@@ -575,3 +575,40 @@ stay there.
 - `snax-csr` gives four lines of `0 errors`; `snax-alu` is unchanged; the
   17 plain tests (9-core build) exit 0 on `snitch`, `perf_cnt` printing
   what it did after P3.
+
+### SG2 step 7: P5, the DMA's read path
+
+- 2026-10-13. The 5 cycles a DMA read waits on the RTL before its first
+  beat, from L1 and DRAM alike (the wide crossbar's cuts and the
+  AXI-to-memory conversion), are a `SnitchDma` argument, `read_latency`,
+  set to 5 by `snax_alu.py`; DRAM reads add `hbm_latency` (6) on top, 11 in
+  all. Default 0, and the backends read it only when present, so the other
+  users of `pulp/idma/` (`reg_dma`, `cheshire_dma`, `pulp_open_dma`, magia's
+  `SnitchDma`) are unchanged.
+- AXI reads (`idma_be_axi.cpp`): added to each burst's latency. Bursts are
+  sent ahead (3 in flight), so back-to-back bursts overlap it, as on the
+  RTL. L1 reads (`idma_be_tcdm.cpp`): this side keeps one line request open,
+  so a per-line latency would be paid on every line; it is paid only when a
+  line does not follow the previous one on the next cycle, once per read
+  stream.
+- Results in Claude's sandbox: `dma-timing` exits 0 with 0 errors and no
+  warning; `busy` equals the RTL in all eight copy cases.
+
+  | Case | busy | RTL | done | RTL |
+  |---|---|---|---|---|
+  | idle | 0 | 0 | 6 | 12 |
+  | l2l1 1x64 | 14 | 14 | 29 | 34 |
+  | l2l1 1x256 | 17 | 17 | 33 | 39 |
+  | l2l1 1x800 | 26 | 26 | 41 | 44 |
+  | l2l1 1x4096 | 77 | 77 | 93 | 99 |
+  | l2l1 1x8192 | 141 | 141 | 157 | 159 |
+  | l2l1 2x800 | 39 | 39 | 54 | 59 |
+  | l2l1 4x800 | 65 | 65 | 80 | 84 |
+  | l1l2 1x800 | 20 | 20 | 35 | 39 |
+
+- The rest of `done` is issue and polling in the core: 15 to 16 cycles
+  here, 18 to 22 on the RTL, a gap of 2 to 6 per case; the idle case (6
+  against 12) shows the same core cost. SG5's.
+- `snax-csr` gives four lines of `0 errors`; `snax-alu` is unchanged; the
+  17 plain tests (9-core build) exit 0 on `snitch`, `dma_simple` and
+  `perf_cnt` printing what they did after P4.

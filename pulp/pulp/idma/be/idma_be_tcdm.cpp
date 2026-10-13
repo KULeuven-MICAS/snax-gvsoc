@@ -46,6 +46,9 @@ IDmaBeTcdm::IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer
 
     // Local memory base
     this->loc_base = idma->get_js_config()->get_int("loc_base");
+    // SNAX: the DMA's own read path latency
+    js::Config *read_latency = idma->get_js_config()->get("read_latency");
+    this->read_latency = read_latency ? read_latency->get_int() : 0;
 }
 
 
@@ -147,6 +150,7 @@ void IDmaBeTcdm::reset(bool active)
         this->write_ack_timestamp = -1;
 
         this->last_line_timestamp = -1;
+        this->last_read_push_timestamp = -2;
     }
 }
 
@@ -312,20 +316,30 @@ void IDmaBeTcdm::read_line()
         trace.fatal("Asynchronous response is not supported on TCDM backend\n");
     }
 
-    if (req->get_latency() == 0 && this->be->is_ready_to_accept_data(this->burst_queue_transfer.front()))
+    // SNAX: a line that does not follow the previous one on the next cycle starts a new
+    // read stream and pays the DMA's own read path latency
+    int64_t now = this->clock.get_cycles();
+    uint64_t latency = req->get_latency();
+    if (this->last_read_push_timestamp < now - 1)
+    {
+        latency += this->read_latency;
+    }
+
+    if (latency == 0 && this->be->is_ready_to_accept_data(this->burst_queue_transfer.front()))
     {
         // If there is no latency and backend is ready, we can immediately push the data
         IdmaTransfer *transfer = this->burst_queue_transfer.front();
         this->remove_chunk_from_current_burst(size);
+        this->last_read_push_timestamp = now;
         this->be->write_data(transfer, req->get_data(), size);
     }
     else
     {
         // Otherwise we have to put it on hold since we can only have one request pending
-        this->read_pending_timestamp = this->clock.get_cycles() + req->get_latency();
+        this->read_pending_timestamp = now + latency;
         this->read_pending_line_data = req->get_data();
         this->read_pending_line_size = size;
-        this->fsm_event.enqueue(req->get_latency());
+        this->fsm_event.enqueue(latency);
     }
 }
 
@@ -390,6 +404,7 @@ void IDmaBeTcdm::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
                 _this->read_pending_line_size = 0;
                 IdmaTransfer *transfer = _this->burst_queue_transfer.front();
                 _this->remove_chunk_from_current_burst(size);
+                _this->last_read_push_timestamp = _this->clock.get_cycles();
                 _this->be->write_data(transfer, _this->read_pending_line_data, size);
             }
             else

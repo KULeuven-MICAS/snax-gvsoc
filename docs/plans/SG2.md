@@ -38,7 +38,7 @@ touches.
   external wide port; into L1 one 64 B beat per cycle. The testbench DRAM
   (`tb_memory_axi`) takes 2 reads and 2 writes in flight (atomics filter),
   then a cut and `axi_to_reg`; the memory itself answers in the same cycle.
-- GVSoC (`SnitchDma` in `snitch_cluster.py`, `pulp/idma/`): 8 transfers
+- GVSoC before P4 and P5 (`SnitchDma` in `snitch_cluster.py`, `pulp/idma/`): 8 transfers
   queued, 24 bursts in flight, `tcdm_width` 4096 B (a whole burst is one L1
   write), bursts split on the AXI side only, a read burst's data arrives at
   once after its latency, done when the last L1 write is acknowledged. The
@@ -72,7 +72,7 @@ last start and after `snrt_dma_wait_all`; then read the counters.
 | 4 | From the RTL numbers: issue cost, startup, first-beat latency, beat rate, effect of the 2-read limit, done delay. Findings only | done 2026-10-13 |
 | 5 | P3: counting in GVSoC's cluster registers (`CYCLES`, `DMA_BUSY`, read and write beats) and a busy signal out of the iDMA model; the program prints counters on both sides | done 2026-10-13 |
 | 6 | P4: parameters from step 4, through arch values: the DRAM's 6 of the 11 cycles to a first beat (`hbm_latency`), DRAM 64 B per cycle, `tcdm_width` 64 B, request queue 3, bursts in flight 3. `hbm_latency` also moves the cores' DRAM fetches and loads, which are not measured (SG5). `busy` ends 5 cycles under the RTL in every case | done 2026-10-13 |
-| 7 | P5: the 5-cycle read path common to L1 and DRAM (the wide crossbar's cuts and the AXI-to-memory conversion) as one read latency in the iDMA model, paid once per burst, the beats after it one per cycle; the L1 read side, which keeps one line request open, pipelined so it is not paid per line. Target: `busy` equal to the RTL in all eight copy cases. Gap per case logged | |
+| 7 | P5: the 5-cycle read path common to L1 and DRAM (the wide crossbar's cuts and the AXI-to-memory conversion) as one read latency in the iDMA model, paid once per burst, the beats after it one per cycle; the L1 read side, which keeps one line request open, pipelined so it is not paid per line. Target: `busy` equal to the RTL in all eight copy cases. Gap per case logged | done 2026-10-13 |
 | 8 | P6: SG2 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | |
 
 ## Decided

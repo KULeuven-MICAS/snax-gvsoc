@@ -40,6 +40,9 @@ class SnitchDma(gvsoc.systree.Component):
         Width of the local interconnect, in bytes.
     beat_size: int
         Bytes per AXI beat, the unit of the beat counts on o_R_BEATS / o_W_BEATS (SNAX).
+    read_latency: int
+        Cycles the DMA's own read path adds before the first data of a read stream, on top of
+        the latency the memory side returns (SNAX). 0 keeps the model as it was.
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str,
@@ -49,7 +52,8 @@ class SnitchDma(gvsoc.systree.Component):
             loc_base: int=0,
             loc_size: int=0,
             tcdm_width: int=0,
-            beat_size: int=64):
+            beat_size: int=64,
+            read_latency: int=0):
 
         super().__init__(parent, name)
 
@@ -70,6 +74,7 @@ class SnitchDma(gvsoc.systree.Component):
             "loc_size": loc_size,
             "tcdm_width": tcdm_width,
             "beat_size": beat_size,
+            "read_latency": read_latency,
         })
 
     def i_OFFLOAD(self) -> gvsoc.systree.SlaveItf:

@@ -70,10 +70,12 @@ SNAX_ACC = {0: snax_alu_acc}
 # The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4):
 # one 64 B beat per cycle into L1 (dma_data_width 512), 3 transfers queued
 # (dma_req_fifo_depth) and 3 bursts in flight (dma_axi_req_fifo_depth). A DMA
-# read's first beat comes 6 cycles later from DRAM than from L1 (11 against 5);
-# those 6 cycles are the DRAM's. The cores' fetches and loads from DRAM take the
-# same path; their latency on the RTL is not measured (SG5).
-SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3}
+# read's first beat comes 5 cycles after its request from L1 and 11 from DRAM:
+# the 5 common to both are the DMA's own read path (read_latency), the other 6
+# are the DRAM's. The cores' fetches and loads from DRAM take the same path;
+# their latency on the RTL is not measured (SG5).
+SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
+    'read_latency': 5}
 DRAM_LATENCY = 6
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 

@@ -141,4 +141,10 @@ private:
     int64_t last_line_timestamp;
     // Current transfer for which data to be written are push
     IdmaTransfer *write_current_transfer;
+    // SNAX: cycles the DMA's own read path adds before the first line of a read stream
+    // (property read_latency, 0 when absent). Lines read on consecutive cycles form one
+    // stream and pay it once, as the RTL's read requests run ahead of the data.
+    uint64_t read_latency;
+    // SNAX: cycle in which the last read line was handed to the destination
+    int64_t last_read_push_timestamp;
 };
