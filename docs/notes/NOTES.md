@@ -119,3 +119,27 @@ stay there.
   `printf_simple` prints `Hello, World!` nine times; core 8 reads
   0xBC1 = 0x10000000 and 0xBC3 = 0x00090008 (9 cores, index 8), as the RTL
   gives. `perf_cnt` reads all zeros, as on upstream (GVS2).
+
+### SG0 step 7: one image, in snax-forge
+
+- 2026-10-13. The image holds tools only, and each repo keeps its own pixi
+  environment, so a separate snax-forge image would have been
+  `snax-gvsoc:main` plus pixi. Instead there is one image, owned by
+  snax-forge as the hub (D118 there): `ghcr.io/kuleuven-micas/snax-forge:main`
+  from snax-forge's `container/`, moved there from this repo's `b029ea4`
+  unchanged apart from its header and one layer. `container/` is removed here;
+  `snax-gvsoc:main` is no longer built, and `:gvs1` stays for the experiment.
+- The added layer is pixi 0.41.4, the version snax-forge's CI pins and its
+  lock was written with. The toolchain stage keeps 0.81.0: 0.41.4 refuses the
+  toolchain lock ("lock file version is 7, but only up to including version 6
+  is supported"), checked in Claude's sandbox.
+- How it is used: one container started from the folder that holds
+  snax-forge, snax-gvsoc and snax_cluster, mounted at its own path.
+  `pixi install` in snax-forge writes `snax-forge/.pixi/`, which also works
+  from the host with the same pixi version. GVSoC is built outside
+  `pixi shell`: snax-forge's environment sets `CC` and `CXX` to conda's gcc.
+- `gvrun` ends in `exec python3 -m gvrun`; inside a pixi task that is pixi's
+  Python, without GVSoC's packages. Open item 56 in snax-forge, for FLOW3.
+- On the author's side: the image built and pushed; on micaseb19 pixi 0.41.4
+  runs, snax-forge's `pixi install`, `pixi run check` and `pixi run test`
+  pass, and GVSoC builds and runs the bundled ELF in it.

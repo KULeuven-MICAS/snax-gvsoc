@@ -25,13 +25,16 @@ ticked here when its entry is in the notes.
 | 4 | P2: two-stage image `snax-gvsoc:main` with snax_cluster's toolchain (clang, lld, llvm-tools, clang-format 21.1.6, bender 0.28.2) and zsh; rv64 GCC and Snitch LLVM 12 dropped; built, pushed and run on micaseb19 | done 2026-10-12 |
 | 5 | Probe: snax_cluster `8ebd4229` tests built with its own flow (`cfg/snitch_cluster.hjson`, generic LLVM, `rtl-generic`) and run on `gvrun --target snitch` | done 2026-10-12 |
 | 6 | P3: snax_cluster's cluster CSRs 0xBC1 to 0xBC3 in the Snitch core; the probe run again, commit chosen | wip |
-| 7 | P4: snax-forge's image FROM `snax-gvsoc:main`, pixi last | todo |
+| 7 | P4a/P4b: one image, `snax-forge:main` from snax-forge's `container/` with pixi 0.41.4 (D118); `container/` removed here; built, pushed and run on micaseb19 | done 2026-10-13 |
 | 8 | P5: SG0 closed here, and the STATUS.md update for snax-forge | todo |
 
 ## Later
 
-- CI rebuilds `snax-gvsoc:main` on every push to `main`, as snax_cluster's
-  `build-docker.yml` does. Until then it is built and pushed by hand.
+- snax-forge's CI rebuilds `snax-forge:main` on every push to `main`, as
+  snax_cluster's `build-docker.yml` does. Until then it is built and pushed
+  by hand.
+- One pixi version for both locks: the toolchain lock (format 7) needs pixi
+  0.81.0, snax-forge's CI and lock use 0.41.4.
 
 ## Decided
 
