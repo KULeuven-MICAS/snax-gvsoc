@@ -38,7 +38,7 @@ written by hand with these values; reading the hjson comes later.
 | # | Step | Status |
 |---|---|---|
 | 1 | P1: this plan; the snax_cluster pin moved to `b2672f8` | done 2026-10-13 |
-| 2 | P2: the `snax-alu` app copied into `tests/snax/snax-alu/` (app, library, seeded `data.h`, `streamer_csr_addr_map.h`), linked against the runtime of `../snax_cluster` built with the old hjson; on `snitch` it stops at the first SNAX CSR | |
+| 2 | P2: the `snax-alu` app copied into `tests/snax/snax-alu/` (app, library, seeded `data.h`, `streamer_csr_addr_map.h`), linked against the runtime of `../snax_cluster` built with the old hjson; on `snitch` it stops at the first SNAX CSR | done 2026-10-13 |
 | 3 | P3: the `snax_alu` target in `snax/`: 2 cores, `misa` of `rv32ima`; `simple` and `printf_simple` exit 0, `Hello, World!` twice | |
 | 4 | Read how a CSR instruction can send an IO request and stall until the response; findings only | |
 | 5 | P4: the core patch for the CSR port; the 17 plain tests still pass on `snitch` | |

@@ -50,3 +50,5 @@ Every upstream file we edit gets one comment line near its top,
 | `core/models/cpu/iss/src/snitch/snitch.cpp` | 0xBC1 to 0xBC3 declared read-only, values from the core's properties | SG0 P3 |
 | `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes the cluster base, core count and core index as properties | SG0 P3 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | Passes them to each Snitch core | SG0 P3 |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `misa` and passes it to each Snitch core; `None` keeps the value the ISA string gives | SG1 P3 |
+| `Makefile` | `snax/` added to `GVSOC_MODULES` | SG1 P3 |

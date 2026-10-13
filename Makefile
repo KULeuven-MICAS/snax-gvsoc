@@ -1,3 +1,4 @@
+# Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 include test.mk
 
 CMAKE_FLAGS ?= -j 16
@@ -58,7 +59,7 @@ export PATH:=$(CURDIR)/gapy/bin:$(PATH)
 # Module roots passed to CMake at build time and to the doc build, where
 # each module's docs/ tree gets embedded into the manual. Keep build and
 # doc in sync by sharing this list.
-GVSOC_MODULES = $(CURDIR)/engine/python;$(CURDIR)/core/models;$(CURDIR)/pulp;$(CURDIR)/pulp/models;$(CURDIR)/pulp/targets;$(CURDIR)/gvrun/python;$(CURDIR)/config_tree
+GVSOC_MODULES = $(CURDIR)/engine/python;$(CURDIR)/core/models;$(CURDIR)/pulp;$(CURDIR)/pulp/models;$(CURDIR)/pulp/targets;$(CURDIR)/gvrun/python;$(CURDIR)/config_tree;$(CURDIR)/snax
 
 all: checkout build
 

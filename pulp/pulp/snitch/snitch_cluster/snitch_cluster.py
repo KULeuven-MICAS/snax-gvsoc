@@ -90,7 +90,7 @@ else:
     class ClusterArch(Tree):
         def __init__(self, parent, name, base, first_hartid, auto_fetch=False,
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
-                core_type='accurate', isa=None, alias_base=None):
+                core_type='accurate', isa=None, alias_base=None, misa=None):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -125,6 +125,8 @@ else:
             self.use_spatz = spatz
             self.spatz_nb_lanes = spatz_nb_lanes
             self.isa = isa
+            # Value of the misa CSR, None for the one the ISA string gives.
+            self.misa = misa
 
         class Tcdm(Tree):
             def __init__(self, parent, name, base, nb_masters):
@@ -235,7 +237,7 @@ class SnitchCluster(gvsoc.systree.Component):
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,
                     core_id=arch.first_hartid + core_id, htif=True, binaries=binaries,
                     snax_cluster_base_addr=arch.base, snax_cluster_nb_cores=arch.nb_core,
-                    snax_cluster_core_idx=core_id))
+                    snax_cluster_core_idx=core_id, misa=getattr(arch, 'misa', None)))
 
                 fp_cores.append(iss.Snitch_fp_ss(self, f'fp_ss{core_id}', isa=arch.isa,
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,

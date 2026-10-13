@@ -216,3 +216,34 @@ stay there.
   the first streamer register write.
 - Figures from Claude's sandbox run (LLVM 21.1.6 and bender 0.28.2 from
   their GitHub releases, as in SG0 step 4).
+- On the author's side, in the container on the MICAS server: the same
+  stop on `0x3c0`, at cycle 9639. The sandbox's ELF and runtime come from
+  another build of clang 21.1.6 and are not byte-identical to the author's;
+  the author's figures are the reference from here on.
+
+### SG1 step 3: P3, the snax_alu target
+
+- 2026-10-13. `snax/snax_alu.py` is the target `snax_alu`: the Snitch chip
+  of `pulp/pulp/chips/snitch/snitch.py` with one cluster of 2 cores (hart 0
+  computes, hart 1 is the DMA core, as GVSoC takes the last core), 128 KiB
+  TCDM in 32 banks, boot ROM at 0x1000, DRAM at 0x8000_0000, and
+  `misa` = 0x40001101 (RV32 I, M, A). The values are those of
+  `snax_alu_cluster_old.hjson`, written by hand. `snax/CMakeLists.txt`
+  installs it where gvrun looks (`install/generators`), as pulp's does.
+- GVSoC reads a target twice: `make build` lists its components through
+  gapy without `USE_GVRUN`, and gvrun runs it with `USE_GVRUN` set; pulp's
+  modules define different arch classes for the two. The build path reuses
+  `SnitchArch` with 2 cores; the run path has its own arch tree, since
+  `SnitchAttr` fixes 9 cores.
+- Upstream edits (in `UPSTREAM.md`): `ClusterArch` passes `misa` to each
+  Snitch core, `None` keeping today's value; `Makefile` adds `snax/` to
+  `GVSOC_MODULES`.
+- `misa` is only the value the CSR reads: the start-up code skips its FP
+  register setup when F and D are absent, as on the RTL's `rv32ima` cores.
+  GVSoC still executes FP instructions; the RTL would not.
+- Results in Claude's sandbox: `simple` and `printf_simple`, rebuilt for 2
+  cores in step 2, exit 0; `Hello, World!` twice. In `simple`, pe0 reads
+  `misa` = 0x40001101, branches over the FP setup and reaches
+  `init_global_pointer` at cycle 3460 (3944 on `snitch`, which reads
+  0x4004112d and runs the setup). `snax-alu` stops on `0x3c0` at cycle 8730
+  (9528 on `snitch`).

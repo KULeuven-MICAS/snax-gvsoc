@@ -36,6 +36,13 @@ From this folder, with the image's Python:
     runpy.run_path('data/datagen.py', run_name='__main__')
     " > data/data.h
 
+## Run
+
+From snax-gvsoc, after `make build TARGETS=snax_alu` and `source sourceme.sh`:
+
+    gvrun --target snax_alu --work-dir build/work/snax-alu \
+        --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf run
+
 ## Expected output
 
 On snax_cluster's RTL:
