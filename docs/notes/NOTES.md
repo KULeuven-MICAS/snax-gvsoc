@@ -453,3 +453,86 @@ stay there.
   read yet); each extra 800 B copy adds about 200 cycles for the same
   reason; L1 to L2 ignores the DRAM latency, as `idma_be_axi.cpp` does for
   writes.
+
+### SG2 step 3: the RTL run
+
+- 2026-10-13. Author's run of P2's ELF on snax_cluster's RTL built from
+  `snax_alu_cluster_old.hjson` at `b2672f8`. Bender took the iDMA fork at
+  `e859ffc`, the commit read in step 1. `Number of errors: 0`.
+
+  | Case | issue | done | busy | r | w | ar_stall | w_stall | r_stall |
+  |---|---|---|---|---|---|---|---|---|
+  | idle | 6 | 12 | 0 | 0 | 0 | 0 | 67 | 0 |
+  | l2l1 1x64 | 18 | 34 | 14 | 1 | 1 | 0 | 88 | 0 |
+  | l2l1 1x256 | 18 | 39 | 17 | 4 | 4 | 0 | 90 | 0 |
+  | l2l1 1x800 | 18 | 44 | 26 | 13 | 13 | 0 | 86 | 0 |
+  | l2l1 1x4096 | 18 | 99 | 77 | 64 | 64 | 0 | 90 | 0 |
+  | l2l1 1x8192 | 18 | 159 | 141 | 128 | 128 | 0 | 86 | 0 |
+  | l2l1 2x800 | 28 | 59 | 39 | 26 | 26 | 0 | 88 | 0 |
+  | l2l1 4x800 | 48 | 84 | 65 | 52 | 52 | 0 | 87 | 0 |
+  | l1l2 1x800 | 18 | 39 | 20 | 13 | 13 | 0 | 81 | 0 |
+
+- `dma_trace_00001_00000.log` (the iDMA's own trace, hart 1) is kept by
+  the author; 814 lines, one per cycle with backend activity.
+
+### SG2 step 4: what the RTL does
+
+- 2026-10-13. Read from step 3's numbers and trace. The trace's busy
+  windows equal the `busy` counter in every case (two runs per case).
+  In the trace, `bus.axi_rsp_valid` is a read beat and `bus.axi_req_valid`
+  a write beat.
+- Per copy, counting from the cycle the backend takes it: the read request
+  in cycle 1; the first read beat `L_rd` cycles later (11 from DRAM, 5 from
+  L1); then one read beat per cycle, with no gap between bursts or between
+  back-to-back copies; each write beat one cycle after its read beat; busy
+  drops after the last write beat; the write response (`rsp_valid`) comes 5
+  cycles later for an L1 write and 11 for a DRAM write. So
+  `busy = L_rd + N_beats + 2`, with `N_beats` the 64 B beats the copy
+  touches (800 B is 13, also at +800); exact for all eight copy cases.
+- 8 KiB: both 4 KiB bursts are requested at the start and the beats run on
+  through the page boundary, so the burst split costs nothing. 4x800: the
+  backend takes a copy every 10 cycles, the issue cost per copy, and the
+  beats stay continuous.
+- `snrt_dma_wait_all` polls `busy_o`, which drops before the write
+  response: software never waits for it.
+- `ar_stall` and `r_stall` are 0 in every case: the testbench's 2-read
+  limit and the 3-beat buffer never bite here. `w_stall` counts cycles in
+  which the memory side is ready, whether a copy runs or not (67 when
+  idle); it says nothing about a copy.
+- Outside the engine, `done - busy` is 18 to 22 cycles: issue and the
+  poll. One copy issues in 18 cycles, each further copy adds 10 (GVSoC
+  today: 16 and 9). The idle case (6 and 12, GVSoC 3 and 6) is the cost of
+  `mcycle` and `dmstati` in the core, an SG5 matter.
+- Against GVSoC today (step 2): the DRAM is 100 cycles away there against
+  about 11 for a first beat, and 4 B per cycle against 64; GVSoC moves L1
+  to L2 without the DRAM latency. These set P4's values; P5 keeps only what
+  P4's run leaves.
+
+### SG2 step 5: P3, the perf counters
+
+- 2026-10-13. GVSoC's cluster registers count four events of
+  `snitch_cluster_peripheral.sv`: `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and
+  `DMA_BUSY`. Accesses to the perf range (0x000 to 0x17F) are handled before
+  the generated regmap: enable, hart select and a 48-bit value per counter,
+  8 bytes apart, any access inside one register. A counter counts the event
+  of its lowest enable bit, as the RTL's if-else chain does; the other
+  events count nothing. `CYCLE` and `DMA_BUSY` are brought up to date from
+  timestamps before any change and any read, with no per-cycle event. The
+  RTL's one-cycle register on the events is not modelled; it changes a
+  count only when an event crosses the moment a counter starts or stops.
+- The iDMA frontend drives three wires: `busy`, from the transfer IDs as
+  `dmstat 2` returns them, and `r_beats` / `w_beats`, the 64 B beats of
+  each copy when it is queued (`beat_size`, a `SnitchDma` property). A beat
+  never straddles a 4 KiB page, so the sum per copy equals the RTL's sum
+  per burst. Unbound wires are not driven, so other users of `SnitchDma`
+  (magia) are unchanged. `SnitchCluster` binds them, except with Spatz,
+  whose cluster registers are another model.
+- Results in Claude's sandbox: `dma-timing` on `snax_alu` exits 0 with 0
+  errors; `issue` and `done` as in step 2; `r` and `w` equal the RTL's
+  beats in every case; `busy` is the model's engine time today (103, 103,
+  106, 900, 1924, 206, 606 and 6 for the copy cases, RTL 14 to 141).
+  `snax-csr` gives four lines of `0 errors`; `snax-alu` still ends with
+  `Accelerator Cycles: 0` and 100 errors. The 17 plain tests (9-core
+  build) exit 0 on `snitch`; `perf_cnt` now prints `End: 1531 cycles`
+  (0 before) and still 0 for its DMA byte counters, which count
+  `DMA_AR_BW` and `DMA_AW_BW`.

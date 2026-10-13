@@ -19,9 +19,11 @@ ticked here when its entry is in the notes.
 ## The DMA path
 
 From source at snax_cluster `b2672f8` and the iDMA fork's `master`
-(`e859ffc`, upstream v0.6.5); not run yet. snax_cluster takes the fork at
-`rev: master` with no lock file in git, so the commit in the RTL build is
-read from that build (step 3).
+(`e859ffc`, upstream v0.6.5), the commit the RTL build took (step 3).
+Measured on the RTL in step 4: a copy's engine time is
+`busy = L_rd + N_beats + 2`, with `L_rd` the cycles from read request to
+first beat (11 from DRAM, 5 from L1) and `N_beats` the 64 B beats it
+touches.
 
 - Program: `snrt_dma_start_1d` is `dmsrc`, `dmdst` and `dmcpyi` (1D, R-AW
   coupled, channel 0) through the DMA core's offload port;
@@ -66,11 +68,11 @@ last start and after `snrt_dma_wait_all`; then read the counters.
 |---|---|---|
 | 1 | P1: this plan; SG1.md and snax-forge's STATUS say the housekeeping pass moves after SG5 | done 2026-10-13 |
 | 2 | P2: the timing program in `tests/snax/dma-timing/`: L2 to L1 at 64 B, 256 B, 800 B, 4 KiB and 8 KiB, 2 x and 4 x 800 B back to back, L1 to L2 at 800 B; each case run twice, the second kept; one line per case and the error count. On `snax_alu`: `mcycle` only, 0 errors | done 2026-10-13 |
-| 3 | The same ELF on the RTL (author's run): the printed lines, the iDMA commit, `dma_trace_00001_00000.log` | |
-| 4 | From the RTL numbers: issue cost, startup, first-beat latency, beat rate, effect of the 2-read limit, done delay. Findings only | |
-| 5 | P3: counting in GVSoC's cluster registers (`CYCLES`, `DMA_BUSY`, read and write beats) and a busy signal out of the iDMA model; the program prints counters on both sides | |
-| 6 | P4: parameters: request queue 3, bursts in flight per direction, `tcdm_width` 64 B, DRAM 64 B per cycle with step 4's latency through an arch value | |
-| 7 | P5: model changes: read data per 64 B beat, the burst split on the destination side, done on the last write response; gap per case logged | |
+| 3 | The same ELF on the RTL (author's run): the printed lines, the iDMA commit, `dma_trace_00001_00000.log` | done 2026-10-13 |
+| 4 | From the RTL numbers: issue cost, startup, first-beat latency, beat rate, effect of the 2-read limit, done delay. Findings only | done 2026-10-13 |
+| 5 | P3: counting in GVSoC's cluster registers (`CYCLES`, `DMA_BUSY`, read and write beats) and a busy signal out of the iDMA model; the program prints counters on both sides | done 2026-10-13 |
+| 6 | P4: parameters from step 4: a DMA read's first beat 5 cycles after its request from L1 and 11 from DRAM (the 6 more through an `hbm_latency` arch value), DRAM 64 B per cycle, `tcdm_width` 64 B, request queue 3, bursts in flight 3. `hbm_latency` also moves the cores' DRAM fetches and loads, which are not measured (SG5) | |
+| 7 | P5: what P4's run leaves of `busy = L_rd + N_beats + 2`, likely the read request one cycle after the copy is taken, each write beat one cycle after its read beat and busy ending at the last write beat; the list is fixed after P4. The destination-side burst split is dropped: it costs no cycle on the RTL. Gap per case logged | |
 | 8 | P6: SG2 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | |
 
 ## Decided

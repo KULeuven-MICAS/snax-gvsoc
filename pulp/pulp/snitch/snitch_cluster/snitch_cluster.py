@@ -380,6 +380,12 @@ class SnitchCluster(gvsoc.systree.Component):
         # Cluster DMA
         idma.o_AXI(wide_axi.i_INPUT())
         idma.o_TCDM(tcdm.i_DMA_INPUT())
+        # SNAX: the DMA's perf events into the cluster's perf counters (not modelled by the
+        # Spatz cluster registers)
+        if not arch.use_spatz:
+            idma.o_BUSY(cluster_registers.i_DMA_BUSY())
+            idma.o_R_BEATS(cluster_registers.i_DMA_R_BEATS())
+            idma.o_W_BEATS(cluster_registers.i_DMA_W_BEATS())
 
         # Zero mem
         wide_axi.o_MAP(zero_mem.i_INPUT(), base=arch.zero_mem.base, size=arch.zero_mem.size, rm_base=True)

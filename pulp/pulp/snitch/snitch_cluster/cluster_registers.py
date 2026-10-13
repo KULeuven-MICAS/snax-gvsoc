@@ -48,5 +48,17 @@ class ClusterRegisters(gvsoc.systree.Component):
     def i_BARRIER_ACK(self, core: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'barrier_req_{core}', signature='wire<bool>')
 
+    def i_DMA_BUSY(self) -> gvsoc.systree.SlaveItf:
+        """The DMA's busy state, counted by DMA_BUSY perf counters (SNAX)."""
+        return gvsoc.systree.SlaveItf(self, 'dma_busy', signature='wire<bool>')
+
+    def i_DMA_R_BEATS(self) -> gvsoc.systree.SlaveItf:
+        """DMA read beats, counted by DMA_R_DONE perf counters (SNAX)."""
+        return gvsoc.systree.SlaveItf(self, 'dma_r_beats', signature='wire<int>')
+
+    def i_DMA_W_BEATS(self) -> gvsoc.systree.SlaveItf:
+        """DMA write beats, counted by DMA_W_DONE perf counters (SNAX)."""
+        return gvsoc.systree.SlaveItf(self, 'dma_w_beats', signature='wire<int>')
+
     def gen_gui(self, parent_signal):
         return gvsoc.gui.Signal(self, parent_signal, name=self.name, is_group=True, groups=["regmap"])
