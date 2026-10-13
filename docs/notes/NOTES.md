@@ -536,3 +536,42 @@ stay there.
   build) exit 0 on `snitch`; `perf_cnt` now prints `End: 1531 cycles`
   (0 before) and still 0 for its DMA byte counters, which count
   `DMA_AR_BW` and `DMA_AW_BW`.
+
+### SG2 step 6: P4, the parameters
+
+- 2026-10-13. `snax_alu.py` sets what step 4 measured, through two new
+  arch values: `ClusterArch(dma=...)` replaces `SnitchCluster`'s `SnitchDma`
+  defaults (`tcdm_width` 64, `transfer_queue_size` 3, `burst_queue_size` 3,
+  for the RTL's 512-bit beat, `dma_req_fifo_depth` and
+  `dma_axi_req_fifo_depth`), and `Soc`'s `hbm_latency` (default 100) is 6.
+  The DRAM memory is 64 B per cycle (`width_log2=6`). Targets that set
+  neither keep today's values.
+- The 6 is only the DRAM's share of a read's latency: 11 cycles to a first
+  beat from DRAM against 5 from L1. The 5 common to both are the wide
+  crossbar's cuts and the AXI-to-memory conversion, which belong to the DMA
+  model (P5). The cores' fetches and loads from DRAM take the same chip
+  mapping, so they now see 6 cycles there too; their RTL latency is not
+  measured (SG5).
+- Results in Claude's sandbox: `dma-timing` exits 0 with 0 errors and no
+  warning; `r` and `w` as in step 5.
+
+  | Case | busy | RTL | done | RTL |
+  |---|---|---|---|---|
+  | idle | 0 | 0 | 6 | 12 |
+  | l2l1 1x64 | 9 | 14 | 25 | 34 |
+  | l2l1 1x256 | 12 | 17 | 27 | 39 |
+  | l2l1 1x800 | 21 | 26 | 37 | 44 |
+  | l2l1 1x4096 | 72 | 77 | 87 | 99 |
+  | l2l1 1x8192 | 136 | 141 | 151 | 159 |
+  | l2l1 2x800 | 34 | 39 | 50 | 59 |
+  | l2l1 4x800 | 60 | 65 | 76 | 84 |
+  | l1l2 1x800 | 15 | 20 | 31 | 39 |
+
+- `busy` is 5 under the RTL in every copy case: GVSoC now gives
+  `busy = (L_rd - 5) + N_beats + 2`, so the beat rate, the page crossing,
+  the back-to-back copies and the 2 fixed cycles already match; only the
+  common read path is missing. `done - busy` is 15 to 16 here against 18
+  to 22 on the RTL: issue and polling in the core, as the idle case (SG5).
+- `snax-csr` gives four lines of `0 errors`; `snax-alu` is unchanged; the
+  17 plain tests (9-core build) exit 0 on `snitch`, `perf_cnt` printing
+  what it did after P3.
