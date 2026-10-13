@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the probe and the RTL reference | `8ebd42299c1db2ab26006f68f76896097b64b278` (2026-09-16) |
+| snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
 
 ## Log
 
@@ -176,3 +176,210 @@ stay there.
   left is generating it from the hjson (for snax_alu's 2-core cluster with
   `rv32ima` cores, for one), and recording cycles per test against the RTL.
 - SG2 starts from the list under "SG2 starts from" in `docs/plans/SG0.md`.
+
+### SG1 step 1: P1, the plan
+
+- 2026-10-13. `docs/plans/SG1.md` written: SG1 builds the `snax_alu`
+  target from `cfg/snax_alu_cluster_old.hjson` by hand and adds the CSR
+  port; the DMA (SG2), the streamer (SG3), the ALU (SG4) and the cycle
+  comparison (SG5) follow.
+- The snax_cluster pin moves to `b2672f8`, which adds
+  `snax_alu_cluster_old.hjson`: the `snax_alu` cluster with the plain
+  interconnect (`sparse_interconnect: false`, 12 narrow TCDM ports). The
+  sparse interconnect comes after SG5.
+- The reference: `snax-alu` on the RTL built from that file prints
+  `Accelerator Done!`, `Accelerator Cycles: 25` and `Number of errors: 0`
+  (author's run). 25 is `LOOP_ITER` (`LENGTH` 100 over 4 lanes): the ALU's
+  counter is set to 1 by the CSR write and counts each busy cycle up to the
+  last output, so 25 is one output per cycle. Neither number depends on the
+  data values.
+- At `b2672f8` snax_cluster's own build does not make the app for the old
+  file: `sw/Makefile` names `snax_multi_alu_cluster_old.hjson`, and
+  `sw/apps/Makefile` has no branch for it. The copy in step 2 does not need
+  either.
+
+### SG1 step 2: P2, the snax-alu app copied in
+
+- 2026-10-13. `tests/snax/snax-alu/` holds snax_cluster `b2672f8`'s app,
+  its library and `datagen.py` unchanged, the streamer header that
+  `rtl-gen` wrote for the old hjson (from the author's RTL build: streamer
+  registers 960 to 977, the ALU's 978 to 982 in `snax-alu-lib.h`), and a
+  `data.h` made with NumPy seed 0. Its Makefile builds against the runtime
+  of the snax_cluster checkout beside the repo, built with
+  `make sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson` (no sbt needed;
+  `CFG_CLUSTER_NR_CORES 2`). That build also rebuilds `sw/tests/build/` for
+  2 cores, so the 17 plain ELFs of SG0 are kept aside for step 5.
+- With the same `data.h`, snax_cluster's own build of the app gives a
+  byte-identical ELF.
+- On the stock `snitch` target (9 cores): pe0 stops at cycle 9528 with
+  `Accessing unsupported CSR (id: 0x3c0, name: unknown)` and exits 1, at
+  the first streamer register write.
+- Figures from Claude's sandbox run (LLVM 21.1.6 and bender 0.28.2 from
+  their GitHub releases, as in SG0 step 4).
+- On the author's side, in the container on the MICAS server: the same
+  stop on `0x3c0`, at cycle 9639. The sandbox's ELF and runtime come from
+  another build of clang 21.1.6 and are not byte-identical to the author's;
+  the author's figures are the reference from here on.
+
+### SG1 step 3: P3, the snax_alu target
+
+- 2026-10-13. `snax/snax_alu.py` is the target `snax_alu`: the Snitch chip
+  of `pulp/pulp/chips/snitch/snitch.py` with one cluster of 2 cores (hart 0
+  computes, hart 1 is the DMA core, as GVSoC takes the last core), 128 KiB
+  TCDM in 32 banks, boot ROM at 0x1000, DRAM at 0x8000_0000, and
+  `misa` = 0x40001101 (RV32 I, M, A). The values are those of
+  `snax_alu_cluster_old.hjson`, written by hand. `snax/CMakeLists.txt`
+  installs it where gvrun looks (`install/generators`), as pulp's does.
+- GVSoC reads a target twice: `make build` lists its components through
+  gapy without `USE_GVRUN`, and gvrun runs it with `USE_GVRUN` set; pulp's
+  modules define different arch classes for the two. The build path reuses
+  `SnitchArch` with 2 cores; the run path has its own arch tree, since
+  `SnitchAttr` fixes 9 cores.
+- Upstream edits (in `UPSTREAM.md`): `ClusterArch` passes `misa` to each
+  Snitch core, `None` keeping today's value; `Makefile` adds `snax/` to
+  `GVSOC_MODULES`.
+- `misa` is only the value the CSR reads: the start-up code skips its FP
+  register setup when F and D are absent, as on the RTL's `rv32ima` cores.
+  GVSoC still executes FP instructions; the RTL would not.
+- Results in Claude's sandbox: `simple` and `printf_simple`, rebuilt for 2
+  cores in step 2, exit 0; `Hello, World!` twice. In `simple`, pe0 reads
+  `misa` = 0x40001101, branches over the FP setup and reaches
+  `init_global_pointer` at cycle 3460 (3944 on `snitch`, which reads
+  0x4004112d and runs the setup). `snax-alu` stops on `0x3c0` at cycle 8730
+  (9528 on `snitch`).
+- On the author's side: all four checks pass (`simple` and `printf_simple`
+  on `snax_alu`, the skipped FP setup, `snax-alu` stopping on `0x3c0`, a
+  plain 9-core ELF on `snitch`).
+
+### SG1 step 4: how a CSR instruction can leave the core
+
+- 2026-10-13. Read at `93cedc4`, no code. `csrrw` and `csrrwi`
+  (`core/models/cpu/iss/include/isa/priv.hpp`) first ask
+  `iss->csr.get_csr(number)`; if a register object is declared there, its
+  virtual `handle()` runs the whole instruction and returns the next PC.
+  `csrrs`, `csrrc` and their immediate forms never call `handle()`: they
+  call `check_access()` and then `iss_csr_read()` / `iss_csr_write()`, which
+  run the object's callbacks. The callbacks get `(is_write, value)` only,
+  not the instruction or the CSR number.
+- The default `handle()` reads before every write, whatever `rd` is, so a
+  plain callback would turn each `csrw` into a read and a write.
+- `snax-alu` uses both paths: 17 `csrw` and 2 `csrwi` (`csrrw`, `csrrwi`;
+  first counted as 18 and 2, see SG1 step 7)
+  and 3 `csrr` (`csrrs`, on 976, 981, 982). objdump names 0x3C0 and up
+  `pmpaddr16` and on.
+- A CSR can make the core wait: the barrier CSR 0x7C2
+  (`src/snitch/snitch.cpp`) sends a request from its callback and calls
+  `exec.insn_stall()` if not answered; the answer calls `stalled_dec()` and
+  `insn_terminate()`. `dmcpy` (`include/isa/xdma.hpp`) does the same for a
+  value, parking `rd` in `exec.stall_reg` until `Exec::offload_grant`.
+- The core's `acc_req` / `acc_rsp` ports carry FP instructions to the FP
+  subsystem, and `offload` is the DMA core's link to the iDMA: neither is
+  the SNAX CSR path.
+
+### SG1 step 5: P4, the CSR port
+
+- 2026-10-13. The accurate Snitch core declares 0x3C0 to 0x5FF in one loop,
+  one `SnaxCsr` object each (it carries its number, which the callback path
+  does not see), named `snax_csr_<number>`. Every access becomes a 32-bit IO
+  request on the new master port `snax_csr`, at byte address 4 * CSR
+  number. `csrrw` / `csrrwi` go through `SnaxCsr::handle()`: one write, after
+  one read only when `rd` is not `x0` (as shipped, P4 also read for `x0`;
+  fixed in P5, see SG1 step 6). The other CSR instructions go through
+  the callback. `Snitch.o_SNAX_CSR` binds the port; nothing binds it yet.
+- Answers: `IO_REQ_OK` gives the value at once and its latency is counted
+  as stall cycles. A pending or denied answer is a fatal error naming the
+  CSR, until a block needs one (SG5 looks at the RTL's response timing).
+- Unbound port: the same "unsupported CSR" warning as before, now with the
+  CSR's name (`snax_csr_960`), and exit 1.
+- Cost: only Snitch's own files change, so only that core recompiles. Other
+  instructions are untouched; a CSR instruction does the map lookup it did
+  before, in a map with 576 more entries. The one `IoReq` is reused, not
+  allocated. `handle()` does not go through `iss_csr_write()`, so a `csrw`
+  does not switch the core out of its fast execution mode.
+- Results in Claude's sandbox: the 17 plain ELFs (9-core build) exit 0 on
+  `snitch`; on `snax_alu`, `simple` and `printf_simple` exit 0 and
+  `snax-alu` stops at cycle 8730 with `Accessing unsupported CSR (id:
+  0x3c0, name: snax_csr_960)`. With a plain memory bound to pe0's port in a
+  throwaway edit, the `csrr` reads returned the memory's contents, so the
+  busy loop never ended (P5's stub answers 0). That run was also read as
+  "every `csrw` was one write", which was wrong: see SG1 step 6.
+- On the author's side: the 17 plain ELFs pass on `snitch` and `snax-alu`
+  stops on `snax_csr_960` at the same cycle as with P3.
+
+### SG1 step 6: P5, the stub register block
+
+- 2026-10-13. `snax/snax_csr_stub.py` / `.cpp`: an IO slave holding a list
+  of read-write CSRs (read back what was written, 0 after reset) and
+  read-only CSRs (read 0). The rules follow snax_cluster's
+  `ReqRspManager.scala`: read-write registers first, then read-only ones;
+  a write past the read-write ones, or any access past the end, fires an
+  assertion there. The stub refuses those with a warning naming the CSR.
+  The start handshake (bit 0 of the last read-write CSR raises `valid` and
+  the write waits for `ready`) is not modelled; it is SG3 / SG4's.
+- `snitch_cluster.py`: `ClusterArch` takes `snax_acc`, `{core index:
+  function(parent, name) -> component}`; `SnitchCluster` builds each as
+  `snax_acc<core>` and binds the core's `o_SNAX_CSR` to its `i_INPUT()`.
+  Both arch classes carry it, since `make build` reads the build-time one to
+  find the sources to compile. `snax_alu.py` sets `{0: snax_alu_acc}` with
+  960 to 975 and 978 to 980 read-write, 976, 977, 981, 982 read-only.
+- GVSoC runs with `werror: true` (`gvsoc_config.json`): any
+  `force_warning` ends the run at once with exit 1. That is how the
+  unsupported-CSR warning stopped `snax-alu`, and how a refused stub access
+  stops; the core's fatal for a non-OK answer is then not reached.
+- P4 fix: the decoder gives `rd = x0` the index `ISS_NB_REGS` (32), not 0
+  (`core/models/cpu/iss/src/decode.cpp`), so `handle()`'s `!= 0` check made
+  every `csrw` read first. Upstream's `csrrw_exec` has the same check,
+  harmless there. Now `!= ISS_NB_REGS`. Found by counting the stub's
+  accesses for `snax-csr`: 129 before, 108 after (66 reads, 42 writes).
+- `tests/snax/snax-csr/`: four parts, one per CSR instruction path (see its
+  README); returns its error count.
+- Results in Claude's sandbox: `snax-csr` prints four lines of `0 errors`,
+  exits 0, 108 stub accesses; the 17 plain ELFs (9-core build) exit 0 on
+  `snitch`; `simple` and `printf_simple` exit 0 on `snax_alu`. Throwaway
+  programs: a write to 976 stops with `Write to read-only CSR 976 (value:
+  0x1)`, a read of 983 with `CSR 983 is not held by this block`.
+  `snax-alu` runs to the end with no CSR warning: `Accelerator Cycles: 0`,
+  `Number of errors: 100`, exit code 100 (nothing computes the output).
+- On the author's side: P5's checks pass (`snax-csr` four lines of `0
+  errors`, 108 stub accesses, the 17 plain ELFs on `snitch`).
+
+### SG1 step 7: snax-alu on the stub
+
+- 2026-10-13. `snax-alu` runs to the end with no CSR warning:
+  `Accelerator Done!`, `Accelerator Cycles: 0`, `Number of errors: 100`,
+  exit code 100. Nothing computes `local_o`, so all 100 outputs differ.
+- The stub sees 22 accesses (`--trace=snax_acc0`), cycles from Claude's
+  sandbox:
+
+  | Cycle | CSR | Value | What |
+  |---|---|---|---|
+  | 8730 to 9237 | 960 to 964 | `0x10000000`, 0, 8, 25, 32 | reader 0: base `local_a`, spatial stride 8 B, 25 steps of 32 B |
+  | 9459 to 9573 | 965 to 969 | `0x10000320`, ... | reader 1: base `local_b` (+800 B) |
+  | 9693 to 9697 | 970 to 974 | `0x10000640`, ... | writer 0: base `local_o` |
+  | 9815, 9914 | 978, 979 | 0, 25 | ALU mode, length |
+  | 9919 | 975 | 1 | streamer start |
+  | 10034 | 980 | 1 | ALU start |
+  | 10040, 10046 | 981, 976 | 0 | ALU busy, streamer busy |
+  | 21814 | 982 | 0 | ALU counter, after the check loop and `printf` |
+
+- For SG3 and SG4: the streamer is started before the ALU, and each start
+  is a write of 1 to the last read-write CSR of its block, the write that
+  raises `valid` in `ReqRspManager.scala` and waits for `ready`. Each
+  streamer runs 25 steps of 4 lanes of 64 bit.
+- The ELF holds 19 SNAX CSR writes (17 `csrw`, 2 `csrwi`), one per write
+  that runs; step 4's count of 18 `csrw` was one too many.
+
+### SG1 step 8: SG1 closed
+
+- 2026-10-13. All steps done; acceptance met: `snax-csr` reads back every
+  written value, `snax-alu` runs to the end on the stub, the 17 plain tests
+  still pass on `snitch`.
+- Settled (the list is in `docs/plans/SG1.md` under "Decided"): the
+  `snax_alu` target by hand, the CSR port at 4 * CSR, accelerators per core
+  through `snax_acc`, the stub's rules. In snax-forge: D119 (M16's order)
+  and D120 (the CSR path).
+- Upstream files changed in SG1: the Snitch core (`class.hpp`,
+  `snitch.cpp`, `snitch_core.py`), the cluster (`snitch_cluster.py`) and
+  the `Makefile`; rows in `UPSTREAM.md`.
+- Next: a housekeeping pass on this branch, then SG2 (the DMA), from the
+  list under "SG2 starts from" in `docs/plans/SG1.md`.

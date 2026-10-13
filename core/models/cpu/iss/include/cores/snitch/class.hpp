@@ -62,6 +62,27 @@
 class IssWrapper;
 
 
+// snax_cluster's accelerator CSRs (hw/snitch/src/csr_snax_def.sv): the core sends
+// every CSR instruction in this range out on its accelerator port.
+static const iss_reg_t SNAX_CSR_FIRST = 0x3C0;
+static const iss_reg_t SNAX_CSR_LAST = 0x5FF;
+static const int SNAX_CSR_NB = SNAX_CSR_LAST - SNAX_CSR_FIRST + 1;
+
+// One SNAX CSR. Its accesses go out as IO requests on the core's snax_csr port, at
+// byte address 4 * CSR number. csrrw and csrrwi come through handle(), the other CSR
+// instructions through the callback the core registers (Iss::snax_csr_access).
+class SnaxCsr : public CsrAbtractReg
+{
+public:
+    SnaxCsr() : CsrAbtractReg(&this->value) {}
+    iss_reg_t handle(Iss *iss, iss_insn_t *insn, iss_reg_t pc, iss_reg_t reg_value) override;
+
+    iss_reg_t address = 0;
+    // Storage the base class needs; SNAX CSRs keep their value in the block behind the port.
+    iss_reg_t value = 0;
+};
+
+
 class Iss
 {
 public:
@@ -125,6 +146,13 @@ public:
     iss_reg_t pc;
     bool is_write;
     unsigned int frm;
+    // SNAX CSRs: one object per CSR number, the port and the one request they share.
+    // Returns false when the port is not bound (the CSR is then unsupported, as before).
+    bool snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value);
+    SnaxCsr snax_csrs[SNAX_CSR_NB];
+    vp::IoMaster snax_csr_itf;
+    vp::IoReq snax_csr_req;
+
     // Temporary variable to process RAW caused by SSR and accessing stack pointer,
     // for result is written to memory directly.
     iss_addr_t mem_map;
@@ -135,6 +163,7 @@ private:
     bool barrier_update(bool is_write, iss_reg_t &value);
     static void barrier_sync(vp::Block *__this, bool value);
     bool ssr_access(bool is_write, iss_reg_t &value);
+    bool snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value);
     static void handle_wait_acc_ready(vp::Block *__this, vp::ClockEvent *event);
 
     vp::WireMaster<bool> barrier_req_itf;

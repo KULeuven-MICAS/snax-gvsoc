@@ -55,6 +55,20 @@ Iss::Iss(IssWrapper &top)
     this->snax_base_addr_h.value = 0;
     this->snax_cluster_core_id.value = snax_core_id;
 
+    // snax_cluster's accelerator CSRs 0x3C0 to 0x5FF, one object each, sent out on the
+    // snax_csr port. The object carries its own number, since the callback path
+    // (csrrs, csrrc) does not see the instruction.
+    for (int i = 0; i < SNAX_CSR_NB; i++)
+    {
+        SnaxCsr *snax_csr = &this->snax_csrs[i];
+        snax_csr->address = SNAX_CSR_FIRST + i;
+        this->csr.declare_csr(snax_csr, "snax_csr_" + std::to_string(snax_csr->address),
+            snax_csr->address);
+        snax_csr->register_callback(std::bind(&Iss::snax_csr_access, this, snax_csr,
+            std::placeholders::_1, std::placeholders::_2));
+    }
+    this->top.new_master_port("snax_csr", &this->snax_csr_itf, (vp::Block *)this);
+
     this->barrier_ack_itf.set_sync_meth(&Iss::barrier_sync);
     this->top.new_slave_port("barrier_ack", &this->barrier_ack_itf, (vp::Block *)this);
 
@@ -105,6 +119,79 @@ bool Iss::barrier_update(bool is_write, iss_reg_t &value)
     }
 
     return false;
+}
+
+
+// Sends one access to a SNAX CSR out on the snax_csr port: a 32-bit IO request at byte
+// address 4 * CSR number. The block behind the port answers at once (IO_REQ_OK); its
+// latency is counted as stall cycles. A block that answers later is not supported yet.
+bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
+{
+    if (!this->snax_csr_itf.is_bound())
+    {
+        // Nothing behind the port: the CSR is unsupported, as without this model
+        this->csr.trace.force_warning("Accessing unsupported CSR (id: 0x%x, name: %s)\n",
+            address, iss_csr_name(this, address));
+        return false;
+    }
+
+    uint32_t data = is_write ? (uint32_t)value : 0;
+    vp::IoReq *req = &this->snax_csr_req;
+    req->init();
+    req->set_addr(address * 4);
+    req->set_size(4);
+    req->set_is_write(is_write);
+    req->set_data((uint8_t *)&data);
+
+    int err = this->snax_csr_itf.req(req);
+    if (err != vp::IO_REQ_OK)
+    {
+        this->csr.trace.fatal("SNAX CSR access not answered at once (id: 0x%x, is_write: %d, "
+            "status: %d); pending and denied answers are not supported yet\n",
+            address, is_write, err);
+        return false;
+    }
+
+    if (!is_write)
+    {
+        value = data;
+    }
+    if (req->get_latency() > 0)
+    {
+        this->timing.stall_cycles_account(req->get_latency());
+    }
+    return true;
+}
+
+
+// Callback of every SNAX CSR: csrrs, csrrc and their immediate forms read through here,
+// and write through here when they set or clear bits.
+bool Iss::snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value)
+{
+    this->snax_csr_request(csr->address, is_write, value);
+    // false: the value lives behind the port, not in the CSR object
+    return false;
+}
+
+
+// csrrw and csrrwi on a SNAX CSR: one write request, after a read only when rd is not x0
+// (a csrw sends no read, as in the RISC-V spec). The decoder gives rd = x0 the index
+// ISS_NB_REGS, a register nothing reads, not 0.
+iss_reg_t SnaxCsr::handle(Iss *iss, iss_insn_t *insn, iss_reg_t pc, iss_reg_t reg_value)
+{
+    if (insn->out_regs[0] != ISS_NB_REGS)
+    {
+        iss_reg_t value = 0;
+        if (iss->snax_csr_request(this->address, false, value))
+        {
+            iss->regfile.memcheck_set_valid(insn->out_regs[0], true);
+            iss->regfile.set_reg(insn->out_regs[0], value);
+        }
+    }
+
+    iss->snax_csr_request(this->address, true, reg_value);
+
+    return iss_insn_next(iss, insn, pc);
 }
 
 

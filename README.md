@@ -16,7 +16,9 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | Path | What |
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `docs/plans/` | One checklist per task (`SG0.md`) |
+| `snax/` | SNAX targets and components: the `snax_alu` target, the CSR stub |
+| `tests/snax/` | Programs for the SNAX targets, built against snax_cluster's runtime |
+| `docs/plans/` | One checklist per task (`SG0.md`, `SG1.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, and what it installs; not tracked |
 
@@ -56,7 +58,7 @@ beside this repo; only the ELF files are run here. Clone it next to this
 repo, at the commit in `docs/notes/NOTES.md`, with its submodules:
 
     git clone https://github.com/KULeuven-MICAS/snax_cluster.git ../snax_cluster
-    git -C ../snax_cluster checkout 8ebd42299c1db2ab26006f68f76896097b64b278
+    git -C ../snax_cluster checkout b2672f81bad52654bb3f1549cbe009f8ad8e1faf
     git -C ../snax_cluster submodule update --init --recursive
 
 In the container, started from the parent folder as above, build
@@ -74,6 +76,29 @@ prints `Hello, World!` once per core:
       echo "$n exit $?"
     done
     cat build/work/printf_simple.log
+
+## The snax_alu target
+
+`snax_alu` is snax_cluster's `cfg/snax_alu_cluster_old.hjson`: a compute
+core and a DMA core, the compute core's accelerator CSRs on a stub that
+holds them (`snax/snax_csr_stub.py`). Build snax_cluster's runtime for that
+cluster (this also rebuilds its plain tests for 2 cores), then GVSoC and
+the programs in `tests/snax/`:
+
+    make -C ../snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
+    make build TARGETS="snitch;snax_alu"
+    make -C tests/snax/snax-csr
+    make -C tests/snax/snax-alu
+    source sourceme.sh
+    gvrun --target snax_alu --work-dir build/work/snax-csr \
+        --param chip/soc/binary=$PWD/tests/snax/snax-csr/build/snax-csr.elf run
+    gvrun --target snax_alu --work-dir build/work/snax-alu \
+        --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf run
+
+`snax-csr` prints four lines of `0 errors` and exits 0. `snax-alu` prints
+`Accelerator Done!`, `Accelerator Cycles: 0` and `Number of errors: 100`
+and exits with 100, since nothing computes its output yet. Adding
+`--trace=snax_acc0` before `run` prints every CSR access the stub gets.
 
 ## License
 
