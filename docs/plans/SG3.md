@@ -139,7 +139,7 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 | # | Step | Status |
 |---|---|---|
 | 1 | P1: this plan; the reading in the notes | done 2026-10-13 |
-| 2 | P2: `SnaxAluAcc` with the CSR router and two stubs. `snax-alu`'s 22 accesses at the cycles of SG1 step 7; `snax-csr` four lines of `0 errors`, 108 accesses | todo |
+| 2 | P2: `SnaxAluAcc` with the CSR router and two stubs. `snax-alu`'s 22 accesses and `snax-csr`'s 108 at the cycles and values of main before P2; `snax-csr` four lines of `0 errors` | done 2026-10-14 |
 | 3 | P3: `SnaxTcdmXbar`; the streamer's CSRs, start, busy, counter, AGU and readers; `stream-timing`. Counter per case on SNAX-GVSoC and the same-bank trace | todo |
 | 4 | The same ELF on the RTL (author's run): the printed lines and the common_cells commit in `Bender.lock` | todo |
 | 5 | The counter per case on both sides, each gap named. Findings only | todo |

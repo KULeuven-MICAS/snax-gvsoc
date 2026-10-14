@@ -668,3 +668,32 @@ stay there.
 - `snax-alu`'s buffers start at banks 0 (A), 4 (B) and 8 (O); the writer
   can meet a reader in the same banks when the readers run two beats ahead.
   Not run yet; `snax-stream` shows it in P5.
+
+### SG3 step 2: P2, the CSR router
+
+- 2026-10-14. `snax/snax_alu_acc.py`: `SnaxAluAcc`, the compute core's
+  accelerator as `snax_acc_wrapper.sv.tpl` builds it. A GVSoC `Router`
+  (synchronous, no bandwidth, no latency) splits the core's CSR accesses as
+  `snax_csr_mux_demux.sv` does: 960 to 977 to `streamer`, 978 up to the last
+  SNAX CSR (0x5FF) to `alu`, each mapping removing its base. Both are
+  `SnaxCsrStub`s for now. The CSR lists moved there from `snax_alu.py`,
+  which now sets `snax_acc={0: SnaxAluAcc}`.
+- `SnaxCsrStub` takes `csr_base` (default 0): the CSR is `csr_base +
+  offset / 4`, so a stub behind the router keeps the absolute CSR numbers
+  in its checks and trace. Bound directly, it behaves as before.
+- No upstream file changed.
+- Trace to a file: `--trace=snax_acc0:<file>`. On stdout a `printf` of the
+  program can land inside a trace line, which hid one of `snax-csr`'s 108
+  accesses from a `grep`.
+- Results in Claude's sandbox, on main before P2 and with P2: `snax-csr`
+  four lines of `0 errors`, exit 0, 108 accesses (91 streamer, 17 ALU);
+  `snax-alu` `Accelerator Cycles: 0`, `Number of errors: 100`, exit code
+  100, 22 accesses (17 streamer, 5 ALU). Every access has the same cycle,
+  CSR and value with and without P2: the router adds no cycle. Throwaway
+  programs: a read of 983 stops with `CSR 983 is not held by this block`
+  from `alu`, a write to 976 with `Write to read-only CSR 976` from
+  `streamer`.
+- The cycles of SG1 step 7 moved with SG2's DRAM latency (the core fetches
+  from DRAM): `snax-alu` now writes 960 at cycle 2508, starts the streamer
+  (975) at 2616 and the ALU (980) at 2630, reads 981 at 2636 and 976 at
+  2642, and reads 982 at 4696, after the check loop and `printf`.
