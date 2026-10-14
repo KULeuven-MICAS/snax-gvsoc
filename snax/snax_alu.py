@@ -58,11 +58,20 @@ SNAX_ACC = {0: SnaxAluAcc}
 # (dma_req_fifo_depth) and 3 bursts in flight (dma_axi_req_fifo_depth). A DMA
 # read's first beat comes 5 cycles after its request from L1 and 11 from DRAM:
 # the 5 common to both are the DMA's own read path (read_latency), the other 6
-# are the DRAM's. The cores' fetches and loads from DRAM take the same path;
-# their latency on the RTL is not measured (SG5).
+# are the DRAM's.
 SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
     'read_latency': 5}
 DRAM_LATENCY = 6
+
+# The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
+# in snax-alu's check loop. One integer load in flight, as the hjson's
+# num_int_outstanding_loads: 1: a load issues only once the previous load's
+# data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
+# the core's data path gets the cycles GVSoC lacks for that (core_latency), on
+# its TCDM port and on its way out of the cluster (narrow_axi). Instruction
+# fetches keep their own path.
+SNAX_CORE = {'int_loads_in_flight': 1}
+CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 
 
@@ -104,7 +113,8 @@ class SnaxAluAttr(Tree):
                 self.clusters = [
                     ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
                         nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
-                        snax_acc=SNAX_ACC, dma=SNAX_DMA)
+                        snax_acc=SNAX_ACC, dma=SNAX_DMA, core=SNAX_CORE,
+                        core_latency=CORE_LATENCY)
                 ]
 
             def get_cluster_base(self, id: int):

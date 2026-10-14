@@ -78,6 +78,29 @@ inline void Lsu::free_req(vp::IoReq *req, int64_t cyclestamp)
 #endif
 }
 
+inline int64_t Lsu::load_wait()
+{
+    if (this->int_loads_in_flight == 0)
+    {
+        return 0;
+    }
+    int64_t wait = this->load_ready_cycle - this->iss.exec.get_cycles();
+    if (wait <= 0)
+    {
+        return 0;
+    }
+    this->iss.timing.stall_cycles_account(wait);
+    return wait;
+}
+
+inline void Lsu::load_issued(int64_t latency)
+{
+    if (this->int_loads_in_flight != 0)
+    {
+        this->load_ready_cycle = this->iss.exec.get_cycles() + latency;
+    }
+}
+
 template<typename T>
 inline bool Lsu::load(iss_insn_t *insn, iss_addr_t addr, int size, int reg)
 {
@@ -111,9 +134,12 @@ inline bool Lsu::load(iss_insn_t *insn, iss_addr_t addr, int size, int reg)
     int err;
     int64_t latency;
     int req_id;
+    // SNAX: wait for the previous load's data when loads in flight are limited
+    this->load_wait();
     if ((err = this->data_req(phys_addr, (uint8_t *)this->iss.regfile.reg_ref(reg),
         (uint8_t *)this->iss.regfile.reg_check_ref(reg), size, false, latency, req_id)) == 0)
     {
+        this->load_issued(latency + 1);
 #ifdef CONFIG_GVSOC_ISS_SCOREBOARD
         this->iss.regfile.scoreboard_reg_set_timestamp(reg, latency + 1, CSR_PCER_LD_STALL);
 #endif
@@ -227,9 +253,12 @@ inline bool Lsu::load_signed(iss_insn_t *insn, iss_addr_t addr, int size, int re
     int err;
     int64_t latency;
     int req_id;
+    // SNAX: wait for the previous load's data when loads in flight are limited
+    this->load_wait();
     if ((err = this->data_req(phys_addr, (uint8_t *)this->iss.regfile.reg_ref(reg),
         (uint8_t *)this->iss.regfile.reg_check_ref(reg), size, false, latency, req_id)) == 0)
     {
+        this->load_issued(latency + 1);
         this->iss.regfile.set_reg(reg, iss_get_signed_value(this->iss.regfile.get_reg_untimed(reg), size * 8));
 
         // Due to sign extension, propagate left the validity of the sign

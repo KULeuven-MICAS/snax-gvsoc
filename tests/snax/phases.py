@@ -19,8 +19,8 @@ instruction pattern (docs/plans/SG5.md, "Phases and markers"), never by a
 fixed PC, so another size or a rebuild moves nothing.
 
 Usage:
-    phases.py ELF --gvsoc WORKDIR [--json OUT]
-    phases.py ELF --rtl LOGDIR [--json OUT]
+    phases.py ELF --gvsoc WORKDIR [--json OUT] [--show PHASE]
+    phases.py ELF --rtl LOGDIR [--json OUT] [--show PHASE]
 
 Prints one table per hart: each phase's first cycle, its cycles (the next
 phase's first cycle minus its own), the instructions traced in it and, for
@@ -313,6 +313,27 @@ def cut(trace, phases, end_cycle=None):
     return rows, end_cycle
 
 
+def show(trace, phases, name, words):
+    """One line per instruction of phase `name`: its cycle, the cycles to the
+    next instruction, its pc and its word. For finding where a phase's
+    cycles go on either side."""
+    names = [p[0] for p in phases]
+    if name not in names or name == "end":
+        raise MarkerError(f"no phase {name} on this hart")
+    i, starts = 0, []
+    for pname, rule, _ in phases:
+        i = _find(trace, i, rule, pname)
+        starts.append(i)
+    k = names.index(name)
+    first = starts[k]
+    last = starts[k + 1] if k + 1 < len(starts) else len(trace) - 1
+    out = []
+    for j in range(first, last):
+        cycle, pc = trace[j]
+        out.append(f"{cycle:>8} +{trace[j + 1][0] - cycle:<4} {pc:08x} {words.get(pc, 0):08x}")
+    return "\n".join(out)
+
+
 def phase_tables(elf_path, traces):
     """`traces` maps hart to its trace; returns the tables and the total."""
     marks = markers(Elf(elf_path))
@@ -368,14 +389,25 @@ def main(argv=None):
     side.add_argument("--gvsoc", metavar="WORKDIR", help="holds pe0.txt and pe1.txt")
     side.add_argument("--rtl", metavar="LOGDIR", help="holds trace_chip_*_hart_*.dasm (or .txt)")
     p.add_argument("--json", metavar="OUT", help="also write the tables as JSON")
+    p.add_argument("--show", metavar="PHASE",
+                   help="also list a phase's instructions, e.g. 'C2a CSR setup'")
     args = p.parse_args(argv)
     try:
-        result = phase_tables(args.elf, load_traces(args))
+        traces = load_traces(args)
+        result = phase_tables(args.elf, traces)
+        if args.show:
+            elf = Elf(args.elf)
+            marks = markers(elf)
+            hart = 0 if args.show[0] == "C" else 1
+            listing = show(traces[hart], marks[hart], args.show, elf.words)
     except MarkerError as e:
         print(f"phases.py: {e}", file=sys.stderr)
         return 1
     result["side"] = "gvsoc" if args.gvsoc else "rtl"
     print(format_tables(result, result["side"]))
+    if args.show:
+        print(f"{result['side']}, {args.show}: cycle, +cycles to the next, pc, word")
+        print(listing)
     if args.json:
         Path(args.json).write_text(json.dumps(result, indent=1) + "\n")
     return 0

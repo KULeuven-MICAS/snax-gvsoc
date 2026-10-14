@@ -1277,3 +1277,98 @@ stay there.
   copied from a run.
 - `spike-dasm` would be a build of Spike (riscv-isa-sim) in snax-forge's
   image; not needed for SG5, so not added.
+
+### SG5 step 5: the RTL run
+
+- 2026-10-14. Author's run of the five ELFs of P4 (built in the author's
+  container) on snax_cluster's RTL (Verilator, `snax_alu_cluster_old.hjson`
+  at `d7dd789`), the raw `.dasm` traces kept per size. Every size prints
+  `Accelerator Done!`, `Accelerator Cycles:` 1, 25, 32, 256, 1024 and
+  `Number of errors: 0`. Phases from `phases.py --rtl` (polls in brackets):
+
+  | Phase | 4 | 100 | 128 | 1024 | 4096 |
+  |---|---|---|---|---|---|
+  | C0 boot | 656 | 653 | 639 | 632 | 632 |
+  | C1 barrier | 122 | 137 | 148 | 374 | 1154 |
+  | C2a CSR setup | 110 | 111 | 110 | 110 | 110 |
+  | C2b CSR setup | 16 | 16 | 16 | 16 | 16 |
+  | C3 ALU poll | 7 (1) | 32 (6) | 37 (7) | 262 (52) | 1032 (206) |
+  | C4 streamer poll | 5 (1) | 5 (1) | 5 (1) | 5 (1) | 5 (1) |
+  | C5 check loop | 214 | 4535 | 5795 | 46115 | 184355 |
+  | C6 printf | 7238 | 7485 | 8020 | 8240 | 8260 |
+  | C7 exit | 143 | 140 | 143 | 143 | 143 |
+  | D0 boot | 656 | 653 | 639 | 633 | 633 |
+  | D1 DMA issue | 99 | 99 | 100 | 100 | 100 |
+  | D2 DMA wait | 20 (4) | 35 (7) | 45 (9) | 270 (54) | 1050 (210) |
+  | D3 barrier | 3 | 3 | 3 | 14 | 14 |
+  | D4 post-main and exit | 7733 | 12324 | 14126 | 54880 | 193910 |
+  | Total up to 982 | 1130 | 5489 | 6750 | 47514 | 187304 |
+  | Total | 8511 | 13114 | 14913 | 55897 | 195707 |
+
+- The `.dasm` reader of P4b works on the real traces: every marker is
+  found on both harts at every size.
+
+### SG5 step 6: the phases on both sides
+
+- 2026-10-14. Against the author's SNAX-GVSoC run of the same ELFs (P4):
+  tier 1 is met (982 equal, 0 errors on both sides, every size). The blocks
+  match: at 4096, C1 1148 against 1154, D2 1050 against 1050, C3 1029
+  against 1032. C5 does not: 20 cycles per element on SNAX-GVSoC, 45 on the
+  RTL, at every size, so the total up to 982 is 55% under at 4096.
+- Each instruction's cycle in C5 on both sides (a throwaway script, `--show`
+  since P5; one iteration, 15 instructions):
+  the RTL issues `lw` (L1), then the next `lw` 4 cycles later, then two
+  `lw` from DRAM 14 cycles apart each; each load waits for the previous
+  load's data, as `num_int_outstanding_loads: 1` in the hjson says. GVSoC
+  issued the four loads on four cycles and stalled once, 6 cycles, at the
+  first use; a DRAM load took about 9 cycles. Class: a target parameter
+  (the hjson and the core's path, which SG2 left unmeasured): fixed in P5.
+- Not fixed, the core's own timing: the RTL polls `dmstati` every 5 cycles
+  against GVSoC's 2, so D2 and C1 end up to 9 cycles later at small sizes
+  (D2 at 128: 45 against 36, 20%); under 3% from 1024 on. Tier-3 gaps left
+  to explain (C2a, C7, D1, D3) follow the fix (step 7).
+
+### SG5 step 7: P5, the core's loads
+
+- 2026-10-14. `Lsu` (`core/models/cpu/iss/`) takes `int_loads_in_flight`
+  from the core's properties: 0, no limit, GVSoC's behaviour and the default;
+  1, a load stalls the core until the previous load's data is back. Only
+  `load` and `load_signed` (integer loads) are limited; stores, `elw` and FP
+  loads are not. `ClusterArch` takes `core` (`Snitch` arguments) and
+  `core_latency` (cycles on the core's map to the TCDM and to
+  `narrow_axi`). `snax_alu.py` sets one load in flight, `tcdm` 2 and
+  `narrow` 6: from one load to the next, 4 cycles from L1 and 14 from DRAM,
+  as on the RTL (`--show 'C5 check loop'`). Rows in `UPSTREAM.md`.
+- First try counted the wait twice: `get_cycles()` already holds the stall
+  just accounted, so the load's own latency counts from it without adding
+  the wait again.
+- `phases.py --show PHASE` lists a phase's instructions on either side; one
+  more unit test (11).
+- Results in Claude's sandbox (its ELFs; the RTL columns are the author's
+  run of the author's ELFs, so boot and `printf` differ by the toolchain
+  too). Every size: `Number of errors: 0`, 982 equal. RTL / SNAX-GVSoC:
+
+  | Phase | 128 | 1024 | 4096 |
+  |---|---|---|---|
+  | C1 barrier | 148 / 154 (+4%) | 374 / 381 (+2%) | 1154 / 1169 (+1%) |
+  | D2 DMA wait | 45 / 36 (-20%) | 270 / 262 (-3%) | 1050 / 1050 (0%) |
+  | C3 ALU poll | 37 / 39 (+5%) | 262 / 261 (0%) | 1032 / 1029 (0%) |
+  | C5 check loop | 5795 / 5698 (-2%) | 46115 / 45244 (-2%) | 184355 / 180754 (-2%) |
+  | Total up to 982 | 6750 / 6698 (-1%) | 47514 / 46696 (-2%) | 187304 / 183755 (-2%) |
+
+  Tier 2 is met but for D2 at 128 (step 6). C5 is 44 cycles per element
+  against 45: the RTL waits 2 more cycles before `xor a6, a6, a7`, probably
+  the L1 load's write-back waiting for a free register-file port (SG5.md,
+  "Not verified").
+- Tier 3, still to explain from `--show` on both sides: C2a 133 against 110
+  (114 before P5: its DRAM loads are now as slow as the RTL's, so something
+  else is faster there), C7 81 against 143, D1 117 against 100, D3 2
+  against 14 at 1024 and 4096. C6 and the full total now land within 15%.
+- Other programs on `snax_alu`, exit 0: `snax-stream` errors 0, 977 31, 982
+  25 in all four modes (unchanged); `alu-timing` 977 and 982 as before but
+  `out_one_bank`'s 977 209 (211 before, RTL 210), start gaps -7 / 103 /
+  103 / -7 / -7; `stream-timing` counters 0, 9, 9, 10, 12 (unchanged), polls
+  0, 0, 3, 4, 1; `dma-timing` `busy` unchanged, `done` unchanged but 4x800
+  at 82 (80 before, RTL 84); `snax-csr` four lines of `0 errors` and both
+  warnings. The 17 plain tests (9-core build) exit 0 on `snitch`,
+  `printf_simple` printing `Hello, World!` 9 times.

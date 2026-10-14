@@ -155,6 +155,18 @@ private:
     static void load_float_resume(Lsu *lsu, vp::IoReq *req);
 
     int64_t pending_latency;
+
+    // SNAX: integer loads in flight, as snax_cluster's num_int_outstanding_loads; 0 for no
+    // limit (GVSoC's default). With 1, a load issues only once the previous load's data is
+    // back: the core stalls until then, and the load's own latency counts from there.
+    int int_loads_in_flight;
+    // Cycle from which the last load's data can be used.
+    int64_t load_ready_cycle;
+    // Stalls the core until a new load may issue; returns the cycles it waits.
+    inline int64_t load_wait();
+    // Records when the load just issued has its data back, latency counted from now.
+    inline void load_issued(int64_t latency);
+
     // True if the last request has been denied. The core must not send another request until
     // the last request has been granted
     vp::Signal<bool> io_req_denied;

@@ -144,6 +144,8 @@ phases); it does not close open item 60 there.
   blank when equal to the line before, no pc on stall and write-back lines,
   the metrics after `## Performance metrics`). Both formats are read from
   source, not from a run, until step 5.
+- `--show PHASE` lists a phase's instructions (cycle, cycles to the next,
+  pc, word), on either side: how step 6 found where C5's cycles go.
 - Markers are matched on the instruction word and the CSR number, not on a
   disassembler's names: `llvm-objdump` shows `dmstati` as `<unknown>` and
   982 as `pmpaddr38`.
@@ -184,6 +186,14 @@ Findings first (step 6), then a fix step, skipped if empty:
 - In the core's own ISS timing (CSR issue, polling, I-cache, barrier):
   explained, accepted, and recorded as an open item in snax-forge.
 
+Step 6 found one gap of the second kind, fixed in P5: the core's loads. The
+RTL core has one integer load in flight (`num_int_outstanding_loads: 1` in
+the hjson), a load issuing only once the previous load's data is back, 4
+cycles later from L1 and 14 from DRAM; GVSoC issued loads back to back and
+took about 2 and 9. P5 limits loads in flight in GVSoC's LSU and adds the
+missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
+`snax_alu.py`).
+
 ## Tests
 
 | Test | Where | Checks |
@@ -207,6 +217,9 @@ Findings first (step 6), then a fix step, skipped if empty:
 - Whether either trace shows instructions before `_start` (a boot ROM); the
   phases start at `_start`, so it does not change them.
 - The race at 1024 and 4096 without the wait: estimated, not run.
+- The RTL's 2 more cycles before the check loop's `xor` on the second L1
+  load (`xor a6, a6, a7`): probably the load's write-back waiting for a free
+  register-file port, not modelled; 44 cycles per element against 45.
 
 ## Steps
 
@@ -216,9 +229,9 @@ Findings first (step 6), then a fix step, skipped if empty:
 | 2 | P2: the DMA wait in snax_cluster's `snax-alu.c` (a patch merged there) and the copy here synced, its README and the snax_cluster pin moved to that commit. `snax-alu` at 100 prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC | done 2026-10-14 |
 | 3 | P3: `tests/snax/phases.py` with unit tests on short trace excerpts; the phase table of `snax-alu` at 100 on SNAX-GVSoC | done 2026-10-14 |
 | 4 | P4: `snax-alu` at the five sizes, the L1 fit check; errors, 982, 977 and the phase tables on SNAX-GVSoC | done 2026-10-14 |
-| 5 | The same five ELFs on the RTL (author's run): the printed lines and the raw `.dasm` traces; phase tables from the script | todo |
-| 6 | Per phase on both sides against the target, each gap classed. Findings only | todo |
-| 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | todo |
+| 5 | The same five ELFs on the RTL (author's run): the printed lines and the raw `.dasm` traces; phase tables from the script | done 2026-10-14 |
+| 6 | Per phase on both sides against the target, each gap classed. Findings only | done 2026-10-14 |
+| 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | done 2026-10-14 |
 | 8 | P6: the regression, `make regress` | todo |
 | 9 | Expected files written in the author's container (`--update`); `make regress` passes there | todo |
 | 10 | P7: SG5 closed here, and the STATUS.md and DECISIONS.md update for snax-forge (the target, the core's open items) | todo |
@@ -242,6 +255,10 @@ Findings first (step 6), then a fix step, skipped if empty:
 - BASE1 (the timed flow log) is out of SG5: after the SG series, when the
   snax-forge flow runs end to end again. It stays under the paper's tasks in
   snax-forge.
+- The core's loads are a target parameter (P5): one integer load in flight,
+  as the hjson says, in GVSoC's LSU behind a core property (0, no limit, for
+  every other target), and the load-to-load cycles of the RTL run (4 from
+  L1, 14 from DRAM) on the core's data path; fetches keep their own path.
 - After SG5: SG6 (Zicsr on SNAX CSRs on both sides, SG4's warnings removed),
   then the housekeeping pass over snax-gvsoc's code, which includes the ALU
   sleeping until a beat moves (SG4).

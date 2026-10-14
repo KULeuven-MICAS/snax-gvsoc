@@ -112,6 +112,11 @@ class Cut(unittest.TestCase):
         rows, end = phases.cut(trace, self.PHASES[:-1], end_cycle=40)
         self.assertEqual(rows[-1], {"phase": "C", "start": 30, "cycles": 10, "insns": 2, "polls": None})
 
+    def test_show(self):
+        trace = [(10, 0x10), (12, 0x20), (20, 0x24), (30, 0x34), (35, 0x38), (40, 0x40)]
+        lines = phases.show(trace, self.PHASES, "B", {0x24: 0x13}).splitlines()
+        self.assertEqual(lines, ["      20 +10   00000024 00000013"])
+
     def test_missing_marker(self):
         with self.assertRaisesRegex(phases.MarkerError, "start of C"):
             phases.cut([(10, 0x10), (12, 0x20), (20, 0x24)], self.PHASES)

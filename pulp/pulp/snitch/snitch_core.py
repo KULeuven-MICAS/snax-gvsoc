@@ -120,7 +120,8 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
             nb_outstanding: int=1,
             snax_cluster_base_addr: int=0,
             snax_cluster_nb_cores: int=0,
-            snax_cluster_core_idx: int=0):
+            snax_cluster_core_idx: int=0,
+            int_loads_in_flight: int=0):
 
         isa_instance = isa_instances.get(isa)
 
@@ -152,6 +153,8 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
             'snax_cluster_base_addr': snax_cluster_base_addr,
             'snax_cluster_nb_cores': snax_cluster_nb_cores,
             'snax_cluster_core_idx': snax_cluster_core_idx,
+            # snax_cluster's num_int_outstanding_loads; 0 for no limit (lsu.cpp)
+            'int_loads_in_flight': int_loads_in_flight,
         })
 
         self.add_c_flags([
