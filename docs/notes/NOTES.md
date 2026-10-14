@@ -977,3 +977,44 @@ stay there.
     P2, no warning.
   - The 17 plain tests (9-core build) exit 0 on `snitch`, `printf_simple`
     printing `Hello, World!` 9 times; none warns.
+
+### SG4 step 4: P4, the timing program
+
+- 2026-10-14. `tests/snax/alu-timing/`: one ELF, five cases in sequence on
+  `snax-alu`'s streamers and the ALU through its library; per case the
+  errors, the streamer's counter (977), the ALU's (982) and the start gap
+  (`mcycle` before `start_alu()` minus before `start_streamer()`). Each case
+  has one counter that does not depend on the gap, the one to compare: 977
+  for `alu_first` and `restart_idle`, 982 for `stream_first` and
+  `out_one_bank`, both for `len1`.
+- Changed from the plan: `out_same_banks` (O on A's banks lane by lane) gave
+  no conflict, since the writer writes beat t one cycle after the ALU takes
+  it, when reader A asks for beat t + 9, four banks on. O's four lanes on one
+  bank (beats on consecutive banks) did not stall the ALU either: the lanes
+  of consecutive beats write in parallel. `out_one_bank` puts every word of
+  O on one bank (spatial stride 256 B, temporal 1024 B), so the writer gets
+  one grant a cycle.
+- `stream_first` uses `snax-alu`'s own layout, where the writer loses banks
+  8 to 11 to reader B twice (crossbar trace, 8 lane conflicts); its 8-deep
+  queue absorbs them, so the ALU does not stall.
+- Results in Claude's sandbox, exit 0, `errors 0` in every case:
+
+  | Case | 977 | 982 | Gap | ALU classes |
+  |---|---|---|---|---|
+  | `alu_first` | 29 | 34 | -16 | busy 25, stall_in 9 |
+  | `stream_first` | 134 | 25 | 105 | busy 25 |
+  | `out_one_bank` | 211 | 72 | 105 | busy 25, stall_out 50 |
+  | `len1` | 5 | 1 | -7 | busy 1, stall_in 9 |
+  | `restart_idle` | 29 | 34 | -7 | busy 25, stall_in 9 |
+
+  - `alu_first`: the trace's start writes are 6 cycles apart (ALU at s_a,
+    streamer at s_a + 6); the ALU's first firing is at s + 4, s the
+    streamer's start, and its last at s + 28; the writer's last grant at
+    s + 29 ends the streamer, counter 29.
+  - `out_one_bank`: the ALU's last firing is 75 cycles after its start;
+    the counter stops at the second-to-last, 72. The writer's queues reach
+    7 to 8.
+  - `restart_idle`: the second start (sub, 25) replaces the first (add, 100)
+    before any firing; O = A - B.
+- Not rerun: the other programs and the plain tests; P4 adds a program and
+  changes nothing they use.

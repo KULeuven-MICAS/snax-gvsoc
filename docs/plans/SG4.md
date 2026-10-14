@@ -131,7 +131,7 @@ depend on it; that is the one compared.
 |---|---|---|---|
 | `alu_first` | ALU (add, 25 beats), then the streamer; `snax-alu`'s layout | 977 | The path reader → ALU → writer and the writer's last grant |
 | `stream_first` | The streamer, a wait of about 100 cycles (readers full), then the ALU | 982 | Firing from full readers; the first-cycle ordering |
-| `out_same_banks` | As `stream_first`, O on A's banks lane by lane | 982 | The writer's back-pressure on the ALU |
+| `out_one_bank` | As `stream_first`, every word of O on one bank (P4: O on A's banks gave no conflict) | 982 | The writer's back-pressure on the ALU |
 | `len1` | Length 1, ALU first | 982 and 977 | The counter's end rule |
 | `restart_idle` | Start (add, 100), start again (sub, 25), then the streamer | 977, O = A - B | A start while busy latches the new mode and length |
 
@@ -142,7 +142,7 @@ depend on it; that is the one compared.
 | 1 | P1: this plan; the reading in the notes | done 2026-10-14 |
 | 2 | P2: `SnaxAluShell` in the test datapath's place (removed); `snax-stream` on the ALU's modes. `snax-alu` prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC; `snax-stream` 0 errors in all four modes | done 2026-10-14 |
 | 3 | P3: the core's warnings on the two CSR forms; `snax-csr` four lines of `0 errors` and both warnings | done 2026-10-14 |
-| 4 | P4: `alu-timing`; its counters and errors on SNAX-GVSoC | todo |
+| 4 | P4: `alu-timing`; its counters and errors on SNAX-GVSoC | done 2026-10-14 |
 | 5 | The same ELFs on the RTL (author's run): `snax-alu`, `snax-stream`, `alu-timing`, the printed lines | todo |
 | 6 | The counters per case on both sides, each gap named. Findings only | todo |
 | 7 | P5: the gaps of step 6; skipped if there are none | todo |
