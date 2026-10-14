@@ -11,6 +11,7 @@ stay there.
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
 | snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
+| common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
 
@@ -633,3 +634,246 @@ stay there.
   chip's `snitch.py`; rows in `UPSTREAM.md`.
 - Next: SG3, the streamer, planned in its own round from the list under
   "SG3 starts from" in `docs/plans/SG2.md`.
+
+### SG3 step 1: P1, the plan
+
+- 2026-10-13. `docs/plans/SG3.md` written: a streamer model with the
+  hjson's parameter names, a crossbar that arbitrates the 12 SNAX ports per
+  bank as the plain interconnect does, a test datapath in the ALU's place,
+  and a reader-only timing program run on both sides.
+- Read from source, not run (snax_cluster `b2672f8`, common_cells
+  `v1.40.0`; the values are in SG3.md under "The streamer on the RTL" and
+  "The path around it"):
+  - The streamer's CSRs are 5 per mover (pointer low and high, spatial
+    stride, temporal bound, temporal stride), the start CSR, then `busy`
+    and the counter: 960 to 977. The ALU's are 978 to 982, reached through
+    a combinational mux that subtracts 18.
+  - The start write waits only while the streamer is busy; the core feels
+    it only when the 2-deep offload cut is full or a later CSR read queues
+    behind it. `snax-alu` starts an idle streamer.
+  - A reader is done at its last grant, with data still buffered, so a
+    reader-only run ends without the ALU when each lane reads at most
+    `fifo_depth` (8) beats and the writer's bound is 0.
+  - The plain interconnect is one `rr_arb_tree` per bank (`FairArb`,
+    `LockIn`, no priority), not the sparse interconnect's arbiter that
+    SNAX-MODEL copied (D31 in snax-forge). Read data comes one cycle after
+    the grant.
+  - On the RTL `csrrw` only writes and `csrrs` / `csrrc` only read; D120
+    reads before a write when `rd` is not `x0`. `snax-alu` does not hit
+    this; noted for SG5.
+- GVSoC today: `L1_interleaver` does not arbitrate; a second access to a
+  bank in a cycle gets one cycle of latency from the bank's cyclestamp, in
+  call order. A sync `Router` with bandwidth 0 adds no latency, so a CSR
+  access through it passes in its cycle (checked by run in P2).
+- `snax-alu`'s buffers start at banks 0 (A), 4 (B) and 8 (O); the writer
+  can meet a reader in the same banks when the readers run two beats ahead.
+  Not run yet; `snax-stream` shows it in P5.
+
+### SG3 step 2: P2, the CSR router
+
+- 2026-10-14. `snax/snax_alu_acc.py`: `SnaxAluAcc`, the compute core's
+  accelerator as `snax_acc_wrapper.sv.tpl` builds it. A GVSoC `Router`
+  (synchronous, no bandwidth, no latency) splits the core's CSR accesses as
+  `snax_csr_mux_demux.sv` does: 960 to 977 to `streamer`, 978 up to the last
+  SNAX CSR (0x5FF) to `alu`, each mapping removing its base. Both are
+  `SnaxCsrStub`s for now. The CSR lists moved there from `snax_alu.py`,
+  which now sets `snax_acc={0: SnaxAluAcc}`.
+- `SnaxCsrStub` takes `csr_base` (default 0): the CSR is `csr_base +
+  offset / 4`, so a stub behind the router keeps the absolute CSR numbers
+  in its checks and trace. Bound directly, it behaves as before.
+- No upstream file changed.
+- Trace to a file: `--trace=snax_acc0:<file>`. On stdout a `printf` of the
+  program can land inside a trace line, which hid one of `snax-csr`'s 108
+  accesses from a `grep`.
+- Results in Claude's sandbox, on main before P2 and with P2: `snax-csr`
+  four lines of `0 errors`, exit 0, 108 accesses (91 streamer, 17 ALU);
+  `snax-alu` `Accelerator Cycles: 0`, `Number of errors: 100`, exit code
+  100, 22 accesses (17 streamer, 5 ALU). Every access has the same cycle,
+  CSR and value with and without P2: the router adds no cycle. Throwaway
+  programs: a read of 983 stops with `CSR 983 is not held by this block`
+  from `alu`, a write to 976 with `Write to read-only CSR 976` from
+  `streamer`.
+- The cycles of SG1 step 7 moved with SG2's DRAM latency (the core fetches
+  from DRAM): `snax-alu` now writes 960 at cycle 2508, starts the streamer
+  (975) at 2616 and the ALU (980) at 2630, reads 981 at 2636 and 976 at
+  2642, and reads 982 at 4696, after the check loop and `printf`.
+
+### SG3 step 3: P3, the crossbar and the readers
+
+- 2026-10-14. `snax/snax_tcdm_xbar.py` / `.cpp`: `SnaxTcdmXbar`, the SNAX
+  ports into the TCDM banks as the plain interconnect arbitrates them: per
+  bank `rr_arb_tree`'s tree (`sel = ~left | right & rr_q[level]`) and
+  `FairArb` state (the next requester above `rr_q`, else the first at or
+  below it). A request is held (`IO_REQ_PENDING`) until the crossbar's event
+  of that cycle, queued by the first request; the winner's bank access
+  happens then, `grant()` in that cycle, `resp()` one cycle later plus the
+  bank's latency. A loser gets nothing and its master sends it again the
+  next cycle, as an RTL master keeps `valid` high. Built in
+  `SnitchClusterTcdm` when an accelerator has TCDM ports, its outputs on the
+  same bank memories the cores use; inputs numbered in core order, as
+  snax_cluster packs `snax_tcdm_req_i`.
+- `snax/snax_streamer.py` / `.cpp`: `SnaxStreamer`, configured from the
+  hjson's streamer template (`STREAMER_TEMPLATE` in `snax_alu_acc.py`,
+  `snax_alu_streamer_template` with its keys); other keys are refused by
+  name. CSRs, start, busy, counter, AGU and readers as SG3.md reads the RTL.
+  One event per cycle while busy sends the requests, then a commit event
+  (delay 0, after the crossbar's) pops the granted addresses and lets the
+  AGUs push. Busy and the counter are computed from the start cycle and the
+  end cycle when read. A streamer with no credit and no room sleeps. Not
+  yet: writers (a writer that would start is refused with a warning), the
+  beats out (P5).
+- `snax_alu_acc.py`: `csr_mux`, `streamer`, `alu_regs`; the ALU's first CSR
+  computed from the template (978); `SnaxAluAcc.nb_tcdm_ports` (12) and
+  `o_TCDM()` for the cluster.
+- `snax-csr` leaves out the start CSR 975 (its pattern has bit 0 set and
+  would start the streamer): 103 accesses, 63 reads and 40 writes. The
+  ALU's start CSR 980 stays until SG4.
+- `tests/snax/stream-timing/`: one ELF per case (`CASE_<name>`), since the
+  reader queues keep their beats and credit after a run with no ALU, on the
+  RTL too. Results in Claude's sandbox; s is the start write's cycle:
+
+  | Case | s | Last grant | Busy up to | Counter |
+  |---|---|---|---|---|
+  | `zero_bound` | 4707 | none | s + 1 | 0 |
+  | `a_alone` | 4707 | 4716 | 4717 | 9 |
+  | `ab_other_banks` | 4711 | 4720 | 4721 | 9 |
+  | `ab_same_banks` | 4711 | 4721 | 4722 | 10 |
+  | `a_stride0` | 4707 | 4719 | 4720 | 12 |
+
+  All five as predicted from source in step 1. The first grant is at
+  s + 2. `ab_same_banks`: in s + 2 A wins banks 0 to 3 (`grant in_0`,
+  `held: in_4`, ...), then B runs one cycle behind with no further conflict.
+  `a_stride0`: bank 0 grants in_0, in_1, in_2, in_3 in turn and the lanes
+  stay one cycle apart. The printed `polls` (0, 0, 3, 4, 1) and `mcycle`
+  spans (15, 15, 24, 27, 18) are the core's timing: in `a_alone` the first
+  busy read comes 11 cycles after the start write and already reads 0.
+- The arbiter against the RTL, run, not read: common_cells v1.40.0's
+  `rr_arb_tree` (`FairArb`, `LockIn`, `AxiVldRdy`, the grant always given)
+  in Icarus Verilog 12 on 2000 cycles of random requests, against
+  `tree_pick()` and `next_rr()` taken verbatim from `snax_tcdm_xbar.cpp`:
+  the same winner in every cycle at 12, 15 and 4 inputs, and the RTL's 15
+  inputs with 3 idle give the model's 12-input winners.
+- Throwaway program: a second start write while the streamer is busy stops
+  with `Start (CSR 975) while the streamer is busy`.
+- `snax-alu` now stops at its start write (cycle 2616) with `Writer at CSR
+  970 started: writers are not modelled yet (SG3 P5)`; it runs again in P5.
+- Results in Claude's sandbox: `snax-csr` four lines of `0 errors`, 103
+  accesses (86 streamer, 17 `alu_regs`); `dma-timing` exits 0 with every
+  field as in SG2 step 7; the 17 plain tests (9-core build) exit 0 on
+  `snitch`, which builds no crossbar, `perf_cnt` printing `End: 1531
+  cycles`.
+- For step 4 (author's run on the RTL): the five ELFs of
+  `tests/snax/stream-timing/build/`, the printed lines, and the
+  common_cells version in snax_cluster's `Bender.lock`.
+
+### SG3 step 4: the RTL run
+
+- 2026-10-14. Author's run of P3's five `stream-timing` ELFs on
+  snax_cluster's RTL (Verilator) built from `snax_alu_cluster_old.hjson` at
+  `b2672f8`:
+
+  ```
+  stream-timing zero_bound: counter 0, polls 0, mcycle 13
+  stream-timing a_alone: counter 9, polls 3, mcycle 25
+  stream-timing ab_other_banks: counter 9, polls 3, mcycle 19
+  stream-timing ab_same_banks: counter 10, polls 3, mcycle 19
+  stream-timing a_stride0: counter 12, polls 3, mcycle 25
+  ```
+
+- `Bender.lock`: common_cells 1.40.0 at `1281545`, the commit read in step
+  1 and simulated against the model's arbiter in step 3.
+
+### SG3 step 5: the counter on both sides
+
+- 2026-10-14. The streamer's counter is equal on the RTL and on SNAX-GVSoC
+  in all five cases:
+
+  | Case | RTL | SNAX-GVSoC |
+  |---|---|---|
+  | `zero_bound` | 0 | 0 |
+  | `a_alone` | 9 | 9 |
+  | `ab_other_banks` | 9 | 9 |
+  | `ab_same_banks` | 10 | 10 |
+  | `a_stride0` | 12 | 12 |
+
+  So the start (first request at s + 2), the AGU's pace, the end rule
+  (counter g - s) and the round-robin order per bank match the RTL.
+- `polls` and `mcycle` are the core's: the RTL polls 3 times in every
+  running case, SNAX-GVSoC 0 to 4 (its first busy read comes 11 cycles after
+  the start write in `a_alone`); the RTL's `mcycle` span does not follow the
+  counter (`a_alone` 25, `ab_same_banks` 19), so the core's fetch timing
+  differs per ELF. SG5's, with SG2's issue and polling gaps.
+
+### SG3 step 6: P4 skipped
+
+- 2026-10-14. Step 5 left no gap in the streamer's counter.
+
+### SG3 step 7: P5, writers, beats and the test datapath
+
+- 2026-10-14. `SnaxStreamer` gains the writers and the beat ports
+  `reader_<i>` and `writer_<j>` (`num_channel` x 8 B, lane 0 first; size 0
+  is a probe, `DENIED` means not this cycle). Rules from the RTL: read data
+  enters its lane's queue one cycle after the grant and can leave the cycle
+  after; a beat leaves when every lane holds data, `repeat` times with
+  temporal stride 0; a pop returns credit in that cycle; a beat given to a
+  writer is taken when no lane's queue is full and can be written the next
+  cycle; a writer channel requests with an address and its lane's data, with
+  no credit, and is done at its last grant. A streamer that can do nothing
+  sleeps until a beat moves.
+- `snax/snax_test_datapath.py` / `.cpp`: `SnaxTestDatapath` in the ALU's
+  place (`test_datapath`), not the ALU. The ALU's 5 CSRs: mode (bit 0 copies
+  B instead of A, bits 7:4 are k - 1), length, start; busy (start + 1 to the
+  last firing), counter (those cycles). A firing takes one beat from each
+  reader and gives the chosen one to the writer, all or nothing (probes
+  first). Its event runs before the streamer's step in a cycle, so a pop
+  returns credit in time for that cycle's requests; at its first cycle the
+  order may be the other way round, which delays a request by one cycle at
+  most. `snax_csr_stub` is no longer used by the target and stays as a
+  placeholder for blocks not modelled yet.
+- Folded in from the profiling review (open items 59 and 61 of the plan
+  for P6, and the `resp` and queue events): the crossbar names its inputs
+  by owner (`snax_acc0.streamer.reader0.lane2`), from the accelerator's
+  `tcdm_port_names` through the cluster, and traces each response (`Resp`)
+  at trace level; the streamer traces each lane queue's count (`Queue`) at
+  trace level, at the cycle a word enters or leaves; per mover it classes
+  every cycle of a run as SNAX-MODEL did (`busy` > `stall_xbar` >
+  `stall_fifo` > `idle`, cycles slept through keep the class they had) and
+  writes the classes and each lane queue's highest count in the run's last
+  busy cycle. The classes add up to e - s in every run checked.
+- `tests/snax/snax-stream/`: `snax-alu`'s three streamers through its
+  library; the datapath copies A at k = 1, then B at k = 3; each run checks
+  O and prints the streamer's and the datapath's counters.
+- `snax-csr` leaves out the ALU's start CSR 980 as well: 98 accesses, 60
+  reads and 38 writes.
+- Results in Claude's sandbox:
+  - `snax-stream`: `copy A, k=1: errors 0, streamer counter 42, datapath
+    counter 25` and `copy B, k=3: errors 0, streamer counter 79, datapath
+    counter 73`; exit 0. In the first run the datapath starts 14 cycles
+    after the streamer, the readers wait 5 cycles for credit before it,
+    and the writer loses a bank to a reader twice (`stall_xbar 2`): the
+    writer meets the readers in the same banks, as step 1 expected.
+  - `snax-alu` runs to the end: `Accelerator Done!`, `Accelerator Cycles:
+    25`, `Number of errors: 97`, exit code 97. The datapath copies A where
+    the ALU adds; the 3 outputs that match are the elements where B is 0.
+  - `stream-timing`: the same five counters (0, 9, 9, 10, 12);
+    `snax-csr` four lines of `0 errors`; `dma-timing` as in SG2 step 7; the
+    17 plain tests (9-core build) exit 0 on `snitch`.
+
+### SG3 step 8: SG3 closed
+
+- 2026-10-14. All steps done, P4 skipped; acceptance met: standalone tests
+  of `snax-alu`'s three streamers (`stream-timing` with its readers on both
+  sides, `snax-stream` with all three on SNAX-GVSoC), and per-bank
+  arbitration of a streamer port in the crossbar's trace (`ab_same_banks`,
+  `a_stride0`).
+- Settled (the list is in `docs/plans/SG3.md` under "Decided"): the
+  crossbar copies the plain interconnect's `rr_arb_tree` and carries only
+  the SNAX ports; one streamer component from the hjson's template; the
+  beats by request with a probe; a test datapath in the ALU's place until
+  SG4. In snax-forge: D122, and open items 57, 58, 60 and 62 from SG3's
+  profiling review and reading (59 and 61 were done in P5).
+- Upstream files changed in SG3: `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py`
+  (P3, P5); rows in `UPSTREAM.md`. New in `snax/`: `snax_alu_acc`,
+  `snax_streamer`, `snax_tcdm_xbar`, `snax_test_datapath`.
+- Next: SG4, the ALU, planned in its own round from the list under "SG4
+  starts from" in `docs/plans/SG3.md`.

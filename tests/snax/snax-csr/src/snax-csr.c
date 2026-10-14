@@ -2,20 +2,21 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Checks the compute core's SNAX CSRs on the snax_alu target's stub: every
-// read-write CSR reads back what was written, through each kind of CSR
-// instruction, and the read-only CSRs read 0. Returns the number of errors.
+// Checks the compute core's SNAX CSRs on the snax_alu target (the streamer
+// model and the test datapath in the ALU's place): every read-write CSR reads
+// back what was written, through each kind of CSR instruction, and the
+// read-only CSRs read 0, as nothing is started. Returns the number of errors.
 //
 // The CSR number is part of a CSR instruction, so each check is written out
 // once per CSR with the X-macros below.
 
 #include "snrt.h"
 
-// The stub's CSRs, as snax/snax_alu.py lists them
+// The read-write CSRs of snax/snax_alu_acc.py, without the two start CSRs
+// (975, 980): every pattern has bit 0 set, which would start the block.
 #define RW_CSRS(X)                                                    \
     X(960) X(961) X(962) X(963) X(964) X(965) X(966) X(967) X(968)    \
-    X(969) X(970) X(971) X(972) X(973) X(974) X(975) X(978) X(979)    \
-    X(980)
+    X(969) X(970) X(971) X(972) X(973) X(974) X(978) X(979)
 #define RO_CSRS(X) X(976) X(977) X(981) X(982)
 
 // A value that differs per CSR and has bits set in both halves

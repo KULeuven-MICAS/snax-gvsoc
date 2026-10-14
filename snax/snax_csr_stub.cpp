@@ -11,8 +11,9 @@
 // accelerator drives, here always 0 (so busy reads 0). Nothing is started.
 //
 // The core sends each CSR access as a 32-bit IO request at byte address
-// 4 * CSR number. An access to a CSR the stub does not hold, or a write to a
-// read-only one, is refused: the RTL's manager asserts on both.
+// 4 * CSR number; a router in front of the stub may remove a base, so the CSR
+// is csr_base + offset / 4. An access to a CSR the stub does not hold, or a
+// write to a read-only one, is refused: the RTL's manager asserts on both.
 
 #include <map>
 #include <set>
@@ -32,6 +33,8 @@ private:
     vp::Trace trace;
     vp::IoSlave input_itf;
 
+    // The CSR at offset 0 of the input port
+    uint32_t csr_base;
     // CSR number -> value of each read-write CSR
     std::map<uint32_t, uint32_t> rw_regs;
     // Numbers of the read-only CSRs
@@ -45,6 +48,8 @@ SnaxCsrStub::SnaxCsrStub(vp::ComponentConf &config)
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->input_itf.set_req_meth(&SnaxCsrStub::req);
     this->new_slave_port("input", &this->input_itf);
+
+    this->csr_base = this->get_js_config()->get_child_int("csr_base");
 
     for (auto x : this->get_js_config()->get("rw_csrs")->get_elems())
     {
@@ -74,7 +79,7 @@ vp::IoReqStatus SnaxCsrStub::req(vp::Block *__this, vp::IoReq *req)
 {
     SnaxCsrStub *_this = (SnaxCsrStub *)__this;
 
-    uint32_t csr = req->get_addr() / 4;
+    uint32_t csr = _this->csr_base + req->get_addr() / 4;
     uint32_t *data = (uint32_t *)req->get_data();
     bool is_write = req->get_is_write();
 

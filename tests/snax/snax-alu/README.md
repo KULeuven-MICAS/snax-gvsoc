@@ -50,3 +50,11 @@ On snax_cluster's RTL:
     Accelerator Done!
     Accelerator Cycles: 25
     Number of errors: 0
+
+On SNAX-GVSoC since SG3 P5, with the test datapath in the ALU's place (it
+copies A where the ALU adds A and B; the 3 outputs that match are where B is
+0), exit code 97:
+
+    Accelerator Done!
+    Accelerator Cycles: 25
+    Number of errors: 97
