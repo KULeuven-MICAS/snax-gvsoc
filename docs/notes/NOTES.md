@@ -1468,3 +1468,25 @@ stay there.
   ELF"); a missing hash file fails too. The top README has the commands to
   refresh `rtl/`. In Claude's sandbox: passes with the hashes of its ELFs;
   with one hash changed it fails on that size alone and exits 1.
+
+### SG5 step 10: SG5 closed
+
+- 2026-10-14. All steps done; acceptance met: the deviation per phase is
+  inside the target or explained (SG5.md, "Result"), and `make regress`
+  fails when a number drifts (step 8) or when the RTL reference is from
+  another ELF (P6b).
+- Settled (the list is in `docs/plans/SG5.md` under "Decided"): the phases
+  from both sides' instruction traces of one ELF; the DMA wait in
+  snax_cluster's app (`d7dd789`); five sizes; the three-tier target with
+  tier 2's total up to the read of 982; the core's loads as the hjson and
+  the RTL have them; the regression with expected files from the author's
+  container and RTL references hash-checked against the ELF. In snax-forge:
+  D124, D125, open items 65 to 67, CI1.
+- Upstream files changed in SG5: `core/models/cpu/iss/include/lsu.hpp`,
+  `include/lsu_implem.hpp`, `src/lsu.cpp`, `pulp/pulp/snitch/snitch_core.py`,
+  `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` (P5) and `Makefile`
+  (P6); rows in `UPSTREAM.md`. New: `tests/snax/phases.py`,
+  `test_phases.py`, `regress.py`, `snax-alu`'s `DATA_LEN` builds and its
+  `expected/` and `rtl/` folders, the other programs' `expected/`.
+- Next: SG6, Zicsr on SNAX CSRs on both sides, from the list under "SG6
+  starts from" in `docs/plans/SG5.md`; then the housekeeping pass; then CI1.

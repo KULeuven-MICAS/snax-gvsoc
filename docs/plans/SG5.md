@@ -251,7 +251,32 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 | 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | done 2026-10-14 |
 | 8 | P6: the regression, `make regress` | done 2026-10-14 |
 | 9 | Expected files written in the author's container (`--update`); `make regress` passes there | done 2026-10-14 |
-| 10 | P7: SG5 closed here, and the STATUS.md and DECISIONS.md update for snax-forge (the target, the core's open items) | todo |
+| 10 | P7: SG5 closed here, and the STATUS.md and DECISIONS.md update for snax-forge (the target, the core's open items) | done 2026-10-14 |
+
+## Result
+
+The author's run of the same five ELFs on both sides (`tests/snax/snax-alu/rtl/`
+and `expected/`), RTL / SNAX-GVSoC:
+
+| Phase | 128 | 1024 | 4096 |
+|---|---|---|---|
+| C1 barrier | 147 / 154 (+5%) | 373 / 381 (+2%) | 1153 / 1169 (+1%) |
+| D2 DMA wait | 45 / 36 (-20%, accepted) | 270 / 262 (-3%) | 1050 / 1050 (0%) |
+| C3 ALU poll | 37 / 39 (+5%) | 262 / 261 (0%) | 1032 / 1029 (0%) |
+| C5 check loop | 5795 / 5698 (-2%) | 46115 / 45244 (-2%) | 184355 / 180754 (-2%) |
+| Total up to 982 | 6713 / 6698 (0%) | 47495 / 46696 (-2%) | 187285 / 183755 (-2%) |
+
+- Tier 1 met: 982 equal and 0 errors on both sides at every size.
+- Tier 2 met at 128, 1024 and 4096, but for D2 at 128: the RTL core polls
+  `dmstati` every 5 cycles, SNAX-GVSoC's every 2 (accepted in the
+  regression).
+- Tier 3, explained: C2a and D1 (the RTL's L0 prefetches, GVSoC's I-cache
+  does not), C7 (atomics in DRAM through the RTL testbench's
+  `axi_riscv_atomics_wrap`), C6 (the host's polling), C0 and D0 (the same
+  fetch and host effects in boot), D3 (14 against 2 at 1024 and 4096, not
+  looked into). Each is the core's or the testbench's own timing, recorded
+  in snax-forge as open items 65 to 67.
+- One gap was a target parameter and is fixed (P5): the core's loads.
 
 ## Decided
 
@@ -279,3 +304,15 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 - After SG5: SG6 (Zicsr on SNAX CSRs on both sides, SG4's warnings removed),
   then the housekeeping pass over snax-gvsoc's code, which includes the ALU
   sleeping until a beat moves (SG4).
+- Closed in snax-forge: D124 (the target, the gap rule and the regression,
+  closing open item 3) and D125 (the core's loads); open items 65 to 67 for
+  the accepted gaps; CI1 after SG6 and the housekeeping pass.
+
+## SG6 starts from
+
+- SG4's two CSR-form warnings in the Snitch core (`SnaxCsr::handle()`,
+  `Iss::snax_csr_access()`), to be removed once both sides follow Zicsr;
+  `snax-csr`'s expected file then loses its two warning lines (an
+  `--update` with a notes entry).
+- `snax-csr` has run on SNAX-GVSoC only; SG6 runs it on the RTL too.
+- `make regress` is SG6's guard: every other number stays as it is.
