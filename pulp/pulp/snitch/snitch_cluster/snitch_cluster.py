@@ -133,7 +133,9 @@ else:
             self.misa = misa
             # SNAX accelerators: {core index: function(parent, name) -> component}. Each
             # component is built in the cluster and bound to that core's snax_csr port
-            # through its i_INPUT(). None for a cluster without accelerators.
+            # through its i_INPUT(). A class with an nb_tcdm_ports attribute also gets
+            # that many TCDM ports, bound through its o_TCDM(port, itf) to the cluster's
+            # SNAX crossbar. None for a cluster without accelerators.
             self.snax_acc = snax_acc
             # SNAX: SnitchDma arguments that replace the cluster's defaults, e.g.
             # {'tcdm_width': 64}. None keeps them all.
@@ -152,7 +154,9 @@ else:
 
 class SnitchClusterTcdm(gvsoc.systree.Component):
 
-    def __init__(self, parent, name, arch):
+    # SNAX: nb_snax_ports adds a crossbar for the accelerators' TCDM ports in front of the
+    # same banks, arbitrated per bank as snax_cluster's plain interconnect (snax/snax_tcdm_xbar).
+    def __init__(self, parent, name, arch, nb_snax_ports=0):
         super().__init__(parent, name)
 
         banks = []
@@ -176,8 +180,20 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
             self.bind(self, f'in_{i}', interleaver, f'in_{i}')
             self.bind(self, f'dma_input', dma_interleaver, f'input')
 
+        if nb_snax_ports > 0:
+            from snax_tcdm_xbar import SnaxTcdmXbar
+            snax_xbar = SnaxTcdmXbar(self, 'snax_xbar', nb_inputs=nb_snax_ports,
+                nb_banks=nb_banks, bank_width=arch.bank_width)
+            for i in range(0, nb_banks):
+                snax_xbar.o_BANK(i, banks[i].i_INPUT())
+            for i in range(0, nb_snax_ports):
+                self.bind(self, f'snax_in_{i}', snax_xbar, f'in_{i}')
+
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
+
+    def i_SNAX_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'snax_in_{port}', signature='io')
 
     def i_DMA_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'dma_input', signature='io')
@@ -202,8 +218,14 @@ class SnitchCluster(gvsoc.systree.Component):
         # Dedicated router for dma to TCDM
         tcdm_dma_ico = router.Router(self, 'tcdm_dma_ico', bandwidth=64)
 
+        # SNAX accelerators: {core: component class}, and their TCDM ports, numbered in core
+        # order as snax_cluster packs snax_tcdm_req_i
+        snax_acc = getattr(arch, 'snax_acc', None) or {}
+        nb_snax_ports = sum(getattr(make_acc, 'nb_tcdm_ports', 0)
+            for make_acc in snax_acc.values())
+
         # L1 Memory
-        tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm)
+        tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=nb_snax_ports)
 
         # Zero memory
         zero_mem = ZeroMem(self, 'zero_mem', size=arch.zero_mem.size)
@@ -266,11 +288,15 @@ class SnitchCluster(gvsoc.systree.Component):
             cluster_registers = pulp.snitch.snitch_cluster.cluster_registers.ClusterRegisters(
                 self, 'cluster_registers', nb_cores=arch.nb_core, boot_addr=entry)
 
-        # SNAX accelerators, each on the snax_csr port of the core that drives it
-        snax_acc = getattr(arch, 'snax_acc', None) or {}
-        for core_id, make_acc in snax_acc.items():
+        # SNAX accelerators, each on the snax_csr port of the core that drives it, and with
+        # its TCDM ports on the SNAX crossbar
+        snax_port = 0
+        for core_id, make_acc in sorted(snax_acc.items()):
             acc = make_acc(self, f'snax_acc{core_id}')
             cores[core_id].o_SNAX_CSR(acc.i_INPUT())
+            for port in range(0, getattr(make_acc, 'nb_tcdm_ports', 0)):
+                acc.o_TCDM(port, tcdm.i_SNAX_INPUT(snax_port))
+                snax_port += 1
 
         # Cluster DMA
         # SNAX: the arch may replace these defaults (ClusterArch's dma)

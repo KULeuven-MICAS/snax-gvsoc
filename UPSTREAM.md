@@ -67,3 +67,4 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | `read_latency` (0 when absent) added to each read burst's latency | SG2 P5 |
 | `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `read_latency` (0 when absent) paid once per read stream: a line read on the cycle after the previous one does not pay it again | SG2 P5 |
 | `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) | SG2 P5 |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `nb_snax_ports` and builds `SnaxTcdmXbar` (`snax/`) in front of the same banks; `SnitchCluster` counts the accelerators' `nb_tcdm_ports` and binds each one's ports to it | SG3 P3 |

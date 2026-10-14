@@ -6,59 +6,84 @@
 
 """snax_alu's accelerator as snax_cluster builds it (snax_acc_wrapper.sv.tpl).
 
-The composite bound to the compute core's snax_csr port. A router splits the
+The composite bound to the compute core's snax_csr port. csr_mux splits the
 core's CSR accesses between the streamer and the ALU as snax_csr_mux_demux.sv
 does: the streamer's CSRs first, everything above them to the ALU. Each block
-sees offsets from its own first CSR, as each CSR manager does on the RTL.
+sees offsets from its own first CSR, as each CSR manager does on the RTL. The
+streamer's channels leave the composite as its TCDM ports.
 
-For now both blocks are stubs that hold their CSRs (snax_csr_stub.py); the
-streamer model (SG3) and the ALU model (SG4) replace them.
+The ALU is still a stub that holds its CSRs (alu_regs, snax_csr_stub.py)
+until SG3 P5 and SG4.
 """
 
 import gvsoc.systree
 import interco.router as router
 from snax_csr_stub import SnaxCsrStub
+from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports
 
+
+# snax_alu_streamer_template of snax_cluster's cfg/snax_alu_cluster_old.hjson
+# at b2672f8, with the hjson's keys
+STREAMER_TEMPLATE = {
+    'data_reader_params': {
+        'spatial_bounds': [[4], [4]],
+        'temporal_dim': [1, 1],
+        'num_channel': [4, 4],
+        'fifo_depth': [8, 8],
+    },
+    'data_writer_params': {
+        'spatial_bounds': [[4]],
+        'temporal_dim': [1],
+        'num_channel': [4],
+        'fifo_depth': [8],
+    },
+    'snax_library_name': 'snax-alu',
+}
+
+# The hjson's cluster tcdm.size (128 KiB): the address generators keep its
+# log2, 17 bits
+TCDM_SIZE = 128 * 1024
 
 # The first SNAX CSR (CSR_SNAX_BEGIN, 0x3C0) and the last one the core sends
 # out (0x5FF). The core puts CSR n at byte address 4 * n on its snax_csr port.
 SNAX_CSR_FIRST = 960
 SNAX_CSR_LAST = 0x5FF
 
-# The streamer's CSRs, from the app's streamer_csr_addr_map.h: 3 movers x 5
-# read-write CSRs and the start CSR (960 to 975), then busy and the performance
-# counter, read-only (976, 977).
-STREAMER_RW_CSRS = list(range(960, 976))
-STREAMER_RO_CSRS = [976, 977]
+# The streamer's CSRs come first: 3 movers x 5 read-write CSRs and start, then
+# busy and the performance counter, 960 to 977 (streamer_csr_addr_map.h).
+# Where csr_mux switches to the ALU: AddrSelOffSet of snax_csr_mux_demux.sv.
+ALU_CSR_FIRST = SNAX_CSR_FIRST + nb_csrs(STREAMER_TEMPLATE)
+
 # The ALU's, from snax-alu-lib.h: mode, length, start (978 to 980), then busy
 # and the performance counter, read-only (981, 982).
 ALU_RW_CSRS = [978, 979, 980]
 ALU_RO_CSRS = [981, 982]
 
-# Where the router switches to the ALU: AddrSelOffSet of snax_csr_mux_demux.sv,
-# the streamer's CSR count.
-ALU_CSR_FIRST = SNAX_CSR_FIRST + len(STREAMER_RW_CSRS) + len(STREAMER_RO_CSRS)
-
 
 class SnaxAluAcc(gvsoc.systree.Component):
-    """snax_alu's accelerator: the CSR router, the streamer and the ALU.
+    """snax_alu's accelerator: the CSR mux, the streamer and the ALU.
 
     Ports
     -----
     input : io slave
         The compute core's CSR accesses, a 32-bit request at 4 * CSR number.
+    tcdm_<i> : io master
+        The streamer's TCDM ports (nb_tcdm_ports of them).
     """
+
+    # The cluster binds this many TCDM ports (snax_tcdm_ports in the hjson)
+    nb_tcdm_ports = nb_tcdm_ports(STREAMER_TEMPLATE)
 
     def __init__(self, parent: gvsoc.systree.Component, name: str):
         super().__init__(parent, name)
 
         # Synchronous, no bandwidth and no latency: a request is forwarded in
         # the call that brings it, as through the RTL's combinational mux.
-        csr = router.Router(self, 'csr')
+        csr_mux = router.Router(self, 'csr_mux')
 
-        streamer = SnaxCsrStub(self, 'streamer', csr_base=SNAX_CSR_FIRST,
-            rw_csrs=STREAMER_RW_CSRS, ro_csrs=STREAMER_RO_CSRS)
-        alu = SnaxCsrStub(self, 'alu', csr_base=ALU_CSR_FIRST,
+        streamer = SnaxStreamer(self, 'streamer', template=STREAMER_TEMPLATE,
+            csr_base=SNAX_CSR_FIRST, tcdm_size=TCDM_SIZE)
+        alu_regs = SnaxCsrStub(self, 'alu_regs', csr_base=ALU_CSR_FIRST,
             rw_csrs=ALU_RW_CSRS, ro_csrs=ALU_RO_CSRS)
 
         # The streamer's range, and everything from the ALU's first CSR to the
@@ -66,12 +91,22 @@ class SnaxAluAcc(gvsoc.systree.Component):
         # mapping removes its base, so a block sees offsets from its first CSR.
         streamer_base = 4 * SNAX_CSR_FIRST
         alu_base = 4 * ALU_CSR_FIRST
-        csr.o_MAP(streamer.i_INPUT(), base=streamer_base,
+        csr_mux.o_MAP(streamer.i_INPUT(), base=streamer_base,
             size=alu_base - streamer_base)
-        csr.o_MAP(alu.i_INPUT(), base=alu_base,
+        csr_mux.o_MAP(alu_regs.i_INPUT(), base=alu_base,
             size=4 * (SNAX_CSR_LAST + 1) - alu_base)
 
-        self.bind(self, 'input', csr, 'input')
+        self.bind(self, 'input', csr_mux, 'input')
+
+        for port in range(0, self.nb_tcdm_ports):
+            streamer.o_TCDM(port, self.i_TCDM_INTERNAL(port))
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, 'input', signature='io')
+
+    def i_TCDM_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
+        # Inside the composite: the streamer's port i leaves as tcdm_<i>
+        return gvsoc.systree.SlaveItf(self, f'tcdm_{port}', signature='io')
+
+    def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind(f'tcdm_{port}', itf, signature='io')

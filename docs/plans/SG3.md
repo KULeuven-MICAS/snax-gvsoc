@@ -103,9 +103,9 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 | Component | Kind | Ports |
 |---|---|---|
 | `SnaxAluAcc` | Python composite, `snax_acc[0]` | `input` (CSR), `tcdm_0` to `tcdm_11` |
-| `csr` | sync `Router`, bandwidth 0 | 960 to 977 to the streamer, 978 to 982 to the ALU slot, offsets from 0 |
-| `SnaxStreamer` | C++ | `csr`, `tcdm_0` to `tcdm_11`, `reader_0`, `reader_1` (beats out), `writer_0` (beats in) |
-| ALU slot | C++; in SG3 a test datapath, the ALU in SG4 | `csr` (the ALU's 5 CSRs, stub rules), `in_a`, `in_b`, `out` |
+| `csr_mux` | sync `Router`, bandwidth 0 | 960 to 977 to the streamer, 978 up to the ALU slot, offsets from each block's first CSR |
+| `SnaxStreamer` | C++ | `input` (CSR), `tcdm_0` to `tcdm_11`; from P5 `reader_0`, `reader_1` (beats out), `writer_0` (beats in) |
+| ALU slot | `alu_regs` (the stub) up to P5, then a test datapath; the ALU in SG4 | `input` (the ALU's 5 CSRs, stub rules); from P5 `in_a`, `in_b`, `out` |
 | `SnaxTcdmXbar` | C++, in `SnitchClusterTcdm` | `in_0` to `in_<n-1>` (SNAX ports), `out_0` to `out_31` on the same banks |
 
 - Python takes `data_reader_params` and `data_writer_params` with the
@@ -140,7 +140,7 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 |---|---|---|
 | 1 | P1: this plan; the reading in the notes | done 2026-10-13 |
 | 2 | P2: `SnaxAluAcc` with the CSR router and two stubs. `snax-alu`'s 22 accesses and `snax-csr`'s 108 at the cycles and values of main before P2; `snax-csr` four lines of `0 errors` | done 2026-10-14 |
-| 3 | P3: `SnaxTcdmXbar`; the streamer's CSRs, start, busy, counter, AGU and readers; `stream-timing`. Counter per case on SNAX-GVSoC and the same-bank trace | todo |
+| 3 | P3: `SnaxTcdmXbar`; the streamer's CSRs, start, busy, counter, AGU and readers; `stream-timing`. Counter per case on SNAX-GVSoC and the same-bank trace | done 2026-10-14 |
 | 4 | The same ELF on the RTL (author's run): the printed lines and the common_cells commit in `Bender.lock` | todo |
 | 5 | The counter per case on both sides, each gap named. Findings only | todo |
 | 6 | P4: the gaps of step 5; skipped if there are none | todo |

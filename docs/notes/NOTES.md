@@ -697,3 +697,71 @@ stay there.
   from DRAM): `snax-alu` now writes 960 at cycle 2508, starts the streamer
   (975) at 2616 and the ALU (980) at 2630, reads 981 at 2636 and 976 at
   2642, and reads 982 at 4696, after the check loop and `printf`.
+
+### SG3 step 3: P3, the crossbar and the readers
+
+- 2026-10-14. `snax/snax_tcdm_xbar.py` / `.cpp`: `SnaxTcdmXbar`, the SNAX
+  ports into the TCDM banks as the plain interconnect arbitrates them: per
+  bank `rr_arb_tree`'s tree (`sel = ~left | right & rr_q[level]`) and
+  `FairArb` state (the next requester above `rr_q`, else the first at or
+  below it). A request is held (`IO_REQ_PENDING`) until the crossbar's event
+  of that cycle, queued by the first request; the winner's bank access
+  happens then, `grant()` in that cycle, `resp()` one cycle later plus the
+  bank's latency. A loser gets nothing and its master sends it again the
+  next cycle, as an RTL master keeps `valid` high. Built in
+  `SnitchClusterTcdm` when an accelerator has TCDM ports, its outputs on the
+  same bank memories the cores use; inputs numbered in core order, as
+  snax_cluster packs `snax_tcdm_req_i`.
+- `snax/snax_streamer.py` / `.cpp`: `SnaxStreamer`, configured from the
+  hjson's streamer template (`STREAMER_TEMPLATE` in `snax_alu_acc.py`,
+  `snax_alu_streamer_template` with its keys); other keys are refused by
+  name. CSRs, start, busy, counter, AGU and readers as SG3.md reads the RTL.
+  One event per cycle while busy sends the requests, then a commit event
+  (delay 0, after the crossbar's) pops the granted addresses and lets the
+  AGUs push. Busy and the counter are computed from the start cycle and the
+  end cycle when read. A streamer with no credit and no room sleeps. Not
+  yet: writers (a writer that would start is refused with a warning), the
+  beats out (P5).
+- `snax_alu_acc.py`: `csr_mux`, `streamer`, `alu_regs`; the ALU's first CSR
+  computed from the template (978); `SnaxAluAcc.nb_tcdm_ports` (12) and
+  `o_TCDM()` for the cluster.
+- `snax-csr` leaves out the start CSR 975 (its pattern has bit 0 set and
+  would start the streamer): 103 accesses, 63 reads and 40 writes. The
+  ALU's start CSR 980 stays until SG4.
+- `tests/snax/stream-timing/`: one ELF per case (`CASE_<name>`), since the
+  reader queues keep their beats and credit after a run with no ALU, on the
+  RTL too. Results in Claude's sandbox; s is the start write's cycle:
+
+  | Case | s | Last grant | Busy up to | Counter |
+  |---|---|---|---|---|
+  | `zero_bound` | 4707 | none | s + 1 | 0 |
+  | `a_alone` | 4707 | 4716 | 4717 | 9 |
+  | `ab_other_banks` | 4711 | 4720 | 4721 | 9 |
+  | `ab_same_banks` | 4711 | 4721 | 4722 | 10 |
+  | `a_stride0` | 4707 | 4719 | 4720 | 12 |
+
+  All five as predicted from source in step 1. The first grant is at
+  s + 2. `ab_same_banks`: in s + 2 A wins banks 0 to 3 (`grant in_0`,
+  `held: in_4`, ...), then B runs one cycle behind with no further conflict.
+  `a_stride0`: bank 0 grants in_0, in_1, in_2, in_3 in turn and the lanes
+  stay one cycle apart. The printed `polls` (0, 0, 3, 4, 1) and `mcycle`
+  spans (15, 15, 24, 27, 18) are the core's timing: in `a_alone` the first
+  busy read comes 11 cycles after the start write and already reads 0.
+- The arbiter against the RTL, run, not read: common_cells v1.40.0's
+  `rr_arb_tree` (`FairArb`, `LockIn`, `AxiVldRdy`, the grant always given)
+  in Icarus Verilog 12 on 2000 cycles of random requests, against
+  `tree_pick()` and `next_rr()` taken verbatim from `snax_tcdm_xbar.cpp`:
+  the same winner in every cycle at 12, 15 and 4 inputs, and the RTL's 15
+  inputs with 3 idle give the model's 12-input winners.
+- Throwaway program: a second start write while the streamer is busy stops
+  with `Start (CSR 975) while the streamer is busy`.
+- `snax-alu` now stops at its start write (cycle 2616) with `Writer at CSR
+  970 started: writers are not modelled yet (SG3 P5)`; it runs again in P5.
+- Results in Claude's sandbox: `snax-csr` four lines of `0 errors`, 103
+  accesses (86 streamer, 17 `alu_regs`); `dma-timing` exits 0 with every
+  field as in SG2 step 7; the 17 plain tests (9-core build) exit 0 on
+  `snitch`, which builds no crossbar, `perf_cnt` printing `End: 1531
+  cycles`.
+- For step 4 (author's run on the RTL): the five ELFs of
+  `tests/snax/stream-timing/build/`, the printed lines, and the
+  common_cells version in snax_cluster's `Bender.lock`.
