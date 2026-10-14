@@ -1,0 +1,108 @@
+{
+ "harts": {
+  "0": [
+   {
+    "phase": "C0 boot",
+    "start": 13755,
+    "cycles": 649,
+    "insns": 122,
+    "polls": null
+   },
+   {
+    "phase": "C1 barrier",
+    "start": 14404,
+    "cycles": 1169,
+    "insns": 19,
+    "polls": null
+   },
+   {
+    "phase": "C2a CSR setup",
+    "start": 15573,
+    "cycles": 134,
+    "insns": 46,
+    "polls": null
+   },
+   {
+    "phase": "C2b CSR setup",
+    "start": 15707,
+    "cycles": 14,
+    "insns": 3,
+    "polls": null
+   },
+   {
+    "phase": "C3 ALU poll",
+    "start": 15721,
+    "cycles": 1029,
+    "insns": 686,
+    "polls": 171
+   },
+   {
+    "phase": "C4 streamer poll",
+    "start": 16750,
+    "cycles": 6,
+    "insns": 4,
+    "polls": 1
+   },
+   {
+    "phase": "C5 check loop",
+    "start": 16756,
+    "cycles": 180754,
+    "insns": 61450,
+    "polls": null
+   },
+   {
+    "phase": "C6 printf",
+    "start": 197510,
+    "cycles": 7715,
+    "insns": 2764,
+    "polls": null
+   },
+   {
+    "phase": "C7 exit",
+    "start": 205225,
+    "cycles": 81,
+    "insns": 12,
+    "polls": null
+   }
+  ],
+  "1": [
+   {
+    "phase": "D0 boot",
+    "start": 13755,
+    "cycles": 649,
+    "insns": 331,
+    "polls": null
+   },
+   {
+    "phase": "D1 DMA issue",
+    "start": 14404,
+    "cycles": 117,
+    "insns": 35,
+    "polls": null
+   },
+   {
+    "phase": "D2 DMA wait",
+    "start": 14521,
+    "cycles": 1050,
+    "insns": 1050,
+    "polls": 525
+   },
+   {
+    "phase": "D3 barrier",
+    "start": 15571,
+    "cycles": 2,
+    "insns": 2,
+    "polls": null
+   },
+   {
+    "phase": "D4 post-main and exit",
+    "start": 15573,
+    "cycles": 189733,
+    "insns": 30,
+    "polls": null
+   }
+  ]
+ },
+ "total": 191551,
+ "total_to_982": 183755
+}

@@ -94,7 +94,7 @@ else:
         def __init__(self, parent, name, base, first_hartid, auto_fetch=False,
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
                 core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None,
-                dma=None):
+                dma=None, core=None, core_latency=None):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -141,6 +141,13 @@ else:
             # SNAX: SnitchDma arguments that replace the cluster's defaults, e.g.
             # {'tcdm_width': 64}. None keeps them all.
             self.dma = dma
+            # SNAX: Snitch arguments that replace the cores' defaults, e.g.
+            # {'int_loads_in_flight': 1}. None keeps them all.
+            self.core = core
+            # SNAX: cycles added on a core's data path, {'tcdm': n, 'narrow': n}: from the
+            # core to the TCDM, and to everything outside the cluster through narrow_axi.
+            # None adds none.
+            self.core_latency = core_latency
 
         class Tcdm(Tree):
             def __init__(self, parent, name, base, nb_masters):
@@ -277,7 +284,8 @@ class SnitchCluster(gvsoc.systree.Component):
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,
                     core_id=arch.first_hartid + core_id, htif=True, binaries=binaries,
                     snax_cluster_base_addr=arch.base, snax_cluster_nb_cores=arch.nb_core,
-                    snax_cluster_core_idx=core_id, misa=getattr(arch, 'misa', None)))
+                    snax_cluster_core_idx=core_id, misa=getattr(arch, 'misa', None),
+                    **(getattr(arch, 'core', None) or {})))
 
                 fp_cores.append(iss.Snitch_fp_ss(self, f'fp_ss{core_id}', isa=arch.isa,
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,
@@ -350,11 +358,13 @@ class SnitchCluster(gvsoc.systree.Component):
         tcdm_port = 0
         for core_id in range(0, arch.nb_core):
             cores[core_id].o_DATA(cores_ico[core_id].i_INPUT())
+            core_latency = getattr(arch, 'core_latency', None) or {}
             cores_ico[core_id].o_MAP(tcdm.i_INPUT(tcdm_port), base=arch.tcdm.area.base,
-                size=arch.tcdm.area.size, rm_base=True)
+                size=arch.tcdm.area.size, rm_base=True, latency=core_latency.get('tcdm', 0))
             if arch.alias_base is not None:
                 cores_ico[core_id].o_MAP(tcdm.i_INPUT(tcdm_port), name='tcdm_alias',
-                    base=arch.tcdm_alias.base, size=arch.tcdm_alias.size, rm_base=True)
+                    base=arch.tcdm_alias.base, size=arch.tcdm_alias.size, rm_base=True,
+                    latency=core_latency.get('tcdm', 0))
             tcdm_port += 1
 
             if arch.use_spatz:
@@ -362,7 +372,7 @@ class SnitchCluster(gvsoc.systree.Component):
                     cores[core_id].o_VLSU(port, tcdm.i_INPUT(tcdm_port))
                     tcdm_port += 1
 
-            cores_ico[core_id].o_MAP(narrow_axi.i_INPUT())
+            cores_ico[core_id].o_MAP(narrow_axi.i_INPUT(), latency=core_latency.get('narrow', 0))
             cores[core_id].o_FETCH(icache.i_INPUT(core_id))
 
             # Icache

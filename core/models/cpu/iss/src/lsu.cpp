@@ -30,6 +30,7 @@ void Lsu::reset(bool active)
         this->elw_stalled.set(false);
         this->misaligned_size = 0;
         this->io_req_denied = false;
+        this->load_ready_cycle = 0;
     }
 }
 
@@ -347,6 +348,16 @@ void Lsu::build()
 
     this->memory_start = -1;
     this->memory_end = -1;
+
+    // SNAX: integer loads in flight, 0 (no limit) when the core does not set it.
+    js::Config *loads_in_flight = this->iss.top.get_js_config()->get("int_loads_in_flight");
+    this->int_loads_in_flight = loads_in_flight ? loads_in_flight->get_int() : 0;
+    if (this->int_loads_in_flight > 1)
+    {
+        this->trace.fatal("int_loads_in_flight %d: only 0 (no limit) and 1 are modelled\n",
+            this->int_loads_in_flight);
+    }
+    this->load_ready_cycle = 0;
 
     if (this->iss.top.get_js_config()->get("memory_start") != NULL)
     {

@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
+| snax_cluster, the programs and the RTL reference | `d7dd78967b86dae5c7d149f420dd69681714dac9` (2026-10-14): `b2672f8` plus the DMA wait in `snax-alu.c` (SG5 P2), the RTL unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8` |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -1093,3 +1093,400 @@ stay there.
   `alu-timing`.
 - Next: SG5, the baseline, planned in its own round from the list under
   "SG5 starts from" in `docs/plans/SG4.md`.
+
+### SG5 step 1: P1, the plan
+
+- 2026-10-14. `docs/plans/SG5.md` written: `snax-alu` at five sizes (4, 100,
+  128, 1024, 4096) on both sides, per-phase cycles cut from each side's
+  instruction trace of the same ELF, a three-tier error target fixed before
+  the first comparison, and a regression (`make regress`) locking
+  SNAX-GVSoC's numbers.
+- Read from source, not run (snax_cluster `b2672f8`; details in SG5.md under
+  "The app on the RTL"):
+  - The runtime runs init on the CPU, a hardware barrier, `main`, a second
+    hardware barrier and the exit (a reduction in DRAM, a global barrier,
+    core 0's store to `tohost`). Hart 0 computes, hart 1 is the DMA core.
+  - `snrt_cluster_hw_barrier()` is `csrr x0, 0x7C2` and waits for the cores
+    only. `snax-alu.c`'s DMA core issues A and B and goes to the barrier
+    without waiting, so the transfer runs while the compute core sets up
+    and polls, and the readers do not wait for it.
+  - From SG2's DMA times (estimate, not run): reader B asks for B before the
+    DMA has written it once N is about 250 or more, so 1024 and 4096 would
+    give errors on both sides that depend on each side's initial L1 and on
+    core timing.
+- Changed from the planning round: the app gets `snrt_dma_wait_all()` before
+  its barrier, in snax_cluster itself (P2), so the copy here stays the app
+  unchanged; D2 becomes the DMA wait and holds the transfer, with C1; the
+  DMA core gets D3 (barrier) and D4 (the post-main barrier, which holds the
+  compute core's C2 to C6, and the exit); C4 moves to tier 3, since the
+  streamer ends 2 to 4 cycles after the ALU at any N; the fit of 4096 is
+  checked from the runtime's L1 layout, not the linker map (L1 is allocated
+  at run time from the TCDM start).
+- BASE1 is out of SG5 (after the SG series); snax-forge's SG5 row updated.
+
+### SG5 step 2: P2, the DMA wait
+
+- 2026-10-14. snax_cluster `d7dd789` (#656) is `b2672f8` plus
+  `snrt_dma_wait_all()` in `snax-alu.c`, after the DMA core's two starts and
+  before its barrier; nothing else changed, so the RTL and SG2 to SG4's RTL
+  results are those of `b2672f8`. The copy in `tests/snax/snax-alu/` is
+  synced, its README names the new commit, the pin above and the clone
+  command in `README.md` moved to it. The other programs' READMEs keep
+  `b2672f8`, where their RTL runs were made.
+- Author's run on the RTL: the same three lines as before the change.
+- Results in Claude's sandbox (LLVM 21.1.6 from LLVM's release, the ELF
+  built here), `snax-alu` at 100 before and after P2, with
+  `--trace=pe0/insn` and `--trace=pe1/insn`:
+  - Both print `Accelerator Done!`, `Accelerator Cycles: 25`, `Number of
+    errors: 0` and exit 0.
+  - After P2 the DMA core issues its second copy at 2497, polls `dmstati` 15
+    times (2498 to 2526) and reaches the barrier at 2529. Both cores' barrier
+    instructions are traced at 2529, against 2489 before: the compute core
+    leaves the barrier 40 cycles later, once A and B are in L1.
+  - The compute core's start writes move by 27 cycles, not 40 (975 at 2643
+    against 2616, 980 at 2657 against 2630): its CSR setup is 13 cycles
+    shorter after P2, probably because the DMA no longer shares the path to
+    DRAM while the core fetches the setup code (not checked). ALU and
+    streamer polls are unchanged (5 and 1).
+  - The read of 982 moves from 4716 to 4736, but hart 0's last instruction is
+    at 11264 in both runs. Left for the phase script (P3) to explain.
+- Seen in the dump, for P3's markers: `dmstati` disassembles as `<unknown>`
+  in `llvm-objdump` but as `dmstati` in GVSoC's trace; CSR 982 disassembles
+  as `pmpaddr38` and the SNAX CSRs in GVSoC's trace as `snax_csr_<n>`, so
+  markers match on the CSR number, not its name.
+- Not rerun: the other programs and the plain tests; P2 changes no file they
+  use.
+
+### SG5 step 3: P3, the phase script
+
+- 2026-10-14. `tests/snax/phases.py ELF --gvsoc WORKDIR | --rtl LOGDIR
+  [--json OUT]` cuts a `snax-alu` run into the phases of SG5.md from both
+  cores' instruction traces, with markers found in the ELF by symbol and
+  instruction word: the barrier word in `main`, the CSR writes to 975 and
+  980 and the read of 982 by CSR number, the three poll loops as a call (or
+  `dmstati`) at P with a branch back at P + 4, `main`'s `ret`, and the
+  store to `tohost` as an `auipc` and store pair. A missing marker is a
+  named error (the ELF before P2 gives "poll loop of dmstati not found in
+  main"). 9 unit tests in `tests/snax/test_phases.py`; the RTL lines in them
+  follow `gen_trace.py`'s format, not a run, until step 5.
+- On SNAX-GVSoC a trace file name is relative to the work directory:
+  `--trace=pe0/insn:pe0.txt` writes `<work-dir>/pe0.txt`; a path with the
+  work directory in it fails with "Unable to open file" (exit 134).
+- Results in Claude's sandbox, `snax-alu` at 100:
+
+  | Hart 0 | Start | Cycles | Insns | Polls |
+  |---|---|---|---|---|
+  | C0 boot | 1754 | 644 | 122 | |
+  | C1 barrier | 2398 | 132 | 19 | |
+  | C2a CSR setup | 2530 | 114 | 46 | |
+  | C2b CSR setup | 2644 | 14 | 3 | |
+  | C3 ALU poll | 2658 | 33 | 22 | 5 |
+  | C4 streamer poll | 2691 | 6 | 4 | 1 |
+  | C5 check loop | 2697 | 2040 | 1510 | |
+  | C6 printf | 4737 | 6445 | 2846 | |
+  | C7 exit | 11182 | 76 | 12 | |
+
+  | Hart 1 | Start | Cycles | Insns | Polls |
+  |---|---|---|---|---|
+  | D0 boot | 1754 | 653 | 331 | |
+  | D1 DMA issue | 2407 | 91 | 33 | |
+  | D2 DMA wait | 2498 | 30 | 30 | 15 |
+  | D3 barrier | 2528 | 2 | 2 | |
+  | D4 post-main and exit | 2530 | 8728 | 30 | |
+
+  Total 9504 cycles; up to the read of 982 (C0 to C5) 2983.
+- C6 is the host's: each `printf` line ends in a syscall through `tohost`,
+  and `_putchar` spins on `fromhost` until the host answers. Here the three
+  spins (about 100 cycles each) end at 6009, 9006 and 11009, on a grid of
+  about 1000 cycles. That is why the run ends at the same cycle before and
+  after P2 (step 2). Tier 2's total therefore stops at the read of 982; C6,
+  C7 and the full total move to tier 3 (SG5.md updated).
+- C5 takes about 20 cycles per element: the core loads OUT from DRAM, two
+  32-bit loads per 64-bit element. A tier-2 phase, on the core's path to
+  DRAM.
+- Not rerun: the other programs and the plain tests; P3 adds a script and
+  changes no program.
+
+### SG5 step 4: P4, the five sizes
+
+- 2026-10-14. `make -C tests/snax/snax-alu DATA_LEN=N` writes
+  `build/N/data.h` with `datagen.py` (NumPy seed 0, mode 0, N elements) and
+  builds `build/N/snax-alu.elf`; without `DATA_LEN` the build is unchanged.
+  At 100 the generated `data.h` and the ELF equal the default build byte for
+  byte. The streamer's counter (977), which the app does not read, comes
+  from its trace: `--trace=streamer:streamer.txt`, the line `Done: busy up
+  to cycle ..., counter N`.
+- Results in Claude's sandbox. Every size exits 0 with `Number of errors: 0`
+  and `Accelerator Cycles:` N / 4; each run takes 1 to 2 s. Cycles per phase
+  (polls in brackets):
+
+  | Phase | 4 | 100 | 128 | 1024 | 4096 |
+  |---|---|---|---|---|---|
+  | C0 boot | 633 | 644 | 659 | 661 | 653 |
+  | C1 barrier | 111 | 132 | 133 | 360 | 1148 |
+  | C2a CSR setup | 114 | 114 | 114 | 115 | 115 |
+  | C2b CSR setup | 14 | 14 | 14 | 14 | 14 |
+  | C3 ALU poll | 9 (1) | 33 (5) | 39 (6) | 261 (43) | 1029 (171) |
+  | C4 streamer poll | 6 (1) | 6 (1) | 6 (1) | 6 (1) | 6 (1) |
+  | C5 check loop | 113 | 2040 | 2613 | 20533 | 81962 |
+  | C6 printf | 5716 | 6445 | 6765 | 6696 | 6496 |
+  | C7 exit | 77 | 76 | 74 | 73 | 73 |
+  | D0 boot | 642 | 653 | 659 | 661 | 653 |
+  | D1 DMA issue | 92 | 91 | 95 | 96 | 96 |
+  | D2 DMA wait | 8 (4) | 30 (15) | 36 (18) | 262 (131) | 1050 (525) |
+  | D3 barrier | 2 | 2 | 2 | 2 | 2 |
+  | D4 post-main and exit | 6049 | 8728 | 9625 | 27698 | 89695 |
+  | Total up to 982 | 1000 | 2983 | 3578 | 21950 | 84927 |
+  | Total | 6793 | 9504 | 10417 | 28719 | 91496 |
+  | 982 | 1 | 25 | 32 | 256 | 1024 |
+  | 977 | 16 | 42 | 48 | 272 | 1040 |
+
+- D2 and C1 grow by about one cycle per 64-byte beat (1024 beats at 4096),
+  as SG2's DMA does; C3 by N / 4; C5 by about 20 cycles per element, the
+  core's two DRAM loads per 64-bit element. C0 moves by up to 28 cycles with
+  N, though nothing in boot depends on N but where `.data` sits; probably
+  instruction-fetch alignment (tier 3, not looked into).
+- L1 at 4096: A, B and O start at 0x10000000, 0x10008000 and 0x10010000 (the
+  DMA's `dmdst` operands), so O ends at 0x10018000 (96 KiB); the stacks sit
+  at the top, 1 KiB per core (`SNRT_LOG2_STACK_SIZE` 10), hart 1's `sp`
+  starting at 0x1001fbd8. About 30 KiB stay free; the largest size that fits
+  is about 5300.
+- 977 is 42 at 100 with and without P2 (the ELF of `b2672f8` rerun here):
+  the two start writes are 14 cycles apart (975 at 2643, 980 at 2657), as in
+  SG3 step 2 (2616 and 2630). SG4 step 2's "streamer starts at 2625" and its
+  counter 31 do not match a rerun of either ELF; taken as a slip in that
+  entry. 977 depends on that gap, so it sits beside the target, not in it.
+- The author's container gives the same cycles and polls in C2a to C4 and
+  D2 at 100 (step 3's run), with C0, D0 and C6 a few tens of cycles off and
+  other instruction counts there: the runtime is built by another toolchain
+  build. The regression's expected files come from that container (SG5.md).
+- Not rerun: the other programs and the plain tests; P4 changes only
+  `snax-alu`'s Makefile and README.
+
+### SG5 P4b: the raw RTL trace
+
+- 2026-10-14. `make traces` stops in the image: `spike-dasm` is not in it
+  (`/bin/sh: spike-dasm: not found`, then `gen_trace.py` fails on its empty
+  input). The phase script needs only each instruction's cycle and pc, which
+  the raw `logs/trace_chip_*_hart_*.dasm` already holds, so it reads those
+  directly (`read_rtl_dasm`): the lines from the integer core (`source` 0)
+  that are not stalled and not offloaded to the FPU, the lines `gen_trace.py`
+  gives a pc in the `.txt`. `--rtl` reads the `.dasm` when there is one,
+  the `.txt` otherwise. Format from `snitch_cc.sv` and `snitch_pkg.sv` at
+  `d7dd789`; one more unit test (10), on lines written in that format, not
+  copied from a run.
+- `spike-dasm` would be a build of Spike (riscv-isa-sim) in snax-forge's
+  image; not needed for SG5, so not added.
+
+### SG5 step 5: the RTL run
+
+- 2026-10-14. Author's run of the five ELFs of P4 (built in the author's
+  container) on snax_cluster's RTL (Verilator, `snax_alu_cluster_old.hjson`
+  at `d7dd789`), the raw `.dasm` traces kept per size. Every size prints
+  `Accelerator Done!`, `Accelerator Cycles:` 1, 25, 32, 256, 1024 and
+  `Number of errors: 0`. Phases from `phases.py --rtl` (polls in brackets):
+
+  | Phase | 4 | 100 | 128 | 1024 | 4096 |
+  |---|---|---|---|---|---|
+  | C0 boot | 656 | 653 | 639 | 632 | 632 |
+  | C1 barrier | 122 | 137 | 148 | 374 | 1154 |
+  | C2a CSR setup | 110 | 111 | 110 | 110 | 110 |
+  | C2b CSR setup | 16 | 16 | 16 | 16 | 16 |
+  | C3 ALU poll | 7 (1) | 32 (6) | 37 (7) | 262 (52) | 1032 (206) |
+  | C4 streamer poll | 5 (1) | 5 (1) | 5 (1) | 5 (1) | 5 (1) |
+  | C5 check loop | 214 | 4535 | 5795 | 46115 | 184355 |
+  | C6 printf | 7238 | 7485 | 8020 | 8240 | 8260 |
+  | C7 exit | 143 | 140 | 143 | 143 | 143 |
+  | D0 boot | 656 | 653 | 639 | 633 | 633 |
+  | D1 DMA issue | 99 | 99 | 100 | 100 | 100 |
+  | D2 DMA wait | 20 (4) | 35 (7) | 45 (9) | 270 (54) | 1050 (210) |
+  | D3 barrier | 3 | 3 | 3 | 14 | 14 |
+  | D4 post-main and exit | 7733 | 12324 | 14126 | 54880 | 193910 |
+  | Total up to 982 | 1130 | 5489 | 6750 | 47514 | 187304 |
+  | Total | 8511 | 13114 | 14913 | 55897 | 195707 |
+
+- The `.dasm` reader of P4b works on the real traces: every marker is
+  found on both harts at every size.
+
+### SG5 step 6: the phases on both sides
+
+- 2026-10-14. Against the author's SNAX-GVSoC run of the same ELFs (P4):
+  tier 1 is met (982 equal, 0 errors on both sides, every size). The blocks
+  match: at 4096, C1 1148 against 1154, D2 1050 against 1050, C3 1029
+  against 1032. C5 does not: 20 cycles per element on SNAX-GVSoC, 45 on the
+  RTL, at every size, so the total up to 982 is 55% under at 4096.
+- Each instruction's cycle in C5 on both sides (a throwaway script, `--show`
+  since P5; one iteration, 15 instructions):
+  the RTL issues `lw` (L1), then the next `lw` 4 cycles later, then two
+  `lw` from DRAM 14 cycles apart each; each load waits for the previous
+  load's data, as `num_int_outstanding_loads: 1` in the hjson says. GVSoC
+  issued the four loads on four cycles and stalled once, 6 cycles, at the
+  first use; a DRAM load took about 9 cycles. Class: a target parameter
+  (the hjson and the core's path, which SG2 left unmeasured): fixed in P5.
+- Not fixed, the core's own timing: the RTL polls `dmstati` every 5 cycles
+  against GVSoC's 2, so D2 and C1 end up to 9 cycles later at small sizes
+  (D2 at 128: 45 against 36, 20%); under 3% from 1024 on. Tier-3 gaps left
+  to explain (C2a, C7, D1, D3) follow the fix (step 7).
+
+### SG5 step 7: P5, the core's loads
+
+- 2026-10-14. `Lsu` (`core/models/cpu/iss/`) takes `int_loads_in_flight`
+  from the core's properties: 0, no limit, GVSoC's behaviour and the default;
+  1, a load stalls the core until the previous load's data is back. Only
+  `load` and `load_signed` (integer loads) are limited; stores, `elw` and FP
+  loads are not. `ClusterArch` takes `core` (`Snitch` arguments) and
+  `core_latency` (cycles on the core's map to the TCDM and to
+  `narrow_axi`). `snax_alu.py` sets one load in flight, `tcdm` 2 and
+  `narrow` 6: from one load to the next, 4 cycles from L1 and 14 from DRAM,
+  as on the RTL (`--show 'C5 check loop'`). Rows in `UPSTREAM.md`.
+- First try counted the wait twice: `get_cycles()` already holds the stall
+  just accounted, so the load's own latency counts from it without adding
+  the wait again.
+- `phases.py --show PHASE` lists a phase's instructions on either side; one
+  more unit test (11).
+- Results in Claude's sandbox (its ELFs; the RTL columns are the author's
+  run of the author's ELFs, so boot and `printf` differ by the toolchain
+  too). Every size: `Number of errors: 0`, 982 equal. RTL / SNAX-GVSoC:
+
+  | Phase | 128 | 1024 | 4096 |
+  |---|---|---|---|
+  | C1 barrier | 148 / 154 (+4%) | 374 / 381 (+2%) | 1154 / 1169 (+1%) |
+  | D2 DMA wait | 45 / 36 (-20%) | 270 / 262 (-3%) | 1050 / 1050 (0%) |
+  | C3 ALU poll | 37 / 39 (+5%) | 262 / 261 (0%) | 1032 / 1029 (0%) |
+  | C5 check loop | 5795 / 5698 (-2%) | 46115 / 45244 (-2%) | 184355 / 180754 (-2%) |
+  | Total up to 982 | 6750 / 6698 (-1%) | 47514 / 46696 (-2%) | 187304 / 183755 (-2%) |
+
+  Tier 2 is met but for D2 at 128 (step 6). C5 is 44 cycles per element
+  against 45: the RTL waits 2 more cycles before `xor a6, a6, a7`, probably
+  the L1 load's write-back waiting for a free register-file port (SG5.md,
+  "Not verified").
+- Tier 3, still to explain from `--show` on both sides: C2a 133 against 110
+  (114 before P5: its DRAM loads are now as slow as the RTL's, so something
+  else is faster there), C7 81 against 143, D1 117 against 100, D3 2
+  against 14 at 1024 and 4096. C6 and the full total now land within 15%.
+- Other programs on `snax_alu`, exit 0: `snax-stream` errors 0, 977 31, 982
+  25 in all four modes (unchanged); `alu-timing` 977 and 982 as before but
+  `out_one_bank`'s 977 209 (211 before, RTL 210), start gaps -7 / 103 /
+  103 / -7 / -7; `stream-timing` counters 0, 9, 9, 10, 12 (unchanged), polls
+  0, 0, 3, 4, 1; `dma-timing` `busy` unchanged, `done` unchanged but 4x800
+  at 82 (80 before, RTL 84); `snax-csr` four lines of `0 errors` and both
+  warnings. The 17 plain tests (9-core build) exit 0 on `snitch`,
+  `printf_simple` printing `Hello, World!` 9 times.
+
+### SG5: the remaining gaps, from the listings
+
+- 2026-10-14. The author's rerun of the five sizes with P5 (the same ELFs
+  as the RTL run) at 100: total up to 982 5471 against the RTL's 5489
+  (-0.3%), C5 4468 against 4535. The listings of `phases.py --show` on both
+  sides at 100 explain the rest (C2a, D1, C7 below).
+- The RTL source behind P5 (snax_cluster `d7dd789`):
+  `hw/snitch/src/snitch_lsu.sv` holds loads waiting for data in a queue
+  `NumOutstandingLoads` deep (line 72) and holds a new load while it is
+  full, stores excepted (lines 118, 155); the hjson sets it to 1. The core's
+  data port has a request and a response register (`RegisterCoreReq`,
+  `RegisterCoreRsp`, `snitch_cc.sv` lines 308-309, on in the hjson): the
+  `tcdm` +2. The way to DRAM adds the narrow crossbar cut on all ports
+  (`NarrowXbarLatency`, `snitch_cluster.sv` line 360) and the external
+  narrow port's registers (`RegisterExtNarrow`, lines 1413 and 1502): the
+  `narrow` +6 is fitted to the trace, not counted stage by stage.
+- C2a (RTL 111, SNAX-GVSoC 133): the loads now cost the same on both sides
+  (14 cycles to the next load or the use). The difference is instruction
+  fetch: both caches have 32-byte lines (`cacheline: 256`); GVSoC misses
+  each time execution enters a new line (6 misses of about 10 cycles), the
+  RTL twice (16 and 22 cycles, entering `0x2c0` and `0x2e0` on the way back
+  into `main`). The RTL's L0 prefetches on a hit, the next line or the
+  target of a taken branch or `jal` it finds in the line
+  (`cluster_icache`'s `snitch_icache_l0.sv` lines 289-371, read at `main`,
+  `d94589e`; the RTL build's `Bender.lock` holds the exact commit), so the
+  `configure_*` lines are there on the first jump; GVSoC's
+  `Hierarchical_cache` L0 does not prefetch. The core's fetch timing:
+  explained, accepted, not modelled.
+- D1 (RTL 99, SNAX-GVSoC 115): the same, on the DMA core (GVSoC misses at
+  `0x254`, `0x260`, `0x280`, `0x3ac`, `0x3c0`, `0x3e0`); the RTL instead
+  waits 5 to 8 cycles after each of its first three stack stores (not
+  looked into).
+- C7 (RTL 140, SNAX-GVSoC 79): the testbench's memory. The exit's second
+  barrier waits for the DMA core's software global barrier (atomic adds, a
+  load and a store on `_snrt_barrier` in DRAM): 78 cycles on the RTL, 50 on
+  SNAX-GVSoC; the load of `_reduction_result` right after takes 41 cycles
+  on the RTL, 13 on SNAX-GVSoC. The RTL testbench puts
+  `axi_riscv_atomics_wrap` (at most 2 reads and 2 writes in flight) in
+  front of its DRAM (`target/common/test/tb_memory_axi.sv` line 58), so
+  every atomic to DRAM is a read-modify-write in that adapter and the load
+  behind them waits; SNAX-GVSoC treats an atomic as one access. Outside the
+  cluster, tier 3, accepted. The first post-main barrier's 14 cycles on the
+  RTL (1 here) are not looked into.
+- All four are the core's or the testbench's own timing (SG5.md, "Gaps
+  outside the target"); they go to snax-forge as open items in P7.
+
+### SG5 step 8: P6, the regression
+
+- 2026-10-14. `tests/snax/regress.py`, `make regress`: builds the programs,
+  runs each on `snax_alu`, and compares exactly with `expected/` per
+  program: `snax-alu` at five sizes (`<N>.out`: printed lines, exit code,
+  977 from the streamer's trace; `<N>.phases.json`), `snax-stream`,
+  `alu-timing`, the five `stream-timing` cases, `dma-timing`, `snax-csr`
+  with its two warnings. It then checks `snax-alu` against
+  `tests/snax/snax-alu/rtl/` (the author's printed lines and phase tables of
+  step 5, the JSON written from those tables in `phases.py --json`'s form):
+  tier 1 at every size, tier 2 at 128, 1024 and 4096, C1 and D2 at 128 in
+  an accepted list with their reason. `REGRESS_FLAGS=--update` rewrites
+  `expected/` only. Exit 0 when all match, 1 otherwise, so CI can run it as
+  it is.
+- `make regress-plain` builds snax_cluster's plain tests for its 9-core
+  cluster into `build/regress/plain/`, then rebuilds the runtime for the ALU
+  cluster; `regress` runs them on `snitch` when they are there (17, each
+  exit 0). In Claude's sandbox the round trip leaves `snax-alu`'s ELF
+  byte-identical.
+- Results in Claude's sandbox (its own expected files, not checked in):
+  `--update` then `make regress` passes in about 50 s with the plain tests;
+  tier 2 at 128: C1 +4%, D2 -20% (accepted), C3 +5%, C5 -2%, total up to
+  982 -1%; at 1024 and 4096 every row within 3%. With one expected value
+  changed (977 at 100) it fails on that file alone and exits 1.
+- The expected files are written in step 9, in the author's container.
+
+### SG5 step 9: the expected files, and the RTL run again
+
+- 2026-10-14. Author's container: `make regress-plain`, then
+  `make regress REGRESS_FLAGS=--update` wrote the 19 expected files, and
+  `make regress` passed. Its numbers equal Claude's sandbox exactly (total
+  up to 982 1157, 5444, 6698, 46696, 183755; 977 16, 42, 48, 272, 1040), but
+  not the author's earlier run (5471 at 100): `regress-plain` rebuilt
+  snax_cluster's runtime, and with it the `snax-alu` ELFs. The ELFs of
+  steps 4 to 7 came from an earlier runtime build (C0 123 instructions, now
+  122; only boot, `printf` and exit code differ, `main` is the same); what
+  made that build differ was not found.
+- So the step-5 RTL tables were from other ELFs than SNAX-GVSoC now runs.
+  The author ran the current five ELFs on the RTL again and refreshed
+  `tests/snax/snax-alu/rtl/` (`phases.py --json`, the printed lines, and
+  the ELF's sha256 per size); C0 is 122 instructions on both sides.
+  `make regress` passes against it: at 128 C1 +5%, D2 -20% (accepted), C3
+  +5%, C5 -2%, total up to 982 0%; at 1024 and 4096 every row within 3%, as
+  before. The step-5 table above stays as the record of that run.
+- P6b: `regress.py` checks each size's ELF against `rtl/<N>.elf.sha256` and
+  fails a size whose ELF changed ("the RTL reference ... comes from another
+  ELF"); a missing hash file fails too. The top README has the commands to
+  refresh `rtl/`. In Claude's sandbox: passes with the hashes of its ELFs;
+  with one hash changed it fails on that size alone and exits 1.
+
+### SG5 step 10: SG5 closed
+
+- 2026-10-14. All steps done; acceptance met: the deviation per phase is
+  inside the target or explained (SG5.md, "Result"), and `make regress`
+  fails when a number drifts (step 8) or when the RTL reference is from
+  another ELF (P6b).
+- Settled (the list is in `docs/plans/SG5.md` under "Decided"): the phases
+  from both sides' instruction traces of one ELF; the DMA wait in
+  snax_cluster's app (`d7dd789`); five sizes; the three-tier target with
+  tier 2's total up to the read of 982; the core's loads as the hjson and
+  the RTL have them; the regression with expected files from the author's
+  container and RTL references hash-checked against the ELF. In snax-forge:
+  D124, D125, open items 65 to 67, CI1.
+- Upstream files changed in SG5: `core/models/cpu/iss/include/lsu.hpp`,
+  `include/lsu_implem.hpp`, `src/lsu.cpp`, `pulp/pulp/snitch/snitch_core.py`,
+  `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` (P5) and `Makefile`
+  (P6); rows in `UPSTREAM.md`. New: `tests/snax/phases.py`,
+  `test_phases.py`, `regress.py`, `snax-alu`'s `DATA_LEN` builds and its
+  `expected/` and `rtl/` folders, the other programs' `expected/`.
+- Next: SG6, Zicsr on SNAX CSRs on both sides, from the list under "SG6
+  starts from" in `docs/plans/SG5.md`; then the housekeeping pass; then CI1.
