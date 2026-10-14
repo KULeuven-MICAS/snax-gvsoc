@@ -1093,3 +1093,33 @@ stay there.
   `alu-timing`.
 - Next: SG5, the baseline, planned in its own round from the list under
   "SG5 starts from" in `docs/plans/SG4.md`.
+
+### SG5 step 1: P1, the plan
+
+- 2026-10-14. `docs/plans/SG5.md` written: `snax-alu` at five sizes (4, 100,
+  128, 1024, 4096) on both sides, per-phase cycles cut from each side's
+  instruction trace of the same ELF, a three-tier error target fixed before
+  the first comparison, and a regression (`make regress`) locking
+  SNAX-GVSoC's numbers.
+- Read from source, not run (snax_cluster `b2672f8`; details in SG5.md under
+  "The app on the RTL"):
+  - The runtime runs init on the CPU, a hardware barrier, `main`, a second
+    hardware barrier and the exit (a reduction in DRAM, a global barrier,
+    core 0's store to `tohost`). Hart 0 computes, hart 1 is the DMA core.
+  - `snrt_cluster_hw_barrier()` is `csrr x0, 0x7C2` and waits for the cores
+    only. `snax-alu.c`'s DMA core issues A and B and goes to the barrier
+    without waiting, so the transfer runs while the compute core sets up
+    and polls, and the readers do not wait for it.
+  - From SG2's DMA times (estimate, not run): reader B asks for B before the
+    DMA has written it once N is about 250 or more, so 1024 and 4096 would
+    give errors on both sides that depend on each side's initial L1 and on
+    core timing.
+- Changed from the planning round: the app gets `snrt_dma_wait_all()` before
+  its barrier, in snax_cluster itself (P2), so the copy here stays the app
+  unchanged; D2 becomes the DMA wait and holds the transfer, with C1; the
+  DMA core gets D3 (barrier) and D4 (the post-main barrier, which holds the
+  compute core's C2 to C6, and the exit); C4 moves to tier 3, since the
+  streamer ends 2 to 4 cycles after the ALU at any N; the fit of 4096 is
+  checked from the runtime's L1 layout, not the linker map (L1 is allocated
+  at run time from the TCDM start).
+- BASE1 is out of SG5 (after the SG series); snax-forge's SG5 row updated.
