@@ -146,10 +146,13 @@ phases); it does not close open item 60 there.
 `DATA_LEN` 4, 100, 128, 1024, 4096: 100 is the app's default and SG4's
 reference. `data.h` per size from `datagen.py` with NumPy seed 0 and mode 0,
 written into the size's build folder; the checked-in `data.h` (100) stays,
-and the generated one at 100 must equal it. One ELF per size. The fit of
-4096 in L1 is checked in P4: 96 KiB from the TCDM start below the top
-region (stacks, TLS, CLS), from the ELF's symbols and the runtime's layout,
-not the linker map, since L1 is allocated at run time.
+and the generated one at 100 equals it (P4: `make DATA_LEN=N` into
+`build/N/`). One ELF per size. The fit of 4096 in L1 is checked from the
+run, not the linker map, since L1 is allocated at run time: A, B and O at
+0x10000000, 0x10008000 and 0x10010000 (the DMA's `dmdst` operands), 96 KiB
+up to 0x10018000; the stacks at the top, 1 KiB per core
+(`SNRT_LOG2_STACK_SIZE` 10), hart 1's `sp` starting at 0x1001fbd8. About
+30 KiB stay free; the largest size that fits is about 5300.
 
 ## The target
 
@@ -196,7 +199,6 @@ Findings first (step 6), then a fix step, skipped if empty:
 - The RTL trace format as the script reads it, until step 5's traces.
 - Whether either trace shows instructions before `_start` (a boot ROM); the
   phases start at `_start`, so it does not change them.
-- The size of the top region of the TCDM, for the fit of 4096 (P4).
 - The race at 1024 and 4096 without the wait: estimated, not run.
 
 ## Steps
@@ -206,7 +208,7 @@ Findings first (step 6), then a fix step, skipped if empty:
 | 1 | P1: this plan; the reading in the notes; the SG5 row in snax-forge's STATUS | done 2026-10-14 |
 | 2 | P2: the DMA wait in snax_cluster's `snax-alu.c` (a patch merged there) and the copy here synced, its README and the snax_cluster pin moved to that commit. `snax-alu` at 100 prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC | done 2026-10-14 |
 | 3 | P3: `tests/snax/phases.py` with unit tests on short trace excerpts; the phase table of `snax-alu` at 100 on SNAX-GVSoC | done 2026-10-14 |
-| 4 | P4: `snax-alu` at the five sizes, the L1 fit check; errors, 982, 977 and the phase tables on SNAX-GVSoC | todo |
+| 4 | P4: `snax-alu` at the five sizes, the L1 fit check; errors, 982, 977 and the phase tables on SNAX-GVSoC | done 2026-10-14 |
 | 5 | The same five ELFs on the RTL (author's run): the printed lines and `make traces`; phase tables from the script | todo |
 | 6 | Per phase on both sides against the target, each gap classed. Findings only | todo |
 | 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | todo |

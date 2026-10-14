@@ -9,7 +9,18 @@ MK_DIR       := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 SNAX_CLUSTER ?= $(abspath $(MK_DIR)/../../../../snax_cluster)
 
 APP      = snax-alu
+
+# DATA_LEN unset: the checked-in data/data.h (100 elements) into build/.
+# DATA_LEN=N: data.h made with datagen.py (NumPy seed 0, mode 0, N elements)
+# into build/N/, and the ELF there (SG5). N must be a multiple of 4.
+ifeq ($(DATA_LEN),)
 BUILDDIR = $(MK_DIR)build
+DATA_DIR = $(MK_DIR)data
+else
+BUILDDIR = $(MK_DIR)build/$(DATA_LEN)
+DATA_DIR = $(BUILDDIR)
+endif
+DATA_H   = $(DATA_DIR)/data.h
 LIB_OBJ  = $(BUILDDIR)/snax-alu-lib.o
 
 # The library object goes first, as snax_cluster's app Makefile adds it before
@@ -23,7 +34,7 @@ SNRT_DIR    := $(SNAX_CLUSTER)/sw/snRuntime
 RUNTIME_DIR := $(SW_DIR)/runtime/rtl-generic
 MATH_DIR    := $(SW_DIR)/math
 
-INCDIRS += $(MK_DIR)data
+INCDIRS += $(DATA_DIR)
 INCDIRS += $(MK_DIR)include
 INCDIRS += $(RUNTIME_DIR)/src
 INCDIRS += $(RUNTIME_DIR)/../common
@@ -54,7 +65,14 @@ $(BUILDDIR):
 $(LIB_OBJ): $(MK_DIR)lib/snax-alu-lib.c $(wildcard $(MK_DIR)include/*.h) | $(BUILDDIR)
 	$(RISCV_CC) $(RISCV_CFLAGS) -c $< -o $@
 
-$(ELF): $(MK_DIR)src/$(APP).c $(MK_DIR)data/data.h $(LIB_OBJ) $(LIBS) | $(BUILDDIR)
+ifneq ($(DATA_LEN),)
+$(DATA_H): $(MK_DIR)data/datagen.py | $(BUILDDIR)
+	PYTHONPATH=$(SNAX_CLUSTER)/util/sim python3 -c "import sys, runpy, numpy as np; \
+	np.random.seed(0); sys.argv = ['datagen.py', '--mode=0', '--length=$(DATA_LEN)']; \
+	runpy.run_path('$<', run_name='__main__')" > $@
+endif
+
+$(ELF): $(MK_DIR)src/$(APP).c $(DATA_H) $(LIB_OBJ) $(LIBS) | $(BUILDDIR)
 	$(RISCV_CC) $(RISCV_CFLAGS) $(RISCV_LDFLAGS) $(MK_DIR)src/$(APP).c -o $@
 
 $(DUMP): $(ELF)

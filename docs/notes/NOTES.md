@@ -1206,3 +1206,59 @@ stay there.
   DRAM.
 - Not rerun: the other programs and the plain tests; P3 adds a script and
   changes no program.
+
+### SG5 step 4: P4, the five sizes
+
+- 2026-10-14. `make -C tests/snax/snax-alu DATA_LEN=N` writes
+  `build/N/data.h` with `datagen.py` (NumPy seed 0, mode 0, N elements) and
+  builds `build/N/snax-alu.elf`; without `DATA_LEN` the build is unchanged.
+  At 100 the generated `data.h` and the ELF equal the default build byte for
+  byte. The streamer's counter (977), which the app does not read, comes
+  from its trace: `--trace=streamer:streamer.txt`, the line `Done: busy up
+  to cycle ..., counter N`.
+- Results in Claude's sandbox. Every size exits 0 with `Number of errors: 0`
+  and `Accelerator Cycles:` N / 4; each run takes 1 to 2 s. Cycles per phase
+  (polls in brackets):
+
+  | Phase | 4 | 100 | 128 | 1024 | 4096 |
+  |---|---|---|---|---|---|
+  | C0 boot | 633 | 644 | 659 | 661 | 653 |
+  | C1 barrier | 111 | 132 | 133 | 360 | 1148 |
+  | C2a CSR setup | 114 | 114 | 114 | 115 | 115 |
+  | C2b CSR setup | 14 | 14 | 14 | 14 | 14 |
+  | C3 ALU poll | 9 (1) | 33 (5) | 39 (6) | 261 (43) | 1029 (171) |
+  | C4 streamer poll | 6 (1) | 6 (1) | 6 (1) | 6 (1) | 6 (1) |
+  | C5 check loop | 113 | 2040 | 2613 | 20533 | 81962 |
+  | C6 printf | 5716 | 6445 | 6765 | 6696 | 6496 |
+  | C7 exit | 77 | 76 | 74 | 73 | 73 |
+  | D0 boot | 642 | 653 | 659 | 661 | 653 |
+  | D1 DMA issue | 92 | 91 | 95 | 96 | 96 |
+  | D2 DMA wait | 8 (4) | 30 (15) | 36 (18) | 262 (131) | 1050 (525) |
+  | D3 barrier | 2 | 2 | 2 | 2 | 2 |
+  | D4 post-main and exit | 6049 | 8728 | 9625 | 27698 | 89695 |
+  | Total up to 982 | 1000 | 2983 | 3578 | 21950 | 84927 |
+  | Total | 6793 | 9504 | 10417 | 28719 | 91496 |
+  | 982 | 1 | 25 | 32 | 256 | 1024 |
+  | 977 | 16 | 42 | 48 | 272 | 1040 |
+
+- D2 and C1 grow by about one cycle per 64-byte beat (1024 beats at 4096),
+  as SG2's DMA does; C3 by N / 4; C5 by about 20 cycles per element, the
+  core's two DRAM loads per 64-bit element. C0 moves by up to 28 cycles with
+  N, though nothing in boot depends on N but where `.data` sits; probably
+  instruction-fetch alignment (tier 3, not looked into).
+- L1 at 4096: A, B and O start at 0x10000000, 0x10008000 and 0x10010000 (the
+  DMA's `dmdst` operands), so O ends at 0x10018000 (96 KiB); the stacks sit
+  at the top, 1 KiB per core (`SNRT_LOG2_STACK_SIZE` 10), hart 1's `sp`
+  starting at 0x1001fbd8. About 30 KiB stay free; the largest size that fits
+  is about 5300.
+- 977 is 42 at 100 with and without P2 (the ELF of `b2672f8` rerun here):
+  the two start writes are 14 cycles apart (975 at 2643, 980 at 2657), as in
+  SG3 step 2 (2616 and 2630). SG4 step 2's "streamer starts at 2625" and its
+  counter 31 do not match a rerun of either ELF; taken as a slip in that
+  entry. 977 depends on that gap, so it sits beside the target, not in it.
+- The author's container gives the same cycles and polls in C2a to C4 and
+  D2 at 100 (step 3's run), with C0, D0 and C6 a few tens of cycles off and
+  other instruction counts there: the runtime is built by another toolchain
+  build. The regression's expected files come from that container (SG5.md).
+- Not rerun: the other programs and the plain tests; P4 changes only
+  `snax-alu`'s Makefile and README.
