@@ -1,7 +1,8 @@
 # snax-alu
 
 snax_cluster's `snax-alu` app, copied here so SNAX-GVSoC is developed against
-a fixed program. Source: snax_cluster `b2672f8`, cluster
+a fixed program. Source: snax_cluster `d7dd789` (`b2672f8` with the DMA
+core waiting for its transfers before the barrier, SG5 P2), cluster
 `cfg/snax_alu_cluster_old.hjson`.
 
 | File | From snax_cluster |

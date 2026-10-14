@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
+| snax_cluster, the programs and the RTL reference | `d7dd78967b86dae5c7d149f420dd69681714dac9` (2026-10-14): `b2672f8` plus the DMA wait in `snax-alu.c` (SG5 P2), the RTL unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8` |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -1123,3 +1123,36 @@ stay there.
   checked from the runtime's L1 layout, not the linker map (L1 is allocated
   at run time from the TCDM start).
 - BASE1 is out of SG5 (after the SG series); snax-forge's SG5 row updated.
+
+### SG5 step 2: P2, the DMA wait
+
+- 2026-10-14. snax_cluster `d7dd789` (#656) is `b2672f8` plus
+  `snrt_dma_wait_all()` in `snax-alu.c`, after the DMA core's two starts and
+  before its barrier; nothing else changed, so the RTL and SG2 to SG4's RTL
+  results are those of `b2672f8`. The copy in `tests/snax/snax-alu/` is
+  synced, its README names the new commit, the pin above and the clone
+  command in `README.md` moved to it. The other programs' READMEs keep
+  `b2672f8`, where their RTL runs were made.
+- Author's run on the RTL: the same three lines as before the change.
+- Results in Claude's sandbox (LLVM 21.1.6 from LLVM's release, the ELF
+  built here), `snax-alu` at 100 before and after P2, with
+  `--trace=pe0/insn` and `--trace=pe1/insn`:
+  - Both print `Accelerator Done!`, `Accelerator Cycles: 25`, `Number of
+    errors: 0` and exit 0.
+  - After P2 the DMA core issues its second copy at 2497, polls `dmstati` 15
+    times (2498 to 2526) and reaches the barrier at 2529. Both cores' barrier
+    instructions are traced at 2529, against 2489 before: the compute core
+    leaves the barrier 40 cycles later, once A and B are in L1.
+  - The compute core's start writes move by 27 cycles, not 40 (975 at 2643
+    against 2616, 980 at 2657 against 2630): its CSR setup is 13 cycles
+    shorter after P2, probably because the DMA no longer shares the path to
+    DRAM while the core fetches the setup code (not checked). ALU and
+    streamer polls are unchanged (5 and 1).
+  - The read of 982 moves from 4716 to 4736, but hart 0's last instruction is
+    at 11264 in both runs. Left for the phase script (P3) to explain.
+- Seen in the dump, for P3's markers: `dmstati` disassembles as `<unknown>`
+  in `llvm-objdump` but as `dmstati` in GVSoC's trace; CSR 982 disassembles
+  as `pmpaddr38` and the SNAX CSRs in GVSoC's trace as `snax_csr_<n>`, so
+  markers match on the CSR number, not its name.
+- Not rerun: the other programs and the plain tests; P2 changes no file they
+  use.

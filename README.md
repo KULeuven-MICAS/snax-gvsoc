@@ -58,7 +58,7 @@ beside this repo; only the ELF files are run here. Clone it next to this
 repo, at the commit in `docs/notes/NOTES.md`, with its submodules:
 
     git clone https://github.com/KULeuven-MICAS/snax_cluster.git ../snax_cluster
-    git -C ../snax_cluster checkout b2672f81bad52654bb3f1549cbe009f8ad8e1faf
+    git -C ../snax_cluster checkout d7dd78967b86dae5c7d149f420dd69681714dac9
     git -C ../snax_cluster submodule update --init --recursive
 
 In the container, started from the parent folder as above, build

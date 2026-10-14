@@ -178,7 +178,7 @@ Findings first (step 6), then a fix step, skipped if empty:
 | # | Step | Status |
 |---|---|---|
 | 1 | P1: this plan; the reading in the notes; the SG5 row in snax-forge's STATUS | done 2026-10-14 |
-| 2 | P2: the DMA wait in snax_cluster's `snax-alu.c` (a patch merged there) and the copy here synced, its README and the snax_cluster pin moved to that commit. `snax-alu` at 100 prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC | todo |
+| 2 | P2: the DMA wait in snax_cluster's `snax-alu.c` (a patch merged there) and the copy here synced, its README and the snax_cluster pin moved to that commit. `snax-alu` at 100 prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC | done 2026-10-14 |
 | 3 | P3: `tests/snax/phases.py` with unit tests on short trace excerpts; the phase table of `snax-alu` at 100 on SNAX-GVSoC | todo |
 | 4 | P4: `snax-alu` at the five sizes, the L1 fit check; errors, 982, 977 and the phase tables on SNAX-GVSoC | todo |
 | 5 | The same five ELFs on the RTL (author's run): the printed lines and `make traces`; phase tables from the script | todo |
