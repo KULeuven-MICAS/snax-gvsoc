@@ -91,8 +91,10 @@ read of 982. The unit tests of the script:
 
 `expected/` holds SNAX-GVSoC's output per size for `make regress`:
 `<N>.out` (the printed lines, the exit code, 977) and `<N>.phases.json`.
-`rtl/` holds the RTL run of SG5 step 5: `<N>.out` (the printed lines) and
-`<N>.json` (the phase table, in the form `phases.py --json` writes).
+`rtl/` holds the RTL run of the same ELFs (SG5 step 9): `<N>.out` (the
+printed lines), `<N>.json` (`phases.py --json` on the RTL traces) and
+`<N>.elf.sha256` (the hash of the ELF the RTL ran, which `make regress`
+checks).
 
 ## Sizes
 

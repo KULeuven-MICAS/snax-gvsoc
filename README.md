@@ -115,7 +115,8 @@ the ALU cluster, as above, and takes about a minute.
 snax_cluster's 17 plain tests run on `snitch` too once their ELFs are in
 `build/regress/plain/`. `make regress-plain` puts them there: it builds them
 for snax_cluster's 9-core cluster and then rebuilds the runtime for the ALU
-cluster (run it again after moving the snax_cluster pin).
+cluster (run it again after moving the snax_cluster pin). That rebuild can
+change the `snax-alu` ELFs, which `make regress` then rebuilds.
 
     make regress-plain
     make regress
@@ -126,6 +127,26 @@ failed and exits 1. When a change is meant to move the numbers,
 `rtl/`); add a notes entry saying why. The expected files come from the
 development image, so a regression run elsewhere (another LLVM build) can
 differ by a few cycles.
+
+`tests/snax/snax-alu/rtl/<N>.elf.sha256` is the hash of the ELF the RTL ran.
+When a `snax-alu` ELF changes, its size fails with "the RTL reference ...
+comes from another ELF": run the ELFs on the RTL again and refresh `rtl/`.
+In snax_cluster's `target/snitch_cluster`, for each size:
+
+    rm -rf logs
+    bin/snitch_cluster.vlt ../../../snax-gvsoc/tests/snax/snax-alu/build/$n/snax-alu.elf | tee rtl-$n.log
+    rm -rf logs-$n && mv logs logs-$n
+
+then in snax-gvsoc, for each size:
+
+    R=../snax_cluster/target/snitch_cluster
+    A=tests/snax/snax-alu
+    sha256sum $A/build/$n/snax-alu.elf | cut -d' ' -f1 > $A/rtl/$n.elf.sha256
+    python3 tests/snax/phases.py $A/build/$n/snax-alu.elf --rtl $R/logs-$n --json $A/rtl/$n.json
+    grep -E 'Accelerator Done|Accelerator Cycles|Number of errors' $R/rtl-$n.log \
+        | sed 's/^# //' > $A/rtl/$n.out
+
+with `n` each of 4, 100, 128, 1024, 4096, and a notes entry saying why.
 
 ## License
 

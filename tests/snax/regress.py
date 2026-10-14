@@ -17,6 +17,8 @@ and compares its output exactly with the program's `expected/` folder:
 For `snax-alu` it also checks SG5's error target against the RTL run in
 `tests/snax/snax-alu/rtl/` (docs/plans/SG5.md, "The target"): tier 1 at
 every size, tier 2 at 128, 1024 and 4096, but for the gaps in ACCEPTED.
+`rtl/<N>.elf.sha256` is the hash of the ELF the RTL ran; a size whose ELF
+now hashes differently fails, since its RTL reference is from another ELF.
 
 The plain tests of snax_cluster run on the `snitch` target when their ELFs
 are in build/regress/plain/ (`make regress-plain` builds them): each must
@@ -29,6 +31,7 @@ when everything matches, 1 otherwise.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -133,17 +136,26 @@ def run_snax_alu(check, n):
     check.compare(name, prog / "expected" / f"{n}.out", f"{out}exit {code}\n977 {counter}\n")
     check.compare(name, prog / "expected" / f"{n}.phases.json", json.dumps(table, indent=1) + "\n")
     print(f"  {name}: exit {code}, 977 {counter}, total up to 982 {table['total_to_982']}")
-    return out, table
+    return elf, out, table
 
 
 def against_rtl(check, runs):
     """SG5's target: tier 1 at every size, tier 2 at TIER2_SIZES."""
     rtl = HERE / "snax-alu" / "rtl"
     print("snax-alu against the RTL (tests/snax/snax-alu/rtl/)")
-    for n, (out, table) in runs.items():
+    for n, (elf, out, table) in runs.items():
         rtl_out, rtl_json = rtl / f"{n}.out", rtl / f"{n}.json"
-        if not rtl_out.exists() or not rtl_json.exists():
-            check.fail(f"rtl-{n}", f"no {rtl_out.name} or {rtl_json.name} in {rtl.relative_to(ROOT)}")
+        rtl_sha = rtl / f"{n}.elf.sha256"
+        missing = [p.name for p in (rtl_out, rtl_json, rtl_sha) if not p.exists()]
+        if missing:
+            check.fail(f"rtl-{n}", f"no {', '.join(missing)} in {rtl.relative_to(ROOT)}")
+            continue
+        # The RTL reference holds only for the ELF the RTL ran (D123)
+        sha = hashlib.sha256(elf.read_bytes()).hexdigest()
+        if rtl_sha.read_text().split()[0] != sha:
+            check.fail(f"rtl-{n}", f"the RTL reference in {rtl.relative_to(ROOT)} comes from "
+                       f"another ELF than {elf.relative_to(ROOT)} (sha256 {sha[:12]}); "
+                       "rerun the RTL and refresh rtl/ (README, Regression)")
             continue
         # The RTL's simulator may prefix printed lines with "# "
         want = [l.removeprefix("# ") for l in rtl_out.read_text().splitlines() if l.strip()]

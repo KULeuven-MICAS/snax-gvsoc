@@ -1444,3 +1444,27 @@ stay there.
   982 -1%; at 1024 and 4096 every row within 3%. With one expected value
   changed (977 at 100) it fails on that file alone and exits 1.
 - The expected files are written in step 9, in the author's container.
+
+### SG5 step 9: the expected files, and the RTL run again
+
+- 2026-10-14. Author's container: `make regress-plain`, then
+  `make regress REGRESS_FLAGS=--update` wrote the 19 expected files, and
+  `make regress` passed. Its numbers equal Claude's sandbox exactly (total
+  up to 982 1157, 5444, 6698, 46696, 183755; 977 16, 42, 48, 272, 1040), but
+  not the author's earlier run (5471 at 100): `regress-plain` rebuilt
+  snax_cluster's runtime, and with it the `snax-alu` ELFs. The ELFs of
+  steps 4 to 7 came from an earlier runtime build (C0 123 instructions, now
+  122; only boot, `printf` and exit code differ, `main` is the same); what
+  made that build differ was not found.
+- So the step-5 RTL tables were from other ELFs than SNAX-GVSoC now runs.
+  The author ran the current five ELFs on the RTL again and refreshed
+  `tests/snax/snax-alu/rtl/` (`phases.py --json`, the printed lines, and
+  the ELF's sha256 per size); C0 is 122 instructions on both sides.
+  `make regress` passes against it: at 128 C1 +5%, D2 -20% (accepted), C3
+  +5%, C5 -2%, total up to 982 0%; at 1024 and 4096 every row within 3%, as
+  before. The step-5 table above stays as the record of that run.
+- P6b: `regress.py` checks each size's ELF against `rtl/<N>.elf.sha256` and
+  fails a size whose ELF changed ("the RTL reference ... comes from another
+  ELF"); a missing hash file fails too. The top README has the commands to
+  refresh `rtl/`. In Claude's sandbox: passes with the hashes of its ELFs;
+  with one hash changed it fails on that size alone and exits 1.

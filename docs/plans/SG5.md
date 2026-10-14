@@ -209,6 +209,10 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
   `regress.py` with their reason.
 - `REGRESS_FLAGS=--update` rewrites `expected/`, with a notes entry saying
   why; `rtl/` is never written by it.
+- `rtl/<N>.elf.sha256` holds the hash of the ELF the RTL ran; a size whose
+  ELF hashes differently fails, so the RTL reference is always from the ELF
+  SNAX-GVSoC runs (D123). P6b, after step 9 found the step-5 RTL run made
+  with ELFs of an earlier runtime build.
 - Expected files come from the author's container build, not Claude's
   sandbox: its LLVM build already moves `dma-timing`'s `done` by 1 to 3
   cycles (SG4 step 2).
@@ -246,7 +250,7 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 | 6 | Per phase on both sides against the target, each gap classed. Findings only | done 2026-10-14 |
 | 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | done 2026-10-14 |
 | 8 | P6: the regression, `make regress` | done 2026-10-14 |
-| 9 | Expected files written in the author's container (`--update`); `make regress` passes there | todo |
+| 9 | Expected files written in the author's container (`--update`); `make regress` passes there | done 2026-10-14 |
 | 10 | P7: SG5 closed here, and the STATUS.md and DECISIONS.md update for snax-forge (the target, the core's open items) | todo |
 
 ## Decided
