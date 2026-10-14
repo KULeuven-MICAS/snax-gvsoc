@@ -877,3 +877,29 @@ stay there.
   `snax_streamer`, `snax_tcdm_xbar`, `snax_test_datapath`.
 - Next: SG4, the ALU, planned in its own round from the list under "SG4
   starts from" in `docs/plans/SG3.md`.
+
+### SG4 step 1: P1, the plan
+
+- 2026-10-14. `docs/plans/SG4.md` written: an ALU model after
+  `snax_alu_shell_wrapper.sv` in the test datapath's place, `snax-stream` on
+  the ALU's modes, a timing program `alu-timing` run on both sides, and the
+  core's warnings on the two CSR forms where SNAX-GVSoC and the RTL differ.
+- Read from source, not run (snax_cluster `b2672f8`; the values are in
+  SG4.md under "The ALU on the RTL"):
+  - The ALU's CSRs are 978 to 982: mode, length and start in the
+    ReqRspManager, busy and the counter from `snax_alu_csr.sv`. Its `ready`
+    is tied to 1, so a start is never held, not even while busy.
+  - A start latches mode and length at the end of its cycle but does not
+    reset `len_counter`: a start while busy keeps the firings done, the end
+    wins over a start in the same cycle, and length 0 never ends.
+  - The counter is 1 at s + 1 and stops counting once `len_counter` reaches
+    `length - 1`, so it ends at f - s + 1 with f the second-to-last firing.
+    The test datapath's f_last - s gives the same 25 for back-to-back
+    firings, and differs when the last firing is late (1 with length 1 on
+    the RTL).
+  - The PE is combinational: a firing needs busy, both readers' beats and
+    the writer's `ready` in one cycle. The writer's `ready` is all lane
+    queues not full (`pipe = false`), the rule SG3 modelled, now read in
+    `Writer.scala`.
+- `alu-timing` compares, per case, the counter that does not depend on the
+  gap between the two start writes, since that gap is the core's timing.
