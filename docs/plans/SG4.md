@@ -141,7 +141,7 @@ depend on it; that is the one compared.
 |---|---|---|
 | 1 | P1: this plan; the reading in the notes | done 2026-10-14 |
 | 2 | P2: `SnaxAluShell` in the test datapath's place (removed); `snax-stream` on the ALU's modes. `snax-alu` prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC; `snax-stream` 0 errors in all four modes | done 2026-10-14 |
-| 3 | P3: the core's warnings on the two CSR forms; `snax-csr` four lines of `0 errors` and both warnings | todo |
+| 3 | P3: the core's warnings on the two CSR forms; `snax-csr` four lines of `0 errors` and both warnings | done 2026-10-14 |
 | 4 | P4: `alu-timing`; its counters and errors on SNAX-GVSoC | todo |
 | 5 | The same ELFs on the RTL (author's run): `snax-alu`, `snax-stream`, `alu-timing`, the printed lines | todo |
 | 6 | The counters per case on both sides, each gap named. Findings only | todo |
@@ -171,3 +171,10 @@ depend on it; that is the one compared.
   snax_cluster later (`snitch.sv` decode, `snax_intf_translator.sv`), after
   the SG series. Until then SNAX-GVSoC warns on the two forms that differ,
   from SG4 on, since the same ELFs start running on both sides here.
+- Two more findings from P3's reading, fixed right after the SG series
+  together with the RTL: on the RTL, `csrrw` / `csrrwi` with `rd` not `x0`
+  writes `rd` with `rs1` or the immediate plus the CSR number (the decoder's
+  default ALU add), not with the CSR's value; and GVSoC's ISS (`priv.hpp`,
+  shared by every core) writes on `csrrc` with `x0` and on `csrrsi` /
+  `csrrci` with 0, where Zicsr writes nothing (`csrrs` already does not).
+  SG4 only warns: no SNAX program uses these forms.

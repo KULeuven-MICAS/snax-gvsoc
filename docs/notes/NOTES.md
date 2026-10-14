@@ -946,3 +946,34 @@ stay there.
     errors`; `dma-timing`: exit 0, `busy` as in SG2 step 7. The 17 plain tests
     were not run: the `snitch` target builds no SNAX component, and P2
     changes no upstream file.
+
+### SG4 step 3: P3, the CSR-form warnings
+
+- 2026-10-14. The Snitch core warns once per run, without stopping it
+  (`force_warning_no_error`), on the two forms where SNAX-GVSoC follows
+  Zicsr (D120) and the RTL does not: in `SnaxCsr::handle()` on `csrrw` /
+  `csrrwi` with `rd` not `x0`, in `Iss::snax_csr_access()` on any write from
+  `csrrs`, `csrrc`, `csrrsi` or `csrrci` (the callback sees no instruction,
+  but a write there is always one of these). Two flags on `Iss`; rows in
+  `UPSTREAM.md`.
+- Read from source, not run (snax_cluster `b2672f8`): on the RTL,
+  `csrrw rd, csr, rs1` with `rd` not `x0` writes the CSR with `rs1` and
+  writes `rd` with the ALU's sum of `rs1` and the CSR number (`snitch.sv`
+  leaves `write_rd` at 1 and `alu_op` at `Add`, operand B the CSR number);
+  `csrrwi` the same with the immediate. The four set and clear forms are
+  sent as reads only (`snax_intf_translator.sv`, `write_csr = 0`).
+- Found in GVSoC's ISS (`core/models/cpu/iss/include/isa/priv.hpp`, shared
+  by every core): `csrrc` with `rs1 = x0` and `csrrsi` / `csrrci` with 0 write
+  back the value they read, where Zicsr writes nothing; `csrrs` checks
+  `rs1`. On a read-only SNAX CSR that write is refused and stops the run.
+  No SNAX program uses these forms (`csrr_ss` is `csrrs rd, csr, x0`).
+  Warned about now; fixed right after the SG series, with the RTL's fix.
+- `snax-csr`'s README still named the test datapath (missed in P2); fixed.
+- Results in Claude's sandbox:
+  - `snax-csr`: four lines of `0 errors`, exit 0, and the two warnings,
+    both on CSR 960 (part 2's `csrrw` at cycle 5201, part 3's `csrrs` at
+    7161); still 98 accesses, 60 reads and 38 writes.
+  - `snax-alu`, `snax-stream`, `stream-timing`, `dma-timing`: output as after
+    P2, no warning.
+  - The 17 plain tests (9-core build) exit 0 on `snitch`, `printf_simple`
+    printing `Hello, World!` 9 times; none warns.
