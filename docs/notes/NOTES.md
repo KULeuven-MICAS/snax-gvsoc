@@ -858,3 +858,22 @@ stay there.
   - `stream-timing`: the same five counters (0, 9, 9, 10, 12);
     `snax-csr` four lines of `0 errors`; `dma-timing` as in SG2 step 7; the
     17 plain tests (9-core build) exit 0 on `snitch`.
+
+### SG3 step 8: SG3 closed
+
+- 2026-10-14. All steps done, P4 skipped; acceptance met: standalone tests
+  of `snax-alu`'s three streamers (`stream-timing` with its readers on both
+  sides, `snax-stream` with all three on SNAX-GVSoC), and per-bank
+  arbitration of a streamer port in the crossbar's trace (`ab_same_banks`,
+  `a_stride0`).
+- Settled (the list is in `docs/plans/SG3.md` under "Decided"): the
+  crossbar copies the plain interconnect's `rr_arb_tree` and carries only
+  the SNAX ports; one streamer component from the hjson's template; the
+  beats by request with a probe; a test datapath in the ALU's place until
+  SG4. In snax-forge: D122, and open items 57, 58, 60 and 62 from SG3's
+  profiling review and reading (59 and 61 were done in P5).
+- Upstream files changed in SG3: `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py`
+  (P3, P5); rows in `UPSTREAM.md`. New in `snax/`: `snax_alu_acc`,
+  `snax_streamer`, `snax_tcdm_xbar`, `snax_test_datapath`.
+- Next: SG4, the ALU, planned in its own round from the list under "SG4
+  starts from" in `docs/plans/SG3.md`.

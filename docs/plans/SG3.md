@@ -152,14 +152,16 @@ the commit read; the counter values, equal on the RTL in all five cases of
 | 5 | The counter per case on both sides, each gap named. Findings only | done 2026-10-14 |
 | 6 | P4: the gaps of step 5; skipped if there are none | skipped 2026-10-14: no gap |
 | 7 | P5: writers, the beat ports, the test datapath; `snax-stream`; `snax-alu` runs to the end | done 2026-10-14 |
-| 8 | P6: SG3 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | todo |
+| 8 | P6: SG3 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | done 2026-10-14 |
 
 ## Decided
 
 - The crossbar copies `rr_arb_tree` as the plain interconnect uses it, not
   SNAX-MODEL's arbiter of D31 in snax-forge, which copies the sparse
   interconnect (priority mask, pointer reset on idle cycles). D31 stays
-  SNAX-MODEL's; SG3's decision is logged at P6.
+  SNAX-MODEL's; SG3's choice is D122 in snax-forge. Checked against
+  common_cells' `rr_arb_tree` in Icarus and by the RTL's counter in all
+  five `stream-timing` cases.
 - Only the SNAX ports go through the crossbar. The cores and the DMA keep
   their paths into the same banks, where a clash with a streamer shows as
   one cycle of latency on the later access, not as a round-robin stall.
@@ -171,3 +173,39 @@ the commit read; the counter values, equal on the RTL in all five cases of
   it. `snax-alu` starts an idle streamer.
 - The streamer's own timing runs on the RTL in SG3 with readers only (no
   ALU needed); timing with the writer or the ALU's counter (982) is SG4's.
+- One streamer component, configured from the hjson's streamer template
+  with its keys; the beats move by the accelerator's requests (a size-0
+  probe, then the beat), and the accelerator's event runs before the
+  streamer's in a cycle.
+- A test datapath holds the ALU's place and CSR layout until SG4; it is
+  not the ALU and runs on SNAX-GVSoC only.
+- Per mover the streamer classes its cycles as SNAX-MODEL did and names its
+  crossbar ports by owner; the structured output for the views (open item
+  57 in snax-forge) comes later.
+- Result: the streamer's counter equals the RTL in all five
+  `stream-timing` cases; `snax-stream` moves snax-alu's three streams with
+  0 errors at one firing per cycle and per 3 cycles; `snax-alu` runs to the
+  end on SNAX-GVSoC.
+
+## SG4 starts from
+
+- The ALU model replaces `test_datapath` in `snax/snax_alu_acc.py`, on the
+  same CSR range (978 to 982) and the same beat ports (`in_a`, `in_b`,
+  `out`, probe first). `snax_alu_shell_wrapper.sv`, `snax_alu_pe.sv` and
+  `snax_alu_csr.sv` set its rules: it takes A and B together, only while
+  busy and when its output can go; busy and its counter as
+  `snax_alu_csr.sv` counts them.
+- The datapath's first cycle may run after the streamer's step in that
+  cycle (SG3 step 7), which delays a request by one cycle at most; the ALU
+  model checks it against the RTL.
+- The writer's timing and the beats are not checked against the RTL yet:
+  they need the ALU. `snax-alu`'s cycles on both sides (`Accelerator
+  Cycles: 25` on the RTL) are SG4's acceptance; the cycles per phase SG5's.
+- `snax-csr` leaves out both start CSRs; `snax-stream` uses the test
+  datapath's mode bits and stays a SNAX-GVSoC test (or moves to the ALU's
+  modes in SG4).
+- From the reading in step 1, for SG5: the RTL's `csrrw` on a SNAX CSR only
+  writes and `csrrs` / `csrrc` only read, where D120 reads before a write;
+  the core's issue and polling around the CSRs; the cores' path into the
+  banks outside the crossbar.
+- The housekeeping pass over SG1's to SG3's code comes after SG5.
