@@ -165,9 +165,20 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
 
 
 // Callback of every SNAX CSR: csrrs, csrrc and their immediate forms read through here,
-// and write through here when they set or clear bits.
+// and write through here when they set or clear bits. A write here is one the RTL does
+// not make: snax_intf_translator.sv sends these four forms as reads only. csrrc,
+// csrrsi and csrrci also write here with no bit to change (priv.hpp writes back the
+// value read), where Zicsr writes nothing: to be fixed after the SG series, with the
+// RTL. Warned about once per run, without stopping it.
 bool Iss::snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value)
 {
+    if (is_write && !this->snax_csr_set_clear_warned)
+    {
+        this->snax_csr_set_clear_warned = true;
+        this->csr.trace.force_warning_no_error("csrrs, csrrc, csrrsi or csrrci writes SNAX "
+            "CSR %d here (Zicsr, D120); snax_cluster's RTL only reads it (warned once)\n",
+            (int)csr->address);
+    }
     this->snax_csr_request(csr->address, is_write, value);
     // false: the value lives behind the port, not in the CSR object
     return false;
@@ -176,11 +187,21 @@ bool Iss::snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value)
 
 // csrrw and csrrwi on a SNAX CSR: one write request, after a read only when rd is not x0
 // (a csrw sends no read, as in the RISC-V spec). The decoder gives rd = x0 the index
-// ISS_NB_REGS, a register nothing reads, not 0.
+// ISS_NB_REGS, a register nothing reads, not 0. With rd not x0, snax_cluster's RTL
+// (snitch.sv) writes the CSR without reading it and gives rd its ALU sum of rs1 (or the
+// immediate) and the CSR number: warned about once per run, without stopping it.
 iss_reg_t SnaxCsr::handle(Iss *iss, iss_insn_t *insn, iss_reg_t pc, iss_reg_t reg_value)
 {
     if (insn->out_regs[0] != ISS_NB_REGS)
     {
+        if (!iss->snax_csr_rw_rd_warned)
+        {
+            iss->snax_csr_rw_rd_warned = true;
+            iss->csr.trace.force_warning_no_error("csrrw or csrrwi with rd not x0 reads SNAX "
+                "CSR %d before writing it here (Zicsr, D120); snax_cluster's RTL does not "
+                "read it and writes rd with rs1 or the immediate plus the CSR number "
+                "(warned once)\n", (int)this->address);
+        }
         iss_reg_t value = 0;
         if (iss->snax_csr_request(this->address, false, value))
         {

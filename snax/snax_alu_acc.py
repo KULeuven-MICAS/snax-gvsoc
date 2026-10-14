@@ -12,15 +12,15 @@ does: the streamer's CSRs first, everything above them to the ALU. Each block
 sees offsets from its own first CSR, as each CSR manager does on the RTL. The
 streamer's channels leave the composite as its TCDM ports.
 
-The ALU's place holds a test datapath (test_datapath, snax_test_datapath.py)
-until the ALU model (SG4): it takes the beats of readers A and B and gives
-the writer one of them.
+The ALU (alu, snax_alu_shell.py) takes the beats of readers A and B and gives
+the writer their sum, difference, product or xor, as snax_alu_shell_wrapper.sv
+does.
 """
 
 import gvsoc.systree
 import interco.router as router
 from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
-from snax_test_datapath import SnaxTestDatapath
+from snax_alu_shell import SnaxAluShell
 
 
 # snax_alu_streamer_template of snax_cluster's cfg/snax_alu_cluster_old.hjson
@@ -56,15 +56,16 @@ SNAX_CSR_LAST = 0x5FF
 ALU_CSR_FIRST = SNAX_CSR_FIRST + nb_csrs(STREAMER_TEMPLATE)
 
 # The ALU's 5 CSRs follow, from snax-alu-lib.h: mode, length, start (978 to
-# 980), then busy and the performance counter, read-only (981, 982). The test
-# datapath holds them in the same layout.
+# 980), then busy and the performance counter, read-only (981, 982).
 
-# A beat between the streamer and the ALU: 4 lanes of 64 bit
-BEAT_BYTES = 4 * 8
+# The shell wrapper's NumPE and DataWidth: a beat between the streamer and the
+# ALU is 4 lanes of 64 bit
+ALU_NUM_PE = 4
+ALU_DATA_WIDTH = 64
 
 
 class SnaxAluAcc(gvsoc.systree.Component):
-    """snax_alu's accelerator: the CSR mux, the streamer and the ALU's place.
+    """snax_alu's accelerator: the CSR mux, the streamer and the ALU.
 
     Ports
     -----
@@ -88,8 +89,8 @@ class SnaxAluAcc(gvsoc.systree.Component):
 
         streamer = SnaxStreamer(self, 'streamer', template=STREAMER_TEMPLATE,
             csr_base=SNAX_CSR_FIRST, tcdm_size=TCDM_SIZE)
-        test_datapath = SnaxTestDatapath(self, 'test_datapath', csr_base=ALU_CSR_FIRST,
-            beat_bytes=BEAT_BYTES)
+        alu = SnaxAluShell(self, 'alu', csr_base=ALU_CSR_FIRST, num_pe=ALU_NUM_PE,
+            data_width=ALU_DATA_WIDTH)
 
         # The streamer's range, and everything from the ALU's first CSR to the
         # last SNAX CSR to the ALU, as the RTL mux does (sel_output). Each
@@ -98,13 +99,13 @@ class SnaxAluAcc(gvsoc.systree.Component):
         alu_base = 4 * ALU_CSR_FIRST
         csr_mux.o_MAP(streamer.i_INPUT(), base=streamer_base,
             size=alu_base - streamer_base)
-        csr_mux.o_MAP(test_datapath.i_INPUT(), base=alu_base,
+        csr_mux.o_MAP(alu.i_INPUT(), base=alu_base,
             size=4 * (SNAX_CSR_LAST + 1) - alu_base)
 
         # The beats: readers A and B in, the writer out (snax_alu_shell_wrapper.sv)
-        test_datapath.o_IN_A(streamer.i_READER(0))
-        test_datapath.o_IN_B(streamer.i_READER(1))
-        test_datapath.o_OUT(streamer.i_WRITER(0))
+        alu.o_IN_A(streamer.i_READER(0))
+        alu.o_IN_B(streamer.i_READER(1))
+        alu.o_OUT(streamer.i_WRITER(0))
 
         self.bind(self, 'input', csr_mux, 'input')
 

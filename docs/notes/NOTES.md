@@ -877,3 +877,219 @@ stay there.
   `snax_streamer`, `snax_tcdm_xbar`, `snax_test_datapath`.
 - Next: SG4, the ALU, planned in its own round from the list under "SG4
   starts from" in `docs/plans/SG3.md`.
+
+### SG4 step 1: P1, the plan
+
+- 2026-10-14. `docs/plans/SG4.md` written: an ALU model after
+  `snax_alu_shell_wrapper.sv` in the test datapath's place, `snax-stream` on
+  the ALU's modes, a timing program `alu-timing` run on both sides, and the
+  core's warnings on the two CSR forms where SNAX-GVSoC and the RTL differ.
+- Read from source, not run (snax_cluster `b2672f8`; the values are in
+  SG4.md under "The ALU on the RTL"):
+  - The ALU's CSRs are 978 to 982: mode, length and start in the
+    ReqRspManager, busy and the counter from `snax_alu_csr.sv`. Its `ready`
+    is tied to 1, so a start is never held, not even while busy.
+  - A start latches mode and length at the end of its cycle but does not
+    reset `len_counter`: a start while busy keeps the firings done, the end
+    wins over a start in the same cycle, and length 0 never ends.
+  - The counter is 1 at s + 1 and stops counting once `len_counter` reaches
+    `length - 1`, so it ends at f - s + 1 with f the second-to-last firing.
+    The test datapath's f_last - s gives the same 25 for back-to-back
+    firings, and differs when the last firing is late (1 with length 1 on
+    the RTL).
+  - The PE is combinational: a firing needs busy, both readers' beats and
+    the writer's `ready` in one cycle. The writer's `ready` is all lane
+    queues not full (`pipe = false`), the rule SG3 modelled, now read in
+    `Writer.scala`.
+- `alu-timing` compares, per case, the counter that does not depend on the
+  gap between the two start writes, since that gap is the core's timing.
+
+### SG4 step 2: P2, the ALU
+
+- 2026-10-14. `snax/snax_alu_shell.py` / `.cpp`: `SnaxAluShell`, the ALU after
+  `snax_alu_shell_wrapper.sv` (`num_pe` 4, `data_width` 64), as `alu` in
+  `SnaxAluAcc` on the same CSRs (978 to 982) and beat ports as the test
+  datapath, which is removed. Rules as SG4.md reads the RTL: a start is
+  recorded when written and applied at the first event or access in a later
+  cycle, so a firing in its cycle still uses the old mode and length; busy
+  and the counter come from s, F (the firing that brings `len_counter` to
+  `length - 1`) and E (the last firing). How it waits (`try_fire`) and what
+  it computes (`compute`) are one method each.
+- GVSoC runs with `werror`: `force_warning` stops the run. The warning on a
+  start that cannot end (length 0, or firings kept past `length - 1`) uses
+  `force_warning_no_error`, since the RTL just stays busy; P3's CSR-form
+  warnings need the same.
+- `tests/snax/snax-stream/`: one run per mode (add, sub, mul, xor), 25
+  beats in `snax-alu`'s layout, 64-bit data from a fixed generator, O checked
+  against the core's own result; runs on the RTL too. Dropped: the runs
+  "copy A, k=1" and "copy B, k=3", since the test datapath and its mode bits
+  are gone; the back-pressure k = 3 gave comes back in P4
+  (`out_same_banks`). clang inlines the 64-bit multiply (no `__muldi3`).
+- Claude's sandbox now builds with LLVM 21.1.6 from LLVM's release and bender
+  0.28.2 from its release (the conda channels are not reachable from it).
+  On main this setup gives SG3's numbers (`snax-alu` 25 / 97 errors,
+  `snax-stream` 42 / 25 and 79 / 73) and `stream-timing`'s polls and
+  `mcycle` spans of SG3 step 3, but `dma-timing`'s `done` 1 to 3 cycles under
+  SG2 step 7 (`busy` equal): the ELF, not P2, since main gives the same.
+- Results in Claude's sandbox:
+  - `snax-alu`: `Accelerator Done!`, `Accelerator Cycles: 25`, `Number of
+    errors: 0`, exit 0. The streamer starts at 2625, the ALU at 2630, the
+    ALU fires in every cycle from 2631 to 2655 (`busy 25, stall_out 0,
+    stall_in 0`), and the streamer is done at 2657 (counter 31).
+  - `snax-stream`: `errors 0, streamer counter 31, alu counter 25` in all
+    four modes, exit 0; the two start writes are 5 cycles apart in each run.
+  - A throwaway program (not kept): length 1 with the streamer started 288
+    cycles after the ALU gives counter 1; a start (add, 100) then a start
+    (sub, 25) before any firing gives O = A - B with 0 errors; a start with
+    length 0 warns, busy reads 1 and the program ends with exit 0.
+  - `stream-timing`: counters 0, 9, 9, 10, 12; `snax-csr`: four lines of `0
+    errors`; `dma-timing`: exit 0, `busy` as in SG2 step 7. The 17 plain tests
+    were not run: the `snitch` target builds no SNAX component, and P2
+    changes no upstream file.
+
+### SG4 step 3: P3, the CSR-form warnings
+
+- 2026-10-14. The Snitch core warns once per run, without stopping it
+  (`force_warning_no_error`), on the two forms where SNAX-GVSoC follows
+  Zicsr (D120) and the RTL does not: in `SnaxCsr::handle()` on `csrrw` /
+  `csrrwi` with `rd` not `x0`, in `Iss::snax_csr_access()` on any write from
+  `csrrs`, `csrrc`, `csrrsi` or `csrrci` (the callback sees no instruction,
+  but a write there is always one of these). Two flags on `Iss`; rows in
+  `UPSTREAM.md`.
+- Read from source, not run (snax_cluster `b2672f8`): on the RTL,
+  `csrrw rd, csr, rs1` with `rd` not `x0` writes the CSR with `rs1` and
+  writes `rd` with the ALU's sum of `rs1` and the CSR number (`snitch.sv`
+  leaves `write_rd` at 1 and `alu_op` at `Add`, operand B the CSR number);
+  `csrrwi` the same with the immediate. The four set and clear forms are
+  sent as reads only (`snax_intf_translator.sv`, `write_csr = 0`).
+- Found in GVSoC's ISS (`core/models/cpu/iss/include/isa/priv.hpp`, shared
+  by every core): `csrrc` with `rs1 = x0` and `csrrsi` / `csrrci` with 0 write
+  back the value they read, where Zicsr writes nothing; `csrrs` checks
+  `rs1`. On a read-only SNAX CSR that write is refused and stops the run.
+  No SNAX program uses these forms (`csrr_ss` is `csrrs rd, csr, x0`).
+  Warned about now; fixed right after the SG series, with the RTL's fix.
+- `snax-csr`'s README still named the test datapath (missed in P2); fixed.
+- Results in Claude's sandbox:
+  - `snax-csr`: four lines of `0 errors`, exit 0, and the two warnings,
+    both on CSR 960 (part 2's `csrrw` at cycle 5201, part 3's `csrrs` at
+    7161); still 98 accesses, 60 reads and 38 writes.
+  - `snax-alu`, `snax-stream`, `stream-timing`, `dma-timing`: output as after
+    P2, no warning.
+  - The 17 plain tests (9-core build) exit 0 on `snitch`, `printf_simple`
+    printing `Hello, World!` 9 times; none warns.
+
+### SG4 step 4: P4, the timing program
+
+- 2026-10-14. `tests/snax/alu-timing/`: one ELF, five cases in sequence on
+  `snax-alu`'s streamers and the ALU through its library; per case the
+  errors, the streamer's counter (977), the ALU's (982) and the start gap
+  (`mcycle` before `start_alu()` minus before `start_streamer()`). Each case
+  has one counter that does not depend on the gap, the one to compare: 977
+  for `alu_first` and `restart_idle`, 982 for `stream_first` and
+  `out_one_bank`, both for `len1`.
+- Changed from the plan: `out_same_banks` (O on A's banks lane by lane) gave
+  no conflict, since the writer writes beat t one cycle after the ALU takes
+  it, when reader A asks for beat t + 9, four banks on. O's four lanes on one
+  bank (beats on consecutive banks) did not stall the ALU either: the lanes
+  of consecutive beats write in parallel. `out_one_bank` puts every word of
+  O on one bank (spatial stride 256 B, temporal 1024 B), so the writer gets
+  one grant a cycle.
+- `stream_first` uses `snax-alu`'s own layout, where the writer loses banks
+  8 to 11 to reader B twice (crossbar trace, 8 lane conflicts); its 8-deep
+  queue absorbs them, so the ALU does not stall.
+- Results in Claude's sandbox, exit 0, `errors 0` in every case:
+
+  | Case | 977 | 982 | Gap | ALU classes |
+  |---|---|---|---|---|
+  | `alu_first` | 29 | 34 | -16 | busy 25, stall_in 9 |
+  | `stream_first` | 134 | 25 | 105 | busy 25 |
+  | `out_one_bank` | 211 | 72 | 105 | busy 25, stall_out 50 |
+  | `len1` | 5 | 1 | -7 | busy 1, stall_in 9 |
+  | `restart_idle` | 29 | 34 | -7 | busy 25, stall_in 9 |
+
+  - `alu_first`: the trace's start writes are 6 cycles apart (ALU at s_a,
+    streamer at s_a + 6); the ALU's first firing is at s + 4, s the
+    streamer's start, and its last at s + 28; the writer's last grant at
+    s + 29 ends the streamer, counter 29.
+  - `out_one_bank`: the ALU's last firing is 75 cycles after its start;
+    the counter stops at the second-to-last, 72. The writer's queues reach
+    7 to 8.
+  - `restart_idle`: the second start (sub, 25) replaces the first (add, 100)
+    before any firing; O = A - B.
+- Not rerun: the other programs and the plain tests; P4 adds a program and
+  changes nothing they use.
+
+### SG4 step 5: the RTL run
+
+- 2026-10-14. Author's run of P4's ELFs (`snax-alu`, `snax-stream`,
+  `alu-timing`) on snax_cluster's RTL (Verilator) built from
+  `snax_alu_cluster_old.hjson` at `b2672f8`:
+
+  ```
+  Accelerator Done!
+  Accelerator Cycles: 25
+  Number of errors: 0
+
+  snax-stream add: errors 0, streamer counter 29, alu counter 25
+  snax-stream sub: errors 0, streamer counter 29, alu counter 25
+  snax-stream mul: errors 0, streamer counter 29, alu counter 25
+  snax-stream xor: errors 0, streamer counter 29, alu counter 25
+
+  alu-timing alu_first: errors 0, streamer counter 29, alu counter 32, start gap -5
+  alu-timing stream_first: errors 0, streamer counter 132, alu counter 25, start gap 103
+  alu-timing out_one_bank: errors 0, streamer counter 210, alu counter 72, start gap 104
+  alu-timing len1: errors 0, streamer counter 5, alu counter 1, start gap -5
+  alu-timing restart_idle: errors 0, streamer counter 29, alu counter 32, start gap -5
+  ```
+
+### SG4 step 6: the counters on both sides
+
+- 2026-10-14. SNAX-GVSoC's values from Claude's sandbox (steps 2 and 4).
+  Every counter that does not depend on the core's timing is equal:
+
+  | Program, case | Counter | RTL | SNAX-GVSoC |
+  |---|---|---|---|
+  | `snax-alu` | 982 | 25 | 25 |
+  | `snax-stream`, each mode | 982 | 25 | 25 |
+  | `alu_first` | 977 | 29 | 29 |
+  | `stream_first` | 982 | 25 | 25 |
+  | `out_one_bank` | 982 | 72 | 72 |
+  | `len1` | 982, 977 | 1, 5 | 1, 5 |
+  | `restart_idle` | 977 | 29 | 29 |
+
+  So the beat path (reader → ALU → writer), the writer's last grant, its
+  `ready` rule and the back-pressure into the ALU, the counter's end rule
+  and the re-latch on a second start match the RTL. The writer's timing and
+  the beat handshake, open since SG3, are checked.
+- The counters that depend on the gap between the two start writes differ
+  by the core's timing: with the ALU first, 982 is the gap plus 28 (RTL 32,
+  4 cycles; SNAX-GVSoC 34, 6 cycles); with the streamer first, 977 is the
+  gap plus 26 (`snax-stream`: RTL 29, 3 cycles; SNAX-GVSoC 31, 5 cycles);
+  after the 100-cycle wait, 132 against 134 and 210 against 211. SNAX-GVSoC's
+  core puts about 2 more cycles between two library CSR calls. SG5's.
+- The first-cycle ordering of SG3 step 7 is not visible: `stream_first`
+  starts the ALU on full readers, and a refill request one cycle late is
+  absorbed by the 8 beats buffered.
+
+### SG4 step 7: P5 skipped
+
+- 2026-10-14. Step 6 left no gap in the counters compared.
+
+### SG4 step 8: SG4 closed
+
+- 2026-10-14. All steps done, P5 skipped; acceptance met: `snax-alu` prints
+  `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC, as on
+  the RTL, and every counter of `snax-stream` and `alu-timing` that does not
+  depend on the core's timing equals the RTL.
+- Settled (the list is in `docs/plans/SG4.md` under "Decided"): the ALU
+  copies `snax_alu_csr.sv`, start while busy included; the test datapath is
+  gone and `snax-stream` runs on both sides; timing by the same ELFs on both
+  sides; the CSR-form warnings until SG6 fixes both sides. In snax-forge:
+  D123 (the same ELF on both sides), D120 amended, open items 62 to 64, and
+  SG6.
+- Upstream files changed in SG4: `core/models/cpu/iss/src/snitch/snitch.cpp`
+  and `include/cores/snitch/class.hpp` (P3); rows in `UPSTREAM.md`. New in
+  `snax/`: `snax_alu_shell`; removed: `snax_test_datapath`. New test:
+  `alu-timing`.
+- Next: SG5, the baseline, planned in its own round from the list under
+  "SG5 starts from" in `docs/plans/SG4.md`.

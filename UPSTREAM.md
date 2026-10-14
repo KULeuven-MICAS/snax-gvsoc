@@ -69,3 +69,5 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) | SG2 P5 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `nb_snax_ports` and builds `SnaxTcdmXbar` (`snax/`) in front of the same banks; `SnitchCluster` counts the accelerators' `nb_tcdm_ports` and binds each one's ports to it | SG3 P3 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `snax_port_names`; `SnitchCluster` names each SNAX port `snax_acc<core>.<name>` from the accelerator's `tcdm_port_names` | SG3 P5 |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | `SnaxCsr::handle()` warns once per run on `csrrw` / `csrrwi` with `rd` not `x0`, `Iss::snax_csr_access()` once on a write from `csrrs`, `csrrc`, `csrrsi` or `csrrci`, without stopping the run | SG4 P3 |
+| `core/models/cpu/iss/include/cores/snitch/class.hpp` | `Iss` gains the two flags of those warnings | SG4 P3 |

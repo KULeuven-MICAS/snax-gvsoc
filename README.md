@@ -80,10 +80,10 @@ prints `Hello, World!` once per core:
 ## The snax_alu target
 
 `snax_alu` is snax_cluster's `cfg/snax_alu_cluster_old.hjson`: a compute
-core and a DMA core, the compute core's accelerator CSRs on a stub that
-holds them (`snax/snax_csr_stub.py`). Build snax_cluster's runtime for that
-cluster (this also rebuilds its plain tests for 2 cores), then GVSoC and
-the programs in `tests/snax/`:
+core and a DMA core, the compute core's accelerator (`snax/snax_alu_acc.py`)
+with its streamer and the ALU, its TCDM ports through a crossbar into the
+banks. Build snax_cluster's runtime for that cluster (this also rebuilds its
+plain tests for 2 cores), then GVSoC and the programs in `tests/snax/`:
 
     make -C ../snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
     make build TARGETS="snitch;snax_alu"
@@ -96,9 +96,10 @@ the programs in `tests/snax/`:
         --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf run
 
 `snax-csr` prints four lines of `0 errors` and exits 0. `snax-alu` prints
-`Accelerator Done!`, `Accelerator Cycles: 0` and `Number of errors: 100`
-and exits with 100, since nothing computes its output yet. Adding
-`--trace=snax_acc0` before `run` prints every CSR access the stub gets.
+`Accelerator Done!`, `Accelerator Cycles: 25` and `Number of errors: 0` and
+exits 0, as on the RTL. Adding `--trace=snax_acc0` before `run` prints every
+CSR access the streamer and the ALU get. Each program in `tests/snax/` has a
+README with its own expected output.
 
 ## License
 

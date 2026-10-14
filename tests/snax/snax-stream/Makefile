@@ -1,4 +1,4 @@
-# Builds the SG3 streamer test, with snax-alu's library and headers, against
+# Builds the SG4 streamer and ALU test, with snax-alu's library and headers, against
 # the runtime of the snax_cluster checkout beside this repo. That runtime must
 # be built first for the same cluster:
 #   make -C $(SNAX_CLUSTER)/target/snitch_cluster sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson

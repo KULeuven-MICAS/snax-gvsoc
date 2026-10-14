@@ -152,6 +152,10 @@ public:
     SnaxCsr snax_csrs[SNAX_CSR_NB];
     vp::IoMaster snax_csr_itf;
     vp::IoReq snax_csr_req;
+    // The two forms where SNAX-GVSoC (Zicsr, D120) and snax_cluster's RTL differ are
+    // warned about once per run each (snitch.cpp)
+    bool snax_csr_rw_rd_warned = false;
+    bool snax_csr_set_clear_warned = false;
 
     // Temporary variable to process RAW caused by SSR and accessing stack pointer,
     // for result is written to memory directly.
