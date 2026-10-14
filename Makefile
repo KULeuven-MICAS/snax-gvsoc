@@ -63,6 +63,25 @@ GVSOC_MODULES = $(CURDIR)/engine/python;$(CURDIR)/core/models;$(CURDIR)/pulp;$(C
 
 all: checkout build
 
+# SNAX-GVSoC's regression (SG5, tests/snax/regress.py). Needs GVSoC built for
+# "snitch;snax_alu" and snax_cluster's runtime built for the ALU cluster.
+# REGRESS_FLAGS=--update rewrites the expected files. regress-plain builds
+# snax_cluster's plain tests for its 9-core cluster into build/regress/plain/,
+# then rebuilds the runtime for the ALU cluster; regress runs them when there.
+SNAX_CLUSTER ?= $(abspath $(CURDIR)/../snax_cluster)
+SNAX_CLUSTER_SW = $(MAKE) -C $(SNAX_CLUSTER)/target/snitch_cluster sw
+
+regress:
+	python3 tests/snax/regress.py $(REGRESS_FLAGS)
+
+regress-plain:
+	$(SNAX_CLUSTER_SW) CFG_OVERRIDE=cfg/snitch_cluster.hjson
+	rm -rf build/regress/plain && mkdir -p build/regress/plain
+	cp $(SNAX_CLUSTER)/target/snitch_cluster/sw/tests/build/*.elf build/regress/plain/
+	$(SNAX_CLUSTER_SW) CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
+
+.PHONY: regress regress-plain
+
 checkout:
 	git submodule update --recursive --init
 

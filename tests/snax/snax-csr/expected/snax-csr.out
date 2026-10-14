@@ -1,0 +1,7 @@
+csrw/csrr: 0 errors
+csrrw: 0 errors
+csrrs/csrrc/csrrwi: 0 errors
+read-only: 0 errors
+624100000: 6241: [/chip/soc/cluster_0/pe0/csr                                              ] csrrw or csrrwi with rd not x0 reads SNAX CSR 960 before writing it here (Zicsr, D120); snax_cluster's RTL does not read it and writes rd with rs1 or the immediate plus the CSR number (warned once)
+920400000: 9204: [/chip/soc/cluster_0/pe0/csr                                              ] csrrs, csrrc, csrrsi or csrrci writes SNAX CSR 960 here (Zicsr, D120); snax_cluster's RTL only reads it (warned once)
+exit 0

@@ -1372,3 +1372,75 @@ stay there.
   at 82 (80 before, RTL 84); `snax-csr` four lines of `0 errors` and both
   warnings. The 17 plain tests (9-core build) exit 0 on `snitch`,
   `printf_simple` printing `Hello, World!` 9 times.
+
+### SG5: the remaining gaps, from the listings
+
+- 2026-10-14. The author's rerun of the five sizes with P5 (the same ELFs
+  as the RTL run) at 100: total up to 982 5471 against the RTL's 5489
+  (-0.3%), C5 4468 against 4535. The listings of `phases.py --show` on both
+  sides at 100 explain the rest (C2a, D1, C7 below).
+- The RTL source behind P5 (snax_cluster `d7dd789`):
+  `hw/snitch/src/snitch_lsu.sv` holds loads waiting for data in a queue
+  `NumOutstandingLoads` deep (line 72) and holds a new load while it is
+  full, stores excepted (lines 118, 155); the hjson sets it to 1. The core's
+  data port has a request and a response register (`RegisterCoreReq`,
+  `RegisterCoreRsp`, `snitch_cc.sv` lines 308-309, on in the hjson): the
+  `tcdm` +2. The way to DRAM adds the narrow crossbar cut on all ports
+  (`NarrowXbarLatency`, `snitch_cluster.sv` line 360) and the external
+  narrow port's registers (`RegisterExtNarrow`, lines 1413 and 1502): the
+  `narrow` +6 is fitted to the trace, not counted stage by stage.
+- C2a (RTL 111, SNAX-GVSoC 133): the loads now cost the same on both sides
+  (14 cycles to the next load or the use). The difference is instruction
+  fetch: both caches have 32-byte lines (`cacheline: 256`); GVSoC misses
+  each time execution enters a new line (6 misses of about 10 cycles), the
+  RTL twice (16 and 22 cycles, entering `0x2c0` and `0x2e0` on the way back
+  into `main`). The RTL's L0 prefetches on a hit, the next line or the
+  target of a taken branch or `jal` it finds in the line
+  (`cluster_icache`'s `snitch_icache_l0.sv` lines 289-371, read at `main`,
+  `d94589e`; the RTL build's `Bender.lock` holds the exact commit), so the
+  `configure_*` lines are there on the first jump; GVSoC's
+  `Hierarchical_cache` L0 does not prefetch. The core's fetch timing:
+  explained, accepted, not modelled.
+- D1 (RTL 99, SNAX-GVSoC 115): the same, on the DMA core (GVSoC misses at
+  `0x254`, `0x260`, `0x280`, `0x3ac`, `0x3c0`, `0x3e0`); the RTL instead
+  waits 5 to 8 cycles after each of its first three stack stores (not
+  looked into).
+- C7 (RTL 140, SNAX-GVSoC 79): the testbench's memory. The exit's second
+  barrier waits for the DMA core's software global barrier (atomic adds, a
+  load and a store on `_snrt_barrier` in DRAM): 78 cycles on the RTL, 50 on
+  SNAX-GVSoC; the load of `_reduction_result` right after takes 41 cycles
+  on the RTL, 13 on SNAX-GVSoC. The RTL testbench puts
+  `axi_riscv_atomics_wrap` (at most 2 reads and 2 writes in flight) in
+  front of its DRAM (`target/common/test/tb_memory_axi.sv` line 58), so
+  every atomic to DRAM is a read-modify-write in that adapter and the load
+  behind them waits; SNAX-GVSoC treats an atomic as one access. Outside the
+  cluster, tier 3, accepted. The first post-main barrier's 14 cycles on the
+  RTL (1 here) are not looked into.
+- All four are the core's or the testbench's own timing (SG5.md, "Gaps
+  outside the target"); they go to snax-forge as open items in P7.
+
+### SG5 step 8: P6, the regression
+
+- 2026-10-14. `tests/snax/regress.py`, `make regress`: builds the programs,
+  runs each on `snax_alu`, and compares exactly with `expected/` per
+  program: `snax-alu` at five sizes (`<N>.out`: printed lines, exit code,
+  977 from the streamer's trace; `<N>.phases.json`), `snax-stream`,
+  `alu-timing`, the five `stream-timing` cases, `dma-timing`, `snax-csr`
+  with its two warnings. It then checks `snax-alu` against
+  `tests/snax/snax-alu/rtl/` (the author's printed lines and phase tables of
+  step 5, the JSON written from those tables in `phases.py --json`'s form):
+  tier 1 at every size, tier 2 at 128, 1024 and 4096, C1 and D2 at 128 in
+  an accepted list with their reason. `REGRESS_FLAGS=--update` rewrites
+  `expected/` only. Exit 0 when all match, 1 otherwise, so CI can run it as
+  it is.
+- `make regress-plain` builds snax_cluster's plain tests for its 9-core
+  cluster into `build/regress/plain/`, then rebuilds the runtime for the ALU
+  cluster; `regress` runs them on `snitch` when they are there (17, each
+  exit 0). In Claude's sandbox the round trip leaves `snax-alu`'s ELF
+  byte-identical.
+- Results in Claude's sandbox (its own expected files, not checked in):
+  `--update` then `make regress` passes in about 50 s with the plain tests;
+  tier 2 at 128: C1 +4%, D2 -20% (accepted), C3 +5%, C5 -2%, total up to
+  982 -1%; at 1024 and 4096 every row within 3%. With one expected value
+  changed (977 at 100) it fails on that file alone and exits 1.
+- The expected files are written in step 9, in the author's container.

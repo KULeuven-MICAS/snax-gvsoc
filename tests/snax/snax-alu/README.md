@@ -87,6 +87,13 @@ read of 982. The unit tests of the script:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
+## Regression files
+
+`expected/` holds SNAX-GVSoC's output per size for `make regress`:
+`<N>.out` (the printed lines, the exit code, 977) and `<N>.phases.json`.
+`rtl/` holds the RTL run of SG5 step 5: `<N>.out` (the printed lines) and
+`<N>.json` (the phase table, in the form `phases.py --json` writes).
+
 ## Sizes
 
 SG5 runs the app at five `DATA_LEN` values. `make DATA_LEN=N` writes

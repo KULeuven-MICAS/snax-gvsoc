@@ -1,0 +1,5 @@
+snax-stream add: errors 0, streamer counter 31, alu counter 25
+snax-stream sub: errors 0, streamer counter 31, alu counter 25
+snax-stream mul: errors 0, streamer counter 31, alu counter 25
+snax-stream xor: errors 0, streamer counter 31, alu counter 25
+exit 0

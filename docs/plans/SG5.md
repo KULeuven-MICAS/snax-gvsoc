@@ -202,14 +202,24 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 | Regression (`tests/snax/regress.py`, `make regress`) | SNAX-GVSoC | Exactly: `snax-alu` at five sizes with its phase table, `snax-stream`, `alu-timing`, `stream-timing`, `dma-timing`, `snax-csr` with its two warnings; the 17 plain tests on `snitch` exit 0 |
 
 - Expected files per program under `tests/snax/<program>/expected/`; the
-  author's RTL lines and phase tables under `tests/snax/<program>/rtl/`.
-  For `snax-alu` the regression also checks tiers 1 and 2 against `rtl/`.
-- `--update` rewrites `expected/`, with a notes entry saying why.
+  author's RTL lines and phase tables under `tests/snax/snax-alu/rtl/`.
+  For `snax-alu` the regression also checks tier 1 at every size and tier 2
+  at 128, 1024 and 4096 against `rtl/`; gaps SG5 explained and accepted
+  (C1 and D2 at 128, the `dmstati` poll granularity) are listed in
+  `regress.py` with their reason.
+- `REGRESS_FLAGS=--update` rewrites `expected/`, with a notes entry saying
+  why; `rtl/` is never written by it.
 - Expected files come from the author's container build, not Claude's
   sandbox: its LLVM build already moves `dma-timing`'s `done` by 1 to 3
   cycles (SG4 step 2).
-- Where `make regress` lives (the top `Makefile`, an upstream file with a
-  row in `UPSTREAM.md`, or `tests/snax/Makefile`) is P6's choice.
+- `make regress` and `make regress-plain` are targets of the top `Makefile`
+  (an upstream file, a row in `UPSTREAM.md`). The plain tests need the
+  runtime built for snax_cluster's 9-core cluster, which the ALU cluster's
+  build overwrites in the same checkout, so `regress-plain` builds them into
+  `build/regress/plain/` and rebuilds the ALU cluster's runtime; `regress`
+  runs whatever is there and says when it is empty.
+- The regression is one command with an exit code, so CI (later, SNAX parts
+  only) runs it as it is.
 
 ## Not verified
 
@@ -217,6 +227,9 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 - Whether either trace shows instructions before `_start` (a boot ROM); the
   phases start at `_start`, so it does not change them.
 - The race at 1024 and 4096 without the wait: estimated, not run.
+- The RTL's 14 cycles at the post-main barrier in C7 (1 on SNAX-GVSoC), and
+  its 5 to 8 cycles after each of the DMA core's first three stack stores in
+  D1: seen in the listings, not looked into.
 - The RTL's 2 more cycles before the check loop's `xor` on the second L1
   load (`xor a6, a6, a7`): probably the load's write-back waiting for a free
   register-file port, not modelled; 44 cycles per element against 45.
@@ -232,7 +245,7 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 | 5 | The same five ELFs on the RTL (author's run): the printed lines and the raw `.dasm` traces; phase tables from the script | done 2026-10-14 |
 | 6 | Per phase on both sides against the target, each gap classed. Findings only | done 2026-10-14 |
 | 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | done 2026-10-14 |
-| 8 | P6: the regression, `make regress` | todo |
+| 8 | P6: the regression, `make regress` | done 2026-10-14 |
 | 9 | Expected files written in the author's container (`--update`); `make regress` passes there | todo |
 | 10 | P7: SG5 closed here, and the STATUS.md and DECISIONS.md update for snax-forge (the target, the core's open items) | todo |
 

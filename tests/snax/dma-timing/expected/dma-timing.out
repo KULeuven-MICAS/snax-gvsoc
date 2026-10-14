@@ -1,0 +1,11 @@
+dma idle 0x0 B: issue 3 done 6 busy 0 r 0 w 0 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 1x64 B: issue 16 done 29 busy 14 r 1 w 1 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 1x256 B: issue 16 done 33 busy 17 r 4 w 4 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 1x800 B: issue 16 done 41 busy 26 r 13 w 13 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 1x4096 B: issue 16 done 93 busy 77 r 64 w 64 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 1x8192 B: issue 16 done 157 busy 141 r 128 w 128 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 2x800 B: issue 25 done 54 busy 39 r 26 w 26 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l2l1 4x800 B: issue 43 done 82 busy 66 r 52 w 52 ar_stall 0 w_stall 0 r_stall 0 err 0
+dma l1l2 1x800 B: issue 16 done 35 busy 20 r 13 w 13 ar_stall 0 w_stall 0 r_stall 0 err 0
+Number of errors: 0
+exit 0

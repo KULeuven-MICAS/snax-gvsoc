@@ -101,6 +101,32 @@ exits 0, as on the RTL. Adding `--trace=snax_acc0` before `run` prints every
 CSR access the streamer and the ALU get. Each program in `tests/snax/` has a
 README with its own expected output.
 
+## Regression
+
+`make regress` builds the programs of `tests/snax/`, runs each on
+`snax_alu` and compares its output exactly with its `expected/` folder:
+`snax-alu` at five sizes (printed lines, the streamer's counter, the phase
+table), `snax-stream`, `alu-timing`, the five `stream-timing` cases,
+`dma-timing` and `snax-csr`. It also checks `snax-alu` against the RTL run in
+`tests/snax/snax-alu/rtl/` with SG5's error target (`docs/plans/SG5.md`). It
+needs GVSoC built for `snitch;snax_alu` and snax_cluster's runtime built for
+the ALU cluster, as above, and takes about a minute.
+
+snax_cluster's 17 plain tests run on `snitch` too once their ELFs are in
+`build/regress/plain/`. `make regress-plain` puts them there: it builds them
+for snax_cluster's 9-core cluster and then rebuilds the runtime for the ALU
+cluster (run it again after moving the snax_cluster pin).
+
+    make regress-plain
+    make regress
+
+It ends with `regression passed` and exit 0, or lists each check that
+failed and exits 1. When a change is meant to move the numbers,
+`make regress REGRESS_FLAGS=--update` rewrites the `expected/` files (never
+`rtl/`); add a notes entry saying why. The expected files come from the
+development image, so a regression run elsewhere (another LLVM build) can
+differ by a few cycles.
+
 ## License
 
 Apache 2.0, see `LICENSE` and `UPSTREAM.md`.
