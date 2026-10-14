@@ -90,13 +90,17 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 
 ## Not verified
 
-- The common_cells commit of the RTL build: `Bender.yml` asks for 1.33.0
-  or later; read at v1.40.0. The author checks `Bender.lock` in step 4.
 - The input count of the RTL crossbar (counted 15); any count from 9 to 16
-  gives the same 16-leaf tree.
-- The counter values above, checked on the RTL in step 4.
+  gives the same 16-leaf tree, and the model's 12-input arbiter gives the
+  RTL's 15-input winners when 3 inputs are idle (Icarus, SG3 step 3).
 - Whether io v1 `DENIED` and grant pass through the cores' `pe_ico`
   routers; matters only if the cores join the crossbar.
+- The writer's timing and the beats to and from the accelerator against the
+  RTL: they need the ALU (SG4).
+
+Checked since step 1: the RTL build's common_cells is v1.40.0 at `1281545`,
+the commit read; the counter values, equal on the RTL in all five cases of
+`stream-timing` (step 5).
 
 ## The model
 
@@ -105,7 +109,7 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 | `SnaxAluAcc` | Python composite, `snax_acc[0]` | `input` (CSR), `tcdm_0` to `tcdm_11` |
 | `csr_mux` | sync `Router`, bandwidth 0 | 960 to 977 to the streamer, 978 up to the ALU slot, offsets from each block's first CSR |
 | `SnaxStreamer` | C++ | `input` (CSR), `tcdm_0` to `tcdm_11`; from P5 `reader_0`, `reader_1` (beats out), `writer_0` (beats in) |
-| ALU slot | `alu_regs` (the stub) up to P5, then a test datapath; the ALU in SG4 | `input` (the ALU's 5 CSRs, stub rules); from P5 `in_a`, `in_b`, `out` |
+| ALU slot | `alu_regs` (the stub) up to P5, then `test_datapath` (`SnaxTestDatapath`); the ALU in SG4 | `input` (the ALU's 5 CSRs); from P5 `in_a`, `in_b`, `out` |
 | `SnaxTcdmXbar` | C++, in `SnitchClusterTcdm` | `in_0` to `in_<n-1>` (SNAX ports), `out_0` to `out_31` on the same banks |
 
 - Python takes `data_reader_params` and `data_writer_params` with the
@@ -120,10 +124,13 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
   (the streamer's event, delay 0, queued after its requests: grants pop
   FIFOs and return credit, the AGU enqueues, busy and the counter move).
   Events run only while the streamer is busy.
-- Beats between the streamer and the ALU slot are io v1 requests: `OK` is
-  taken this cycle, `DENIED` is taken later with a grant.
-- The test datapath copies A or B to the output and takes a beat every
-  `k` cycles.
+- Beats between the streamer and the ALU slot are io v1 requests from the
+  datapath: `OK` moves the beat this cycle, `DENIED` does not (no grant
+  follows); a size-0 request is a probe. The datapath's event runs before
+  the streamer's step in a cycle, so a pop returns credit in time for that
+  cycle's requests.
+- The test datapath copies A or B to the output, one firing at most every
+  `k` cycles (mode bit 0 and bits 7:4).
 
 ## Tests
 
@@ -132,7 +139,7 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 | `stream-timing` | RTL and SNAX-GVSoC | Readers only, the writer's bound 0, at most 8 beats per lane: a zero-bound start; A alone; A and B on other banks; A and B on the same banks (B = A + 1 KiB); A with spatial stride 0 (four lanes on one bank). The counter per case, equal on both sides; the same-bank case traced per bank |
 | `snax-stream` | SNAX-GVSoC | `snax-alu`'s three streamers as `snax-alu` sets them (25 beats, A, B, O at +0, +800, +1600 B); the datapath copies A, then B, at k = 1 and 3; the output equals A or B |
 | `snax-alu` | SNAX-GVSoC | Runs to the end; both busy polls end |
-| Regression | SNAX-GVSoC | `snax-csr`, `dma-timing`, the 17 plain tests on `snitch` |
+| Regression | SNAX-GVSoC | `stream-timing`, `snax-csr`, `dma-timing`, the 17 plain tests on `snitch` |
 
 ## Steps
 
@@ -141,10 +148,10 @@ each channel is one 64-bit narrow TCDM port, 12 in all.
 | 1 | P1: this plan; the reading in the notes | done 2026-10-13 |
 | 2 | P2: `SnaxAluAcc` with the CSR router and two stubs. `snax-alu`'s 22 accesses and `snax-csr`'s 108 at the cycles and values of main before P2; `snax-csr` four lines of `0 errors` | done 2026-10-14 |
 | 3 | P3: `SnaxTcdmXbar`; the streamer's CSRs, start, busy, counter, AGU and readers; `stream-timing`. Counter per case on SNAX-GVSoC and the same-bank trace | done 2026-10-14 |
-| 4 | The same ELF on the RTL (author's run): the printed lines and the common_cells commit in `Bender.lock` | todo |
-| 5 | The counter per case on both sides, each gap named. Findings only | todo |
-| 6 | P4: the gaps of step 5; skipped if there are none | todo |
-| 7 | P5: writers, the beat ports, the test datapath; `snax-stream`; `snax-alu` runs to the end | todo |
+| 4 | The same ELF on the RTL (author's run): the printed lines and the common_cells commit in `Bender.lock` | done 2026-10-14 |
+| 5 | The counter per case on both sides, each gap named. Findings only | done 2026-10-14 |
+| 6 | P4: the gaps of step 5; skipped if there are none | skipped 2026-10-14: no gap |
+| 7 | P5: writers, the beat ports, the test datapath; `snax-stream`; `snax-alu` runs to the end | done 2026-10-14 |
 | 8 | P6: SG3 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | todo |
 
 ## Decided

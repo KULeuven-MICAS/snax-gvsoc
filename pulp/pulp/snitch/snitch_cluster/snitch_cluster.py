@@ -135,7 +135,8 @@ else:
             # component is built in the cluster and bound to that core's snax_csr port
             # through its i_INPUT(). A class with an nb_tcdm_ports attribute also gets
             # that many TCDM ports, bound through its o_TCDM(port, itf) to the cluster's
-            # SNAX crossbar. None for a cluster without accelerators.
+            # SNAX crossbar, named in its trace by tcdm_port_names when the class has
+            # them. None for a cluster without accelerators.
             self.snax_acc = snax_acc
             # SNAX: SnitchDma arguments that replace the cluster's defaults, e.g.
             # {'tcdm_width': 64}. None keeps them all.
@@ -156,7 +157,7 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
 
     # SNAX: nb_snax_ports adds a crossbar for the accelerators' TCDM ports in front of the
     # same banks, arbitrated per bank as snax_cluster's plain interconnect (snax/snax_tcdm_xbar).
-    def __init__(self, parent, name, arch, nb_snax_ports=0):
+    def __init__(self, parent, name, arch, nb_snax_ports=0, snax_port_names=None):
         super().__init__(parent, name)
 
         banks = []
@@ -183,7 +184,7 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
         if nb_snax_ports > 0:
             from snax_tcdm_xbar import SnaxTcdmXbar
             snax_xbar = SnaxTcdmXbar(self, 'snax_xbar', nb_inputs=nb_snax_ports,
-                nb_banks=nb_banks, bank_width=arch.bank_width)
+                nb_banks=nb_banks, bank_width=arch.bank_width, input_names=snax_port_names)
             for i in range(0, nb_banks):
                 snax_xbar.o_BANK(i, banks[i].i_INPUT())
             for i in range(0, nb_snax_ports):
@@ -221,11 +222,17 @@ class SnitchCluster(gvsoc.systree.Component):
         # SNAX accelerators: {core: component class}, and their TCDM ports, numbered in core
         # order as snax_cluster packs snax_tcdm_req_i
         snax_acc = getattr(arch, 'snax_acc', None) or {}
-        nb_snax_ports = sum(getattr(make_acc, 'nb_tcdm_ports', 0)
-            for make_acc in snax_acc.values())
+        snax_port_names = []
+        for core_id, make_acc in sorted(snax_acc.items()):
+            nb_ports = getattr(make_acc, 'nb_tcdm_ports', 0)
+            names = getattr(make_acc, 'tcdm_port_names', None) or \
+                [f'port{port}' for port in range(0, nb_ports)]
+            snax_port_names += [f'snax_acc{core_id}.{name}' for name in names]
+        nb_snax_ports = len(snax_port_names)
 
         # L1 Memory
-        tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=nb_snax_ports)
+        tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=nb_snax_ports,
+            snax_port_names=snax_port_names)
 
         # Zero memory
         zero_mem = ZeroMem(self, 'zero_mem', size=arch.zero_mem.size)

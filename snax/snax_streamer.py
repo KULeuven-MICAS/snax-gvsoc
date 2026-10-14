@@ -40,7 +40,8 @@ def movers_of(template: dict) -> list[dict]:
     """The template's movers, readers first then writers, as the streamer orders them."""
     check_template(template)
     movers = []
-    for group, is_reader in [('data_reader_params', True), ('data_writer_params', False)]:
+    for group, is_reader, kind in [('data_reader_params', True, 'reader'),
+            ('data_writer_params', False, 'writer')]:
         params = template.get(group)
         if params is None:
             continue
@@ -51,6 +52,7 @@ def movers_of(template: dict) -> list[dict]:
                 raise RuntimeError(f'{group}[{i}]: spatial bounds {spatial_bounds} need more '
                     f'than {num_channel} channels')
             movers.append({
+                'name': f'{kind}{i}',
                 'is_reader': is_reader,
                 'spatial_bounds': spatial_bounds,
                 'temporal_dim': params['temporal_dim'][i],
@@ -73,6 +75,12 @@ def nb_tcdm_ports(template: dict) -> int:
     return sum(mover['num_channel'] for mover in movers_of(template))
 
 
+def tcdm_port_names(template: dict) -> list[str]:
+    """The owner of each TCDM port, in port order: <mover>.lane<l>."""
+    return [f"{mover['name']}.lane{lane}" for mover in movers_of(template)
+        for lane in range(0, mover['num_channel'])]
+
+
 class SnaxStreamer(gvsoc.systree.Component):
     """A SNAX streamer: data movers with address generators and 64-bit TCDM ports.
 
@@ -93,6 +101,10 @@ class SnaxStreamer(gvsoc.systree.Component):
         CSR accesses, offsets from the first CSR (4 bytes per CSR).
     tcdm_<i> : io master
         Channel i's TCDM port, numbered readers first, as on the RTL.
+    reader_<i> : io slave
+        Reader i's beats to the accelerator (num_channel * 8 bytes; size 0 probes).
+    writer_<j> : io slave
+        Writer j's beats from the accelerator (num_channel * 8 bytes; size 0 probes).
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, template: dict,
@@ -112,3 +124,9 @@ class SnaxStreamer(gvsoc.systree.Component):
 
     def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'tcdm_{port}', itf, signature='io')
+
+    def i_READER(self, reader: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'reader_{reader}', signature='io')
+
+    def i_WRITER(self, writer: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'writer_{writer}', signature='io')

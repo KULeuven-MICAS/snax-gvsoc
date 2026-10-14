@@ -22,6 +22,7 @@
 // cores and the DMA do not go through this crossbar; they reach the same banks
 // on their own paths.
 
+#include <string>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
@@ -61,9 +62,13 @@ private:
     std::vector<int> pending_bank;
     // Per bank: rr_q, the round-robin state of its tree
     std::vector<int> rr_q;
+    // Per input: its owner's name for the trace, in_<i> when none is given
+    std::vector<std::string> names;
 
-    // Granted requests waiting for their response: (cycle, request)
+    // Granted requests waiting for their response: (cycle, request), and
+    // the input of each
     std::vector<std::pair<int64_t, vp::IoReq *>> responses;
+    std::vector<int> resp_input;
 };
 
 
@@ -84,6 +89,23 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     this->bank_bits = __builtin_ctz(this->nb_banks);
     this->width_bits = __builtin_ctz(bank_width);
     this->nb_levels = this->nb_inputs > 1 ? 32 - __builtin_clz(this->nb_inputs - 1) : 0;
+
+    js::Config *names = this->get_js_config()->get("input_names");
+    for (int i = 0; i < this->nb_inputs; i++)
+    {
+        this->names.push_back("in_" + std::to_string(i));
+    }
+    if (names != NULL)
+    {
+        int i = 0;
+        for (auto name : names->get_elems())
+        {
+            if (i < this->nb_inputs)
+            {
+                this->names[i++] = name->get_str();
+            }
+        }
+    }
 
     this->inputs = new vp::IoSlave[this->nb_inputs];
     this->banks = new vp::IoMaster[this->nb_banks];
@@ -110,6 +132,7 @@ void SnaxTcdmXbar::reset(bool active)
         this->pending.assign(this->nb_inputs, NULL);
         this->rr_q.assign(this->nb_banks, 0);
         this->responses.clear();
+        this->resp_input.clear();
     }
 }
 
@@ -121,13 +144,14 @@ vp::IoReqStatus SnaxTcdmXbar::req(vp::Block *__this, vp::IoReq *req, int id)
     uint64_t addr = req->get_addr();
     if (req->get_size() != (1ULL << _this->width_bits) || addr % req->get_size() != 0)
     {
-        _this->trace.force_warning("Unexpected access on in_%d (addr: 0x%lx, size: %ld)\n",
-            id, addr, req->get_size());
+        _this->trace.force_warning("Unexpected access on %s (addr: 0x%lx, size: %ld)\n",
+            _this->names[id].c_str(), addr, req->get_size());
         return vp::IO_REQ_INVALID;
     }
     if (_this->pending[id] != NULL && _this->pending[id] != req)
     {
-        _this->trace.force_warning("Two requests on in_%d in one cycle\n", id);
+        _this->trace.force_warning("Two requests on %s in one cycle\n",
+            _this->names[id].c_str());
         return vp::IO_REQ_INVALID;
     }
 
@@ -226,11 +250,11 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
             {
                 if (i != winner && ((req_mask >> i) & 1))
                 {
-                    held += " in_" + std::to_string(i);
+                    held += " " + _this->names[i];
                 }
             }
             _this->trace.msg(vp::Trace::LEVEL_DEBUG,
-                "Bank %d: grant in_%d (%s 0x%lx)%s%s\n", bank, winner,
+                "Bank %d: grant %s (%s 0x%lx)%s%s\n", bank, _this->names[winner].c_str(),
                 req->get_is_write() ? "write" : "read", addr,
                 held.empty() ? "" : ", held:", held.c_str());
         }
@@ -254,6 +278,7 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
 
         _this->pending[winner] = NULL;
         _this->responses.push_back({cycle + 1 + latency, req});
+        _this->resp_input.push_back(winner);
         resp_port->grant(req);
     }
 
@@ -279,15 +304,22 @@ void SnaxTcdmXbar::respond(vp::Block *__this, vp::ClockEvent *event)
 
     // In grant order, the ones due now; the others stay
     std::vector<std::pair<int64_t, vp::IoReq *>> later;
-    for (auto &entry : _this->responses)
+    std::vector<int> later_input;
+    for (size_t i = 0; i < _this->responses.size(); i++)
     {
+        auto &entry = _this->responses[i];
         if (entry.first <= cycle)
         {
-            entry.second->get_resp_port()->resp(entry.second);
+            vp::IoReq *req = entry.second;
+            _this->trace.msg(vp::Trace::LEVEL_TRACE, "Resp %s (%s 0x%lx)\n",
+                _this->names[_this->resp_input[i]].c_str(),
+                req->get_is_write() ? "write" : "read", req->get_addr());
+            req->get_resp_port()->resp(req);
         }
         else
         {
             later.push_back(entry);
+            later_input.push_back(_this->resp_input[i]);
             if (next == -1 || entry.first < next)
             {
                 next = entry.first;
@@ -295,6 +327,7 @@ void SnaxTcdmXbar::respond(vp::Block *__this, vp::ClockEvent *event)
         }
     }
     _this->responses = later;
+    _this->resp_input = later_input;
 
     if (next != -1)
     {

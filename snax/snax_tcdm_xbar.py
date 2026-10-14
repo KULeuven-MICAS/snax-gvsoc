@@ -25,6 +25,8 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
         TCDM banks, a power of two.
     bank_width : int
         Bytes per bank word, a power of two; every request is one word.
+    input_names : list[str]
+        The owner of each input, for the trace; in_<i> when not given.
 
     Ports
     -----
@@ -35,7 +37,7 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, nb_inputs: int,
-            nb_banks: int, bank_width: int):
+            nb_banks: int, bank_width: int, input_names: list[str] | None = None):
         super().__init__(parent, name)
 
         self.add_sources(['snax_tcdm_xbar.cpp'])
@@ -44,6 +46,8 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
             'nb_inputs': nb_inputs,
             'nb_banks': nb_banks,
             'bank_width': bank_width,
+            'input_names': list(input_names) if input_names is not None
+                else [f'in_{i}' for i in range(0, nb_inputs)],
         })
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:

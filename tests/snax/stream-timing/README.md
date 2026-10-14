@@ -12,7 +12,7 @@ reads at most `fifo_depth` (8) beats and the reader is done; the beats stay
 in its queues and hold its credit, and the RTL does not clear them at start.
 So each case is an ELF of its own.
 
-| Case | Readers | Counter (SNAX-GVSoC) |
+| Case | Readers | Counter (RTL and SNAX-GVSoC, SG3 step 5) |
 |---|---|---|
 | `zero_bound` | every temporal bound 0: busy one cycle | 0 |
 | `a_alone` | A: 8 beats from bank 0 | 9 |
@@ -43,5 +43,8 @@ after snax_cluster's runtime is built for the cluster (see
     done
 
 `--trace="snax_xbar:<file>"` writes the crossbar's grants per bank and cycle,
-with the inputs held; `--trace="snax_acc0/streamer:<file>"` the streamer's
-start, AGUs and end.
+with the inputs held, each named by its owner
+(`snax_acc0.streamer.reader0.lane0`); `--trace="snax_acc0/streamer:<file>"`
+the streamer's start, AGUs, end and per mover the cycle classes and the
+highest queue counts. With `--trace-level=trace` they add each read's
+response (`Resp`) and each lane queue's count (`Queue`).

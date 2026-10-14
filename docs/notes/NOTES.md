@@ -11,7 +11,7 @@ stay there.
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
 | snax_cluster, the programs and the RTL reference | `b2672f81bad52654bb3f1549cbe009f8ad8e1faf` (2026-10-13); SG0 used `8ebd422` |
-| common_cells, read for the TCDM arbiter (SG3) | `v1.40.0` (`1281545`); the RTL build's commit is checked in SG3 step 4 |
+| common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
 
@@ -765,3 +765,96 @@ stay there.
 - For step 4 (author's run on the RTL): the five ELFs of
   `tests/snax/stream-timing/build/`, the printed lines, and the
   common_cells version in snax_cluster's `Bender.lock`.
+
+### SG3 step 4: the RTL run
+
+- 2026-10-14. Author's run of P3's five `stream-timing` ELFs on
+  snax_cluster's RTL (Verilator) built from `snax_alu_cluster_old.hjson` at
+  `b2672f8`:
+
+  ```
+  stream-timing zero_bound: counter 0, polls 0, mcycle 13
+  stream-timing a_alone: counter 9, polls 3, mcycle 25
+  stream-timing ab_other_banks: counter 9, polls 3, mcycle 19
+  stream-timing ab_same_banks: counter 10, polls 3, mcycle 19
+  stream-timing a_stride0: counter 12, polls 3, mcycle 25
+  ```
+
+- `Bender.lock`: common_cells 1.40.0 at `1281545`, the commit read in step
+  1 and simulated against the model's arbiter in step 3.
+
+### SG3 step 5: the counter on both sides
+
+- 2026-10-14. The streamer's counter is equal on the RTL and on SNAX-GVSoC
+  in all five cases:
+
+  | Case | RTL | SNAX-GVSoC |
+  |---|---|---|
+  | `zero_bound` | 0 | 0 |
+  | `a_alone` | 9 | 9 |
+  | `ab_other_banks` | 9 | 9 |
+  | `ab_same_banks` | 10 | 10 |
+  | `a_stride0` | 12 | 12 |
+
+  So the start (first request at s + 2), the AGU's pace, the end rule
+  (counter g - s) and the round-robin order per bank match the RTL.
+- `polls` and `mcycle` are the core's: the RTL polls 3 times in every
+  running case, SNAX-GVSoC 0 to 4 (its first busy read comes 11 cycles after
+  the start write in `a_alone`); the RTL's `mcycle` span does not follow the
+  counter (`a_alone` 25, `ab_same_banks` 19), so the core's fetch timing
+  differs per ELF. SG5's, with SG2's issue and polling gaps.
+
+### SG3 step 6: P4 skipped
+
+- 2026-10-14. Step 5 left no gap in the streamer's counter.
+
+### SG3 step 7: P5, writers, beats and the test datapath
+
+- 2026-10-14. `SnaxStreamer` gains the writers and the beat ports
+  `reader_<i>` and `writer_<j>` (`num_channel` x 8 B, lane 0 first; size 0
+  is a probe, `DENIED` means not this cycle). Rules from the RTL: read data
+  enters its lane's queue one cycle after the grant and can leave the cycle
+  after; a beat leaves when every lane holds data, `repeat` times with
+  temporal stride 0; a pop returns credit in that cycle; a beat given to a
+  writer is taken when no lane's queue is full and can be written the next
+  cycle; a writer channel requests with an address and its lane's data, with
+  no credit, and is done at its last grant. A streamer that can do nothing
+  sleeps until a beat moves.
+- `snax/snax_test_datapath.py` / `.cpp`: `SnaxTestDatapath` in the ALU's
+  place (`test_datapath`), not the ALU. The ALU's 5 CSRs: mode (bit 0 copies
+  B instead of A, bits 7:4 are k - 1), length, start; busy (start + 1 to the
+  last firing), counter (those cycles). A firing takes one beat from each
+  reader and gives the chosen one to the writer, all or nothing (probes
+  first). Its event runs before the streamer's step in a cycle, so a pop
+  returns credit in time for that cycle's requests; at its first cycle the
+  order may be the other way round, which delays a request by one cycle at
+  most. `snax_csr_stub` is no longer used by the target and stays as a
+  placeholder for blocks not modelled yet.
+- Folded in from the profiling review (open items 59 and 61 of the plan
+  for P6, and the `resp` and queue events): the crossbar names its inputs
+  by owner (`snax_acc0.streamer.reader0.lane2`), from the accelerator's
+  `tcdm_port_names` through the cluster, and traces each response (`Resp`)
+  at trace level; the streamer traces each lane queue's count (`Queue`) at
+  trace level, at the cycle a word enters or leaves; per mover it classes
+  every cycle of a run as SNAX-MODEL did (`busy` > `stall_xbar` >
+  `stall_fifo` > `idle`, cycles slept through keep the class they had) and
+  writes the classes and each lane queue's highest count in the run's last
+  busy cycle. The classes add up to e - s in every run checked.
+- `tests/snax/snax-stream/`: `snax-alu`'s three streamers through its
+  library; the datapath copies A at k = 1, then B at k = 3; each run checks
+  O and prints the streamer's and the datapath's counters.
+- `snax-csr` leaves out the ALU's start CSR 980 as well: 98 accesses, 60
+  reads and 38 writes.
+- Results in Claude's sandbox:
+  - `snax-stream`: `copy A, k=1: errors 0, streamer counter 42, datapath
+    counter 25` and `copy B, k=3: errors 0, streamer counter 79, datapath
+    counter 73`; exit 0. In the first run the datapath starts 14 cycles
+    after the streamer, the readers wait 5 cycles for credit before it,
+    and the writer loses a bank to a reader twice (`stall_xbar 2`): the
+    writer meets the readers in the same banks, as step 1 expected.
+  - `snax-alu` runs to the end: `Accelerator Done!`, `Accelerator Cycles:
+    25`, `Number of errors: 97`, exit code 97. The datapath copies A where
+    the ALU adds; the 3 outputs that match are the elements where B is 0.
+  - `stream-timing`: the same five counters (0, 9, 9, 10, 12);
+    `snax-csr` four lines of `0 errors`; `dma-timing` as in SG2 step 7; the
+    17 plain tests (9-core build) exit 0 on `snitch`.
