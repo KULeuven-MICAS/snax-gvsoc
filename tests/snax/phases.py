@@ -9,8 +9,10 @@ hart 1 (DMA core), from either side:
 
 - SNAX-GVSoC: the files `--trace=pe0/insn:pe0.txt` and `--trace=pe1/insn:pe1.txt`
   write into the work directory;
-- snax_cluster's RTL: `logs/trace_chip_00_hart_00000.txt` and
-  `..._00001.txt` from `make traces`.
+- snax_cluster's RTL: the raw `logs/trace_chip_00_hart_00000.dasm` and
+  `..._00001.dasm` the run writes, read directly, so `make traces` (and its
+  `spike-dasm`) is not needed; the `.txt` files `make traces` makes from
+  them are read when there is no `.dasm`.
 
 The phase boundaries are markers found in the ELF by function symbol and
 instruction pattern (docs/plans/SG5.md, "Phases and markers"), never by a
@@ -53,6 +55,32 @@ def read_gvsoc(lines):
         m = _GVSOC_LINE.match(_ANSI.sub("", line))
         if m:
             out.append((int(m.group(1)), int(m.group(2), 16)))
+    return out
+
+
+_DASM_LINE = re.compile(
+    r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+0x([0-9a-fA-Fzx]+)\s+DASM\(([0-9a-fA-Fzx]+)\)\s*#;\s*(.*)$")
+_EXTRA = re.compile(r"'([^']+)'\s*:\s*0x([0-9a-fA-F]+)")
+
+
+def read_rtl_dasm(lines):
+    """snax_cluster's raw `trace_chip_*_hart_*.dasm` (snitch_cc.sv): time,
+    cycle, privilege, pc, `DASM(<word>)`, then `#;` and a dict of extras.
+
+    An instruction is a line from the integer core (`source` 0) that is not
+    stalled and not offloaded to the FPU: the lines `gen_trace.py` gives a
+    pc in the `.txt`. Stalled lines (load and accelerator write-backs) and
+    FPU and sequencer lines are skipped.
+    """
+    out = []
+    for line in lines:
+        m = _DASM_LINE.match(line)
+        if not m:
+            continue
+        extras = {k: int(v, 16) for k, v in _EXTRA.findall(m.group(6))}
+        if extras.get("source", 0) != 0 or extras.get("stall", 0) or extras.get("fpu_offload", 0):
+            continue
+        out.append((int(m.group(2)), int(m.group(4), 16)))
     return out
 
 
@@ -305,15 +333,19 @@ def load_traces(args):
     else:
         files = {}
         for h in (0, 1):
-            found = sorted(Path(args.rtl).glob(f"trace_chip_*_hart_*{h}.txt"))
+            for ext in ("dasm", "txt"):
+                found = sorted(Path(args.rtl).glob(f"trace_chip_*_hart_*{h}.{ext}"))
+                if found:
+                    break
             if len(found) != 1:
                 raise SystemExit(f"expected one trace for hart {h} in {args.rtl}, found {len(found)}")
             files[h] = found[0]
-        reader = read_rtl
+        reader = None
     traces = {}
     for h, path in files.items():
+        read = reader or (read_rtl_dasm if path.suffix == ".dasm" else read_rtl)
         with open(path) as f:
-            traces[h] = reader(f)
+            traces[h] = read(f)
     return traces
 
 
@@ -334,7 +366,7 @@ def main(argv=None):
     p.add_argument("elf")
     side = p.add_mutually_exclusive_group(required=True)
     side.add_argument("--gvsoc", metavar="WORKDIR", help="holds pe0.txt and pe1.txt")
-    side.add_argument("--rtl", metavar="LOGDIR", help="holds trace_chip_*_hart_*.txt")
+    side.add_argument("--rtl", metavar="LOGDIR", help="holds trace_chip_*_hart_*.dasm (or .txt)")
     p.add_argument("--json", metavar="OUT", help="also write the tables as JSON")
     args = p.parse_args(argv)
     try:

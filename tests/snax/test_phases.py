@@ -35,10 +35,27 @@ Performance metrics for section 0 @ (100, 103):
 """
 
 
+# The raw RTL trace, in the format of snitch_cc.sv's $sformat
+# ("%t %1d %8d 0x%h DASM(%h) #; %s": time, cycle, privilege, pc, word,
+# extras), not copied from a run: an issued instruction, a stalled line
+# (a load's write-back), an FPU line, and an instruction offloaded to the FPU.
+DASM = """\
+1000000 100        3 0x80000000 DASM(00010117) #; {'source': 0x0, 'stall': 0x0, 'rd': 0x2, 'fpu_offload': 0x0, }
+1010000 101        3 0x80000004 DASM(00012503) #; {'source': 0x0, 'stall': 0x1, 'retire_load': 0x1, 'fpu_offload': 0x0, }
+1010000 101        3 0xzzzzzzzz DASM(zzzzzzzzzzzzzzzz) #; {'source': 0x1, 'acc_q_hs': 0x1, }
+1020000 102        3 0x80000008 DASM(0005a007) #; {'source': 0x0, 'stall': 0x0, 'fpu_offload': 0x1, }
+1030000 103        3 0x8000000c DASM(00000013) #; {'source': 0x0, 'stall': 0x0, 'fpu_offload': 0x0, }
+"""
+
+
 class Traces(unittest.TestCase):
     def test_gvsoc(self):
         self.assertEqual(phases.read_gvsoc(GVSOC.splitlines()),
                          [(1742, 0x1000), (2529, 0x8000029C), (2530, 0x800002A0)])
+
+    def test_rtl_dasm(self):
+        self.assertEqual(phases.read_rtl_dasm(DASM.splitlines()),
+                         [(100, 0x80000000), (103, 0x8000000C)])
 
     def test_rtl(self):
         # The second line repeats cycle 100; the line without a pc is skipped;

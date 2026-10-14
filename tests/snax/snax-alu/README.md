@@ -71,8 +71,9 @@ give the name only:
     python3 tests/snax/phases.py tests/snax/snax-alu/build/snax-alu.elf \
         --gvsoc build/work/snax-alu --json build/work/snax-alu/phases.json
 
-On the RTL, after the run and `make traces` in snax_cluster's
-`target/snitch_cluster`, with the same ELF:
+On the RTL, after the run in snax_cluster's `target/snitch_cluster`, with
+the same ELF. The script reads the raw `logs/trace_chip_*_hart_*.dasm` the
+run writes, so `make traces` (and its `spike-dasm`) is not needed:
 
     python3 tests/snax/phases.py tests/snax/snax-alu/build/snax-alu.elf \
         --rtl ../snax_cluster/target/snitch_cluster/logs

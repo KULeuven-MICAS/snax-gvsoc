@@ -56,8 +56,10 @@ From source at snax_cluster `b2672f8`, read, not run.
   bytes in all, 96 KiB at 4096. The stacks, TLS and CLS sit at the top of
   the TCDM. A, B and OUT are globals in DRAM (`data.h`); the check loop reads
   OUT from DRAM and O from L1.
-- `make traces` writes `logs/trace_chip_<chip>_hart_<hart>.txt`
-  (`target/common/common.mk`), one per hart.
+- The run writes a raw trace per hart, `logs/trace_chip_<chip>_hart_<hart>.dasm`
+  (`hw/snitch_cluster/src/snitch_cc.sv`); `make traces` turns it into
+  `.txt` with `spike-dasm` (`target/common/common.mk`), which the image does
+  not have. The phase script reads the `.dasm` directly (P4b).
 
 ## The DMA wait (P2)
 
@@ -133,10 +135,15 @@ phases); it does not close open item 60 there.
   release; the RTL's stamp is read from `gen_trace.py` only (a stalled
   cycle has no pc, so the line with the pc comes when the instruction
   leaves the stall).
-- The RTL format is read from `util/trace/gen_trace.py` (time and cycle
+- On the RTL the script reads the raw `.dasm` (P4b): time, cycle,
+  privilege, pc, `DASM(<word>)` and a dict of extras, as `snitch_cc.sv`
+  writes them. An instruction is a line from the integer core (`source` 0),
+  not stalled and not offloaded to the FPU, the lines `gen_trace.py` gives
+  a pc; the RTL writes a line when the instruction leaves its stall. The
+  `.txt` of `make traces` is read when there is no `.dasm` (time and cycle
   blank when equal to the line before, no pc on stall and write-back lines,
-  the metrics after `## Performance metrics`), not from a run, until
-  step 5.
+  the metrics after `## Performance metrics`). Both formats are read from
+  source, not from a run, until step 5.
 - Markers are matched on the instruction word and the CSR number, not on a
   disassembler's names: `llvm-objdump` shows `dmstati` as `<unknown>` and
   982 as `pmpaddr38`.
@@ -209,7 +216,7 @@ Findings first (step 6), then a fix step, skipped if empty:
 | 2 | P2: the DMA wait in snax_cluster's `snax-alu.c` (a patch merged there) and the copy here synced, its README and the snax_cluster pin moved to that commit. `snax-alu` at 100 prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC | done 2026-10-14 |
 | 3 | P3: `tests/snax/phases.py` with unit tests on short trace excerpts; the phase table of `snax-alu` at 100 on SNAX-GVSoC | done 2026-10-14 |
 | 4 | P4: `snax-alu` at the five sizes, the L1 fit check; errors, 982, 977 and the phase tables on SNAX-GVSoC | done 2026-10-14 |
-| 5 | The same five ELFs on the RTL (author's run): the printed lines and `make traces`; phase tables from the script | todo |
+| 5 | The same five ELFs on the RTL (author's run): the printed lines and the raw `.dasm` traces; phase tables from the script | todo |
 | 6 | Per phase on both sides against the target, each gap classed. Findings only | todo |
 | 7 | P5: the gaps of step 6 in a block model or a target parameter; skipped if there are none | todo |
 | 8 | P6: the regression, `make regress` | todo |

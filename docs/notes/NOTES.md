@@ -1262,3 +1262,18 @@ stay there.
   build. The regression's expected files come from that container (SG5.md).
 - Not rerun: the other programs and the plain tests; P4 changes only
   `snax-alu`'s Makefile and README.
+
+### SG5 P4b: the raw RTL trace
+
+- 2026-10-14. `make traces` stops in the image: `spike-dasm` is not in it
+  (`/bin/sh: spike-dasm: not found`, then `gen_trace.py` fails on its empty
+  input). The phase script needs only each instruction's cycle and pc, which
+  the raw `logs/trace_chip_*_hart_*.dasm` already holds, so it reads those
+  directly (`read_rtl_dasm`): the lines from the integer core (`source` 0)
+  that are not stalled and not offloaded to the FPU, the lines `gen_trace.py`
+  gives a pc in the `.txt`. `--rtl` reads the `.dasm` when there is one,
+  the `.txt` otherwise. Format from `snitch_cc.sv` and `snitch_pkg.sv` at
+  `d7dd789`; one more unit test (10), on lines written in that format, not
+  copied from a run.
+- `spike-dasm` would be a build of Spike (riscv-isa-sim) in snax-forge's
+  image; not needed for SG5, so not added.
