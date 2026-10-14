@@ -37,7 +37,8 @@ run. No SNAX program used those forms before SG6.
 
 ## The RTL change (round 1)
 
-snax_cluster, branch `ry/sg6-zicsr`, two files:
+snax_cluster `9fbf35d` (#657, merged from the branch `ry/sg6-zicsr`), two
+files:
 
 - `hw/snitch/src/snitch.sv`, the SNAX branches of the decoder: `csrrw` /
   `csrrwi` with `rd` not `x0` take `rd` from the accelerator's response, as
@@ -67,8 +68,8 @@ snax_cluster, branch `ry/sg6-zicsr`, two files:
 |---|---|---|
 | `snax-csr` before SG6 (four parts) | RTL | Four lines of `0 errors`, exit 0 (17 and 20 errors before) |
 | `snax-csr` with SG6's part 3 | SNAX-GVSoC | Four lines of `0 errors`, exit 0, no warning; 110 accesses |
-| `snax-alu` at five sizes | RTL | The phases and printed lines equal `rtl/`, same ELFs |
-| Regression (`make regress`) | SNAX-GVSoC | Only `snax-csr`'s expected file changes |
+| `snax-alu` at five sizes | RTL | The phases and printed lines equal SG5's `rtl/` tables, same ELFs |
+| Regression (`make regress`) | SNAX-GVSoC | Round 2: only `snax-csr`'s expected file changes; from round 3 on, every program exits 0 |
 
 - Part 3 adds `csrrwi`, `csrrsi` and `csrrci` with `rd` not `x0` on 960, and
   `csrrc` with `x0`, `csrrsi` and `csrrci` with 0 on the read-only 982: a
@@ -88,8 +89,14 @@ snax_cluster, branch `ry/sg6-zicsr`, two files:
   rule.
 - SG4's warnings go; `snax-csr`'s expected file loses its two warning lines.
 - The extended `snax-csr` runs on SNAX-GVSoC only.
-- The RTL reference is snax_cluster's `ry/sg6-zicsr` (`4ffe96a`) until it is
-  merged (the pin in the notes).
+- The RTL reference is snax_cluster `9fbf35d` (#657), the pin in the notes.
+- `make regress` checks only that each program finishes: exit 0 within its
+  timeout. No exact numbers, `expected/` files, RTL references or ELF
+  hashes; SG5's `expected/` and `rtl/` folders are removed.
+- The comparison with the RTL (SG5's three-tier target) is made by hand, on
+  demand, from fresh runs of the same ELF on both sides with
+  `tests/snax/phases.py` (README, "Comparing with the RTL"). Better ways
+  come with more accelerators.
 
 ## Steps
 
@@ -97,4 +104,4 @@ snax_cluster, branch `ry/sg6-zicsr`, two files:
 |---|---|---|
 | 1 | Round 1: the RTL change on snax_cluster's `ry/sg6-zicsr`; `snax-csr` (four parts) and `snax-alu` at five sizes on the RTL | done 2026-10-14 |
 | 2 | Round 2: `priv.hpp`, SG4's warnings removed, `snax-csr`'s part 3 extended, the regression's expected file updated; this plan | done 2026-10-14 |
-| 3 | Round 3: snax-forge's docs (STATUS, D120) and the snax_cluster PR | todo |
+| 3 | Round 3: the snax_cluster PR (#657, merged); `make regress` pass/finish only; the pin moved to `9fbf35d`; snax-forge's docs (STATUS, D120, D124) | done 2026-10-14 |

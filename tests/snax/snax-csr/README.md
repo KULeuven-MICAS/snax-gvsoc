@@ -32,7 +32,7 @@ SG6, 108 before SG3 P3, 103 before SG3 P5).
 Every form follows Zicsr (D120 in snax-forge) on both sides: `csrrw` and
 `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`,
 `csrrsi` and `csrrci` write unless `rs1` is `x0` or `uimm` is 0. The RTL does
-so since snax_cluster's branch `ry/sg6-zicsr`: there the program as it was
+so since snax_cluster `9fbf35d` (#657): there the program as it was
 before SG6 prints four lines of `0 errors`. SG6's checks in part 3 run on
 SNAX-GVSoC only.
 

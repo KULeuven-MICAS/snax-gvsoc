@@ -1,5 +1,0 @@
-csrw/csrr: 0 errors
-csrrw: 0 errors
-set/clear/imm: 0 errors
-read-only: 0 errors
-exit 0

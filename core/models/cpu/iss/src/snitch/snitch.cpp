@@ -166,8 +166,8 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
 
 // Callback of every SNAX CSR: csrrs, csrrc and their immediate forms read through here,
 // and write through here when they set or clear bits; with rs1 = x0 or uimm = 0 they only
-// read (priv.hpp). Zicsr, as snax_cluster since its branch ry/sg6-zicsr
-// (snax_intf_translator.sv reads, then writes).
+// read (priv.hpp). Zicsr, as snax_cluster since 9fbf35d (#657;
+// snax_intf_translator.sv reads, then writes).
 bool Iss::snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value)
 {
     this->snax_csr_request(csr->address, is_write, value);
@@ -178,8 +178,8 @@ bool Iss::snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value)
 
 // csrrw and csrrwi on a SNAX CSR: one write request, after a read only when rd is not x0
 // (a csrw sends no read, as in the RISC-V spec). The decoder gives rd = x0 the index
-// ISS_NB_REGS, a register nothing reads, not 0. Zicsr, as snax_cluster since its branch
-// ry/sg6-zicsr (snitch.sv, snax_intf_translator.sv).
+// ISS_NB_REGS, a register nothing reads, not 0. Zicsr, as snax_cluster since 9fbf35d
+// (#657; snitch.sv, snax_intf_translator.sv).
 iss_reg_t SnaxCsr::handle(Iss *iss, iss_insn_t *insn, iss_reg_t pc, iss_reg_t reg_value)
 {
     if (insn->out_regs[0] != ISS_NB_REGS)

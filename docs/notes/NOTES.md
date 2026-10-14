@@ -10,8 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the programs and the RTL reference | `d7dd78967b86dae5c7d149f420dd69681714dac9` (2026-10-14): `b2672f8` plus the DMA wait in `snax-alu.c` (SG5 P2), the RTL unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8` |
-| snax_cluster, the RTL reference from SG6 on | branch `ry/sg6-zicsr` at `4ffe96a` (2026-10-14) until it is merged: `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged |
+| snax_cluster, the programs and the RTL reference | `9fbf35de566cbfed6fd1b5d6bf51903fa5ce33d1` (#657, 2026-10-14), from SG6 on: `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -1568,3 +1567,28 @@ stay there.
     csrrs/csrrc/csrrwi: 0 errors`, `got: set/clear/imm: 0 errors`; the two
     warning lines gone too); `REGRESS_FLAGS=--update` wrote that one file;
     then `regression passed`, every other number unchanged.
+
+### SG6 step 3: round 3
+
+- 2026-10-14. snax_cluster merged the branch as `9fbf35d` (#657), the same
+  tree as `4ffe96a`; it is the pin for the programs and the RTL reference
+  (Pins above, the clone command in `README.md`, `snax-alu`'s README, the
+  comments in `snitch.cpp`). The app, its library and the runtime are as at
+  `d7dd789`.
+- `make regress` checks only that each program finishes (the author's
+  choice): exit 0 within 300 s, on `snax_alu` for the 14 SNAX runs and on
+  `snitch` for the 17 plain ELFs when they are there; it names each program
+  that does not. No exact numbers, `expected/` files, RTL references or ELF
+  hashes: every `tests/snax/*/expected/` and `tests/snax/snax-alu/rtl/` are
+  removed (SG5's numbers stay in `docs/plans/SG5.md`, "Result", and in the
+  entries above), and `--update` is gone. `phases.py` and its tests stay:
+  the comparison with the RTL is made by hand from fresh runs of one ELF on
+  both sides (README, "Comparing with the RTL (by hand)"). Tried at 100 with
+  round 1's RTL traces: up to the read of 982, 5436 cycles on the RTL and
+  5444 on SNAX-GVSoC.
+- `make regress-plain`, then `make regress`: `regression passed`, exit 0
+  (14 SNAX runs, 17 plain). The rebuilt runtime relinks the `snax-alu`
+  ELFs (round 2's symbol-table difference), which no longer matters. With
+  `snax-csr` returning 1 for one run: `FAIL snax-csr: exit 1`, then
+  `regression FAILED: 1 program(s): snax-csr`; `regress.py` exits 1 (`make`
+  2). Reverted; passes again. The timeout path was not exercised.

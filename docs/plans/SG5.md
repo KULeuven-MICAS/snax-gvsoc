@@ -5,8 +5,9 @@ app, one ELF per `DATA_LEN`, run on snax_cluster's RTL and on SNAX-GVSoC;
 per-phase cycles cut from both sides' instruction traces, with the ALU's
 counter; the deviation per phase against an error target fixed here, before
 the first comparison (open item 3 in snax-forge); a regression test locking
-SNAX-GVSoC's numbers. Acceptance: the deviation explained per phase and
-inside the target; the regression fails when cycles drift.
+SNAX-GVSoC's numbers (changed in SG6: pass/finish only, the RTL compared by
+hand). Acceptance: the deviation explained per phase and inside the target;
+the regression fails when cycles drift.
 
 This file is the checklist; `docs/notes/NOTES.md` is the log. A step is
 ticked here when its entry is in the notes.
@@ -199,10 +200,11 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 | Test | Where | Checks |
 |---|---|---|
 | `snax-alu` at five sizes | RTL and SNAX-GVSoC | The printed lines, the phase table, the target's tiers |
-| Regression (`tests/snax/regress.py`, `make regress`) | SNAX-GVSoC | Exactly: `snax-alu` at five sizes with its phase table, `snax-stream`, `alu-timing`, `stream-timing`, `dma-timing`, `snax-csr` with its two warnings; the 17 plain tests on `snitch` exit 0 |
+| Regression (`tests/snax/regress.py`, `make regress`) | SNAX-GVSoC | Exactly: `snax-alu` at five sizes with its phase table, `snax-stream`, `alu-timing`, `stream-timing`, `dma-timing`, `snax-csr` with its two warnings; the 17 plain tests on `snitch` exit 0 (changed in SG6: pass/finish only, the RTL compared by hand) |
 
 - Expected files per program under `tests/snax/<program>/expected/`; the
-  author's RTL lines and phase tables under `tests/snax/snax-alu/rtl/`.
+  author's RTL lines and phase tables under `tests/snax/snax-alu/rtl/`
+  (changed in SG6: pass/finish only, the RTL compared by hand).
   For `snax-alu` the regression also checks tier 1 at every size and tier 2
   at 128, 1024 and 4096 against `rtl/`; gaps SG5 explained and accepted
   (C1 and D2 at 128, the `dmstati` poll granularity) are listed in
@@ -212,7 +214,8 @@ missing cycles on the core's data path (`SNAX_CORE`, `CORE_LATENCY` in
 - `rtl/<N>.elf.sha256` holds the hash of the ELF the RTL ran; a size whose
   ELF hashes differently fails, so the RTL reference is always from the ELF
   SNAX-GVSoC runs (D123). P6b, after step 9 found the step-5 RTL run made
-  with ELFs of an earlier runtime build.
+  with ELFs of an earlier runtime build (changed in SG6: pass/finish only,
+  the RTL compared by hand).
 - Expected files come from the author's container build, not Claude's
   sandbox: its LLVM build already moves `dma-timing`'s `done` by 1 to 3
   cycles (SG4 step 2).
@@ -290,7 +293,8 @@ and `expected/`), RTL / SNAX-GVSoC:
 - The three-tier target above, and the gap rule. Tier 2's total stops at
   the read of 982: C6 and C7 wait on the host's polling (P3).
 - The regression locks SNAX-GVSoC's numbers exactly; its expected files come
-  from the author's container.
+  from the author's container (changed in SG6: pass/finish only, the RTL
+  compared by hand).
 - When snax-gvsoc gets CI, it builds and tests only the SNAX parts (the
   `snax_alu` target, `snax/`, `tests/snax/`, the SNAX-related upstream
   files), not GVSoC's other components.
