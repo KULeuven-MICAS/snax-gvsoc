@@ -75,12 +75,14 @@ From source at snax_cluster `b2672f8` (`hw/snax_alu/src/`,
 
 ## Not verified
 
-- The writer's timing and the beat handshake as measured on the RTL: read
-  only, in SG3 and above; `alu-timing` measures them.
-- The first-cycle ordering in GVSoC against the RTL; `stream_first` is the
-  case where it can show.
+- The first-cycle ordering in GVSoC against the RTL: `stream_first` gives
+  the RTL's 982, but with full readers a refill request one cycle late is
+  absorbed by the 8 beats buffered, so no counter here would show it.
 - What Verilator does on the ReqRspManager's `assert` for a write to 981 or
   982. The model warns and refuses it.
+
+Checked since step 1: the writer's timing and the beat handshake, by the
+RTL's counters in `alu-timing` (step 6).
 
 ## The model
 
@@ -143,10 +145,10 @@ depend on it; that is the one compared.
 | 2 | P2: `SnaxAluShell` in the test datapath's place (removed); `snax-stream` on the ALU's modes. `snax-alu` prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC; `snax-stream` 0 errors in all four modes | done 2026-10-14 |
 | 3 | P3: the core's warnings on the two CSR forms; `snax-csr` four lines of `0 errors` and both warnings | done 2026-10-14 |
 | 4 | P4: `alu-timing`; its counters and errors on SNAX-GVSoC | done 2026-10-14 |
-| 5 | The same ELFs on the RTL (author's run): `snax-alu`, `snax-stream`, `alu-timing`, the printed lines | todo |
-| 6 | The counters per case on both sides, each gap named. Findings only | todo |
-| 7 | P5: the gaps of step 6; skipped if there are none | todo |
-| 8 | P6: SG4 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | todo |
+| 5 | The same ELFs on the RTL (author's run): `snax-alu`, `snax-stream`, `alu-timing`, the printed lines | done 2026-10-14 |
+| 6 | The counters per case on both sides, each gap named. Findings only | done 2026-10-14 |
+| 7 | P5: the gaps of step 6; skipped if there are none | skipped 2026-10-14: no gap |
+| 8 | P6: SG4 closed here, and the STATUS.md and DECISIONS.md update for snax-forge | done 2026-10-14 |
 
 ## Decided
 
@@ -168,13 +170,35 @@ depend on it; that is the one compared.
   its data. Taken up then; for now the waiting and the compute sit in one
   method each.
 - SNAX-GVSoC keeps Zicsr on SNAX CSRs (D120); the RTL is fixed in
-  snax_cluster later (`snitch.sv` decode, `snax_intf_translator.sv`), after
-  the SG series. Until then SNAX-GVSoC warns on the two forms that differ,
-  from SG4 on, since the same ELFs start running on both sides here.
-- Two more findings from P3's reading, fixed right after the SG series
-  together with the RTL: on the RTL, `csrrw` / `csrrwi` with `rd` not `x0`
-  writes `rd` with `rs1` or the immediate plus the CSR number (the decoder's
-  default ALU add), not with the CSR's value; and GVSoC's ISS (`priv.hpp`,
-  shared by every core) writes on `csrrc` with `x0` and on `csrrsi` /
-  `csrrci` with 0, where Zicsr writes nothing (`csrrs` already does not).
-  SG4 only warns: no SNAX program uses these forms.
+  snax_cluster (`snitch.sv` decode, `snax_intf_translator.sv`) in SG6, right
+  after SG5. Until then SNAX-GVSoC warns on the two forms that differ, from
+  SG4 on, since the same ELFs start running on both sides here.
+- Two more findings from P3's reading, fixed in SG6 together with the RTL:
+  on the RTL, `csrrw` / `csrrwi` with `rd` not `x0` writes `rd` with `rs1`
+  or the immediate plus the CSR number (the decoder's default ALU add), not
+  with the CSR's value; and GVSoC's ISS (`priv.hpp`, shared by every core)
+  writes on `csrrc` with `x0` and on `csrrsi` / `csrrci` with 0, where Zicsr
+  writes nothing (`csrrs` already does not). SG4 only warns: no SNAX program
+  uses these forms.
+- Result: every counter that does not depend on the core's timing equals
+  the RTL in `snax-alu`, `snax-stream` and all five `alu-timing` cases, with
+  0 errors on both sides; `snax-alu` prints `Accelerator Cycles: 25` and
+  `Number of errors: 0` on both.
+
+## SG5 starts from
+
+- The two start writes land about 2 cycles further apart on SNAX-GVSoC than
+  on the RTL: 5 against 3 cycles (streamer, then ALU, in `snax-stream`), 6
+  against 4 (ALU, then streamer, in `alu-timing`), read from the counters
+  that depend on the gap. With SG2's issue and polling gap, this is the
+  core's side of SG5's per-phase deviation.
+- The printed `mcycle` start gaps differ more than the CSR writes (-16
+  against -5 in `alu_first`): they include the `mcycle` reads and the calls
+  around them.
+- The ALU's event runs every cycle while busy, also while it waits for
+  beats; it can sleep until a beat moves, as the streamer does (housekeeping
+  after SG5).
+- The first-cycle ordering is not shown wrong, only not visible in a counter
+  (above, "Not verified").
+- SG6, right after SG5: Zicsr on SNAX CSRs on both sides, and P3's warnings
+  removed.

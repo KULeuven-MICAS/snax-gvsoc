@@ -1018,3 +1018,78 @@ stay there.
     before any firing; O = A - B.
 - Not rerun: the other programs and the plain tests; P4 adds a program and
   changes nothing they use.
+
+### SG4 step 5: the RTL run
+
+- 2026-10-14. Author's run of P4's ELFs (`snax-alu`, `snax-stream`,
+  `alu-timing`) on snax_cluster's RTL (Verilator) built from
+  `snax_alu_cluster_old.hjson` at `b2672f8`:
+
+  ```
+  Accelerator Done!
+  Accelerator Cycles: 25
+  Number of errors: 0
+
+  snax-stream add: errors 0, streamer counter 29, alu counter 25
+  snax-stream sub: errors 0, streamer counter 29, alu counter 25
+  snax-stream mul: errors 0, streamer counter 29, alu counter 25
+  snax-stream xor: errors 0, streamer counter 29, alu counter 25
+
+  alu-timing alu_first: errors 0, streamer counter 29, alu counter 32, start gap -5
+  alu-timing stream_first: errors 0, streamer counter 132, alu counter 25, start gap 103
+  alu-timing out_one_bank: errors 0, streamer counter 210, alu counter 72, start gap 104
+  alu-timing len1: errors 0, streamer counter 5, alu counter 1, start gap -5
+  alu-timing restart_idle: errors 0, streamer counter 29, alu counter 32, start gap -5
+  ```
+
+### SG4 step 6: the counters on both sides
+
+- 2026-10-14. SNAX-GVSoC's values from Claude's sandbox (steps 2 and 4).
+  Every counter that does not depend on the core's timing is equal:
+
+  | Program, case | Counter | RTL | SNAX-GVSoC |
+  |---|---|---|---|
+  | `snax-alu` | 982 | 25 | 25 |
+  | `snax-stream`, each mode | 982 | 25 | 25 |
+  | `alu_first` | 977 | 29 | 29 |
+  | `stream_first` | 982 | 25 | 25 |
+  | `out_one_bank` | 982 | 72 | 72 |
+  | `len1` | 982, 977 | 1, 5 | 1, 5 |
+  | `restart_idle` | 977 | 29 | 29 |
+
+  So the beat path (reader → ALU → writer), the writer's last grant, its
+  `ready` rule and the back-pressure into the ALU, the counter's end rule
+  and the re-latch on a second start match the RTL. The writer's timing and
+  the beat handshake, open since SG3, are checked.
+- The counters that depend on the gap between the two start writes differ
+  by the core's timing: with the ALU first, 982 is the gap plus 28 (RTL 32,
+  4 cycles; SNAX-GVSoC 34, 6 cycles); with the streamer first, 977 is the
+  gap plus 26 (`snax-stream`: RTL 29, 3 cycles; SNAX-GVSoC 31, 5 cycles);
+  after the 100-cycle wait, 132 against 134 and 210 against 211. SNAX-GVSoC's
+  core puts about 2 more cycles between two library CSR calls. SG5's.
+- The first-cycle ordering of SG3 step 7 is not visible: `stream_first`
+  starts the ALU on full readers, and a refill request one cycle late is
+  absorbed by the 8 beats buffered.
+
+### SG4 step 7: P5 skipped
+
+- 2026-10-14. Step 6 left no gap in the counters compared.
+
+### SG4 step 8: SG4 closed
+
+- 2026-10-14. All steps done, P5 skipped; acceptance met: `snax-alu` prints
+  `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC, as on
+  the RTL, and every counter of `snax-stream` and `alu-timing` that does not
+  depend on the core's timing equals the RTL.
+- Settled (the list is in `docs/plans/SG4.md` under "Decided"): the ALU
+  copies `snax_alu_csr.sv`, start while busy included; the test datapath is
+  gone and `snax-stream` runs on both sides; timing by the same ELFs on both
+  sides; the CSR-form warnings until SG6 fixes both sides. In snax-forge:
+  D123 (the same ELF on both sides), D120 amended, open items 62 to 64, and
+  SG6.
+- Upstream files changed in SG4: `core/models/cpu/iss/src/snitch/snitch.cpp`
+  and `include/cores/snitch/class.hpp` (P3); rows in `UPSTREAM.md`. New in
+  `snax/`: `snax_alu_shell`; removed: `snax_test_datapath`. New test:
+  `alu-timing`.
+- Next: SG5, the baseline, planned in its own round from the list under
+  "SG5 starts from" in `docs/plans/SG4.md`.
