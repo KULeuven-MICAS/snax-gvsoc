@@ -11,6 +11,7 @@ stay there.
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
 | snax_cluster, the programs and the RTL reference | `d7dd78967b86dae5c7d149f420dd69681714dac9` (2026-10-14): `b2672f8` plus the DMA wait in `snax-alu.c` (SG5 P2), the RTL unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8` |
+| snax_cluster, the RTL reference from SG6 on | branch `ry/sg6-zicsr` at `4ffe96a` (2026-10-14) until it is merged: `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -1490,3 +1491,80 @@ stay there.
   `expected/` and `rtl/` folders, the other programs' `expected/`.
 - Next: SG6, Zicsr on SNAX CSRs on both sides, from the list under "SG6
   starts from" in `docs/plans/SG5.md`; then the housekeeping pass; then CI1.
+
+### SG6 step 1: round 1, the RTL
+
+- 2026-10-14. Author's run on snax_cluster's branch `ry/sg6-zicsr` at
+  `8d16b0c` (`4ffe96a`, the pin, adds a README and `.gitignore` change
+  only), RTL built from `snax_alu_cluster_old.hjson` and run on Questa
+  2022.4. `docs/plans/SG6.md` has the forms and the change:
+  - `snitch.sv`, the SNAX branches of the decoder only: `csrrw` / `csrrwi`
+    with `rd` not `x0` take `rd` from the accelerator's response (`write_rd`
+    0, `uses_rd` and `acc_register_rd` 1, as `csrrs`); `csrrs` / `csrrc` send
+    `rs1` as operand A, `csrrsi` / `csrrci` the `uimm`.
+  - `snax_intf_translator.sv`: a read then a write for `csrrw` / `csrrwi`
+    with `rd` not `x0` and for the set and clear forms with `rs1` / `uimm`
+    not 0 (old value, or old `|` / `& ~` mask), accepted only with no older
+    read outstanding, `qready` low until the write is taken. A small state
+    machine (`RmwIdle`, `RmwWaitRsp`, `RmwWrite`); the read's data goes to
+    the core through the existing ID FIFO. `csrw` and `csrr` keep their
+    handshake and timing.
+- Before, at `d7dd789`, `snax-csr` (the program of SG5) on the RTL:
+  `csrw/csrr: 0 errors`, `csrrw: 17 errors` (each old value read as
+  `rs1 + CSR number`), `csrrs/csrrc/csrrwi: 20 errors` (3 more: nothing
+  written), `read-only: 20 errors`, exit code 20.
+- After, on `ry/sg6-zicsr`: four lines of `0 errors`, exit code 0.
+  `snax-alu` at the five sizes, the ELFs of `rtl/` (sha256 equal): the phase
+  tables of `phases.py --rtl` and the printed lines equal `rtl/<N>.json` and
+  `rtl/<N>.out`. A clean rebuild (`make clean`, 750 modules compiled) gave the
+  same.
+- Seen on the way: `vsim` exits 0 whatever the program returns (the
+  testbench prints `[SUCCESS]` or `[FAILURE] Finished with exit code N`); on a
+  host without bender, `make bin/snitch_cluster.vsim` does not see an edited
+  `.sv` file. Both are in snax_cluster's `target/snitch_cluster/README.md` on
+  that branch.
+
+### SG6 step 2: round 2, SNAX-GVSoC
+
+- 2026-10-14. Before the change, `make build TARGETS="snitch;snax_alu"`
+  failed: main (`44453a3`, #5) removed the root `CMakeLists.txt`. Restored on
+  the branch from `61905d3`, unchanged, to be fixed on main. snax_cluster's
+  runtime was rebuilt (`make sw` for the ALU cluster; round 1's `make clean`
+  had removed it); the `tests/snax/` ELFs relinked against it differ from
+  `rtl/` only in their symbol table, three mapping symbols (`$x`, `$d`, `$d`)
+  from `snitch_cluster_start.S`: with every symbol stripped they are
+  byte-identical. The earlier ELFs were put back, so `rtl/`'s hashes hold;
+  why the start-up object gained the symbols was not found. Then
+  `make regress` passed.
+- `snax-csr`'s part 3 gains, on 960 after `csrwi 5`: `csrrwi rd, 960, 7`,
+  `csrrsi rd, 960, 8`, `csrrci rd, 960, 3` (old value 5, 7, 15; then 7, 15,
+  12), and on the read-only 982 (0, nothing ran): `csrrc rd, 982, x0`,
+  `csrrsi rd, 982, 0`, `csrrci rd, 982, 0`, each 0. Its label is now
+  `set/clear/imm`. With main's GVSoC it stopped at the first no-write form,
+  `csrrc a3, 982, x0` (pc `0x80001218`), at cycle 9270:
+  `/chip/soc/cluster_0/snax_acc0/alu/trace Write to read-only CSR 982
+  (value: 0x0)`, exit 1; the checks on 960 had passed. The two SG4 warnings
+  came out on stdout there, not stderr as the README said.
+- `priv.hpp` (every core): `csrrc` with `rs1 = x0` and `csrrsi` / `csrrci`
+  with 0 write nothing and ask `check_access()` for no write, as `csrrs`.
+  An input `x0` decodes as 0 (`decode.cpp`); only an output `x0` is
+  `ISS_NB_REGS`. Upstream's generic `csrrw` / `csrrwi` path still reads with
+  `rd = x0` (its `!= 0` check, SG1 step 6); SNAX CSRs do not use it
+  (`SnaxCsr::handle()`), so it is left.
+- SG4 P3's two warnings and their flags removed (`snitch.cpp`, `class.hpp`),
+  the comments saying both sides follow Zicsr; `UPSTREAM.md` drops SG4 P3's
+  rows and gains `priv.hpp`'s.
+- Results in the author's container:
+  - `snax-csr`: four lines of `0 errors`, exit 0, nothing on stderr. The
+    streamer and the ALU see 110 accesses, 69 reads and 41 writes (streamer
+    58 and 37, ALU 11 and 4); SG4's 98 plus 9 reads and 3 writes on 960 and
+    3 reads on 982. As in SG3 step 2, a `printf` line split one `csr_mux`
+    trace line, so a `grep` there finds 68 reads.
+  - Static scan of the 31 ELFs `make regress` runs (a throwaway script,
+    opcode 0x73, funct3 3, 6 or 7, bits 19:15 = 0): 0 in every ELF but
+    `snax-csr`, which has 4, its three forms and a copy of the `csrrc` that
+    clang put in the error path of the check before it.
+  - `make regress`: failed on `snax-csr`'s expected file alone (`expected:
+    csrrs/csrrc/csrrwi: 0 errors`, `got: set/clear/imm: 0 errors`; the two
+    warning lines gone too); `REGRESS_FLAGS=--update` wrote that one file;
+    then `regression passed`, every other number unchanged.

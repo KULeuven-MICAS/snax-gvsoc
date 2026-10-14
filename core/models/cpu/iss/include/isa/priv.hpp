@@ -18,6 +18,7 @@
 /*
  * Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #pragma once
 
@@ -73,7 +74,7 @@ static inline iss_reg_t csrrc_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
     iss_reg_t reg_value = REG_GET(0);
 
     CsrAbtractReg *csr = iss->csr.get_csr(UIM_GET(0));
-    if (csr && !csr->check_access(iss, true, true))
+    if (csr && !csr->check_access(iss, REG_IN(0) != 0, true))
     {
         return pc;
     }
@@ -89,7 +90,11 @@ static inline iss_reg_t csrrc_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
         }
     }
 
-    iss_csr_write(iss, insn, UIM_GET(0), value & ~reg_value);
+    // rs1 = x0 only reads (Zicsr), as csrrs
+    if (REG_IN(0) != 0)
+    {
+        iss_csr_write(iss, insn, UIM_GET(0), value & ~reg_value);
+    }
 
     return iss_insn_next(iss, insn, pc);
 }
@@ -164,7 +169,7 @@ static inline iss_reg_t csrrci_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
     iss_reg_t value;
 
     CsrAbtractReg *csr = iss->csr.get_csr(UIM_GET(0));
-    if (csr && !csr->check_access(iss, true, true))
+    if (csr && !csr->check_access(iss, UIM_GET(1) != 0, true))
     {
         return pc;
     }
@@ -179,7 +184,11 @@ static inline iss_reg_t csrrci_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
             REG_SET(0, value);
         }
     }
-    iss_csr_write(iss, insn, UIM_GET(0), value & ~UIM_GET(1));
+    // uimm = 0 only reads (Zicsr)
+    if (UIM_GET(1) != 0)
+    {
+        iss_csr_write(iss, insn, UIM_GET(0), value & ~UIM_GET(1));
+    }
     return iss_insn_next(iss, insn, pc);
 }
 
@@ -188,7 +197,7 @@ static inline iss_reg_t csrrsi_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
     iss_reg_t value;
 
     CsrAbtractReg *csr = iss->csr.get_csr(UIM_GET(0));
-    if (csr && !csr->check_access(iss, true, true))
+    if (csr && !csr->check_access(iss, UIM_GET(1) != 0, true))
     {
         return pc;
     }
@@ -203,7 +212,11 @@ static inline iss_reg_t csrrsi_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
             REG_SET(0, value);
         }
     }
-    iss_csr_write(iss, insn, UIM_GET(0), value | UIM_GET(1));
+    // uimm = 0 only reads (Zicsr)
+    if (UIM_GET(1) != 0)
+    {
+        iss_csr_write(iss, insn, UIM_GET(0), value | UIM_GET(1));
+    }
     return iss_insn_next(iss, insn, pc);
 }
 
