@@ -69,9 +69,8 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) | SG2 P5 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `nb_snax_ports` and builds `SnaxTcdmXbar` (`snax/`) in front of the same banks; `SnitchCluster` counts the accelerators' `nb_tcdm_ports` and binds each one's ports to it | SG3 P3 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `snax_port_names`; `SnitchCluster` names each SNAX port `snax_acc<core>.<name>` from the accelerator's `tcdm_port_names` | SG3 P5 |
-| `core/models/cpu/iss/src/snitch/snitch.cpp` | `SnaxCsr::handle()` warns once per run on `csrrw` / `csrrwi` with `rd` not `x0`, `Iss::snax_csr_access()` once on a write from `csrrs`, `csrrc`, `csrrsi` or `csrrci`, without stopping the run | SG4 P3 |
-| `core/models/cpu/iss/include/cores/snitch/class.hpp` | `Iss` gains the two flags of those warnings | SG4 P3 |
 | `core/models/cpu/iss/include/lsu.hpp`, `include/lsu_implem.hpp`, `src/lsu.cpp` | `Lsu` takes `int_loads_in_flight` from the core's properties (0, no limit, when absent; only 0 and 1 modelled): with 1, a load stalls the core until the previous load's data is back (`load_wait`, `load_issued` in `load` and `load_signed`) | SG5 P5 |
 | `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes `int_loads_in_flight` (0) as a property | SG5 P5 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `core`, `Snitch` arguments that replace the cores' defaults, and `core_latency`, cycles added on each core's data path to the TCDM (`tcdm`) and out of the cluster (`narrow`, the map to `narrow_axi`) | SG5 P5 |
-| `Makefile` | `regress` (runs `tests/snax/regress.py`) and `regress-plain` (builds snax_cluster's plain tests for its 9-core cluster into `build/regress/plain/`, then rebuilds the runtime for the ALU cluster) | SG5 P6 |
+| `Makefile` | `regress` (runs `tests/snax/regress.py`: every program exits 0, SG6) and `regress-plain` (builds snax_cluster's plain tests for its 9-core cluster into `build/regress/plain/`, then rebuilds the runtime for the ALU cluster) | SG5 P6 |
+| `core/models/cpu/iss/include/isa/priv.hpp` | `csrrc` with `rs1` = `x0`, and `csrrsi` / `csrrci` with `uimm` = 0, write nothing (Zicsr), as `csrrs` already did; for every core | SG6 |

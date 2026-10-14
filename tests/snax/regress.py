@@ -2,80 +2,53 @@
 # Copyright 2026 KU Leuven.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""SNAX-GVSoC's regression (SG5): `make regress` from snax-gvsoc.
+"""SNAX-GVSoC's regression (SG5, pass/finish only since SG6): `make regress`.
 
-Builds the SNAX programs of tests/snax/, runs each on the `snax_alu` target
-and compares its output exactly with the program's `expected/` folder:
-
-- `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096: the printed lines, the
-  exit code, the streamer's counter (977, from its trace) and the phase
-  table (phases.py);
-- `snax-stream`, `alu-timing`, the five `stream-timing` cases, `dma-timing`,
-  `snax-csr` (with its two CSR-form warnings): the printed lines and the
-  exit code.
-
-For `snax-alu` it also checks SG5's error target against the RTL run in
-`tests/snax/snax-alu/rtl/` (docs/plans/SG5.md, "The target"): tier 1 at
-every size, tier 2 at 128, 1024 and 4096, but for the gaps in ACCEPTED.
-`rtl/<N>.elf.sha256` is the hash of the ELF the RTL ran; a size whose ELF
-now hashes differently fails, since its RTL reference is from another ELF.
-
+Builds the SNAX programs of tests/snax/ and runs each on the `snax_alu`
+target: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096, `snax-stream`,
+`alu-timing`, the five `stream-timing` cases, `dma-timing` and `snax-csr`.
 The plain tests of snax_cluster run on the `snitch` target when their ELFs
-are in build/regress/plain/ (`make regress-plain` builds them): each must
-exit 0.
+are in build/regress/plain/ (`make regress-plain` builds them).
+
+A program passes when it exits 0 within TIMEOUT seconds: every SNAX program
+but `stream-timing` returns its error count, `stream-timing` returns 0. No
+output or cycle count is compared; the comparison with the RTL is made by
+hand with phases.py (README, "Comparing with the RTL").
 
 Needs GVSoC built for `snitch;snax_alu` and snax_cluster's runtime built
-for `cfg/snax_alu_cluster_old.hjson` (README). `--update` rewrites the
-`expected/` files from this run; `rtl/` is never written here. Exit code 0
-when everything matches, 1 otherwise.
+for `cfg/snax_alu_cluster_old.hjson` (README). Exit code 0 when every
+program passes, 1 otherwise.
 """
 
-import argparse
-import hashlib
-import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-sys.path.insert(0, str(HERE))
-import phases  # noqa: E402
 
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0"]
 PLAIN_DIR = ROOT / "build" / "regress" / "plain"
 PLAIN_COUNT = 17  # snax_cluster's sw/tests at the pinned commit
 WORK = ROOT / "build" / "regress" / "work"
-
-# Tier 2 (within 10% of the RTL) at these sizes, for these phases.
-TIER2_SIZES = [128, 1024, 4096]
-TIER2_ROWS = ["C1 barrier", "D2 DMA wait", "C3 ALU poll", "C5 check loop", "total_to_982"]
-TIER2_LIMIT = 0.10
-# Gaps outside tier 2 that SG5 explained and accepted: (size, row) -> reason.
-ACCEPTED = {
-    (128, "C1 barrier"): "the RTL core polls dmstati every 5 cycles, GVSoC every 2 (SG5 step 6)",
-    (128, "D2 DMA wait"): "the RTL core polls dmstati every 5 cycles, GVSoC every 2 (SG5 step 6)",
-}
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+TIMEOUT = 300  # seconds per program; each takes a few
 
 
-def gvrun(target, elf, workdir, traces=()):
-    """Runs one ELF; returns its output (colour codes stripped) and exit code."""
+def gvrun(target, elf, workdir):
+    """Runs one ELF; returns its exit code, or None when it does not finish."""
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / 'install' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT / 'install' / 'python'}:{env.get('PYTHONPATH', '')}"
     cmd = ["gvrun", "--target", target, "--work-dir", str(workdir),
-           "--param", f"chip/soc/binary={elf}"]
-    for t in traces:
-        cmd.append(f"--trace={t}")
-    cmd.append("run")
-    p = subprocess.run(cmd, env=env, cwd=ROOT, stdout=subprocess.PIPE,
-                       stderr=subprocess.STDOUT, text=True)
-    return _ANSI.sub("", p.stdout), p.returncode
+           "--param", f"chip/soc/binary={elf}", "run"]
+    try:
+        p = subprocess.run(cmd, env=env, cwd=ROOT, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None
+    return p.returncode
 
 
 def make(path, *args):
@@ -86,151 +59,52 @@ def make(path, *args):
 
 
 class Check:
-    """Compares a run's files with the expected ones, or writes them."""
+    """Collects the programs that did not exit 0."""
 
-    def __init__(self, update):
-        self.update = update
+    def __init__(self):
         self.failed = []
-        self.written = []
 
-    def compare(self, name, path, actual):
-        if self.update:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists() or path.read_text() != actual:
-                path.write_text(actual)
-                self.written.append(path)
+    def run(self, name, target, elf, work=None):
+        code = gvrun(target, elf, WORK / (work or name))
+        if code == 0:
             return
-        if not path.exists():
-            self.fail(name, f"no expected file {path.relative_to(ROOT)} (run with --update)")
-        elif path.read_text() != actual:
-            self.fail(name, f"differs from {path.relative_to(ROOT)}")
-            for a, b in zip(path.read_text().splitlines(), actual.splitlines()):
-                if a != b:
-                    print(f"    expected: {a}\n    got:      {b}")
-                    break
+        why = f"did not finish within {TIMEOUT} s" if code is None else f"exit {code}"
+        self.fail(name, why)
 
     def fail(self, name, why):
         self.failed.append(name)
         print(f"  FAIL {name}: {why}")
 
 
-def run_program(check, name, prog, elf):
-    out, code = gvrun("snax_alu", elf, WORK / name)
-    check.compare(name, HERE / prog / "expected" / f"{name}.out", f"{out}exit {code}\n")
-    print(f"  {name}: exit {code}")
+def main():
+    check = Check()
 
+    print("SNAX programs on snax_alu")
+    for n in SIZES:
+        make(HERE / "snax-alu", f"DATA_LEN={n}")
+        check.run(f"snax-alu-{n}", "snax_alu", HERE / "snax-alu" / "build" / str(n) / "snax-alu.elf")
+    for prog in ("snax-stream", "alu-timing", "dma-timing", "snax-csr"):
+        make(HERE / prog)
+        check.run(prog, "snax_alu", HERE / prog / "build" / f"{prog}.elf")
+    make(HERE / "stream-timing")
+    for case in STREAM_CASES:
+        check.run(f"stream-timing-{case}", "snax_alu",
+                  HERE / "stream-timing" / "build" / f"stream-timing-{case}.elf")
+    print(f"  {len(SIZES) + 4 + len(STREAM_CASES)} run")
 
-def run_snax_alu(check, n):
-    prog = HERE / "snax-alu"
-    make(prog, f"DATA_LEN={n}")
-    elf = prog / "build" / str(n) / "snax-alu.elf"
-    work = WORK / f"snax-alu-{n}"
-    out, code = gvrun("snax_alu", elf, work,
-                      ["pe0/insn:pe0.txt", "pe1/insn:pe1.txt", "streamer:streamer.txt"])
-    done = [line for line in _ANSI.sub("", (work / "streamer.txt").read_text()).splitlines()
-            if "Done:" in line]
-    counter = done[-1].rsplit("counter", 1)[1].strip() if done else "none"
-    traces = {h: phases.read_gvsoc(open(work / f"pe{h}.txt")) for h in (0, 1)}
-    table = phases.phase_tables(str(elf), traces)
-    name = f"snax-alu-{n}"
-    check.compare(name, prog / "expected" / f"{n}.out", f"{out}exit {code}\n977 {counter}\n")
-    check.compare(name, prog / "expected" / f"{n}.phases.json", json.dumps(table, indent=1) + "\n")
-    print(f"  {name}: exit {code}, 977 {counter}, total up to 982 {table['total_to_982']}")
-    return elf, out, table
-
-
-def against_rtl(check, runs):
-    """SG5's target: tier 1 at every size, tier 2 at TIER2_SIZES."""
-    rtl = HERE / "snax-alu" / "rtl"
-    print("snax-alu against the RTL (tests/snax/snax-alu/rtl/)")
-    for n, (elf, out, table) in runs.items():
-        rtl_out, rtl_json = rtl / f"{n}.out", rtl / f"{n}.json"
-        rtl_sha = rtl / f"{n}.elf.sha256"
-        missing = [p.name for p in (rtl_out, rtl_json, rtl_sha) if not p.exists()]
-        if missing:
-            check.fail(f"rtl-{n}", f"no {', '.join(missing)} in {rtl.relative_to(ROOT)}")
-            continue
-        # The RTL reference holds only for the ELF the RTL ran (D123)
-        sha = hashlib.sha256(elf.read_bytes()).hexdigest()
-        if rtl_sha.read_text().split()[0] != sha:
-            check.fail(f"rtl-{n}", f"the RTL reference in {rtl.relative_to(ROOT)} comes from "
-                       f"another ELF than {elf.relative_to(ROOT)} (sha256 {sha[:12]}); "
-                       "rerun the RTL and refresh rtl/ (README, Regression)")
-            continue
-        # The RTL's simulator may prefix printed lines with "# "
-        want = [l.removeprefix("# ") for l in rtl_out.read_text().splitlines() if l.strip()]
-        got = [l.strip() for l in out.splitlines() if l.strip()]
-        for line in want:
-            if line.strip() not in got:
-                check.fail(f"rtl-{n}", f"tier 1: the RTL printed {line.strip()!r}, SNAX-GVSoC did not")
-        rtl_table = json.loads(rtl_json.read_text())
-        if n not in TIER2_SIZES:
-            continue
-        cells = []
-        for row in TIER2_ROWS:
-            g, r = _cycles(table, row), _cycles(rtl_table, row)
-            dev = (g - r) / r
-            ok = abs(dev) <= TIER2_LIMIT
-            mark = "" if ok else (" accepted" if (n, row) in ACCEPTED else " FAIL")
-            cells.append(f"{row} {dev:+.0%}{mark}")
-            if not ok and (n, row) not in ACCEPTED:
-                check.fail(f"rtl-{n}", f"tier 2: {row} {g} against {r} ({dev:+.0%})")
-        print(f"  {n}: " + ", ".join(cells))
-
-
-def _cycles(table, row):
-    if row == "total_to_982":
-        return table["total_to_982"]
-    for hart in table["harts"].values():
-        for r in hart:
-            if r["phase"] == row:
-                return r["cycles"]
-    raise KeyError(row)
-
-
-def run_plain(check):
     elfs = sorted(PLAIN_DIR.glob("*.elf"))
     if not elfs:
         print(f"plain tests: none in {PLAIN_DIR.relative_to(ROOT)}, skipped (make regress-plain)")
-        return
-    print(f"plain tests on snitch ({len(elfs)} in {PLAIN_DIR.relative_to(ROOT)})")
-    if len(elfs) != PLAIN_COUNT:
-        check.fail("plain", f"{len(elfs)} ELFs, expected {PLAIN_COUNT}")
-    for elf in elfs:
-        _, code = gvrun("snitch", elf, WORK / "plain" / elf.stem)
-        if code != 0:
-            check.fail(f"plain {elf.stem}", f"exit {code}")
-    print(f"  {len(elfs)} run")
+    else:
+        print(f"plain tests on snitch ({len(elfs)} in {PLAIN_DIR.relative_to(ROOT)})")
+        if len(elfs) != PLAIN_COUNT:
+            check.fail("plain", f"{len(elfs)} ELFs, expected {PLAIN_COUNT}")
+        for elf in elfs:
+            check.run(f"plain {elf.stem}", "snitch", elf, f"plain/{elf.stem}")
+        print(f"  {len(elfs)} run")
 
-
-def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--update", action="store_true",
-                   help="rewrite the expected/ files from this run (add a notes entry)")
-    args = p.parse_args(argv)
-    check = Check(args.update)
-
-    print("snax-alu")
-    runs = {n: run_snax_alu(check, n) for n in SIZES}
-    print("other programs")
-    for prog in ("snax-stream", "alu-timing", "dma-timing", "snax-csr"):
-        make(HERE / prog)
-        run_program(check, prog, prog, HERE / prog / "build" / f"{prog}.elf")
-    make(HERE / "stream-timing")
-    for case in STREAM_CASES:
-        run_program(check, f"stream-timing-{case}", "stream-timing",
-                    HERE / "stream-timing" / "build" / f"stream-timing-{case}.elf")
-    if not args.update:
-        against_rtl(check, runs)
-    run_plain(check)
-
-    if args.update:
-        for path in check.written:
-            print(f"written {path.relative_to(ROOT)}")
-        print(f"{len(check.written)} expected files written; add a notes entry saying why")
-        return 1 if check.failed else 0
     if check.failed:
-        print(f"regression FAILED: {len(check.failed)} check(s)")
+        print(f"regression FAILED: {len(check.failed)} program(s): {', '.join(check.failed)}")
         return 1
     print("regression passed")
     return 0

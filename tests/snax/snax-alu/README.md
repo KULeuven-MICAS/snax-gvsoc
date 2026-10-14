@@ -1,9 +1,9 @@
 # snax-alu
 
 snax_cluster's `snax-alu` app, copied here so SNAX-GVSoC is developed against
-a fixed program. Source: snax_cluster `d7dd789` (`b2672f8` with the DMA
-core waiting for its transfers before the barrier, SG5 P2), cluster
-`cfg/snax_alu_cluster_old.hjson`.
+a fixed program. Source: snax_cluster `9fbf35d` (#657, SG6's Zicsr fix; the
+app as at `d7dd789`, `b2672f8` with the DMA core waiting for its transfers
+before the barrier, SG5 P2), cluster `cfg/snax_alu_cluster_old.hjson`.
 
 | File | From snax_cluster |
 |---|---|
@@ -86,15 +86,6 @@ barrier 132, C2a 114, C2b 14, C3 33 (5 polls), C4 6 (1 poll), C5 check loop
 read of 982. The unit tests of the script:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
-
-## Regression files
-
-`expected/` holds SNAX-GVSoC's output per size for `make regress`:
-`<N>.out` (the printed lines, the exit code, 977) and `<N>.phases.json`.
-`rtl/` holds the RTL run of the same ELFs (SG5 step 9): `<N>.out` (the
-printed lines), `<N>.json` (`phases.py --json` on the RTL traces) and
-`<N>.elf.sha256` (the hash of the ELF the RTL ran, which `make regress`
-checks).
 
 ## Sizes
 

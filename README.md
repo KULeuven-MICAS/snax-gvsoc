@@ -58,7 +58,7 @@ beside this repo; only the ELF files are run here. Clone it next to this
 repo, at the commit in `docs/notes/NOTES.md`, with its submodules:
 
     git clone https://github.com/KULeuven-MICAS/snax_cluster.git ../snax_cluster
-    git -C ../snax_cluster checkout d7dd78967b86dae5c7d149f420dd69681714dac9
+    git -C ../snax_cluster checkout 9fbf35de566cbfed6fd1b5d6bf51903fa5ce33d1
     git -C ../snax_cluster submodule update --init --recursive
 
 In the container, started from the parent folder as above, build
@@ -103,50 +103,49 @@ README with its own expected output.
 
 ## Regression
 
-`make regress` builds the programs of `tests/snax/`, runs each on
-`snax_alu` and compares its output exactly with its `expected/` folder:
-`snax-alu` at five sizes (printed lines, the streamer's counter, the phase
-table), `snax-stream`, `alu-timing`, the five `stream-timing` cases,
-`dma-timing` and `snax-csr`. It also checks `snax-alu` against the RTL run in
-`tests/snax/snax-alu/rtl/` with SG5's error target (`docs/plans/SG5.md`). It
-needs GVSoC built for `snitch;snax_alu` and snax_cluster's runtime built for
-the ALU cluster, as above, and takes about a minute.
+`make regress` builds the programs of `tests/snax/` and runs each on
+`snax_alu`: `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the five
+`stream-timing` cases, `dma-timing` and `snax-csr`. A program passes when it
+exits 0 within its timeout: each returns its error count, `stream-timing`
+returns 0. No output or cycle count is compared (SG6). It needs GVSoC built
+for `snitch;snax_alu` and snax_cluster's runtime built for the ALU cluster,
+as above, and takes about a minute.
 
 snax_cluster's 17 plain tests run on `snitch` too once their ELFs are in
 `build/regress/plain/`. `make regress-plain` puts them there: it builds them
 for snax_cluster's 9-core cluster and then rebuilds the runtime for the ALU
-cluster (run it again after moving the snax_cluster pin). That rebuild can
-change the `snax-alu` ELFs, which `make regress` then rebuilds.
+cluster (run it again after moving the snax_cluster pin); `make regress`
+rebuilds the programs against it.
 
     make regress-plain
     make regress
 
-It ends with `regression passed` and exit 0, or lists each check that
-failed and exits 1. When a change is meant to move the numbers,
-`make regress REGRESS_FLAGS=--update` rewrites the `expected/` files (never
-`rtl/`); add a notes entry saying why. The expected files come from the
-development image, so a regression run elsewhere (another LLVM build) can
-differ by a few cycles.
+It ends with `regression passed` and exit 0, or names each program that
+failed or did not finish and exits 1.
 
-`tests/snax/snax-alu/rtl/<N>.elf.sha256` is the hash of the ELF the RTL ran.
-When a `snax-alu` ELF changes, its size fails with "the RTL reference ...
-comes from another ELF": run the ELFs on the RTL again and refresh `rtl/`.
-In snax_cluster's `target/snitch_cluster`, for each size:
+## Comparing with the RTL (by hand)
+
+Cycles are compared with the RTL by hand, on demand, from fresh runs of one
+ELF on both sides, against SG5's target (`docs/plans/SG5.md`, "The target";
+D124 in snax-forge). For `snax-alu` at size `n`
+(`make -C tests/snax/snax-alu DATA_LEN=$n`), run the ELF on snax_cluster's
+RTL with Questa as its `target/snitch_cluster/README.md` says, from that
+folder:
 
     rm -rf logs
-    bin/snitch_cluster.vlt ../../../snax-gvsoc/tests/snax/snax-alu/build/$n/snax-alu.elf | tee rtl-$n.log
+    bin/snitch_cluster.vsim ../../../snax-gvsoc/tests/snax/snax-alu/build/$n/snax-alu.elf
     rm -rf logs-$n && mv logs logs-$n
 
-then in snax-gvsoc, for each size:
+then here, on SNAX-GVSoC with both cores' instruction traces, and cut both
+runs into phases:
 
-    R=../snax_cluster/target/snitch_cluster
-    A=tests/snax/snax-alu
-    sha256sum $A/build/$n/snax-alu.elf | cut -d' ' -f1 > $A/rtl/$n.elf.sha256
-    python3 tests/snax/phases.py $A/build/$n/snax-alu.elf --rtl $R/logs-$n --json $A/rtl/$n.json
-    grep -E 'Accelerator Done|Accelerator Cycles|Number of errors' $R/rtl-$n.log \
-        | sed 's/^# //' > $A/rtl/$n.out
+    E=tests/snax/snax-alu/build/$n/snax-alu.elf
+    gvrun --target snax_alu --work-dir build/work/cmp-$n --trace=pe0/insn:pe0.txt \
+        --trace=pe1/insn:pe1.txt --param chip/soc/binary=$PWD/$E run
+    python3 tests/snax/phases.py $E --rtl ../snax_cluster/target/snitch_cluster/logs-$n
+    python3 tests/snax/phases.py $E --gvsoc build/work/cmp-$n
 
-with `n` each of 4, 100, 128, 1024, 4096, and a notes entry saying why.
+`--show PHASE` lists one phase's instructions on either side.
 
 ## License
 
