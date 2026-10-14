@@ -1156,3 +1156,53 @@ stay there.
   markers match on the CSR number, not its name.
 - Not rerun: the other programs and the plain tests; P2 changes no file they
   use.
+
+### SG5 step 3: P3, the phase script
+
+- 2026-10-14. `tests/snax/phases.py ELF --gvsoc WORKDIR | --rtl LOGDIR
+  [--json OUT]` cuts a `snax-alu` run into the phases of SG5.md from both
+  cores' instruction traces, with markers found in the ELF by symbol and
+  instruction word: the barrier word in `main`, the CSR writes to 975 and
+  980 and the read of 982 by CSR number, the three poll loops as a call (or
+  `dmstati`) at P with a branch back at P + 4, `main`'s `ret`, and the
+  store to `tohost` as an `auipc` and store pair. A missing marker is a
+  named error (the ELF before P2 gives "poll loop of dmstati not found in
+  main"). 9 unit tests in `tests/snax/test_phases.py`; the RTL lines in them
+  follow `gen_trace.py`'s format, not a run, until step 5.
+- On SNAX-GVSoC a trace file name is relative to the work directory:
+  `--trace=pe0/insn:pe0.txt` writes `<work-dir>/pe0.txt`; a path with the
+  work directory in it fails with "Unable to open file" (exit 134).
+- Results in Claude's sandbox, `snax-alu` at 100:
+
+  | Hart 0 | Start | Cycles | Insns | Polls |
+  |---|---|---|---|---|
+  | C0 boot | 1754 | 644 | 122 | |
+  | C1 barrier | 2398 | 132 | 19 | |
+  | C2a CSR setup | 2530 | 114 | 46 | |
+  | C2b CSR setup | 2644 | 14 | 3 | |
+  | C3 ALU poll | 2658 | 33 | 22 | 5 |
+  | C4 streamer poll | 2691 | 6 | 4 | 1 |
+  | C5 check loop | 2697 | 2040 | 1510 | |
+  | C6 printf | 4737 | 6445 | 2846 | |
+  | C7 exit | 11182 | 76 | 12 | |
+
+  | Hart 1 | Start | Cycles | Insns | Polls |
+  |---|---|---|---|---|
+  | D0 boot | 1754 | 653 | 331 | |
+  | D1 DMA issue | 2407 | 91 | 33 | |
+  | D2 DMA wait | 2498 | 30 | 30 | 15 |
+  | D3 barrier | 2528 | 2 | 2 | |
+  | D4 post-main and exit | 2530 | 8728 | 30 | |
+
+  Total 9504 cycles; up to the read of 982 (C0 to C5) 2983.
+- C6 is the host's: each `printf` line ends in a syscall through `tohost`,
+  and `_putchar` spins on `fromhost` until the host answers. Here the three
+  spins (about 100 cycles each) end at 6009, 9006 and 11009, on a grid of
+  about 1000 cycles. That is why the run ends at the same cycle before and
+  after P2 (step 2). Tier 2's total therefore stops at the read of 982; C6,
+  C7 and the full total move to tier 3 (SG5.md updated).
+- C5 takes about 20 cycles per element: the core loads OUT from DRAM, two
+  32-bit loads per 64-bit element. A tier-2 phase, on the core's path to
+  DRAM.
+- Not rerun: the other programs and the plain tests; P3 adds a script and
+  changes no program.

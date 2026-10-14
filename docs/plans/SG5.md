@@ -99,20 +99,47 @@ DMA core (hart 1):
 | D1 DMA issue | the first `dmstati` of the wait | |
 | D2 DMA wait | the first instruction after the `dmstati` loop; holds the transfer | `dmstati` polls |
 | D3 barrier | `main`'s `csrr x0, 0x7c2` retired | |
-| D4 post-main and exit | the end of hart 1's exit (marker fixed in P3); holds the compute core's C2 to C6 | |
+| D4 post-main and exit | the run's end, hart 0's store to `tohost`; holds the compute core's C2 to C7 | |
 
-Total: from `_start` on hart 0 to its store to `tohost`. Beside the table:
-982 as printed, and 977 from SNAX-GVSoC's streamer trace (the app does not
-read 977, so the RTL has none).
+Total: from `_start` on hart 0 to its store to `tohost`. Total up to 982:
+from `_start` on hart 0 to the read of 982, C0 to C5; it leaves out C6 and
+C7, which wait on the host (below). Beside the table: 982 as printed, and
+977 from SNAX-GVSoC's streamer trace (the app does not read 977, so the RTL
+has none).
+
+C6 and C7 are the host's, not the cluster's. Each `printf` line ends in a
+syscall: `_putchar` (`target/snitch_cluster/sw/runtime/rtl/src/putchar.c`)
+writes `tohost` and spins on `fromhost` until the host answers, and the exit
+is a write to `tohost`. On SNAX-GVSoC the three answers come on a grid of
+about 1000 cycles (spins of about 100 cycles ending at 6009, 9006 and
+11009 at `DATA_LEN` 100), so C6 is set by how often each side's host polls.
 
 ## The phase script (P3)
 
-`tests/snax/phases.py`: reads the RTL's `trace_chip_*_hart_*.txt` and
-GVSoC's `--trace=pe0/insn` and `pe1/insn` output, finds the markers in the
-ELF's disassembly, and writes one phase table per side and a comparison.
-Plain Python, no dependency outside the image. It is the first piece of
-FLOW3's converter in snax-forge (instruction events to phases); it does not
-close open item 60 there.
+`tests/snax/phases.py ELF --gvsoc WORKDIR | --rtl LOGDIR [--json OUT]`:
+reads GVSoC's `pe0.txt` and `pe1.txt` (written by `--trace=pe0/insn:pe0.txt`
+and `pe1/insn:pe1.txt`; a trace file name is relative to the work
+directory) or the RTL's `trace_chip_*_hart_*.txt`, finds the markers in the
+ELF's words and symbols, and prints one phase table per hart and the two
+totals. Plain Python and pyelftools, in the image's venv; unit tests in
+`tests/snax/test_phases.py`. The comparison of two sides is P6's. It is the
+first piece of FLOW3's converter in snax-forge (instruction events to
+phases); it does not close open item 60 there.
+
+- The cycle of an instruction is the one on its trace line. A phase that
+  ends at a marker marked "retired" starts the next phase at the line after
+  it, so a stall of that instruction counts in its own phase whether the
+  trace stamps it before or after the stall. GVSoC stamps a barrier at its
+  release; the RTL's stamp is read from `gen_trace.py` only (a stalled
+  cycle has no pc, so the line with the pc comes when the instruction
+  leaves the stall).
+- The RTL format is read from `util/trace/gen_trace.py` (time and cycle
+  blank when equal to the line before, no pc on stall and write-back lines,
+  the metrics after `## Performance metrics`), not from a run, until
+  step 5.
+- Markers are matched on the instruction word and the CSR number, not on a
+  disassembler's names: `llvm-objdump` shows `dmstati` as `<unknown>` and
+  982 as `pmpaddr38`.
 
 ## The sizes
 
@@ -132,8 +159,8 @@ is not required. Three tiers:
 | Tier | What | Target |
 |---|---|---|
 | 1 | 982 in `snax-alu`; the error count | Equal on both sides, 0 errors, every size |
-| 2 | The phases that grow with N: C1, D2, C3, C5, and the total | Within 10% of the RTL, at 128, 1024 and 4096 |
-| 3 | The fixed-cost phases (C0, C2a, C2b, C4, C6, C7, D0, D1, D3, D4); every phase at 4 and 100 | No number; each gap explained |
+| 2 | The phases that grow with N: C1, D2, C3, C5, and the total up to 982 | Within 10% of the RTL, at 128, 1024 and 4096 |
+| 3 | The fixed-cost phases (C0, C2a, C2b, C4, D0, D1, D3, D4); C6, C7 and the full total, which wait on the host; every phase at 4 and 100 | No number; each gap explained |
 
 C4 is in tier 3: the streamer ends 2 to 4 cycles after the ALU at any N.
 
@@ -166,12 +193,11 @@ Findings first (step 6), then a fix step, skipped if empty:
 
 ## Not verified
 
-- The two trace formats as the script reads them (P3).
+- The RTL trace format as the script reads it, until step 5's traces.
 - Whether either trace shows instructions before `_start` (a boot ROM); the
   phases start at `_start`, so it does not change them.
 - The size of the top region of the TCDM, for the fit of 4096 (P4).
 - The race at 1024 and 4096 without the wait: estimated, not run.
-- The trace path of hart 1 on SNAX-GVSoC (`pe1/insn` is assumed).
 
 ## Steps
 
@@ -179,7 +205,7 @@ Findings first (step 6), then a fix step, skipped if empty:
 |---|---|---|
 | 1 | P1: this plan; the reading in the notes; the SG5 row in snax-forge's STATUS | done 2026-10-14 |
 | 2 | P2: the DMA wait in snax_cluster's `snax-alu.c` (a patch merged there) and the copy here synced, its README and the snax_cluster pin moved to that commit. `snax-alu` at 100 prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC | done 2026-10-14 |
-| 3 | P3: `tests/snax/phases.py` with unit tests on short trace excerpts; the phase table of `snax-alu` at 100 on SNAX-GVSoC | todo |
+| 3 | P3: `tests/snax/phases.py` with unit tests on short trace excerpts; the phase table of `snax-alu` at 100 on SNAX-GVSoC | done 2026-10-14 |
 | 4 | P4: `snax-alu` at the five sizes, the L1 fit check; errors, 982, 977 and the phase tables on SNAX-GVSoC | todo |
 | 5 | The same five ELFs on the RTL (author's run): the printed lines and `make traces`; phase tables from the script | todo |
 | 6 | Per phase on both sides against the target, each gap classed. Findings only | todo |
@@ -197,7 +223,8 @@ Findings first (step 6), then a fix step, skipped if empty:
   stays; the copy here follows that commit unchanged. Fixed in snax_cluster
   rather than in a variant program, so `snax-alu` stays snax_cluster's app.
 - Five sizes: 4, 100, 128, 1024, 4096; seed 0, one ELF each.
-- The three-tier target above, and the gap rule.
+- The three-tier target above, and the gap rule. Tier 2's total stops at
+  the read of 982: C6 and C7 wait on the host's polling (P3).
 - The regression locks SNAX-GVSoC's numbers exactly; its expected files come
   from the author's container.
 - When snax-gvsoc gets CI, it builds and tests only the SNAX parts (the

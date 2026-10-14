@@ -54,3 +54,31 @@ On snax_cluster's RTL:
 
 On SNAX-GVSoC since SG4 P2, with the ALU model (`snax/snax_alu_shell.py`),
 exit code 0: the same three lines.
+
+## Phases
+
+`../phases.py` cuts a run into phases from both cores' instruction traces
+(SG5, `docs/plans/SG5.md`). On SNAX-GVSoC, trace both cores into the work
+directory; a trace file name is taken relative to the work directory, so
+give the name only:
+
+    gvrun --target snax_alu --work-dir build/work/snax-alu \
+        --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf \
+        --trace=pe0/insn:pe0.txt --trace=pe1/insn:pe1.txt run
+    python3 tests/snax/phases.py tests/snax/snax-alu/build/snax-alu.elf \
+        --gvsoc build/work/snax-alu --json build/work/snax-alu/phases.json
+
+On the RTL, after the run and `make traces` in snax_cluster's
+`target/snitch_cluster`, with the same ELF:
+
+    python3 tests/snax/phases.py tests/snax/snax-alu/build/snax-alu.elf \
+        --rtl ../snax_cluster/target/snitch_cluster/logs
+
+It prints one table per core and the totals. At `DATA_LEN` 100 on
+SNAX-GVSoC (SG5 step 3), hart 0's phases are C0 boot 644 cycles, C1
+barrier 132, C2a 114, C2b 14, C3 33 (5 polls), C4 6 (1 poll), C5 check loop
+2040, C6 printf 6445, C7 exit 76; hart 1's D0 653, D1 91, D2 30 (15
+`dmstati` polls), D3 2, D4 8728; the total is 9504 cycles, 2983 up to the
+read of 982. The unit tests of the script:
+
+    python3 -m unittest discover -s tests/snax -p 'test_*.py'
