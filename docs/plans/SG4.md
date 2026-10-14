@@ -96,16 +96,22 @@ From source at snax_cluster `b2672f8` (`hw/snax_alu/src/`,
   s: a firing in s uses the old mode and length.
 - Start while busy is taken as the RTL takes it, never refused. A warning,
   not a refusal, for a start with length 0 and for one that keeps a
-  `len_counter` at or past the new `length - 1`.
+  `len_counter` at or past the new `length - 1`; it does not stop the run
+  (`force_warning_no_error`: GVSoC runs with `werror`, and the RTL just
+  stays busy).
 - A firing probes `in_a`, `in_b` and `out`, then moves all three or none, as
   the test datapath did. Its event runs every cycle while busy.
+- How the ALU waits for its inputs and its output (`try_fire`) and what it
+  does with a beat (`compute`) are one method each, so a later accelerator
+  with another data interface changes only those.
 - Trace: each firing; at the end of a run its cycle classes in D59's order
   at II = 1 (`busy` > `stall_out` > `stall_in` > `idle`), for open item 57
   in snax-forge.
 - `SnaxTestDatapath` is removed.
 - The Snitch core warns once per run on `csrrw` with `rd` not `x0` and once
   on `csrrs` / `csrrc` with a mask, in `SnaxCsr::handle()` (an upstream
-  file): the forms where SNAX-GVSoC and the RTL differ.
+  file): the forms where SNAX-GVSoC and the RTL differ. They warn without
+  stopping the run, so `snax-csr` still tests D120's paths.
 
 ## Tests
 
@@ -134,7 +140,7 @@ depend on it; that is the one compared.
 | # | Step | Status |
 |---|---|---|
 | 1 | P1: this plan; the reading in the notes | done 2026-10-14 |
-| 2 | P2: `SnaxAluShell` in the test datapath's place (removed); `snax-stream` on the ALU's modes. `snax-alu` prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC; `snax-stream` 0 errors in all four modes | todo |
+| 2 | P2: `SnaxAluShell` in the test datapath's place (removed); `snax-stream` on the ALU's modes. `snax-alu` prints `Accelerator Cycles: 25` and `Number of errors: 0` on SNAX-GVSoC; `snax-stream` 0 errors in all four modes | done 2026-10-14 |
 | 3 | P3: the core's warnings on the two CSR forms; `snax-csr` four lines of `0 errors` and both warnings | todo |
 | 4 | P4: `alu-timing`; its counters and errors on SNAX-GVSoC | todo |
 | 5 | The same ELFs on the RTL (author's run): `snax-alu`, `snax-stream`, `alu-timing`, the printed lines | todo |
@@ -156,6 +162,11 @@ depend on it; that is the one compared.
 - "Same ELF on both sides" becomes a feature of the whole system (build
   once, run SNAX-GVSoC and RTL, compare); recorded in snax-forge's STATUS in
   P6, for SG5's regression and FLOW3 and GEN2.
+- The ALU is SNAX's baseline, not the template of the accelerators made
+  from BRMs (GEN3 in snax-forge): those may need the interface towards the
+  data modelled more generally, and hooks for how an accelerator waits for
+  its data. Taken up then; for now the waiting and the compute sit in one
+  method each.
 - SNAX-GVSoC keeps Zicsr on SNAX CSRs (D120); the RTL is fixed in
   snax_cluster later (`snitch.sv` decode, `snax_intf_translator.sv`), after
   the SG series. Until then SNAX-GVSoC warns on the two forms that differ,

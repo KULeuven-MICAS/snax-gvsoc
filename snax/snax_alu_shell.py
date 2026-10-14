@@ -4,23 +4,25 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""A test datapath in the ALU's place (snax_test_datapath.cpp), until the ALU model (SG4)."""
+"""snax_alu's accelerator (snax_alu_shell.cpp), after snax_alu_shell_wrapper.sv."""
 
 import gvsoc.systree
 
 
-class SnaxTestDatapath(gvsoc.systree.Component):
-    """Copies a beat from in_a or in_b to out, one firing at most every k cycles.
+class SnaxAluShell(gvsoc.systree.Component):
+    """The ALU: num_pe lanes of add, sub, mul or xor, one beat per cycle.
 
-    It holds the ALU's 5 CSRs (mode, length, start; busy, counter): mode bit 0
-    picks the copied input (0: in_a, 1: in_b), mode bits 7:4 are k - 1.
+    Its CSRs and its start, busy and counter rules are those of
+    snax_alu_csr.sv and the ReqRspManager in front of it (snax_alu_shell.cpp).
 
     Parameters
     ----------
     csr_base : int
         Number of its first CSR, for the trace.
-    beat_bytes : int
-        Bytes per beat (8 per lane).
+    num_pe : int
+        Lanes, NumPE of the shell wrapper.
+    data_width : int
+        Bits per lane, DataWidth of the shell wrapper (only 64 is modelled).
 
     Ports
     -----
@@ -33,14 +35,15 @@ class SnaxTestDatapath(gvsoc.systree.Component):
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, csr_base: int,
-            beat_bytes: int):
+            num_pe: int, data_width: int):
         super().__init__(parent, name)
 
-        self.add_sources(['snax_test_datapath.cpp'])
+        self.add_sources(['snax_alu_shell.cpp'])
 
         self.add_properties({
             'csr_base': csr_base,
-            'beat_bytes': beat_bytes,
+            'num_pe': num_pe,
+            'data_width': data_width,
         })
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:

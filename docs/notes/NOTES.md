@@ -903,3 +903,46 @@ stay there.
     `Writer.scala`.
 - `alu-timing` compares, per case, the counter that does not depend on the
   gap between the two start writes, since that gap is the core's timing.
+
+### SG4 step 2: P2, the ALU
+
+- 2026-10-14. `snax/snax_alu_shell.py` / `.cpp`: `SnaxAluShell`, the ALU after
+  `snax_alu_shell_wrapper.sv` (`num_pe` 4, `data_width` 64), as `alu` in
+  `SnaxAluAcc` on the same CSRs (978 to 982) and beat ports as the test
+  datapath, which is removed. Rules as SG4.md reads the RTL: a start is
+  recorded when written and applied at the first event or access in a later
+  cycle, so a firing in its cycle still uses the old mode and length; busy
+  and the counter come from s, F (the firing that brings `len_counter` to
+  `length - 1`) and E (the last firing). How it waits (`try_fire`) and what
+  it computes (`compute`) are one method each.
+- GVSoC runs with `werror`: `force_warning` stops the run. The warning on a
+  start that cannot end (length 0, or firings kept past `length - 1`) uses
+  `force_warning_no_error`, since the RTL just stays busy; P3's CSR-form
+  warnings need the same.
+- `tests/snax/snax-stream/`: one run per mode (add, sub, mul, xor), 25
+  beats in `snax-alu`'s layout, 64-bit data from a fixed generator, O checked
+  against the core's own result; runs on the RTL too. Dropped: the runs
+  "copy A, k=1" and "copy B, k=3", since the test datapath and its mode bits
+  are gone; the back-pressure k = 3 gave comes back in P4
+  (`out_same_banks`). clang inlines the 64-bit multiply (no `__muldi3`).
+- Claude's sandbox now builds with LLVM 21.1.6 from LLVM's release and bender
+  0.28.2 from its release (the conda channels are not reachable from it).
+  On main this setup gives SG3's numbers (`snax-alu` 25 / 97 errors,
+  `snax-stream` 42 / 25 and 79 / 73) and `stream-timing`'s polls and
+  `mcycle` spans of SG3 step 3, but `dma-timing`'s `done` 1 to 3 cycles under
+  SG2 step 7 (`busy` equal): the ELF, not P2, since main gives the same.
+- Results in Claude's sandbox:
+  - `snax-alu`: `Accelerator Done!`, `Accelerator Cycles: 25`, `Number of
+    errors: 0`, exit 0. The streamer starts at 2625, the ALU at 2630, the
+    ALU fires in every cycle from 2631 to 2655 (`busy 25, stall_out 0,
+    stall_in 0`), and the streamer is done at 2657 (counter 31).
+  - `snax-stream`: `errors 0, streamer counter 31, alu counter 25` in all
+    four modes, exit 0; the two start writes are 5 cycles apart in each run.
+  - A throwaway program (not kept): length 1 with the streamer started 288
+    cycles after the ALU gives counter 1; a start (add, 100) then a start
+    (sub, 25) before any firing gives O = A - B with 0 errors; a start with
+    length 0 warns, busy reads 1 and the program ends with exit 0.
+  - `stream-timing`: counters 0, 9, 9, 10, 12; `snax-csr`: four lines of `0
+    errors`; `dma-timing`: exit 0, `busy` as in SG2 step 7. The 17 plain tests
+    were not run: the `snitch` target builds no SNAX component, and P2
+    changes no upstream file.
