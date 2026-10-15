@@ -6,8 +6,9 @@ streamer's readers on the same banks. One ELF per case, as `stream-timing`.
 The same ELFs run on snax_cluster's RTL with the plain interconnect
 (`cfg/snax_alu_cluster_old.hjson`) and on SNAX-GVSoC's `snax_alu` target, and
 with the sparse one (`cfg/snax_alu_cluster.hjson`) and on `snax_alu_sparse`.
-Each case prints the value it compares, which does not depend on the core's
-timing (D123).
+Each case prints the value it compares, chosen not to depend on the core's
+timing (D123); `core_vs_reader`'s turned out to depend on its instruction
+fetch (below).
 
 | Case | What | Compare |
 |---|---|---|
@@ -34,6 +35,15 @@ used.
   0's input (12) by its stores, from which `rr_arb_tree` takes B first:
   5. The sparse one restarts its pointer after the idle cycles and takes A,
   the lower input, first: 6.
+
+Measured (SG7 round 3, step 6), plain RTL / plain target / sparse RTL /
+sparse target: `subword` 0 errors on all but the sparse RTL, where the SC
+fails (`sc` 1, 2 errors: its wrapper leaves the AMO shim's `core_id`
+undriven); `core_vs_reader` 18 / 17 / 17 / 17; `after_stores` 5 / 5 / 6 / 6.
+On SNAX-GVSoC the instruction line with the start write and the loads
+misses in the I-cache, so the core asks for bank 0 at s + 14, too late to
+take a cycle from the readers on the plain target: that counter depends on
+the core's fetch timing.
 
 The line also gives `polls` (busy reads that saw 1), and `core_vs_reader`
 the two words the core loaded; they depend on the core's timing or not at

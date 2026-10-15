@@ -2276,3 +2276,118 @@ model, sparse, the growing phases (as SG5's "Result"):
 - On the sparse RTL `subword` is predicted to fail its SC: the sparse
   wrapper does not drive the memory side's user field, so the AMO shim's
   `core_id` is unknown. A prediction from source only.
+
+### SG7 round 3, step 6: runs and comparison
+
+- 2026-10-15. The same 16 ELFs everywhere: `snax-alu` at 4, 100, 128, 1024,
+  4096, `alu-timing`, the seven `stream-timing` cases (these 13 are round
+  1's, sha256 unchanged) and the three `core-tcdm` cases, built in
+  snax-forge's image; their sha256 (`build/sg7/r3/elfs.sha256`) checked
+  again after all runs.
+- SNAX-GVSoC, step 3's build (step 5 changed no model code): each ELF on
+  `snax_alu` and `snax_alu_sparse`, both cores, the crossbar, the streamer
+  and the ALU traced, all exit 0; `snax-alu` cut with `phases.py --gvsoc`
+  (every phase equal to step 4's on both targets). Then `make regress`:
+  `regression passed`, 38 SNAX runs and 17 plain.
+- The RTL, round 1's builds at `9fbf35d` (no rebuild needed): the plain one
+  in `../snax_cluster_plain` (`cfg/snax_alu_cluster_old.hjson`), the sparse
+  one in `../snax_cluster` (`cfg/snax_alu_cluster.hjson`),
+  `bin/snitch_cluster.vsim` on the host, Questa 2022.4, each ELF from
+  `target/snitch_cluster`, `logs/` kept as `logs-r3-<plain|sparse>-<program>`;
+  3 min 21 s and 3 min 38 s. Every run `[SUCCESS]` but `core-tcdm-subword` on
+  the sparse RTL, `[FAILURE]` with exit code 2, as predicted. `snax-alu` cut
+  with `phases.py --rtl`. This replaces round 1's borrowed plain RTL values
+  (SG3's `stream-timing`, SG4's `alu-timing` at `b2672f8`) with runs at the
+  pin: every one of them is the same.
+- The plain RTL's grants, without editing RTL: the vsim wrapper already runs
+  `log -r /*`, so after a run `vsim -view` on `vsim.wlf` with a list of the
+  interconnect's `req_q_valid_flat`, `rsp_q_ready_flat` and `bank_select`
+  (binary radix, one row per clock edge) gives each input's request and
+  grant per bank and cycle (`build/sg7/r3/wlf/`, not committed). Kept for
+  `stream-timing-ab_same_banks` and the three `core-tcdm` cases.
+
+`stream-timing`, counter 977 (first run in brackets):
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|
+| `zero_bound` | 0 | 0 | 0 | 0 | held |
+| `a_alone` | 9 | 9 | 9 | 9 | held |
+| `ab_other_banks` | 9 | 9 | 9 | 9 | held |
+| `ab_same_banks` | 10 | 10 | 10 | 10 | held; plain grants below |
+| `a_stride0` | 12 | 12 | 12 | 12 | held |
+| `prio_queued` | 5 (5) | 5 (5) | 6 (5) | 6 (5) | held |
+| `idle_restart` | 5 (2) | 5 (2) | 6 (2) | 6 (2) | held |
+
+`alu-timing`, 977, 982 and the start gap (compared counter in bold), errors
+0 on every side:
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|
+| `alu_first` | **29**, 32, -5 | **29**, 34, -7 | **29**, 32, -5 | **29**, 34, -7 | held |
+| `stream_first` | 132, **25**, 103 | 132, **25**, 103 | 131, **25**, 103 | 131, **25**, 103 | held |
+| `out_one_bank` | 210, **72**, 104 | 209, **72**, 103 | 210, **74**, 104 | 209, **74**, 103 | held |
+| `len1` | **5**, **1**, -5 | **5**, **1**, -7 | **5**, **1**, -5 | **5**, **1**, -7 | held |
+| `restart_idle` | **29**, 32, -5 | **29**, 34, -7 | **29**, 32, -5 | **29**, 34, -7 | held |
+
+`snax-alu`: `Accelerator Cycles` 1, 25, 32, 256, 1024 and 0 errors on all
+four sides. Phases: the plain RTL's equal SG5's reference at every size and
+phase, the sparse RTL's equal round 1's; on the targets, step 4's table
+(tiers 1 and 2 held, C5 +5% from the blocking L1 loads). Prediction held.
+
+`core-tcdm`:
+
+| Case | Compare | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|---|
+| `subword` | errors, `sc` | 0, 0 | 0, 0 | 2, 1 | 0, 0 | held on all four |
+| `core_vs_reader` | 977 | 18 | 17 | 17 | 17 | held but on the plain target (18 predicted) |
+| `after_stores` | 977 | 5 | 5 | 6 | 6 | held |
+
+- The plain RTL's grants. `ab_same_banks`: core 0's stores are the last
+  accesses to banks 0 to 3; at the readers' first requests B wins on all
+  four, then A. Round 1's open prediction (B first, from `rr_q` 12) held;
+  the plain target now does the same (its trace: `reader1.laneN` first),
+  where round 1's gave A. `after_stores`: the same, B first on banks 0 to 3,
+  hence 5. `core_vs_reader`: the core's load on bank 16 granted at s + 1,
+  its load on bank 0 asks from s + 5 and is granted at s + 11 after the
+  eight lanes' first requests, as predicted.
+- The sparse RTL's SC, in its waveform: at the `lr.w` and the `sc.w` the
+  AMO shim of bank 5 sees `core_id` X and `is_core` 0 (`is_core` is a `bit`,
+  so undriven reads 0); on the plain RTL, core 0 and 1. The SC returns 1
+  and does not write. Every other access of `subword`, the `amoadd.w`
+  included, is right on all four sides.
+- In the existing programs the cores' accesses meet no streamer request on
+  either target (no grant in any trace with a core and a streamer channel
+  on one bank but in `core_vs_reader`); the two cores meet each other once
+  or twice in boot. Prediction held.
+
+Gaps, named, not fixed:
+
+- `core_vs_reader` on the plain target, 17 against the plain RTL's 18. On
+  SNAX-GVSoC the core's load on bank 16 is granted 10 cycles after the
+  start write (RTL: 1): the instruction line holding the start write and
+  the loads (0x800002a0) misses in GVSoC's I-cache, about 10 cycles, as
+  each new 32 B line of the CSR setup does; snax_cluster's L0 prefetches it
+  (open item 65). So the core's bank-0 load asks at s + 14, behind four
+  lanes still to go in the round, and is granted at s + 18, after the
+  readers: no cycle taken from them. The case was laid out for the core
+  asking 4 to 10 cycles after the start write; its counter depends on the
+  core's fetch timing beyond that, so it does not meet D123 as it stands. A
+  layout that keeps the start write and the loads in a line the core
+  fetched before the start would remove it (not done: the case and its
+  prediction stay as committed). On the sparse sides the core waits for the
+  priority-1 readers either way (17 on both).
+- `subword` on the sparse RTL, 2 errors and `sc` 1 against 0 and 0 on the
+  sparse target: snax_cluster's sparse wrapper
+  (`sparse_interconnect_wrapper.sv.tpl`, "user signal not used") does not
+  drive the memory side's user field, so no LR/SC pair can succeed on the
+  sparse RTL. An RTL issue, not the model's; SNAX-GVSoC follows the plain
+  RTL (the reservation kept by hart).
+- As before, the core's own timing: start gaps (-5 against -7, 104 against
+  103), so `alu-timing`'s gap-dependent counters (982 with the ALU first, 32
+  against 34; `out_one_bank`'s 977, 210 against 209), `polls` and `mcycle`;
+  SG5's phase gaps (open items 65 to 67); and now C5's +5% (step 4).
+- Not observed: the sparse RTL's grants one by one (its interconnect is the
+  Chisel module; the list above reads `snitch_tcdm_interconnect`'s signals,
+  so only the plain RTL's were read); `axi` (input 14) on any side, as no
+  program here sends into the cluster's narrow AXI port; core 1 against a
+  streamer channel.

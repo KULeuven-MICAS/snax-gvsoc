@@ -187,7 +187,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3.3 | The cores and AXI into the crossbar on both SNAX targets | done 2026-10-15 |
 | 3.4 | D125's `tcdm` latency fitted again | done 2026-10-15 |
 | 3.5 | `core-tcdm` and its predictions | done 2026-10-15 |
-| 3.6 | Runs on both RTLs and both targets; the comparison | |
+| 3.6 | Runs on both RTLs and both targets; the comparison | done 2026-10-15 |
 
 ## Predictions
 
@@ -408,6 +408,30 @@ The other programs, with the cores in the crossbar on both targets:
   unchanged); on the targets, step 3.4's.
 - What is not compared may move on SNAX-GVSoC with the core's timing: start
   gaps, `polls`, `mcycle`, 977 where it is not compared.
+
+### Result of round 3
+
+Step 3.6 (`docs/notes/NOTES.md`): the same 16 ELFs on the plain RTL, the
+sparse RTL and both targets.
+
+- `stream-timing`, `alu-timing`, `snax-alu`: every compared counter equal on
+  the plain RTL and the plain target, and on the sparse RTL and the sparse
+  target; every prediction held. The plain RTL's runs at the pin give SG3's
+  and SG4's values. The plain RTL's grants, read from its waveform, settle
+  round 1's open prediction: in `ab_same_banks` B goes first, from the
+  pointer core 0's stores leave, and so does the plain target now.
+- `snax-alu`'s phases: on both RTLs as SG5's reference; on the targets
+  step 3.4's, within SG5's target.
+- `core-tcdm`: `after_stores` 5 plain, 6 sparse on both sides, as
+  predicted. `subword` 0 errors but on the sparse RTL, whose SC fails as
+  predicted: the sparse wrapper leaves the AMO shim's `core_id` undriven (an
+  RTL issue). `core_vs_reader` 18 on the plain RTL, 17 on the plain target
+  (predicted 18): GVSoC's I-cache misses the line holding the start write
+  and the core's loads (open item 65), so the core asks 10 cycles later than
+  on the RTL, beyond what the case tolerates; 17 on both sparse sides.
+- So round 3's acceptance holds for `stream-timing`, `alu-timing` and
+  `snax-alu`, and not for two `core-tcdm` counters: one gap in the RTL, one
+  in the case's layout against the core's fetch timing.
 
 ### Acceptance of round 3
 

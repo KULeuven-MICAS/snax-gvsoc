@@ -26,7 +26,8 @@ access to the TCDM in between; they also print the first run's counter.
 | `idle_restart` | first B alone, 1 beat on banks 0 to 3; then, after idle cycles, A (1 beat) and B (4 beats) on those banks, both priority 1 | 5 | 6 |
 
 Each counter is the same on the RTL and on SNAX-GVSoC: plain, SG3 step 5
-and, for SG7's two cases, SG7 step 9; sparse, SG7 step 9. In `prio_queued` the sparse interconnect lets B, the reader with an
+and, for SG7's two cases, SG7 step 9; sparse, SG7 step 9; all of them again
+with the cores in the crossbar at snax_cluster's pin (SG7 round 3). In `prio_queued` the sparse interconnect lets B, the reader with an
 empty queue, go first; in `idle_restart` its pointer restarts after the idle
 cycles, so A, the lower input, goes first; the plain one gives A and B the
 other way round. The first runs count 5 and 2 on both.

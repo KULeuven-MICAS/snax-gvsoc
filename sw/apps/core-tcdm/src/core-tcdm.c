@@ -4,8 +4,9 @@
 
 // The cores' TCDM accesses through the interconnect (SG7 round 3): the same
 // ELFs run on snax_cluster's RTL and on SNAX-GVSoC. One ELF per case, chosen
-// with CASE_<name>; each prints the value it compares, which does not depend
-// on the core's timing (D123).
+// with CASE_<name>; each prints the value it compares, chosen not to depend
+// on the core's timing (D123; core_vs_reader's depends on its instruction
+// fetch, see the README).
 //
 //   subword          the compute core's stores and loads of bytes, halves,
 //                    words and doublewords (two words on rv32ima), an
