@@ -1904,3 +1904,33 @@ stay there.
   byte-identical. The sparse path runs from step 7; the granularity
   warning cannot occur on the ALU cluster (every granularity 1) and was not
   exercised in GVSoC.
+
+### SG7 step 5: the winner check
+
+- 2026-10-15. `tests/snax/sparse_arb/` (README there): `tb.cpp` drives an
+  elaborated `SparseInterconnect.sv` and `snax/snax_sparse_arb.hpp` with
+  the same random stimulus and compares, per bank and cycle, the module's
+  request valid and address with the model's pick, and per input its
+  `ready` with the model's. Each input's bank-local address is its own
+  index, so the address names the selection, also when the bank refuses.
+  Phases of 500 cycles with their own load (0.05 to 0.95), bank spread
+  (1, 2, 4 or 32 banks), priority rate (0 to 1) and refusal rate (0 to
+  0.4); only accesses the granularity allows. `ports.py` writes the port
+  accessors; `run.sh` builds and runs. Run by hand, not in regress or CI.
+- Simulator: Verilator 5.024 in `d3d8f5572ff4`, which has no Icarus.
+  The module's own legality assertion stayed silent.
+- Results, 20000 cycles each, seeds 1, 2 and 3; every selection and every
+  `ready` equal in all nine runs. Seed 1:
+
+  | Module | Model | Selections | Contested | By priority | After a refusal | After an idle cycle | Refusals | Differences |
+  |---|---|---|---|---|---|---|---|---|
+  | `alu` (15 inputs) | the same | 56885 | 25073 | 11057 | 2831 | 4582 | 10343 | 0 |
+  | `mixed` (23 inputs, `[8, 8]`) | the same | 104766 | 27430 | 9140 | 2498 | 5679 | 12769 | 0 |
+  | `alu` (15 inputs, 12 to 14 idle) | `[[12, 1]]` | 42244 | 17035 | 7454 | 2566 | 3149 | 6684 | 0 |
+
+  Seeds 2 and 3: 44361 and 51250, 104523 and 135022, 43757 and 45590
+  selections, 0 differences.
+- The check fails on a wrong rule: three copies of the header, each with
+  one rule broken (no restart after an idle cycle; no lock; priority
+  ignored), against `alu` at seed 1: 1534, 1244 and 8248 selection
+  differences, exit 1.
