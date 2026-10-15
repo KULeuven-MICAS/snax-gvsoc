@@ -72,7 +72,10 @@ DRAM_LATENCY = 6
 # data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
 # the core's data path gets the cycles GVSoC lacks for that (core_latency), on
 # its TCDM port and on its way out of the cluster (narrow_axi). Instruction
-# fetches keep their own path.
+# fetches keep their own path. On the TCDM port the SNAX crossbar answers a
+# core's read one cycle after its grant plus these cycles, and the core goes
+# on in the cycle after: 4 from one L1 load to the next with tcdm 2, as before
+# the cores went through the crossbar (SG7 round 3).
 SNAX_CORE = {'int_loads_in_flight': 1}
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle

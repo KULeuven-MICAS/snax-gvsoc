@@ -2194,3 +2194,56 @@ model, sparse, the growing phases (as SG5's "Result"):
   18833 to `core1`, reads and writes of 1 and 4 bytes; a core's request held
   behind the other's twice; no AMO in L1 and no access on `axi` (nothing in
   these programs sends into the cluster's narrow AXI port).
+
+### SG7 round 3, step 4: D125 fitted again
+
+- 2026-10-15. `snax-alu` at the five sizes on both targets with step 3's
+  build, `core_latency` unchanged (`tcdm` 2, `narrow` 6), both cores traced,
+  phases with `phases.py --gvsoc` and the check loop with `--show 'C5 check
+  loop'`; the crossbar traced for one run (`snax_alu`, 100).
+- L1 load to the next load, in the check loop at 100 (`lw a4, 4(s0)` on L1,
+  then `lw a5, 4(a2)` on DRAM): the L1 load granted on bank 10 at 2892,
+  answered at 2895 (one cycle after the grant plus 2), the DRAM load issued
+  at 2896: 4, the RTL's. Before round 3: 4 too (2874 to 2878). So `tcdm`
+  stays 2; the expected 1 did not hold. The crossbar's cycle took the place
+  of the cycle the LSU adds to a synchronous answer (`latency + 1`), and the
+  core goes on in the cycle after the response, as it issued the next load
+  in the cycle after `load_ready_cycle` before. DRAM load to load: 14, as
+  before. The listing stamps a load answered after its grant at the
+  response, so its wait shows on the instruction before it (`bne` +4).
+- What changed: the core waits for an L1 load's data (`IO_REQ_PENDING`),
+  where it went on before and only the register waited. In the check loop
+  the 11 instructions after the second L1 load (`lw a7, 0(s0)`), of which
+  only one uses it, now start after its data: 47 cycles per element against
+  44 (RTL 45), in 3999 of 4096 iterations at 4096 (round 1: 44 in 4034).
+  The other iterations take 53 to 65 cycles (96 of them; round 1, 51 to 59,
+  61 of them); not looked into.
+- `Accelerator Cycles` and errors: 1, 25, 32, 256, 1024 and 0 on both
+  targets. Both targets give the same phases at every size. Phases, RTL
+  (SG5's plain reference, which the sparse RTL equals at every phase,
+  round 1) / round 1 / now; the growing phases, the target's tier 2:
+
+  | Phase | 128 | 1024 | 4096 |
+  |---|---|---|---|
+  | C1 barrier | 147 / 154 / 157 (+7%) | 373 / 381 / 384 (+3%) | 1153 / 1169 / 1174 (+2%) |
+  | D2 DMA wait | 45 / 36 / 36 (-20%, accepted in SG5) | 270 / 262 / 262 (-3%) | 1050 / 1050 / 1052 (0%) |
+  | C3 ALU poll | 37 / 39 / 39 (+5%) | 262 / 261 / 261 (0%) | 1032 / 1029 / 1029 (0%) |
+  | C5 check loop | 5795 / 5698 / 6098 (+5%) | 46115 / 45244 / 48446 (+5%) | 184355 / 180754 / 193543 (+5%) |
+  | Total up to 982 | 6713 / 6698 / 7093 (+6%) | 47495 / 46696 / 49916 (+5%) | 187285 / 183755 / 196571 (+5%) |
+
+  Tiers 1 and 2 hold. Every change against round 1, the same on both
+  targets:
+  - C5: 3 cycles per element (the blocking L1 load), plus 15, 16, 130 and
+    501 at 100, 128, 1024 and 4096 in the slower iterations; +12 at 4.
+  - C1 +3 (+5 at 4096) and D1 +3: likely the cores' blocking L1 loads
+    before the barrier and in the DMA issue (stack and TLS are in L1); not
+    traced.
+  - C0 and D0: +3, +6, -8, +15, +22 at 4, 100, 128, 1024, 4096: likely
+    boot's L1 loads, and where the I-cache misses fall; not traced.
+  - C6: +992, +1683, +612, +787, +191: likely `printf`'s L1 loads, then the
+    host's answers on their grid of about 1000 cycles (tier 3); not traced.
+  - D2 +2 at 4096; D4 holds C2 to C7 of hart 0.
+  - C2a, C2b, C3, C4, C7, D3: unchanged.
+  Tier 3 (fixed costs, every phase at 4 and 100) is explained as SG5 did,
+  with C5's and C6's growth above.
+- `snax_alu.py`'s comment on `CORE_LATENCY` says why 2 still gives 4.

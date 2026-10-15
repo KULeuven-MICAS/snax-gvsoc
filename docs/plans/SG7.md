@@ -184,7 +184,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3.1 | Round 3: this section ("Round 3") | done 2026-10-15 |
 | 3.2 | The crossbar: inputs that hold, sub-word accesses; nothing wired | done 2026-10-15 |
 | 3.3 | The cores and AXI into the crossbar on both SNAX targets | done 2026-10-15 |
-| 3.4 | D125's `tcdm` latency fitted again | |
+| 3.4 | D125's `tcdm` latency fitted again | done 2026-10-15 |
 | 3.5 | `core-tcdm` and its predictions | |
 | 3.6 | Runs on both RTLs and both targets; the comparison | |
 
@@ -368,6 +368,12 @@ measures the L1 load-to-load cycles in `snax-alu`'s check loop as SG5 P5 did
 then sets `tcdm` so it is 4 again (expected 1). `narrow` is unchanged. Then
 `snax-alu` at the five sizes: phases against round 1's step 9 and SG5's plain
 RTL reference, within SG5's target, each change named.
+
+Result (3.4, notes): 4 already with `tcdm` 2, which stays. The crossbar's
+cycle takes the place of the cycle the LSU added to a synchronous answer;
+the core goes on in the cycle after the response. What changes is that a
+core's L1 load now blocks the core until its data (3 cycles more per element
+in the check loop, C5 +5% against the RTL); tiers 1 and 2 still hold.
 
 ### Acceptance of round 3
 
