@@ -92,5 +92,5 @@ int main() {
     RO_CSRS(READ_ZERO)
     printf("read-only: %d errors\n", err);
 
-    return err;
+    return err + 1;
 }
