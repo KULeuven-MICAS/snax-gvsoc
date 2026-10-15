@@ -2001,3 +2001,41 @@ stay there.
   time-0 configuration lines. The CI workflow parses (`yaml.safe_load`, one
   job, 8 steps); it was not run on GitHub (nothing is pushed). The
   `.snax_alu_sparse` logs were not read before step 8's predictions.
+
+### SG7 step 8: predictions
+
+- 2026-10-15. Predictions for `stream-timing`, `alu-timing` and
+  `snax-alu` on the sparse RTL and the sparse target are in `SG7.md`,
+  "Predictions", written before any sparse RTL run and committed before any
+  run of the new cases. The sparse target's `run.log` files of step 7's
+  regression were not read before.
+- How: the rules of `SG7.md` worked through each case's requests. For the
+  cases with contention, a throwaway Python restatement of the streamer,
+  the ALU, `rr_arb_tree` and the sparse rule (`build/sg7/predict.py`, not
+  committed; it reads no C++). Run with the plain rule at the plain
+  target's start cycles it gave every grant of the plain target's traces
+  (cycle, bank and winner): all 1212 of `alu-timing`, all of the five
+  `stream-timing` cases and of `snax-alu` at the five sizes, and every
+  counter. Then with the sparse rule. The compared counters stay as they
+  are when either start write moves by up to 3 cycles.
+- Expected: every compared counter as on the plain RTL but `out_one_bank`'s
+  982, 74 against 72, a priority effect (a writer lane with 7 or 8 queued
+  wins repeatedly on bank 0, so the ALU fires in bursts of three).
+  Non-compared: `stream_first`'s 977 and `snax-alu`'s at 100 one lower (the
+  pointer rule gives the writer the second conflict on banks 8 to 11).
+  Grants change without a counter effect in `snax-alu` at 128 to 4096 (idle
+  restart) and, on the plain RTL against the plain target, in
+  `ab_same_banks` (the cores' stores leave `rr_q` 12 in the RTL's plain
+  interconnect, where the model has no cores).
+- Two new `stream-timing` cases, a first run then the measured run, with
+  only CSR instructions between the two start writes (checked in the
+  disassembly of both ELFs): `prio_queued` (B with an empty queue against A
+  with 4 queued: priority) and `idle_restart` (A against B after B's first
+  run on the same banks: the sparse pointer restarts). Predicted 5 on the
+  plain RTL and target, 6 on the sparse ones; first runs 5 and 2. The
+  program sets up each run in `stream()`; the old five cases keep their
+  output line and are otherwise unchanged but for the writer's unused
+  pointer, now at +3 KiB. `Makefile` and `regress.py` list the seven
+  cases; the app's README has them with both interconnects' counters.
+- Built in snax-forge's image (`make -C sw/apps/stream-timing`), not run
+  before this commit.

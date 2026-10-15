@@ -2,7 +2,7 @@
 # build/sw/apps/stream-timing/, one ELF per case.
 
 APP   = stream-timing
-CASES = zero_bound a_alone ab_other_banks ab_same_banks a_stride0
+CASES = zero_bound a_alone ab_other_banks ab_same_banks a_stride0 prio_queued idle_restart
 ELFS  = $(foreach c,$(CASES),$(BUILDDIR)/$(APP)-$(c).elf)
 include ../../common.mk
 

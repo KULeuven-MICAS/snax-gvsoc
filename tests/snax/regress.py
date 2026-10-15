@@ -9,7 +9,7 @@ snax_cluster's plain tests, from the pinned copy, CI1) and the programs
 of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
 (SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
-`snax-stream`, `alu-timing`, the five `stream-timing` cases, `dma-timing`
+`snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`
 and `snax-csr`; then the plain tests on the `snitch` target: one per
 sw/tests/*.c (the 17 of COPIED in sw/sync.py), each from build/sw/tests/; a
 plain ELF missing is a failure.
@@ -43,7 +43,8 @@ BUILD = ROOT / "build" / "sw"
 
 SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
 SIZES = [4, 100, 128, 1024, 4096]
-STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0"]
+STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
+                "prio_queued", "idle_restart"]
 PLAIN_DIR = BUILD / "tests"
 PLAIN_TESTS = sorted(c.stem for c in (SW / "tests").glob("*.c"))  # COPIED in sw/sync.py
 WORK = ROOT / "build" / "regress" / "work"

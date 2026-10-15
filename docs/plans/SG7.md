@@ -184,7 +184,55 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 
 ## Predictions
 
-Filled in step 8, before any sparse RTL run.
+Made in step 8, from source and before any sparse RTL run. The rules are
+those above. Each case's requests and their timing come from the source of
+the streamer, the ALU and the program; where a case has contention, the
+cycles were worked through with a throwaway Python restatement of these
+rules (`build/sg7/predict.py`, not committed), which first gave every grant
+of the plain target exactly (cycle, bank and winner: `alu-timing`'s 1212,
+every `stream-timing` case, `snax-alu` at the five sizes) before it was run
+with the sparse rule. The same values hold for the sparse RTL and the
+sparse target: the compared counters do not move when either start moves by
+up to 3 cycles, and on the RTL the cores' stores before a run are followed
+by idle cycles, so the pointer has restarted there as in the model, which
+has no cores in the crossbar. s is the streamer's start write; f the ALU's
+first firing. Plain RTL values are SG3's, SG4's and SG6's.
+
+`stream-timing`, counter 977:
+
+| Case | Plain RTL | Sparse | Grants against plain, and why |
+|---|---|---|---|
+| `zero_bound` | 0 | 0 | No request |
+| `a_alone` | 9 | 9 | No contention |
+| `ab_other_banks` | 9 | 9 | No contention |
+| `ab_same_banks` | 10 | 10 | Banks 0 to 3 at s + 2, both readers asking with 1 (counts 0): the pointer has restarted (idle), so A, the lowest input, wins, as on the plain target; B follows a cycle later. On the plain RTL B wins there, the tree's pick for `rr_q` 12 left by the core's stores (the cores are in the RTL's interconnect, not in the model's), which the counter cannot show |
+| `a_stride0` | 12 | 12 | Bank 0 at s + 2 to s + 4: lanes 0, 1, 2 in turn, the next input above the last pick, as plain |
+| `prio_queued` (new) | 5 (first run 5) | 6 (first run 5) | Priority: at s + 2 on banks 0 to 3, B asks with 1 (count 0) and A with 0 (4 beats left by the first run), so B wins; plain gives A (`rr_q` 0 to 3 from A's first run, on the RTL too). A, with 4 beats, then ends a cycle later |
+| `idle_restart` (new) | 5 (first run 2) | 6 (first run 2) | Idle restart: at s + 2 on banks 0 to 3 both ask with 1 (counts 0 and 1); the sparse pointer restarted after the idle cycles, so A wins; plain keeps B's turn (`rr_q` 4 to 7 from B's first run). B, with 4 beats, then ends a cycle later |
+
+`alu-timing`, the compared counter of each case (SG4):
+
+| Case | Counter | Plain RTL | Sparse | Grants against plain, and why |
+|---|---|---|---|---|
+| `alu_first` | 977 | 29 | 29 | No contention: A, B and O four banks apart in every cycle |
+| `stream_first` | 982 | 25 | 25 | Pointer rule. At f + 1, B and O on banks 8 to 11 (bits 0): B wins, as plain (pointer restarted, B the lower input). At f + 2, A and O there: the sparse pointer is B's lanes, O is next above, so O wins where plain gives A. O then runs one beat behind the ALU instead of two, A one behind; no further contention, the ALU never waits. 977 one lower than plain at the same start gap (not compared; 131 on the RTL if its gap is as before) |
+| `out_one_bank` | 982 | 72 | 74 | Priority and hold. Every word of O on bank 0: a writer lane whose queue holds 7 or 8 sends each new request with 1 and wins again and again while the other lanes' held requests keep their 0; each lane is drained a few words at a time, so the ALU fires in bursts of three every 12 to 13 cycles instead of once every 4, and its second-to-last firing comes 2 cycles later. The readers' lane-0 requests on bank 0 wait longer (held with 0) but 8 beats are queued, so the ALU never waits on input. 977 as plain at the same gap: bank 0 serves the same words (210 on the RTL if its gap is as before) |
+| `len1` | 982, 977 | 1, 5 | 1, 5 | No contention |
+| `restart_idle` | 977 | 29 | 29 | No contention |
+
+`snax-alu`, `Accelerator Cycles` (982) and the phases:
+
+| `DATA_LEN` | Plain RTL | Sparse | Grants against plain, and why |
+|---|---|---|---|
+| 4 | 1 | 1 | No contention |
+| 100 | 25 | 25 | As `stream_first`: O wins banks 8 to 11 from A at the second conflict (pointer rule); the streamer ends a cycle earlier (977 42 to 41 on SNAX-GVSoC; the app does not read it); the ALU fires in the same cycles |
+| 128, 1024, 4096 | 32, 256, 1024 | 32, 256, 1024 | B on A's banks: at s + 2 A first on both; at s + 15 and s + 16 the sparse pointer restarts after idle cycles, so A goes first where plain gives B; the ALU fires in the same cycles |
+
+Phases: equal to the plain RTL's on the sparse RTL and to the plain
+target's on the sparse target, but C4 at 100, which may end one poll
+earlier (the streamer ends a cycle earlier). The cores' loads meet no
+other master in the banks in these programs, and a lone request is granted
+in its cycle by both interconnects with its data a cycle later.
 
 ## Decided
 
