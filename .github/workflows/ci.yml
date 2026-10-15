@@ -22,7 +22,8 @@ permissions:
 jobs:
   regress:
     name: Build, unit tests, regress
-    runs-on: ubuntu-latest
+    # Only hosts Docker and Node; pinned, ubuntu-latest moves to Ubuntu 26 from 2026-10-19.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Public image with GVSoC's build tools and snax_cluster's toolchain (D118).
     container: ghcr.io/kuleuven-micas/snax-forge:main
@@ -31,7 +32,7 @@ jobs:
         shell: bash
     steps:
       # The repository only: GVSoC's submodules are folded in, sw/ is a copy.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ccache for GVSoC's C++ build. $GITHUB_WORKSPACE is the container's
       # path (github.workspace is the host's); CMake takes the launchers from
@@ -46,7 +47,7 @@ jobs:
 
       # The latest saved ccache, from any branch this run may read.
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: ccache-${{ github.run_id }}-${{ github.run_attempt }}
@@ -70,7 +71,7 @@ jobs:
       # The run.log of every program, when a step failed.
       - name: Upload regress logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: regress-logs
           path: build/regress/work/**/run.log
@@ -79,7 +80,7 @@ jobs:
       # Saved on every run with a build, PRs included: the cache is tens of MB.
       - name: Save ccache
         if: always() && steps.build.outcome == 'success'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .ccache
           key: ccache-${{ github.run_id }}-${{ github.run_attempt }}

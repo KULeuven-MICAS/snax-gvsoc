@@ -87,6 +87,12 @@ ticked here when its entry is in the notes.
   more than its error count, then its revert, pushed one at a time after
   the rest: green, then red on `snax-csr` with its annotation and the
   `regress-logs` artifact, then green. The runs are linked in the notes.
+  As run: the break commit and its revert went in one push, so the red run
+  is a throwaway pull request at the break commit.
+- Step 4: from the runs' notices, the actions on Node 24
+  (`actions/checkout@v7`, `actions/cache/restore@v6` and `save@v6`,
+  `actions/upload-artifact@v7`, inputs unchanged) and the runner pinned to
+  `ubuntu-24.04`; the GitHub runs in the notes. Check: the YAML parses.
 
 ## Acceptance
 
@@ -108,5 +114,6 @@ ticked here when its entry is in the notes.
 | 4a | Fix-up after review: one list of plain tests, header dependencies, `unittest` | done 2026-10-15 |
 | 5 | Round 2: the workflow, `::error` lines in `regress.py`; local checks | done 2026-10-15 |
 | 6 | Round 2: docs here and in snax-forge (D124, CI1 done, SG7) | done 2026-10-15 |
-| 7 | Round 2: the failure check, red then green on GitHub | open, after the push |
-| 8 | Round 2: the GitHub runs linked in the notes | open, after the push |
+| 7 | Round 2: the failure check, red then green on GitHub | done 2026-10-15 |
+| 8 | Round 2: the GitHub runs linked in the notes | done 2026-10-15 |
+| 9 | Round 2: actions on Node 24, runner pinned to `ubuntu-24.04` | done 2026-10-15 |

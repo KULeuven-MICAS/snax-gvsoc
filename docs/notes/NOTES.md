@@ -1786,5 +1786,25 @@ stay there.
     `::error title=snax-csr::exit 1, log build/regress/work/snax-csr/run.log`
     beside its `FAIL` line and log tail, then `regression FAILED: 1
     program(s): snax-csr`, exit 1.
-- The GitHub runs (green, red on the break commit, green on its revert)
-  are added here after the push.
+- The GitHub runs; the figures are from GitHub's run pages, not from
+  Claude Code's runs:
+  - https://github.com/KULeuven-MICAS/snax-gvsoc/actions/runs/38748023138,
+    PR #8 at `0b71d09` (the revert; the break commit arrived in the same
+    push, so it was not run on its own): passed, the job 6 min 21 s with
+    no cache yet.
+  - https://github.com/KULeuven-MICAS/snax-gvsoc/actions/runs/38757868926,
+    a throwaway PR #9 from branch `ry/ci1-break` at `8022f16` (`snax-csr`
+    returning one more than its errors): failed at Regress, annotation
+    "snax-csr: exit 1, log build/regress/work/snax-csr/run.log", artifact
+    `regress-logs` (5.7 KB), the job 6 min 38 s cold (a pull request does
+    not read another pull request's cache). PR #9 closed unmerged, the
+    branch deleted.
+  - The runs gave two notices: the v4 actions run on Node 20, which
+    GitHub deprecated, and `ubuntu-latest` moves to Ubuntu 26 from
+    2026-10-19. So `actions/checkout` and `actions/upload-artifact` went
+    to v7 and `actions/cache/restore` and `actions/cache/save` to v6, all
+    on Node 24, with the same inputs (none we use changed meaning in their
+    READMEs and release notes at those tags), and the runner is pinned to
+    `ubuntu-24.04`: the job runs in the image, the runner only hosts
+    Docker and Node. `yaml.safe_load` still reads the workflow (one job,
+    8 steps); the new versions are not run yet.
