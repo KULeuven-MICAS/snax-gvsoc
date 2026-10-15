@@ -113,6 +113,21 @@ failed or did not finish and exits 1. Each run's output goes to
 log's last 20 lines. `python3 tests/snax/regress.py -k SUBSTRING` runs only
 the programs whose name holds it, as `-k stream-timing` or `-k plain`.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to main, on every pull
+request, and by hand (`workflow_dispatch`), in snax-forge's image
+`ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
+`snitch;snax_alu` (with ccache, kept between runs), runs the unit tests
+(`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
+`make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
+tested; GVSoC's other targets stay out.
+
+When a program fails, the job log holds the last 20 lines of its
+`run.log`, the run's summary shows one annotation per failed program, and
+the `regress-logs` artifact holds every `run.log`. Actions must be enabled
+in the repository's settings for the workflow to run.
+
 ## Where sw/ comes from
 
 `sw/` holds the files of snax_cluster a build reads, at one pinned commit,

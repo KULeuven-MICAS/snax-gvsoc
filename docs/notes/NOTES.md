@@ -1750,3 +1750,41 @@ stay there.
   - `make regress`: `regression passed`, 14 SNAX runs and 17 plain.
 - Figures from Claude Code's runs in the snax-forge image on the MICAS
   server.
+
+### CI1 round 2
+
+- 2026-10-15. On `ry/ci1` (the open pull request); `docs/plans/CI1.md`,
+  "Round 2".
+- `.github/workflows/ci.yml`, workflow `CI`: on push to main, on pull
+  requests and by hand; one run per ref at a time (a newer one cancels
+  it); read-only contents. One job `regress` on `ubuntu-latest` in
+  `ghcr.io/kuleuven-micas/snax-forge:main`, 30 minutes at most: checkout
+  (no submodules); the ccache environment set through `$GITHUB_ENV` from
+  `$GITHUB_WORKSPACE` (`CCACHE_DIR` in `.ccache`, 500 MB, CMake's C and C++
+  launchers, so the Makefile is unchanged); the latest ccache restored;
+  `make build TARGETS="snitch;snax_alu"` and `ccache -s`; `python3 -m
+  unittest discover -s tests/snax -p 'test_*.py'`; `make regress`; on a
+  failure every `run.log` as the `regress-logs` artifact; ccache saved
+  after every run whose build passed, pull requests included. Only
+  `snax/`, `sw/` and `tests/snax/` are built and tested.
+- `regress.py`: with `GITHUB_ACTIONS=true` each failure also prints
+  `::error title=<program>::<why>, log <path>` (no log part for a missing
+  plain ELF); nothing changes outside Actions. `.ccache/` is ignored.
+- Local checks, Claude Code's runs in the snax-forge image on the MICAS
+  server (the workflow itself runs only on GitHub):
+  - `yaml.safe_load` reads the workflow: one job, 8 steps.
+  - With `build/`, `install/` and `.ccache` removed, the commands of steps
+    2 to 6 as written, from the repository root with the same variables
+    (`GITHUB_WORKSPACE` the repository, `GITHUB_ENV` a file read back):
+    `make build` passed with CMake's cache holding the `ccache` launchers
+    (cmake 3.28.3); `ccache -s`: 509 cacheable calls, 485 misses, the cache
+    in `.ccache` (21 MB); the unit tests ran 11, OK; `make regress`:
+    `regression passed`, 14 SNAX runs and 17 plain. A second build after
+    removing `build/` and `install/` hit the cache on all 509 calls.
+  - With `snax-csr` returning one more than its error count (not
+    committed) and `GITHUB_ACTIONS=true`, `regress.py -k snax-csr` printed
+    `::error title=snax-csr::exit 1, log build/regress/work/snax-csr/run.log`
+    beside its `FAIL` line and log tail, then `regression FAILED: 1
+    program(s): snax-csr`, exit 1.
+- The GitHub runs (green, red on the break commit, green on its revert)
+  are added here after the push.

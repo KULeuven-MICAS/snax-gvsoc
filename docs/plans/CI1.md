@@ -29,8 +29,8 @@ ticked here when its entry is in the notes.
    `make regress` builds the apps and runs everything.
    `make sync-snax-cluster SNAX_CLUSTER=<path>` refreshes the copy from a
    checkout and reports what moved.
-2. Round 2, the workflow: on push to main and on pull requests, in the
-   image, GVSoC built for `snitch;snax_alu`, then `make regress`. Only
+2. Round 2, the workflow: on push to main, on pull requests and by hand,
+   in the image, GVSoC built for `snitch;snax_alu`, then `make regress`. Only
    `snax/`, `sw/` and `tests/snax/` are built and tested; GVSoC's other
    components stay out; the unit tests of `tests/snax/` run with
    `python3 -m unittest discover -s tests/snax -p 'test_*.py'`, which needs
@@ -70,6 +70,24 @@ ticked here when its entry is in the notes.
   header relinks only the programs that include it; `make regress` and the
   unit tests pass.
 
+## Round 2
+
+- Step 1: `.github/workflows/ci.yml`, one job `regress` in the image:
+  checkout, the ccache environment, ccache restored, `make build
+  TARGETS="snitch;snax_alu"`, the unit tests, `make regress`, the
+  `run.log` files as the `regress-logs` artifact on failure, ccache saved
+  after every run with a build. `regress.py` prints an `::error`
+  annotation per failed program under Actions. Checks, in the image: the
+  YAML parses; the commands of the workflow pass from the repository root
+  with its environment, ccache filled in `.ccache`; with `snax-csr` made to
+  fail, `regress.py` prints the annotation and exits 1.
+- Step 2: the README's "Continuous integration", the notes, and
+  snax-forge's docs (D124, CI1 done, SG7's row).
+- Step 3: the failure check: a commit that makes `snax-csr` return one
+  more than its error count, then its revert, pushed one at a time after
+  the rest: green, then red on `snax-csr` with its annotation and the
+  `regress-logs` artifact, then green. The runs are linked in the notes.
+
 ## Acceptance
 
 - A fresh clone with no snax_cluster beside it passes `make regress`
@@ -86,6 +104,9 @@ ticked here when its entry is in the notes.
 | 1 | `sw/`: the copy, the generated headers, `sync.py`, `sw/README.md` | done 2026-10-15 |
 | 2 | `make sw`, the apps in `sw/apps/`, `regress.py` | done 2026-10-15 |
 | 3 | READMEs, notes; the standalone check | done 2026-10-15 |
-| 4 | snax-forge's docs (D126, CI1, open item 68) | on snax-forge's `ry/ci1` |
+| 4 | snax-forge's docs (D126, CI1, open item 68) | done 2026-10-15 (snax-forge `ry/ci1`) |
 | 4a | Fix-up after review: one list of plain tests, header dependencies, `unittest` | done 2026-10-15 |
-| 5 | Round 2: the workflow | |
+| 5 | Round 2: the workflow, `::error` lines in `regress.py`; local checks | done 2026-10-15 |
+| 6 | Round 2: docs here and in snax-forge (D124, CI1 done, SG7) | done 2026-10-15 |
+| 7 | Round 2: the failure check, red then green on GitHub | open, after the push |
+| 8 | Round 2: the GitHub runs linked in the notes | open, after the push |

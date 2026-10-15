@@ -4,12 +4,13 @@
 #
 # Builds snax_cluster's software from the copy in sw/ (CI1, README.md) into
 # build/sw/: libmath.a; per cluster, <cluster>/libsnRuntime.a (and for
-# snax_alu_cluster_old snax-alu-lib.o); every plain test in tests/ (the
-# 17 of COPIED in sync.py) for snitch_cluster into tests/. Flags from toolchain.mk; include order and link
-# flags as snax_cluster's sw/math/Makefile, runtime/common/common.mk,
-# snax/snax-alu/Makefile and tests/Makefile at the pin. Each cluster's
-# generated headers (generated/<cluster>/) come before the other include
-# dirs. The apps are built by apps/<name>/Makefile (common.mk).
+# snax_alu_cluster_old snax-alu-lib.o); every plain test in tests/ (the 17
+# of COPIED in sync.py) for snitch_cluster into tests/. Flags from
+# toolchain.mk; include order and link flags as snax_cluster's
+# sw/math/Makefile, runtime/common/common.mk, snax/snax-alu/Makefile and
+# tests/Makefile at the pin. Each cluster's generated headers
+# (generated/<cluster>/) come before the other include dirs. The apps are
+# built by apps/<name>/Makefile (common.mk).
 
 MK_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 SW     := $(abspath $(MK_DIR))
