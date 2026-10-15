@@ -2121,3 +2121,43 @@ model, sparse, the growing phases (as SG5's "Result"):
   against the RTL module); the plain RTL's `alu-timing` and first five
   `stream-timing` cases at this pin with these ELFs (SG3's and SG4's values
   used); the CI workflow on GitHub (nothing pushed).
+
+### SG7 round 3, step 2: the crossbar, holding inputs and sub-word accesses
+
+- 2026-10-15. `git pull` on main in snax-gvsoc and snax-forge (nothing new;
+  main has no commit the branch lacks), `ry/sg7-sparse` checked out and
+  pulled. Round 3's plan is in `SG7.md`, "Round 3".
+- `snax/snax_tcdm_xbar.{cpp,py}`:
+  - Property `holds`, per input (False when not given; its length is
+    checked). An input that holds keeps a losing request, with its priority
+    bit, for the next cycle's arbitration; while one is held, `held_event`
+    at the start of the next cycle queues that cycle's arbitration behind
+    the events already queued (an arbitration queued directly for the next
+    cycle could come before a streamer's step of that cycle). A request
+    arriving after its cycle's arbitration is fatal (it would be arbitrated
+    twice in one cycle).
+  - The response carries the latency the request brings (a core's router)
+    on top of the bank's: due one cycle after the grant plus both; a write
+    on an input that holds is answered at its grant. Every response is sent
+    with no latency in the request (`prepare()`): its cycle holds it all.
+  - Accesses of 1, 2, 4 or 8 bytes inside one bank word, at the bank-local
+    address with the byte offset (as before); one that crosses a word is
+    refused with a warning naming the input. AMOs and LR/SC go to the bank
+    as they come, as on the L1 path; the trace says `amo` for them and
+    gives the size of an access smaller than a word, so a full-word read or
+    write prints as before.
+  - `grant()` is sent at the grant, as before. A router forwards a request
+    (`req_forward`), so the grant goes to the master that sent it; for a
+    core that is `Lsu::data_grant`, which acts only with
+    `CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING` (unset for Snitch,
+    `nb_outstanding` 1): a no-op. The routers on the way have no grant
+    callback of their own; `io.hpp`'s default does nothing. Read, not run.
+- Nothing wired yet: no input holds. Baseline at the branch's head (round 1)
+  and after the change, each with `make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse"`, `make regress` and every SNAX
+  program traced on both targets (`snax_xbar`, `streamer`) in snax-forge's
+  image: `regression passed` both times (32 SNAX runs, 17 plain); all 49
+  `run.log` files byte-identical; the 64 traces and 32 outputs equal but for
+  the port pointers in the time-0 lines.
+- Not exercised by this step: holding, the write answered at its grant, the
+  carried latency and sub-word accesses (no master uses them before step 3).
