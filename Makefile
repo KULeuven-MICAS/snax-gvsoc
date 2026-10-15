@@ -63,29 +63,24 @@ GVSOC_MODULES = $(CURDIR)/engine/python;$(CURDIR)/core/models;$(CURDIR)/pulp;$(C
 
 all: checkout build
 
-# SNAX-GVSoC's regression (SG5, tests/snax/regress.py): every program must
-# exit 0 within its timeout (SG6). Needs GVSoC built for "snitch;snax_alu" and
-# snax_cluster's runtime built for the ALU cluster. regress-plain builds
-# snax_cluster's plain tests for its 9-core cluster into build/regress/plain/,
-# then rebuilds the runtime for the ALU cluster; regress runs them when there.
-SNAX_CLUSTER ?= $(abspath $(CURDIR)/../snax_cluster)
-SNAX_CLUSTER_SW = $(MAKE) -C $(SNAX_CLUSTER)/target/snitch_cluster sw
+# snax_cluster's software and our programs, from the copy in sw/ (CI1,
+# sw/README.md): `make sw` builds the runtime per cluster, the math library
+# and the 17 plain tests into build/sw/.
+sw:
+	$(MAKE) -C sw
 
+# SNAX-GVSoC's regression (SG5, tests/snax/regress.py): builds sw/ and the
+# programs of sw/apps/, then every program must exit 0 within its timeout
+# (SG6). Needs GVSoC built for "snitch;snax_alu".
 regress:
 	python3 tests/snax/regress.py
 
-regress-plain:
-	$(SNAX_CLUSTER_SW) CFG_OVERRIDE=cfg/snitch_cluster.hjson
-	rm -rf build/regress/plain && mkdir -p build/regress/plain
-	cp $(SNAX_CLUSTER)/target/snitch_cluster/sw/tests/build/*.elf build/regress/plain/
-	$(SNAX_CLUSTER_SW) CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
-
-# Refreshes sw/ from a snax_cluster checkout (CI1, sw/README.md)
+# Refreshes sw/ from a snax_cluster checkout (sw/README.md)
 sync-snax-cluster:
-	$(if $(filter command line environment,$(origin SNAX_CLUSTER)),,$(error set SNAX_CLUSTER to a snax_cluster checkout))
+	$(if $(SNAX_CLUSTER),,$(error set SNAX_CLUSTER to a snax_cluster checkout))
 	python3 sw/sync.py $(SNAX_CLUSTER)
 
-.PHONY: regress regress-plain sync-snax-cluster
+.PHONY: sw regress sync-snax-cluster
 
 checkout:
 	git submodule update --recursive --init
