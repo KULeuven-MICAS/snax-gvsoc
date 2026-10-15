@@ -1870,3 +1870,37 @@ stay there.
   for the sparse cluster's headers (made, compared, not kept); the
   hand-copied `streamer_csr_addr_map.h` comes from either hjson; `snax-alu`
   builds the same ELF for both clusters.
+
+### SG7 step 4: the sparse pick in the crossbar
+
+- 2026-10-15. `snax/snax_sparse_arb.hpp`, plain C++ with no GVSoC include,
+  so the crossbar and step 5's check run the same code:
+  `SnaxSparseConfig` (the ports `[width, granularity]`; `bank_inputs(b)`,
+  `get_global_idx_list`'s order; `reaches(input, bank)`, the RTL's
+  assertion) and `SnaxSparseArb`, one bank's arbiter: the mask is the
+  valid inputs with priority 1 if any, else all valid ones; if locked and
+  the last pick is in the mask it wins, else the lowest masked input above
+  the last pick, else the lowest masked input; the pick becomes the
+  pointer. `pick()` runs only in cycles where the bank has a request, so a
+  pick whose last cycle is not the one before restarts the pointer at
+  `inputs - 1` and clears the lock (the RTL's selection in an idle cycle).
+  `refused()` sets the lock for the next cycle. One priority bit, as
+  snaxgen elaborates the module.
+- `snax/snax_tcdm_xbar.{cpp,py}`: property `interconnect`, `plain` (the
+  `rr_arb_tree` path, unchanged) or `sparse`, and `sparse_config`, whose
+  widths must add up to the inputs (checked in Python and C++). In sparse
+  mode each bank keeps its arbiter and its inputs in local order; a request
+  to a bank its input may not reach is refused with a warning naming the
+  input (`IO_REQ_INVALID`, which stops the streamer); `bank_refuses()` is
+  the one entry point for a bank refusing its winner, false for now (the
+  DMA in round 4): the winner is then dropped with the losers and locked.
+  The priority bit is per input, 0 until step 6; the plain path ignores
+  it. In the trace a sparse input asking with priority 1 gets a `!`.
+- In snax-forge's image, `make build TARGETS="snitch;snax_alu"` on main's
+  crossbar, then `make regress` (passed), keeping every `run.log` and a
+  `snax_xbar` and `streamer` trace of the 14 SNAX programs; the same after
+  the change: `make regress` passed, and all 31 `run.log` files, the 14
+  programs' output and both traces (but the lines with port pointers) are
+  byte-identical. The sparse path runs from step 7; the granularity
+  warning cannot occur on the ALU cluster (every granularity 1) and was not
+  exercised in GVSoC.
