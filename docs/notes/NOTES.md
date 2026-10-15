@@ -1970,3 +1970,34 @@ stay there.
   bank 0 at 4715, is resent at 4716 with the same 1, then asks with 1 up to
   4719 and with 0 at 4720. Counter 10, as on the plain target. The writer's
   bit was not looked at here: the writer does not run in `stream-timing`.
+
+### SG7 step 7: the snax_alu_sparse target
+
+- 2026-10-15. `snax/snax_alu_sparse.py`: the `snax_alu` board with
+  `interconnect = {'snax_interconnect': 'sparse', 'snax_sparse_config':
+  {0: [[12, 1]]}}`, the accelerator's `sparse_interconnect_config` in
+  `cfg/snax_alu_cluster.hjson`; target `snax_alu_sparse`. `snax_alu.py`
+  takes the interconnect from the board's class attribute (`INTERCONNECT`,
+  plain) on both arch paths: `SnitchArchProperties` for `make build`
+  (without `USE_GVRUN`), `SnaxAluAttr` for gvrun.
+- `snitch_cluster.py`: `ClusterArch` (both paths) takes
+  `snax_interconnect` and `snax_sparse_config`; `SnitchCluster` lists the
+  accelerators' sparse ports in core order, `[nb_tcdm_ports, 1]` for one
+  without a config, as snaxgen does, and passes them to the crossbar only
+  for `sparse`, so the plain target's configuration is as before. A row in
+  `UPSTREAM.md`.
+- `tests/snax/regress.py`: each SNAX ELF runs on `SNAX_TARGETS`
+  (`snax_alu`, `snax_alu_sparse`), named `<program>.<target>`; `-k` selects
+  by that name. CI builds `snitch;snax_alu;snax_alu_sparse`; the Makefile's
+  comment says so. README: the layout, "The snax_alu targets" (build,
+  the sparse target, `!` in the crossbar's trace), "Regression", "Continuous
+  integration" and "Comparing with the RTL" (one checkout per
+  configuration, the commands for the sparse one, the target to run
+  against each).
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
+  then `make regress`: `regression passed`, 28 SNAX runs and 17 plain, 1 min
+  28 s. The 14 `.snax_alu` and 17 plain `run.log` files equal main's
+  (step 4's baseline), and so do the plain target's traces but for their
+  time-0 configuration lines. The CI workflow parses (`yaml.safe_load`, one
+  job, 8 steps); it was not run on GitHub (nothing is pushed). The
+  `.snax_alu_sparse` logs were not read before step 8's predictions.

@@ -16,7 +16,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | Path | What |
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `snax/` | SNAX targets and components: the `snax_alu` target, its streamer, ALU and TCDM crossbar |
+| `snax/` | SNAX targets and components: the `snax_alu` and `snax_alu_sparse` targets, their streamer, ALU and TCDM crossbar |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
 | `tests/snax/` | The regression (`regress.py`) and the phase script (`phases.py`) |
 | `docs/plans/` | One checklist per task (`SG0.md`, `SG1.md`) |
@@ -70,16 +70,22 @@ per core:
     done
     cat build/work/printf_simple.log
 
-## The snax_alu target
+## The snax_alu targets
 
 `snax_alu` is snax_cluster's `cfg/snax_alu_cluster_old.hjson`: a compute
 core and a DMA core, the compute core's accelerator (`snax/snax_alu_acc.py`)
 with its streamer and the ALU, its TCDM ports through a crossbar into the
-banks. Build `sw/` (the runtime for both clusters), GVSoC and the programs
-in `sw/apps/`, each into `build/sw/apps/<name>/`:
+banks, arbitrated as the plain interconnect does. `snax_alu_sparse`
+(`snax/snax_alu_sparse.py`) is `cfg/snax_alu_cluster.hjson`, the same
+cluster with the sparse interconnect: the crossbar takes the streamer's
+priority bit first, then round robin from the last pick (SG7,
+`docs/plans/SG7.md`); the cores, AXI and the DMA keep their own paths into
+the banks on both. The two clusters build the same ELF (`sw/README.md`).
+Build `sw/` (the runtime for both clusters), GVSoC and the programs in
+`sw/apps/`, each into `build/sw/apps/<name>/`:
 
     make sw
-    make build TARGETS="snitch;snax_alu"
+    make build TARGETS="snitch;snax_alu;snax_alu_sparse"
     make -C sw/apps/snax-csr
     make -C sw/apps/snax-alu
     source sourceme.sh
@@ -92,18 +98,22 @@ in `sw/apps/`, each into `build/sw/apps/<name>/`:
 `Accelerator Done!`, `Accelerator Cycles: 25` and `Number of errors: 0` and
 exits 0, as on the RTL. Adding `--trace=snax_acc0` before `run` prints every
 CSR access the streamer and the ALU get. Each program in `sw/apps/` has a
-README with its own expected output.
+README with its own expected output. The same commands with
+`--target snax_alu_sparse` run them on the sparse interconnect;
+`--trace=snax_xbar` prints each bank's grants, marking with `!` a request
+with priority 1.
 
 ## Regression
 
-`make regress` builds `sw/` and the programs of `sw/apps/`, runs each on
-`snax_alu`: `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the five
-`stream-timing` cases, `dma-timing` and `snax-csr`, then snax_cluster's 17
-plain tests on `snitch`. A program passes when it exits 0 within its
-timeout: each SNAX program returns its error count, `stream-timing` returns
-0, and a plain test missing from `build/sw/tests/` fails. No output or cycle
-count is compared (SG6). It needs GVSoC built for `snitch;snax_alu`, as
-above, and takes about a minute.
+`make regress` builds `sw/` and the programs of `sw/apps/`, runs each ELF
+on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
+`snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
+cases, `dma-timing` and `snax-csr`, then snax_cluster's 17 plain tests on
+`snitch`. A program passes when it exits 0 within its timeout: each SNAX
+program returns its error count, `stream-timing` returns 0, and a plain
+test missing from `build/sw/tests/` fails. No output or cycle count is
+compared (SG6). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse`,
+as above, and takes about two minutes.
 
     make regress
 
@@ -111,14 +121,15 @@ It ends with `regression passed` and exit 0, or names each program that
 failed or did not finish and exits 1. Each run's output goes to
 `build/regress/work/<name>/run.log`; a failure prints that path and the
 log's last 20 lines. `python3 tests/snax/regress.py -k SUBSTRING` runs only
-the programs whose name holds it, as `-k stream-timing` or `-k plain`.
+the programs whose name holds it, as `-k stream-timing`, `-k sparse` or
+`-k plain`.
 
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every push to main, on every pull
 request, and by hand (`workflow_dispatch`), in snax-forge's image
 `ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
-`snitch;snax_alu` (with ccache, kept between runs), runs the unit tests
+`snitch;snax_alu;snax_alu_sparse` (with ccache, kept between runs), runs the unit tests
 (`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
 `make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
 tested; GVSoC's other targets stay out.
@@ -149,19 +160,33 @@ next to this repo at the pin in `sw/README.md`, with its submodules:
     git -C ../snax_cluster checkout $PIN
     git -C ../snax_cluster submodule update --init --recursive
 
+Each target has its RTL: `snax_alu` is snax_cluster built with
+`CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson`, `snax_alu_sparse` with
+`cfg/snax_alu_cluster.hjson`. Keep one checkout per configuration (e.g.
+`../snax_cluster_plain` and `../snax_cluster`), so neither build's
+`make clean` removes the other's. In a checkout, `rtl-gen` and
+`vsim_preparation` run in snax_cluster's image, the Questa binary on the
+host, as its `target/snitch_cluster/README.md` says; for the sparse one:
+
+    podman run --rm -v "$(dirname $PWD)":"$(dirname $PWD)" -w "$PWD" ghcr.io/kuleuven-micas/snax:main \
+        bash -lc 'make -C target/snitch_cluster rtl-gen CFG_OVERRIDE=cfg/snax_alu_cluster.hjson'
+    podman run --rm -v "$(dirname $PWD)":"$(dirname $PWD)" -w "$PWD" ghcr.io/kuleuven-micas/snax:main \
+        bash -lc 'make -C target/snitch_cluster vsim_preparation CFG_OVERRIDE=cfg/snax_alu_cluster.hjson'
+    make -C target/snitch_cluster bin/snitch_cluster.vsim CFG_OVERRIDE=cfg/snax_alu_cluster.hjson
+
 For `snax-alu` at size `n` (`make -C sw/apps/snax-alu DATA_LEN=$n`), run the
-ELF on snax_cluster's RTL with Questa as its `target/snitch_cluster/README.md`
-says, from that folder:
+ELF on that RTL from `target/snitch_cluster`:
 
     rm -rf logs
     bin/snitch_cluster.vsim ../../../snax-gvsoc/build/sw/apps/snax-alu/$n/snax-alu.elf
     rm -rf logs-$n && mv logs logs-$n
 
-then here, on SNAX-GVSoC with both cores' instruction traces, and cut both
-runs into phases:
+then here, on the target of the same configuration (`snax_alu_sparse` for
+the build above, `snax_alu` for the plain one) with both cores' instruction
+traces, and cut both runs into phases:
 
     E=build/sw/apps/snax-alu/$n/snax-alu.elf
-    gvrun --target snax_alu --work-dir build/work/cmp-$n --trace=pe0/insn:pe0.txt \
+    gvrun --target snax_alu_sparse --work-dir build/work/cmp-$n --trace=pe0/insn:pe0.txt \
         --trace=pe1/insn:pe1.txt --param chip/soc/binary=$PWD/$E run
     python3 tests/snax/phases.py $E --rtl ../snax_cluster/target/snitch_cluster/logs-$n
     python3 tests/snax/phases.py $E --gvsoc build/work/cmp-$n

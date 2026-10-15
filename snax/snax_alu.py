@@ -35,7 +35,8 @@ from snax_alu_acc import SnaxAluAcc
 # defines different arch classes for the two, so this target does too: the
 # build reuses SnitchArch with the core count changed, the run uses
 # SnaxAluAttr below. Only the run needs misa, a value read at run time; both
-# need the accelerators, since the build compiles their sources.
+# need the accelerators and the interconnect, since the build compiles their
+# sources and checks the crossbar's configuration.
 if os.environ.get('USE_GVRUN') is None:
     from pulp.chips.snitch.snitch import SnitchArch, SnitchArchProperties
 
@@ -75,13 +76,17 @@ SNAX_CORE = {'int_loads_in_flight': 1}
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 
+# The SNAX ports' interconnect, ClusterArch arguments: the hjson's plain one
+# (tcdm.sparse_interconnect false). snax_alu_sparse.py replaces it.
+INTERCONNECT = {'snax_interconnect': 'plain'}
+
 
 class SnaxAluAttr(Tree):
     """The address map and cluster of the target, as SnitchAttr gives them."""
 
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, interconnect):
         super().__init__(parent, name)
-        self.chip = SnaxAluAttr.Chip(self, 'chip')
+        self.chip = SnaxAluAttr.Chip(self, 'chip', interconnect)
         self.hbm = SnaxAluAttr.Hbm(self, 'hbm')
 
     class Hbm(Tree):
@@ -93,13 +98,13 @@ class SnaxAluAttr(Tree):
 
     class Chip(Tree):
 
-        def __init__(self, parent, name):
+        def __init__(self, parent, name, interconnect):
             super().__init__(parent, name)
-            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc')
+            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc', interconnect)
 
         class Soc(Tree):
 
-            def __init__(self, parent, name):
+            def __init__(self, parent, name, interconnect):
                 super().__init__(parent, name)
                 self.bootrom = Area(self, 'rom', 0x0000_1000, 0x0001_0000,
                     description='Bootrom range')
@@ -115,7 +120,7 @@ class SnaxAluAttr(Tree):
                     ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
                         nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
                         snax_acc=SNAX_ACC, dma=SNAX_DMA, core=SNAX_CORE,
-                        core_latency=CORE_LATENCY)
+                        core_latency=CORE_LATENCY, **interconnect)
                 ]
 
             def get_cluster_base(self, id: int):
@@ -127,6 +132,8 @@ class SnaxAluAttr(Tree):
 
 class SnaxAluBoard(gvsoc.systree.Component):
 
+    interconnect = INTERCONNECT
+
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
 
@@ -137,9 +144,11 @@ class SnaxAluBoard(gvsoc.systree.Component):
             properties.nb_core_per_cluster = NB_CORE
             properties.snax_acc = SNAX_ACC
             properties.dma = SNAX_DMA
+            for key, value in self.interconnect.items():
+                setattr(properties, key, value)
             arch = SnitchArch(self, properties=properties)
         else:
-            arch = SnaxAluAttr(self, 'snax_alu')
+            arch = SnaxAluAttr(self, 'snax_alu', self.interconnect)
         # Exposed so tools like the build process can query the memory map.
         self.set_attributes(arch)
 
