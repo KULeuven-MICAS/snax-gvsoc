@@ -1808,3 +1808,38 @@ stay there.
     `ubuntu-24.04`: the job runs in the image, the runner only hosts
     Docker and Node. `yaml.safe_load` still reads the workflow (one job,
     8 steps); the new versions are not run yet.
+
+### SG7 step 2: RTL generation
+
+- 2026-10-15. Branch `ry/sg7-sparse` from main `130cc70` (#8);
+  `docs/plans/SG7.md`. snax_cluster at the pin `9fbf35d`, submodules
+  updated, in `../snax_cluster`; in the snax image `d3d8f5572ff4`
+  (`ghcr.io/kuleuven-micas/snax:main`), the parent folder mounted at its
+  own path, from `../snax_cluster`:
+
+      make -C target/snitch_cluster clean
+      make -C target/snitch_cluster rtl-gen CFG_OVERRIDE=cfg/snax_alu_cluster.hjson
+
+  Exit 0. snaxgen ran `SparseInterconnectGen` with `--NumInp 15 --NumOut 32
+  --memAddrWidth 9 --tcdmAddrWidth 17 --dataWidth 64 --strbWidth 8
+  --priorityWidth 1 --sparseConfig "[[12, 1], [1, 1], [1, 1], [1, 1]]"`:
+  the 12 SNAX ports, the two cores, AXI. `StreamParamGen.scala` is
+  rewritten by `rtl-gen`, as always; nothing else tracked changed.
+- `target/snitch_cluster/sw/snax/snax-alu/include/streamer_csr_addr_map.h`
+  against `sw/generated/snax_alu_cluster_old/streamer_csr_addr_map.h`,
+  without the `// Generated at` line: equal.
+- The second module, with granularity, from `hw/chisel` in the same image;
+  the widths are snaxgen's formulas for this cluster (512 words per bank:
+  9 and 17 bits, 64-bit data, 8 strobes):
+
+      sbt 'runMain snax.sparse_interconnect.SparseInterconnectGen --NumInp 23
+        --NumOut 32 --memAddrWidth 9 --tcdmAddrWidth 17 --dataWidth 64
+        --strbWidth 8 --priorityWidth 1
+        --sparseConfig "[[12, 1], [8, 8], [1, 1], [1, 1], [1, 1]]"
+        --hw-target-dir <snax-gvsoc>/build/sg7/mixed'
+
+  Exit 0: 23 inputs, 16 per bank.
+- The two modules, not committed: `build/sg7/alu/SparseInterconnect.sv`
+  (copied from `target/snitch_cluster/generated/`, sha256 `befb96a997bebd81`)
+  and `build/sg7/mixed/SparseInterconnect.sv` (`786ffb0cddd09c93`).
+- Figures from Claude Code's runs on the MICAS server.
