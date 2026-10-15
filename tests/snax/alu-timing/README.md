@@ -44,11 +44,11 @@ On the RTL built from the same hjson:
 
 ## Output
 
-On SNAX-GVSoC at SG4 P4 (Claude's sandbox), exit code 0:
+On SNAX-GVSoC, exit code 0:
 
-    alu-timing alu_first: errors 0, streamer counter 29, alu counter 34, start gap -16
-    alu-timing stream_first: errors 0, streamer counter 134, alu counter 25, start gap 105
-    alu-timing out_one_bank: errors 0, streamer counter 211, alu counter 72, start gap 105
+    alu-timing alu_first: errors 0, streamer counter 29, alu counter 34, start gap -7
+    alu-timing stream_first: errors 0, streamer counter 132, alu counter 25, start gap 103
+    alu-timing out_one_bank: errors 0, streamer counter 209, alu counter 72, start gap 103
     alu-timing len1: errors 0, streamer counter 5, alu counter 1, start gap -7
     alu-timing restart_idle: errors 0, streamer counter 29, alu counter 34, start gap -7
 

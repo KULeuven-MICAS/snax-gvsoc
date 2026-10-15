@@ -55,8 +55,8 @@ On snax_cluster's RTL:
     Accelerator Cycles: 25
     Number of errors: 0
 
-On SNAX-GVSoC since SG4 P2, with the ALU model (`snax/snax_alu_shell.py`),
-exit code 0: the same three lines.
+On SNAX-GVSoC, with the ALU model (`snax/snax_alu_shell.py`), exit code 0:
+the same three lines.
 
 ## Phases
 

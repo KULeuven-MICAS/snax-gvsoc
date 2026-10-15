@@ -53,7 +53,7 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `misa` and passes it to each Snitch core; `None` keeps the value the ISA string gives | SG1 P3 |
 | `Makefile` | `snax/` added to `GVSOC_MODULES` | SG1 P3 |
 | `core/models/cpu/iss/include/cores/snitch/class.hpp` | `SnaxCsr` and the `snax_csr` port: snax_cluster's accelerator CSRs 0x3C0 to 0x5FF | SG1 P4 |
-| `core/models/cpu/iss/src/snitch/snitch.cpp` | The 0x3C0 to 0x5FF CSRs declared in a loop and sent out as IO requests | SG1 P4 |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | The 0x3C0 to 0x5FF CSRs declared in a loop and sent out as IO requests; a refused access (`IO_REQ_INVALID`) ends the run with its own message, a pending or denied answer with another | SG1 P4, housekeeping after SG6 |
 | `pulp/pulp/snitch/snitch_core.py` | `Snitch.o_SNAX_CSR` binds that port | SG1 P4 |
 | `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `snax_acc`; `SnitchCluster` builds each accelerator and binds it to its core's `snax_csr` port | SG1 P5 |
 | `core/models/cpu/iss/src/snitch/snitch.cpp` | `SnaxCsr::handle()` tests `rd = x0` against `ISS_NB_REGS`, the index the decoder gives it | SG1 P5 |

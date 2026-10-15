@@ -15,11 +15,16 @@ but `stream-timing` returns its error count, `stream-timing` returns 0. No
 output or cycle count is compared; the comparison with the RTL is made by
 hand with phases.py (README, "Comparing with the RTL").
 
+Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
+failure prints that path and the log's last lines. `-k SUBSTRING` runs only
+the programs whose name holds it.
+
 Needs GVSoC built for `snitch;snax_alu` and snax_cluster's runtime built
 for `cfg/snax_alu_cluster_old.hjson` (README). Exit code 0 when every
 program passes, 1 otherwise.
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -34,18 +39,22 @@ PLAIN_DIR = ROOT / "build" / "regress" / "plain"
 PLAIN_COUNT = 17  # snax_cluster's sw/tests at the pinned commit
 WORK = ROOT / "build" / "regress" / "work"
 TIMEOUT = 300  # seconds per program; each takes a few
+TAIL = 20  # lines of a failed run's log printed
 
 
-def gvrun(target, elf, workdir):
-    """Runs one ELF; returns its exit code, or None when it does not finish."""
+def gvrun(target, elf, workdir, log):
+    """Runs one ELF, its output into log; returns its exit code, or None when
+    it does not finish."""
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / 'install' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT / 'install' / 'python'}:{env.get('PYTHONPATH', '')}"
     cmd = ["gvrun", "--target", target, "--work-dir", str(workdir),
            "--param", f"chip/soc/binary={elf}", "run"]
+    workdir.mkdir(parents=True, exist_ok=True)
     try:
-        p = subprocess.run(cmd, env=env, cwd=ROOT, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=TIMEOUT)
+        with open(log, "w") as out:
+            p = subprocess.run(cmd, env=env, cwd=ROOT, stdout=out,
+                               stderr=subprocess.STDOUT, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return None
     return p.returncode
@@ -59,49 +68,70 @@ def make(path, *args):
 
 
 class Check:
-    """Collects the programs that did not exit 0."""
+    """Runs the programs whose name holds only (all when None) and collects
+    the ones that did not exit 0."""
 
-    def __init__(self):
+    def __init__(self, only=None):
+        self.only = only
+        self.count = 0
         self.failed = []
 
+    def selected(self, name):
+        return self.only is None or self.only in name
+
     def run(self, name, target, elf, work=None):
-        code = gvrun(target, elf, WORK / (work or name))
+        if not self.selected(name):
+            return
+        self.count += 1
+        log = WORK / (work or name) / "run.log"
+        code = gvrun(target, elf, log.parent, log)
         if code == 0:
             return
         why = f"did not finish within {TIMEOUT} s" if code is None else f"exit {code}"
-        self.fail(name, why)
+        self.fail(name, why, log)
 
-    def fail(self, name, why):
+    def fail(self, name, why, log=None):
         self.failed.append(name)
         print(f"  FAIL {name}: {why}")
+        if log is not None:
+            print(f"  log {log.relative_to(ROOT)}, last {TAIL} lines:")
+            for line in log.read_text(errors="replace").splitlines()[-TAIL:]:
+                print(f"    {line}")
 
 
 def main():
-    check = Check()
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("-k", metavar="SUBSTRING", dest="only",
+                   help="run only the programs whose name holds SUBSTRING")
+    check = Check(p.parse_args().only)
 
     print("SNAX programs on snax_alu")
     for n in SIZES:
-        make(HERE / "snax-alu", f"DATA_LEN={n}")
+        if check.selected(f"snax-alu-{n}"):
+            make(HERE / "snax-alu", f"DATA_LEN={n}")
         check.run(f"snax-alu-{n}", "snax_alu", HERE / "snax-alu" / "build" / str(n) / "snax-alu.elf")
     for prog in ("snax-stream", "alu-timing", "dma-timing", "snax-csr"):
-        make(HERE / prog)
+        if check.selected(prog):
+            make(HERE / prog)
         check.run(prog, "snax_alu", HERE / prog / "build" / f"{prog}.elf")
-    make(HERE / "stream-timing")
+    if any(check.selected(f"stream-timing-{case}") for case in STREAM_CASES):
+        make(HERE / "stream-timing")
     for case in STREAM_CASES:
         check.run(f"stream-timing-{case}", "snax_alu",
                   HERE / "stream-timing" / "build" / f"stream-timing-{case}.elf")
-    print(f"  {len(SIZES) + 4 + len(STREAM_CASES)} run")
+    print(f"  {check.count} run")
 
     elfs = sorted(PLAIN_DIR.glob("*.elf"))
     if not elfs:
         print(f"plain tests: none in {PLAIN_DIR.relative_to(ROOT)}, skipped (make regress-plain)")
     else:
         print(f"plain tests on snitch ({len(elfs)} in {PLAIN_DIR.relative_to(ROOT)})")
-        if len(elfs) != PLAIN_COUNT:
+        if len(elfs) != PLAIN_COUNT and check.only is None:
             check.fail("plain", f"{len(elfs)} ELFs, expected {PLAIN_COUNT}")
+        count = check.count
         for elf in elfs:
             check.run(f"plain {elf.stem}", "snitch", elf, f"plain/{elf.stem}")
-        print(f"  {len(elfs)} run")
+        print(f"  {check.count - count} run")
 
     if check.failed:
         print(f"regression FAILED: {len(check.failed)} program(s): {', '.join(check.failed)}")

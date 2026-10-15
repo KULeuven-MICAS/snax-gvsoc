@@ -50,6 +50,7 @@
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+#include "snax_csr_block.hpp"
 
 
 enum AluClass { ALU_BUSY, ALU_STALL_OUT, ALU_STALL_IN, ALU_NB_CLASSES };
@@ -84,10 +85,9 @@ private:
     vp::ClockEvent fire_event;
     vp::IoReq beat_req;
 
-    uint32_t csr_base;          // number of the first CSR, for the trace
     int num_pe;                 // lanes, NumPE of the shell wrapper
     int beat_bytes;             // num_pe * data_width / 8
-    uint32_t regs[3];           // mode, length, start, as written
+    SnaxCsrBlock csrs;          // mode, length, start; busy, counter
 
     // A start written and not applied yet: its cycle (-1 if none) and the
     // mode and length it latches
@@ -116,7 +116,7 @@ SnaxAluShell::SnaxAluShell(vp::ComponentConf &config)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
 
-    this->csr_base = this->get_js_config()->get_child_int("csr_base");
+    this->csrs.configure(&this->trace, this->get_js_config()->get_child_int("csr_base"), 3, 2);
     this->num_pe = this->get_js_config()->get_child_int("num_pe");
     int data_width = this->get_js_config()->get_child_int("data_width");
     if (data_width != 64)
@@ -141,13 +141,17 @@ void SnaxAluShell::reset(bool active)
 {
     if (active)
     {
-        this->regs[0] = this->regs[1] = this->regs[2] = 0;
+        this->csrs.reset();
         this->pending_cycle = -1;
         this->started = false;
         this->start_cycle = 0;
         this->mode = this->length = 0;
         this->len_counter = 0;
         this->fin_cycle = this->end_cycle = -1;
+        for (int c = 0; c < ALU_NB_CLASSES; c++)
+        {
+            this->classes[c] = 0;
+        }
     }
 }
 
@@ -192,7 +196,7 @@ void SnaxAluShell::apply_start(int64_t cycle)
         // The RTL stays busy and the program goes on: warn without stopping
         // the run, also when warnings are errors (werror)
         this->trace.force_warning_no_error("Start (CSR %d) at cycle %ld with length %u and %u firings "
-            "kept: the run does not end\n", this->csr_base + 2, s, this->length,
+            "kept: the run does not end\n", this->csrs.csr(2), s, this->length,
             this->len_counter);
     }
 }
@@ -226,58 +230,29 @@ vp::IoReqStatus SnaxAluShell::csr_req(vp::Block *__this, vp::IoReq *req)
     int64_t cycle = _this->clock.get_cycles();
     _this->apply_start(cycle);
 
-    uint32_t *data = (uint32_t *)req->get_data();
-    bool is_write = req->get_is_write();
-    if (req->get_size() != 4 || req->get_addr() % 4 != 0)
+    vp::IoReqStatus status;
+    int index = _this->csrs.access(req, &status, [&](int ro) -> uint32_t {
+        return ro == 0 ? _this->busy_at(cycle) : _this->counter_at(cycle);
+    });
+    if (index < 0)
     {
-        _this->trace.force_warning("Unexpected access (addr: 0x%lx, size: %ld)\n",
-            req->get_addr(), req->get_size());
-        return vp::IO_REQ_INVALID;
-    }
-    int index = req->get_addr() / 4;
-    uint32_t csr = _this->csr_base + index;
-
-    if (index < 3)
-    {
-        if (!is_write)
-        {
-            *data = _this->regs[index];
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Read CSR %d (value: 0x%x)\n", csr, *data);
-            return vp::IO_REQ_OK;
-        }
-        _this->regs[index] = *data;
-        _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Write CSR %d (value: 0x%x)\n", csr, *data);
-        if (index == 2 && (*data & 1))
-        {
-            // The ReqRspManager hands over the registers as they stand
-            _this->pending_cycle = cycle;
-            _this->pending_mode = _this->regs[0];
-            _this->pending_length = _this->regs[1];
-            if (!_this->fire_event.is_enqueued())
-            {
-                _this->fire_event.enqueue(1);
-            }
-        }
-        return vp::IO_REQ_OK;
+        return status;
     }
 
-    if (index < 5)
+    uint32_t value = *(uint32_t *)req->get_data();
+    _this->csrs.write(index, value);
+    if (index == 2 && (value & 1))
     {
-        if (is_write)
+        // The ReqRspManager hands over the registers as they stand
+        _this->pending_cycle = cycle;
+        _this->pending_mode = _this->csrs.regs[0];
+        _this->pending_length = _this->csrs.regs[1];
+        if (!_this->fire_event.is_enqueued())
         {
-            // An assert in the ReqRspManager on the RTL
-            _this->trace.force_warning("Write to read-only CSR %d (value: 0x%x)\n", csr, *data);
-            return vp::IO_REQ_INVALID;
+            _this->fire_event.enqueue(1);
         }
-        *data = index == 3 ? _this->busy_at(cycle) : _this->counter_at(cycle);
-        _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Read CSR %d (value: 0x%x, read-only)\n",
-            csr, *data);
-        return vp::IO_REQ_OK;
     }
-
-    _this->trace.force_warning("CSR %d is not held by this block (is_write: %d)\n",
-        csr, is_write);
-    return vp::IO_REQ_INVALID;
+    return vp::IO_REQ_OK;
 }
 
 

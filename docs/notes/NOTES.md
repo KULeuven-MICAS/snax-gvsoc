@@ -1592,3 +1592,70 @@ stay there.
   `snax-csr` returning 1 for one run: `FAIL snax-csr: exit 1`, then
   `regression FAILED: 1 program(s): snax-csr`; `regress.py` exits 1 (`make`
   2). Reverted; passes again. The timeout path was not exercised.
+
+### Housekeeping after SG6
+
+- 2026-10-15. Branch `ry/housekeeping` from main `3cab3fa` (#6). No change
+  in what a program prints, in any cycle or in any trace line, but the one
+  message in `snitch.cpp` below.
+- Removed: `snax/snax_csr_stub.py` / `.cpp`, unused since SG3 P2 (the
+  target binds `SnaxAluAcc`, whose `csr_mux` splits the CSRs between the
+  streamer and the ALU); the README's layout row no longer names it.
+- `snax_streamer.cpp`: `start()` configures the movers in place and returns
+  nothing. `channel(mover, lane)`, `agu_has_room()` and `has_addresses()`
+  (used by `mover_busy()`) replace the loops repeated in `commit_handler`,
+  `reader_req`, `writer_req` and `summary_handler`. The TCDM, reader and
+  writer ports, `Channel::reqs` and `Channel::bufs` are `std::vector`s, sized
+  once before any port is registered or any pointer taken.
+- `snax_tcdm_xbar.cpp`: one `Response {cycle, req, input}` per pending
+  response; `respond()` answers the due ones in grant order and keeps the
+  others in place. `bank_req` is a member, cleared per arbitration; inputs
+  and banks are `std::vector`s; the input names are set in one loop.
+- `snax/snax_csr_block.hpp`: `SnaxCsrBlock`, what the ALU's and the
+  streamer's `csr_req` shared: the size and alignment check, the read-write
+  read and write, the read-only read and the write refusal, the "not held by
+  this block" refusal, with the same trace lines. Each block keeps its start
+  (the ALU's latch; the streamer's start and its busy refusal) and how it
+  computes busy and the counter. The header is 110 lines and the two
+  `csr_req` went from 59 and 63 lines to 30 and 32, so 50 lines more in all;
+  kept, since the rules are now in one place and a next block writes only
+  its own part.
+- `snax_alu_shell.cpp`: `reset()` clears `classes[]`.
+- `snitch.cpp`: an `IO_REQ_INVALID` answer ends the run with `SNAX CSR access
+  refused by the block (id: ..., is_write: ...); see its trace`; pending and
+  denied keep `not answered at once`. With `werror` the block's own warning
+  stops the run before either (SG1 step 6), so no program prints them.
+- `snax_alu_acc.py`: `SNAX_CSR_FIRST` and `SNAX_CSR_LAST` both in hex (0x3C0,
+  0x5FF). `cfg/snax_alu_cluster_old.hjson` is unchanged from `b2672f8` up to
+  the pin `9fbf35d` (`git diff` in snax_cluster); said there and in
+  `snax_alu.py`'s docstring.
+- `regress.py`: each run writes its stdout and stderr to
+  `build/regress/work/<name>/run.log` (`plain/<test>/run.log` for the plain
+  tests); a failure prints that path and the log's last 20 lines.
+  `-k SUBSTRING` runs only the programs whose name holds it. README,
+  "Regression".
+- Stale text: `snax-csr.c`'s header and README (no test datapath, no SG3 or
+  SG4 history), "On SNAX-GVSoC" in the program READMEs, `SG6.md` line 7.
+  `alu-timing`'s README still showed SG4 P4's output (start gaps -16, 105,
+  105; 977 134 and 211); it now shows today's (-7, 103, 103; 132 and 209), as
+  in SG5 step 7. The counters it compares are unchanged.
+- Decided: the ALU keeps its event every cycle while busy (about N / 4
+  cycles a run); sleeping would need the streamer to wake it while keeping
+  the ALU-before-streamer order.
+- Upstream file changed: `snitch.cpp`; its row in `UPSTREAM.md`.
+- Results, Claude's runs in the snax-forge image on the MICAS server:
+  - On main, before any edit: `make build TARGETS="snitch;snax_alu"`,
+    `make regress-plain`, `make regress`: `regression passed` (14 SNAX runs,
+    17 plain). A throwaway script then saved the stdout and stderr of the 31
+    runs `make regress` makes, `phases.py --json` at the five sizes (and the
+    md5 of both `insn` traces), and the `snax_acc0` and `snax_xbar` traces of
+    `snax-alu` at 100 and `stream-timing` `ab_same_banks`.
+  - With the changes: `make build`, then `make regress`: `regression passed`.
+    The script's rerun equals the first run in every file: empty diff. Only
+    the heap addresses in GVSoC's `New slave port (... port: 0x...)` lines
+    were masked; they differ between two runs of main too.
+  - With `snax-csr` returning 1: `FAIL snax-csr: exit 1`, then
+    `log build/regress/work/snax-csr/run.log, last 20 lines:` and its five
+    lines (the four `0 errors`, then `Input error: Platform returned an error
+    (exitcode: 1)`), `regression FAILED: 1 program(s): snax-csr`, `make` exit
+    2. Reverted. `-k snax-csr` runs 1 program, `-k stream-timing` 5.

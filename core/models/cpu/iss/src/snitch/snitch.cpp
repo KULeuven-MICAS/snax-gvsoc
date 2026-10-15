@@ -124,7 +124,8 @@ bool Iss::barrier_update(bool is_write, iss_reg_t &value)
 
 // Sends one access to a SNAX CSR out on the snax_csr port: a 32-bit IO request at byte
 // address 4 * CSR number. The block behind the port answers at once (IO_REQ_OK); its
-// latency is counted as stall cycles. A block that answers later is not supported yet.
+// latency is counted as stall cycles. A block refuses an access with IO_REQ_INVALID, after
+// a warning in its own trace. A block that answers later is not supported yet.
 bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
 {
     if (!this->snax_csr_itf.is_bound())
@@ -144,6 +145,12 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
     req->set_data((uint8_t *)&data);
 
     int err = this->snax_csr_itf.req(req);
+    if (err == vp::IO_REQ_INVALID)
+    {
+        this->csr.trace.fatal("SNAX CSR access refused by the block (id: 0x%x, is_write: %d); "
+            "see its trace\n", address, is_write);
+        return false;
+    }
     if (err != vp::IO_REQ_OK)
     {
         this->csr.trace.fatal("SNAX CSR access not answered at once (id: 0x%x, is_write: %d, "

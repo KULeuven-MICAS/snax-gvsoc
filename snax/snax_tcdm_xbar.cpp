@@ -22,10 +22,20 @@
 // cores and the DMA do not go through this crossbar; they reach the same banks
 // on their own paths.
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+
+
+// A granted request waiting for its response
+struct Response
+{
+    int64_t cycle;              // the cycle it is due
+    vp::IoReq *req;
+    int input;
+};
 
 
 class SnaxTcdmXbar : public vp::Component
@@ -45,8 +55,8 @@ private:
     int next_rr(uint64_t req_mask, int rr_q);
 
     vp::Trace trace;
-    vp::IoSlave *inputs;
-    vp::IoMaster *banks;
+    std::vector<vp::IoSlave> inputs;
+    std::vector<vp::IoMaster> banks;
     vp::ClockEvent arb_event;
     vp::ClockEvent resp_event;
 
@@ -62,13 +72,13 @@ private:
     std::vector<int> pending_bank;
     // Per bank: rr_q, the round-robin state of its tree
     std::vector<int> rr_q;
+    // Per bank: the inputs requesting it in this cycle, one bit each
+    std::vector<uint64_t> bank_req;
     // Per input: its owner's name for the trace, in_<i> when none is given
     std::vector<std::string> names;
 
-    // Granted requests waiting for their response: (cycle, request), and
-    // the input of each
-    std::vector<std::pair<int64_t, vp::IoReq *>> responses;
-    std::vector<int> resp_input;
+    // Granted requests waiting for their response, in grant order
+    std::vector<Response> responses;
 };
 
 
@@ -91,27 +101,24 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     this->nb_levels = this->nb_inputs > 1 ? 32 - __builtin_clz(this->nb_inputs - 1) : 0;
 
     js::Config *names = this->get_js_config()->get("input_names");
-    for (int i = 0; i < this->nb_inputs; i++)
-    {
-        this->names.push_back("in_" + std::to_string(i));
-    }
+    std::vector<js::Config *> given;
     if (names != NULL)
     {
-        int i = 0;
-        for (auto name : names->get_elems())
-        {
-            if (i < this->nb_inputs)
-            {
-                this->names[i++] = name->get_str();
-            }
-        }
+        given = names->get_elems();
+    }
+    for (int i = 0; i < this->nb_inputs; i++)
+    {
+        this->names.push_back(i < (int)given.size() ? given[i]->get_str()
+            : "in_" + std::to_string(i));
     }
 
-    this->inputs = new vp::IoSlave[this->nb_inputs];
-    this->banks = new vp::IoMaster[this->nb_banks];
+    // Sized once, before any port is registered: never resized after
+    this->inputs.resize(this->nb_inputs);
+    this->banks.resize(this->nb_banks);
     this->pending.assign(this->nb_inputs, NULL);
     this->pending_bank.assign(this->nb_inputs, 0);
     this->rr_q.assign(this->nb_banks, 0);
+    this->bank_req.assign(this->nb_banks, 0);
 
     for (int i = 0; i < this->nb_inputs; i++)
     {
@@ -132,7 +139,6 @@ void SnaxTcdmXbar::reset(bool active)
         this->pending.assign(this->nb_inputs, NULL);
         this->rr_q.assign(this->nb_banks, 0);
         this->responses.clear();
-        this->resp_input.clear();
     }
 }
 
@@ -211,18 +217,18 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
     int64_t cycle = _this->clock.get_cycles();
 
     // The requests of this cycle, per bank
-    std::vector<uint64_t> bank_req(_this->nb_banks, 0);
+    std::fill(_this->bank_req.begin(), _this->bank_req.end(), 0);
     for (int i = 0; i < _this->nb_inputs; i++)
     {
         if (_this->pending[i] != NULL)
         {
-            bank_req[_this->pending_bank[i]] |= 1ULL << i;
+            _this->bank_req[_this->pending_bank[i]] |= 1ULL << i;
         }
     }
 
     for (int bank = 0; bank < _this->nb_banks; bank++)
     {
-        uint64_t req_mask = bank_req[bank];
+        uint64_t req_mask = _this->bank_req[bank];
         if (req_mask == 0)
         {
             continue;
@@ -277,8 +283,7 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         req->resp_port = resp_port;
 
         _this->pending[winner] = NULL;
-        _this->responses.push_back({cycle + 1 + latency, req});
-        _this->resp_input.push_back(winner);
+        _this->responses.push_back({cycle + 1 + latency, req, winner});
         resp_port->grant(req);
     }
 
@@ -302,32 +307,29 @@ void SnaxTcdmXbar::respond(vp::Block *__this, vp::ClockEvent *event)
     int64_t cycle = _this->clock.get_cycles();
     int64_t next = -1;
 
-    // In grant order, the ones due now; the others stay
-    std::vector<std::pair<int64_t, vp::IoReq *>> later;
-    std::vector<int> later_input;
+    // In grant order, the ones due now; the others stay, in order
+    size_t kept = 0;
     for (size_t i = 0; i < _this->responses.size(); i++)
     {
-        auto &entry = _this->responses[i];
-        if (entry.first <= cycle)
+        Response &entry = _this->responses[i];
+        if (entry.cycle <= cycle)
         {
-            vp::IoReq *req = entry.second;
+            vp::IoReq *req = entry.req;
             _this->trace.msg(vp::Trace::LEVEL_TRACE, "Resp %s (%s 0x%lx)\n",
-                _this->names[_this->resp_input[i]].c_str(),
+                _this->names[entry.input].c_str(),
                 req->get_is_write() ? "write" : "read", req->get_addr());
             req->get_resp_port()->resp(req);
         }
         else
         {
-            later.push_back(entry);
-            later_input.push_back(_this->resp_input[i]);
-            if (next == -1 || entry.first < next)
+            if (next == -1 || entry.cycle < next)
             {
-                next = entry.first;
+                next = entry.cycle;
             }
+            _this->responses[kept++] = entry;
         }
     }
-    _this->responses = later;
-    _this->resp_input = later_input;
+    _this->responses.resize(kept);
 
     if (next != -1)
     {

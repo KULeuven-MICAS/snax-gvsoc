@@ -7,9 +7,8 @@ instruction, the forms that must not write leave a read-only CSR alone, and
 the read-only CSRs read 0, as nothing is started. Only the compute core runs
 it; it returns the number of errors.
 
-The two start CSRs are left out: every pattern has bit 0 set, which starts
-the block behind it. The streamer's (975) since SG3 P3, the ALU's (980) since
-SG3 P5, when a test datapath took the ALU's place (the ALU since SG4 P2).
+The two start CSRs, the streamer's (975) and the ALU's (980), are left out:
+every pattern has bit 0 set, which starts the block behind it.
 
 | Part | Instructions | Path in the core (`src/snitch/snitch.cpp`) |
 |---|---|---|
@@ -27,7 +26,7 @@ written. Before SG6, `priv.hpp` wrote the value read back for these three
 forms, and the run stopped at the first one.
 
 The streamer and the ALU see 110 accesses: 69 reads and 41 writes (98 before
-SG6, 108 before SG3 P3, 103 before SG3 P5).
+SG6).
 
 Every form follows Zicsr (D120 in snax-forge) on both sides: `csrrw` and
 `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`,

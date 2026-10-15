@@ -4,7 +4,8 @@ SG6 is the sixth task of M16 in snax-forge, after SG5. Every CSR instruction
 on snax_cluster's SNAX CSRs (0x3C0 to 0x5FF) does what Zicsr says, on the RTL
 and on SNAX-GVSoC; SG4's two CSR-form warnings go. Acceptance: `snax-csr`
 covers every form and passes on SNAX-GVSoC, its original four parts pass on
-the RTL, and nothing else moves (`snax-alu` against `rtl/`, `make regress`).
+the RTL, and nothing else moves (`snax-alu` against SG5's RTL tables,
+`make regress`).
 
 This file is the checklist; `docs/notes/NOTES.md` is the log. A step is
 ticked here when its entry is in the notes.

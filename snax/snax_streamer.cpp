@@ -59,6 +59,7 @@
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+#include "snax_csr_block.hpp"
 
 
 // A beat word in a lane's queue, and the first cycle it can leave
@@ -116,8 +117,8 @@ struct Channel
     int max_count;              // highest count of the lane's queue in this run
 
     // Requests in flight, at most fifo_depth, plus the one being sent
-    vp::IoReq *reqs;
-    uint64_t *bufs;
+    std::vector<vp::IoReq> reqs;
+    std::vector<uint64_t> bufs;
     std::vector<int> free_reqs;
 };
 
@@ -138,10 +139,13 @@ private:
     static void summary_handler(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
 
-    bool start(int64_t cycle);
+    void start(int64_t cycle);
     bool busy_at(int64_t cycle);
     uint32_t counter_at(int64_t cycle);
     void agu_push(Mover &mover);
+    Channel &channel(Mover &mover, int lane);
+    bool agu_has_room(Mover &mover);
+    bool has_addresses(Mover &mover);
     bool mover_busy(Mover &mover);
     bool can_request(Channel &ch, int64_t cycle);
     void wake(int64_t delay);
@@ -150,17 +154,16 @@ private:
 
     vp::Trace trace;
     vp::IoSlave csr_itf;
-    vp::IoMaster *tcdm_itf;
-    vp::IoSlave *reader_itf;
-    vp::IoSlave *writer_itf;
+    std::vector<vp::IoMaster> tcdm_itf;
+    std::vector<vp::IoSlave> reader_itf;
+    std::vector<vp::IoSlave> writer_itf;
     vp::ClockEvent step_event;
     vp::ClockEvent commit_event;
     vp::ClockEvent summary_event;
 
-    uint32_t csr_base;          // number of the first CSR, for the trace
     uint32_t addr_mask;         // the AGU's address width, from the TCDM size
     int nb_rw;                  // read-write CSRs, the start CSR last
-    std::vector<uint32_t> rw_regs;
+    SnaxCsrBlock csrs;          // then busy and the counter, read-only
 
     std::vector<Mover> movers;
     std::vector<Channel> channels;
@@ -185,7 +188,6 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
 
     js::Config *cfg = this->get_js_config();
-    this->csr_base = cfg->get_child_int("csr_base");
     int addr_bits = cfg->get_child_int("addr_bits");
     this->addr_mask = (uint32_t)((1ULL << addr_bits) - 1);
 
@@ -212,7 +214,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     }
     // The start CSR
     this->nb_rw = csr + 1;
-    this->rw_regs.assign(this->nb_rw, 0);
+    this->csrs.configure(&this->trace, cfg->get_child_int("csr_base"), this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxStreamer::csr_req);
     this->new_slave_port("input", &this->csr_itf);
@@ -223,8 +225,11 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
         (mover.is_reader ? this->readers : this->writers).push_back(&mover);
     }
 
+    // Sized once, before any port is registered: never resized after
     this->channels.resize(nb_channels);
-    this->tcdm_itf = new vp::IoMaster[nb_channels];
+    this->tcdm_itf.resize(nb_channels);
+    this->reader_itf.resize(this->readers.size());
+    this->writer_itf.resize(this->writers.size());
     for (Mover &mover : this->movers)
     {
         for (int lane = 0; lane < mover.num_channel; lane++)
@@ -233,8 +238,8 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
             Channel &ch = this->channels[id];
             ch.mover = &mover;
             ch.lane = lane;
-            ch.reqs = new vp::IoReq[mover.fifo_depth + 1];
-            ch.bufs = new uint64_t[mover.fifo_depth + 1];
+            ch.reqs.resize(mover.fifo_depth + 1);
+            ch.bufs.resize(mover.fifo_depth + 1);
 
             this->tcdm_itf[id].set_grant_meth_muxed(&SnaxStreamer::tcdm_grant, id);
             this->tcdm_itf[id].set_resp_meth_muxed(&SnaxStreamer::tcdm_resp, id);
@@ -242,13 +247,11 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
         }
     }
 
-    this->reader_itf = new vp::IoSlave[this->readers.size()];
     for (size_t i = 0; i < this->readers.size(); i++)
     {
         this->reader_itf[i].set_req_meth_muxed(&SnaxStreamer::reader_req, i);
         this->new_slave_port("reader_" + std::to_string(i), &this->reader_itf[i]);
     }
-    this->writer_itf = new vp::IoSlave[this->writers.size()];
     for (size_t i = 0; i < this->writers.size(); i++)
     {
         this->writer_itf[i].set_req_meth_muxed(&SnaxStreamer::writer_req, i);
@@ -261,7 +264,7 @@ void SnaxStreamer::reset(bool active)
 {
     if (active)
     {
-        this->rw_regs.assign(this->nb_rw, 0);
+        this->csrs.reset();
         for (Mover &mover : this->movers)
         {
             mover.agu_busy = false;
@@ -316,20 +319,43 @@ uint32_t SnaxStreamer::counter_at(int64_t cycle)
 }
 
 
-bool SnaxStreamer::mover_busy(Mover &mover)
+Channel &SnaxStreamer::channel(Mover &mover, int lane)
 {
-    if (mover.agu_busy)
-    {
-        return true;
-    }
+    return this->channels[mover.first_channel + lane];
+}
+
+
+// Room for the AGU's next group: every lane's address FIFO below fifo_depth
+bool SnaxStreamer::agu_has_room(Mover &mover)
+{
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
-        if (!this->channels[mover.first_channel + lane].addrs.empty())
+        if ((int)this->channel(mover, lane).addrs.size() >= mover.fifo_depth)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+// An address waits in some lane
+bool SnaxStreamer::has_addresses(Mover &mover)
+{
+    for (int lane = 0; lane < mover.num_channel; lane++)
+    {
+        if (!this->channel(mover, lane).addrs.empty())
         {
             return true;
         }
     }
     return false;
+}
+
+
+bool SnaxStreamer::mover_busy(Mover &mover)
+{
+    return mover.agu_busy || this->has_addresses(mover);
 }
 
 
@@ -378,27 +404,28 @@ void SnaxStreamer::trace_count(Channel &ch)
 
 
 // The start write is taken in this cycle (s): every mover takes its
-// configuration; the AGUs start at s + 1.
-bool SnaxStreamer::start(int64_t cycle)
+// configuration; the AGUs start at s + 1. Channel state (FIFOs, credit, data)
+// is kept, as on the RTL.
+void SnaxStreamer::start(int64_t cycle)
 {
-    std::vector<Mover> next = this->movers;
+    std::vector<uint32_t> &regs = this->csrs.regs;
     bool any = false;
 
-    for (Mover &mover : next)
+    for (Mover &mover : this->movers)
     {
         int csr = mover.csr_first;
         // AddressGenUnitCfgIO.connectWithList: the pointer is Cat(high, low),
         // cut to the AGU's address width
-        mover.ptr = this->rw_regs[csr] & this->addr_mask;
+        mover.ptr = regs[csr] & this->addr_mask;
         csr += 2;
-        mover.spatial_strides.assign(this->rw_regs.begin() + csr,
-            this->rw_regs.begin() + csr + mover.spatial_bounds.size());
+        mover.spatial_strides.assign(regs.begin() + csr,
+            regs.begin() + csr + mover.spatial_bounds.size());
         csr += mover.spatial_bounds.size();
-        mover.temporal_bounds.assign(this->rw_regs.begin() + csr,
-            this->rw_regs.begin() + csr + mover.temporal_dim);
+        mover.temporal_bounds.assign(regs.begin() + csr,
+            regs.begin() + csr + mover.temporal_dim);
         csr += mover.temporal_dim;
-        mover.temporal_strides.assign(this->rw_regs.begin() + csr,
-            this->rw_regs.begin() + csr + mover.temporal_dim);
+        mover.temporal_strides.assign(regs.begin() + csr,
+            regs.begin() + csr + mover.temporal_dim);
 
         // Reader.scala: with temporal stride 0 on loop 0 the AGU runs that loop
         // once and each beat is handed out bound times.
@@ -421,22 +448,9 @@ bool SnaxStreamer::start(int64_t cycle)
         mover.loop_index.assign(mover.temporal_dim, 0);
         mover.loop_offset.assign(mover.temporal_dim, 0);
         any |= mover.agu_busy;
-    }
 
-    // Channel state (FIFOs, credit, data) is kept, as on the RTL
-    for (size_t i = 0; i < next.size(); i++)
-    {
-        Mover &mover = this->movers[i];
-        mover.ptr = next[i].ptr;
-        mover.spatial_strides = next[i].spatial_strides;
-        mover.temporal_bounds = next[i].temporal_bounds;
-        mover.temporal_strides = next[i].temporal_strides;
-        mover.repeat = next[i].repeat;
         // The hand-out counter restarts with the run (HandShakeRepeater's reset)
         mover.handed = 0;
-        mover.agu_busy = next[i].agu_busy;
-        mover.loop_index = next[i].loop_index;
-        mover.loop_offset = next[i].loop_offset;
         for (int c = 0; c < NB_CLASSES; c++)
         {
             mover.classes[c] = 0;
@@ -468,7 +482,6 @@ bool SnaxStreamer::start(int64_t cycle)
         // Busy for s + 1 only
         this->end_run(cycle);
     }
-    return true;
 }
 
 
@@ -499,7 +512,7 @@ void SnaxStreamer::summary_handler(vp::Block *__this, vp::ClockEvent *event)
         std::string counts;
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
-            counts += " " + std::to_string(_this->channels[mover.first_channel + lane].max_count);
+            counts += " " + std::to_string(_this->channel(mover, lane).max_count);
         }
         _this->trace.msg(vp::Trace::LEVEL_DEBUG,
             "Mover %s: busy %ld, stall_xbar %ld, stall_fifo %ld, idle %ld; queue max%s\n",
@@ -514,63 +527,32 @@ vp::IoReqStatus SnaxStreamer::csr_req(vp::Block *__this, vp::IoReq *req)
     SnaxStreamer *_this = (SnaxStreamer *)__this;
     int64_t cycle = _this->clock.get_cycles();
 
-    uint32_t *data = (uint32_t *)req->get_data();
-    bool is_write = req->get_is_write();
-    if (req->get_size() != 4 || req->get_addr() % 4 != 0)
+    vp::IoReqStatus status;
+    int index = _this->csrs.access(req, &status, [&](int ro) -> uint32_t {
+        return ro == 0 ? _this->busy_at(cycle) : _this->counter_at(cycle);
+    });
+    if (index < 0)
     {
-        _this->trace.force_warning("Unexpected access (addr: 0x%lx, size: %ld)\n",
-            req->get_addr(), req->get_size());
+        return status;
+    }
+
+    // ReqRspManager.scala: writing 1 to bit 0 of the last read-write CSR
+    // starts the streamer; the write waits while the streamer is busy.
+    uint32_t value = *(uint32_t *)req->get_data();
+    if (index != _this->nb_rw - 1 || !(value & 1))
+    {
+        _this->csrs.write(index, value);
+        return vp::IO_REQ_OK;
+    }
+    if (_this->busy_at(cycle))
+    {
+        _this->trace.force_warning("Start (CSR %d) while the streamer is busy; "
+            "holding the write is not modelled\n", _this->csrs.csr(index));
         return vp::IO_REQ_INVALID;
     }
-    int index = req->get_addr() / 4;
-    uint32_t csr = _this->csr_base + index;
-
-    if (index < _this->nb_rw)
-    {
-        if (!is_write)
-        {
-            *data = _this->rw_regs[index];
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Read CSR %d (value: 0x%x)\n", csr, *data);
-            return vp::IO_REQ_OK;
-        }
-
-        // ReqRspManager.scala: writing 1 to bit 0 of the last read-write CSR
-        // starts the streamer; the write waits while the streamer is busy.
-        if (index == _this->nb_rw - 1 && (*data & 1))
-        {
-            if (_this->busy_at(cycle))
-            {
-                _this->trace.force_warning("Start (CSR %d) while the streamer is busy; "
-                    "holding the write is not modelled\n", csr);
-                return vp::IO_REQ_INVALID;
-            }
-            _this->rw_regs[index] = *data;
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Write CSR %d (value: 0x%x), start\n",
-                csr, *data);
-            return _this->start(cycle) ? vp::IO_REQ_OK : vp::IO_REQ_INVALID;
-        }
-
-        _this->rw_regs[index] = *data;
-        _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Write CSR %d (value: 0x%x)\n", csr, *data);
-        return vp::IO_REQ_OK;
-    }
-
-    if (index < _this->nb_rw + 2)
-    {
-        if (is_write)
-        {
-            _this->trace.force_warning("Write to read-only CSR %d (value: 0x%x)\n", csr, *data);
-            return vp::IO_REQ_INVALID;
-        }
-        *data = index == _this->nb_rw ? _this->busy_at(cycle) : _this->counter_at(cycle);
-        _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Read CSR %d (value: 0x%x, read-only)\n",
-            csr, *data);
-        return vp::IO_REQ_OK;
-    }
-
-    _this->trace.force_warning("CSR %d is not held by this block (is_write: %d)\n",
-        csr, is_write);
-    return vp::IO_REQ_INVALID;
+    _this->csrs.write(index, value, ", start");
+    _this->start(cycle);
+    return vp::IO_REQ_OK;
 }
 
 
@@ -592,7 +574,7 @@ vp::IoReqStatus SnaxStreamer::reader_req(vp::Block *__this, vp::IoReq *req, int 
 
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
-        Channel &ch = _this->channels[mover.first_channel + lane];
+        Channel &ch = _this->channel(mover, lane);
         if (ch.data.empty() || ch.data.front().visible > cycle)
         {
             return vp::IO_REQ_DENIED;
@@ -606,7 +588,7 @@ vp::IoReqStatus SnaxStreamer::reader_req(vp::Block *__this, vp::IoReq *req, int 
     uint64_t *beat = (uint64_t *)req->get_data();
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
-        beat[lane] = _this->channels[mover.first_channel + lane].data.front().value;
+        beat[lane] = _this->channel(mover, lane).data.front().value;
     }
 
     mover.handed++;
@@ -615,7 +597,7 @@ vp::IoReqStatus SnaxStreamer::reader_req(vp::Block *__this, vp::IoReq *req, int 
         mover.handed = 0;
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
-            Channel &ch = _this->channels[mover.first_channel + lane];
+            Channel &ch = _this->channel(mover, lane);
             ch.data.pop_front();
             ch.used--;
             _this->trace_count(ch);
@@ -645,7 +627,7 @@ vp::IoReqStatus SnaxStreamer::writer_req(vp::Block *__this, vp::IoReq *req, int 
 
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
-        if ((int)_this->channels[mover.first_channel + lane].data.size() >= mover.fifo_depth)
+        if ((int)_this->channel(mover, lane).data.size() >= mover.fifo_depth)
         {
             return vp::IO_REQ_DENIED;
         }
@@ -658,7 +640,7 @@ vp::IoReqStatus SnaxStreamer::writer_req(vp::Block *__this, vp::IoReq *req, int 
     uint64_t *beat = (uint64_t *)req->get_data();
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
-        Channel &ch = _this->channels[mover.first_channel + lane];
+        Channel &ch = _this->channel(mover, lane);
         ch.data.push_back({cycle + 1, beat[lane]});
         _this->trace_count(ch);
     }
@@ -733,7 +715,7 @@ void SnaxStreamer::tcdm_resp(vp::Block *__this, vp::IoReq *req, int id)
 {
     SnaxStreamer *_this = (SnaxStreamer *)__this;
     Channel &ch = _this->channels[id];
-    int slot = req - ch.reqs;
+    int slot = req - ch.reqs.data();
     if (ch.mover->is_reader)
     {
         ch.data.push_back({_this->clock.get_cycles() + 1, ch.bufs[slot]});
@@ -763,7 +745,7 @@ void SnaxStreamer::agu_push(Mover &mover)
             remainder /= mover.spatial_bounds[j];
         }
         uint32_t addr = (mover.ptr + temporal + spatial) & this->addr_mask;
-        this->channels[mover.first_channel + lane].addrs.push_back(addr);
+        this->channel(mover, lane).addrs.push_back(addr);
     }
 
     // The loops: loop 0 ticks on every group, loop d when loop d - 1 wraps.
@@ -811,15 +793,15 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
         // The cycles slept through keep the class the mover had when it slept
         mover.classes[mover.gap_class] += cycle - _this->classed_cycle - 1;
 
-        bool granted = false, requested = false, waiting = false;
+        bool granted = false, requested = false;
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
-            Channel &ch = _this->channels[mover.first_channel + lane];
+            Channel &ch = _this->channel(mover, lane);
             granted |= ch.granted;
             requested |= ch.requested;
-            waiting |= !ch.addrs.empty();
         }
-        mover.classes[granted ? BUSY : requested ? STALL_XBAR : waiting ? STALL_FIFO : IDLE]++;
+        mover.classes[granted ? BUSY : requested ? STALL_XBAR :
+            _this->has_addresses(mover) ? STALL_FIFO : IDLE]++;
     }
     _this->classed_cycle = cycle;
 
@@ -845,18 +827,8 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
 
     for (Mover &mover : _this->movers)
     {
-        if (!mover.agu_busy)
-        {
-            continue;
-        }
         // Room in every FIFO, counting this cycle's grants (the pipe queue)
-        bool room = true;
-        for (int lane = 0; lane < mover.num_channel; lane++)
-        {
-            Channel &ch = _this->channels[mover.first_channel + lane];
-            room &= (int)ch.addrs.size() < mover.fifo_depth;
-        }
-        if (room)
+        if (mover.agu_busy && _this->agu_has_room(mover))
         {
             _this->agu_push(mover);
         }
@@ -883,22 +855,8 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
     }
     for (Mover &mover : _this->movers)
     {
-        if (mover.agu_busy)
-        {
-            bool room = true;
-            for (int lane = 0; lane < mover.num_channel; lane++)
-            {
-                room &= (int)_this->channels[mover.first_channel + lane].addrs.size()
-                    < mover.fifo_depth;
-            }
-            progress |= room;
-        }
-        bool waiting = false;
-        for (int lane = 0; lane < mover.num_channel; lane++)
-        {
-            waiting |= !_this->channels[mover.first_channel + lane].addrs.empty();
-        }
-        mover.gap_class = waiting ? STALL_FIFO : IDLE;
+        progress |= mover.agu_busy && _this->agu_has_room(mover);
+        mover.gap_class = _this->has_addresses(mover) ? STALL_FIFO : IDLE;
     }
     if (progress)
     {
