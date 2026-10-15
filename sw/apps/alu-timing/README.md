@@ -2,9 +2,10 @@
 
 The ALU's timing against the RTL (SG4): `snax-alu`'s three streamers and the
 ALU, set up through `snax-alu`'s library, in five cases run one after the
-other in one ELF. The same ELF runs on snax_cluster's RTL
-(`cfg/snax_alu_cluster_old.hjson` at `b2672f8`) and on SNAX-GVSoC's
-`snax_alu` target; the counters are the values to compare.
+other in one ELF. The same ELF runs on snax_cluster's RTL with the plain
+interconnect (`cfg/snax_alu_cluster_old.hjson`) and on SNAX-GVSoC's
+`snax_alu` target, and with the sparse one (`cfg/snax_alu_cluster.hjson`)
+and on `snax_alu_sparse` (SG7); the counters are the values to compare.
 
 Each case prints its errors, the streamer's counter (977), the ALU's (982)
 and the start gap: `mcycle` before `start_alu()` minus `mcycle` before
@@ -21,7 +22,12 @@ it, the one to compare:
 | `restart_idle` | Start (add, 100), start (sub, 25) before the streamer, then the streamer | 977, O = A - B | A start while busy latches the new mode and length |
 
 `stream_first`'s layout (snax-alu's own) has the writer lose banks 8 to 11
-to reader B twice; the writer's queue absorbs it. Every case consumes all
+to reader B, then, on the plain interconnect, to reader A; the writer's
+queue absorbs it. On the sparse one the writer wins the second conflict
+(its pointer is at B's lanes, the writer's are next), so the streamer ends a
+cycle earlier. In `out_one_bank` a writer lane with 7 or 8 words queued asks
+with priority 1 on the sparse interconnect and drains several words in a
+row, so the ALU fires in bursts and its counter is 74, not 72 (SG7). Every case consumes all
 its beats and every run ends, so nothing carries over to the next case.
 O is checked against the core's own result in every case; the program
 returns the error count.
@@ -51,7 +57,9 @@ On SNAX-GVSoC, exit code 0:
     alu-timing len1: errors 0, streamer counter 5, alu counter 1, start gap -7
     alu-timing restart_idle: errors 0, streamer counter 29, alu counter 34, start gap -7
 
-On the RTL: step 5 of `docs/plans/SG4.md`.
+On `snax_alu_sparse`, the same but for `stream_first`'s streamer counter,
+131, and `out_one_bank`'s ALU counter, 74. On the RTL: plain, step 5 of
+`docs/plans/SG4.md`; sparse, SG7 step 9 in `docs/notes/NOTES.md`.
 
 `--trace="snax_acc0:<file>"` gives each ALU run's classes (`busy`,
 `stall_out`, `stall_in`) and the streamer's per mover; `--trace="snax_xbar:<file>"`

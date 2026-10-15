@@ -2039,3 +2039,85 @@ stay there.
   cases; the app's README has them with both interconnects' counters.
 - Built in snax-forge's image (`make -C sw/apps/stream-timing`), not run
   before this commit.
+
+### SG7 step 9: runs and comparison
+
+- 2026-10-15. The same 13 ELFs everywhere (`snax-alu` at five sizes,
+  `alu-timing`, seven `stream-timing` cases), built from `sw/` in
+  snax-forge's image; their sha256 were taken before the RTL runs and
+  checked after.
+- SNAX-GVSoC: each ELF on `snax_alu` and `snax_alu_sparse`, with both cores'
+  instruction traces and the crossbar, streamer and ALU traces; `snax-alu`
+  cut with `phases.py --gvsoc`.
+- Sparse RTL, `../snax_cluster` at `9fbf35d` with step 2's `rtl-gen`
+  (`generated/SparseInterconnect.sv` still step 2's): `make -C
+  target/snitch_cluster vsim_preparation CFG_OVERRIDE=cfg/snax_alu_cluster.hjson`
+  in `d3d8f5572ff4`, then `make -C target/snitch_cluster
+  bin/snitch_cluster.vsim CFG_OVERRIDE=cfg/snax_alu_cluster.hjson` on the
+  host, Questa 2022.4: 755 modules, 0 errors, `TARGET_SPARSE_INTERCONNECT`
+  defined. Each ELF run from `target/snitch_cluster`, its `logs/` kept as
+  `logs-sparse-<program>`; all 13 end `[SUCCESS]`; 3 min 4 s in all.
+  `snax-alu` cut with `phases.py --rtl`.
+- Plain RTL for the new cases: `../snax_cluster_plain`, cloned at `9fbf35d`
+  with its submodules; `rtl-gen` and `vsim_preparation` with
+  `cfg/snax_alu_cluster_old.hjson` in `d3d8f5572ff4`, the binary on the
+  host (750 modules, as in SG6, 0 errors); `prio_queued` and
+  `idle_restart` only, both `[SUCCESS]`.
+
+`stream-timing`, counter 977 (plain RTL: SG3 step 4 for the first five, this
+step for the two new ones):
+
+| Case | Plain RTL | Sparse RTL | Sparse SNAX-GVSoC | Plain SNAX-GVSoC | Prediction |
+|---|---|---|---|---|---|
+| `zero_bound` | 0 | 0 | 0 | 0 | held |
+| `a_alone` | 9 | 9 | 9 | 9 | held |
+| `ab_other_banks` | 9 | 9 | 9 | 9 | held |
+| `ab_same_banks` | 10 | 10 | 10 | 10 | held (the plain RTL's winner not observed) |
+| `a_stride0` | 12 | 12 | 12 | 12 | held |
+| `prio_queued` (first run) | 5 (5) | 6 (5) | 6 (5) | 5 (5) | held |
+| `idle_restart` (first run) | 5 (2) | 6 (2) | 6 (2) | 5 (2) | held |
+
+`alu-timing`, 977 and 982 (plain RTL: SG4 step 5, Verilator at `b2672f8`;
+compared counter in bold), errors 0 on every side:
+
+| Case | Plain RTL | Sparse RTL | Sparse SNAX-GVSoC | Plain SNAX-GVSoC | Prediction |
+|---|---|---|---|---|---|
+| `alu_first` | **29**, 32 | **29**, 32 | **29**, 34 | **29**, 34 | held |
+| `stream_first` | 132, **25** | 131, **25** | 131, **25** | 132, **25** | held, 977 one lower too |
+| `out_one_bank` | 210, **72** | 210, **74** | 209, **74** | 209, **72** | held, 977 as plain on each side |
+| `len1` | **5**, **1** | **5**, **1** | **5**, **1** | **5**, **1** | held |
+| `restart_idle` | **29**, 32 | **29**, 32 | **29**, 34 | **29**, 34 | held |
+
+`snax-alu`, `Accelerator Cycles` and errors: 1, 25, 32, 256, 1024 and 0 on
+all four sides (plain RTL: SG5's references). Phases (plain RTL: SG5's
+`tests/snax/snax-alu/rtl/<N>.json`, removed in SG6, read from git at
+`44453a3`; SG6's run at the pin reproduced them): on the sparse RTL every
+phase equals that reference at every size; on the sparse target every
+phase equals the plain target's. Prediction held (C4 at 100 did not end a
+poll earlier: 5 on both RTLs, 6 on both targets). The RTL against the
+model, sparse, the growing phases (as SG5's "Result"):
+
+| Phase | 128 | 1024 | 4096 |
+|---|---|---|---|
+| C1 barrier | 147 / 154 | 373 / 381 | 1153 / 1169 |
+| D2 DMA wait | 45 / 36 | 270 / 262 | 1050 / 1050 |
+| C3 ALU poll | 37 / 39 | 262 / 261 | 1032 / 1029 |
+| C5 check loop | 5795 / 5698 | 46115 / 45244 | 184355 / 180754 |
+| Total up to 982 | 6713 / 6698 | 47495 / 46696 | 187285 / 183755 |
+
+- Gaps. None new: every compared counter is equal on the sparse RTL and
+  the sparse target, and the sparse interconnect changes no phase on
+  either side. What differs is what differed before, the core's timing:
+  the start gap (`alu-timing` -5 against -7, `out_one_bank` 104 against
+  103), so the gap-dependent counters (982 with the ALU first: 32 against
+  34; `out_one_bank`'s 977: 210 against 209); `polls` and `mcycle`; and
+  SG5's phase gaps (C0, C2a, C6, C7, D1 to D3: open items 65 to 67).
+- Not verified: grants on the RTL one by one (no grant trace was taken),
+  so the plain RTL's other winner in `ab_same_banks` (its `rr_q` left at
+  12 by the core's stores) is still a prediction, and so is the order on
+  the RTL in `out_one_bank` beyond its counter; the writer's priority bit
+  against the RTL's signal (only through the counters); the lock and the
+  granularity warning in GVSoC (only the winner check exercises the lock,
+  against the RTL module); the plain RTL's `alu-timing` and first five
+  `stream-timing` cases at this pin with these ELFs (SG3's and SG4's values
+  used); the CI workflow on GitHub (nothing pushed).

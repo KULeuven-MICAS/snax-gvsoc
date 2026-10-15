@@ -173,14 +173,14 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | # | Step | Status |
 |---|---|---|
 | 1 | This plan | done 2026-10-15 |
-| 2 | RTL generation for `snax_alu_cluster.hjson`; the streamer header compared; a second module elaborated with granularity | |
-| 3 | `sw/`: the sparse hjson copied, its headers checked against the old one's | |
-| 4 | The crossbar's sparse pick (`interconnect`, `sparse_config`) in a shared header | |
-| 5 | The winner check against both RTL modules | |
-| 6 | The streamer's priority bit | |
-| 7 | The `snax_alu_sparse` target; regress, CI, README | |
-| 8 | Predictions, and new `stream-timing` cases | |
-| 9 | Runs on the RTL and both targets; the comparison | |
+| 2 | RTL generation for `snax_alu_cluster.hjson`; the streamer header compared; a second module elaborated with granularity | done 2026-10-15 |
+| 3 | `sw/`: the sparse hjson copied, its headers checked against the old one's | done 2026-10-15 |
+| 4 | The crossbar's sparse pick (`interconnect`, `sparse_config`) in a shared header | done 2026-10-15 |
+| 5 | The winner check against both RTL modules | done 2026-10-15 |
+| 6 | The streamer's priority bit | done 2026-10-15 |
+| 7 | The `snax_alu_sparse` target; regress, CI, README | done 2026-10-15 |
+| 8 | Predictions, and new `stream-timing` cases | done 2026-10-15 |
+| 9 | Runs on the RTL and both targets; the comparison | done 2026-10-15 |
 
 ## Predictions
 
@@ -234,9 +234,34 @@ earlier (the streamer ends a cycle earlier). The cores' loads meet no
 other master in the banks in these programs, and a lone request is granted
 in its cycle by both interconnects with its data a cycle later.
 
+## Result of round 1
+
+Step 9 (`docs/notes/NOTES.md`): the same 13 ELFs on the sparse RTL (Questa),
+on `snax_alu_sparse` and on `snax_alu`, and the two new cases on the plain
+RTL. Every prediction above held:
+
+- `stream-timing`: every counter equal on the sparse RTL and the sparse
+  target; `prio_queued` and `idle_restart` 6 there and 5 on the plain RTL
+  and target, first runs 5 and 2 everywhere.
+- `alu-timing`: every compared counter equal on the sparse RTL and the
+  sparse target (29, 25, 74, 1 and 5, 29), `out_one_bank`'s 982 74 against
+  the plain 72; `stream_first`'s 977 131 on both sparse sides against 132.
+- `snax-alu`: 982 and 0 errors at the five sizes on all four sides; every
+  phase of the sparse RTL equals SG5's plain RTL reference, every phase of
+  the sparse target equals the plain target's. So the RTL-against-model
+  gaps are SG5's, unchanged (open items 65 to 67 in snax-forge).
+- No new gap. Not observed: individual grants on the RTL (no grant trace),
+  so the plain RTL's different winner in `ab_same_banks` (cores in its
+  interconnect) stays a prediction; the lock and the granularity warning
+  are exercised only by the winner check, nothing refuses in GVSoC yet.
+
 ## Decided
 
 - Round 1 puts only the SNAX ports through the sparse crossbar; the
   plain target stays as it is.
 - The model describes what each port sees per cycle; the table above is
   its scope.
+- The priority bit travels on a wire per SNAX port, not in the request
+  (step 6).
+- The sparse target shares the plain one's ELFs: the two hjsons give the
+  same headers, which sync checks (step 3).
