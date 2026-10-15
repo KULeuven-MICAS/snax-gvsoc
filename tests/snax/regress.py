@@ -19,8 +19,10 @@ output or cycle count is compared; the comparison with the RTL is made by
 hand with phases.py (README, "Comparing with the RTL").
 
 Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
-failure prints that path and the log's last lines. `-k SUBSTRING` runs only
-the programs whose name holds it.
+failure prints that path and the log's last lines. Under GitHub Actions
+(GITHUB_ACTIONS=true) each failure also prints an `::error` line, an
+annotation on the run naming the program, why and its log. `-k SUBSTRING`
+runs only the programs whose name holds it.
 
 Needs GVSoC built for `snitch;snax_alu` (README). Exit code 0 when every
 program passes, 1 otherwise.
@@ -45,6 +47,7 @@ PLAIN_TESTS = sorted(c.stem for c in (SW / "tests").glob("*.c"))  # COPIED in sw
 WORK = ROOT / "build" / "regress" / "work"
 TIMEOUT = 300  # seconds per program; each takes a few
 TAIL = 20  # lines of a failed run's log printed
+ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
 def gvrun(target, elf, workdir, log):
@@ -98,6 +101,9 @@ class Check:
     def fail(self, name, why, log=None):
         self.failed.append(name)
         print(f"  FAIL {name}: {why}")
+        if ACTIONS:
+            where = f", log {log.relative_to(ROOT)}" if log is not None else ""
+            print(f"::error title={name}::{why}{where}")
         if log is not None:
             print(f"  log {log.relative_to(ROOT)}, last {TAIL} lines:")
             for line in log.read_text(errors="replace").splitlines()[-TAIL:]:
