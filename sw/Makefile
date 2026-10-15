@@ -4,8 +4,8 @@
 #
 # Builds snax_cluster's software from the copy in sw/ (CI1, README.md) into
 # build/sw/: libmath.a; per cluster, <cluster>/libsnRuntime.a (and for
-# snax_alu_cluster_old snax-alu-lib.o); the 17 plain tests for
-# snitch_cluster into tests/. Flags from toolchain.mk; include order and link
+# snax_alu_cluster_old snax-alu-lib.o); every plain test in tests/ (the
+# 17 of COPIED in sync.py) for snitch_cluster into tests/. Flags from toolchain.mk; include order and link
 # flags as snax_cluster's sw/math/Makefile, runtime/common/common.mk,
 # snax/snax-alu/Makefile and tests/Makefile at the pin. Each cluster's
 # generated headers (generated/<cluster>/) come before the other include
@@ -99,12 +99,10 @@ $(ALU_LIB): $(SW)/snax/snax-alu/src/snax-alu-lib.c
 # Plain tests #
 ###############
 
-# The 17 tests of runtime.yaml and standard-fp.yaml under tests/, for
-# snitch_cluster, with tests/Makefile's include dirs and link flags
-TESTS = atomics barrier dma_simple fence_i interrupt_local multi_cluster perf_cnt \
-        printf_simple printf_fmtint simple tls varargs_1 varargs_2 \
-        fp16_comparison_scalar fp16_computation_scalar fp32_comparison_scalar \
-        fp32_computation_scalar
+# Every test in tests/ (sync.py's COPIED holds the list: those of
+# runtime.yaml and standard-fp.yaml), for snitch_cluster, with
+# tests/Makefile's include dirs and link flags
+TESTS = $(basename $(notdir $(wildcard $(SW)/tests/*.c)))
 TEST_ELFS = $(addprefix $(BUILD)/tests/,$(addsuffix .elf,$(TESTS)))
 TEST_RUNTIME = $(BUILD)/snitch_cluster/libsnRuntime.a
 

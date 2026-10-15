@@ -5,5 +5,5 @@ APP = dma-timing
 INCDIRS = $(APP_DIR)/data
 include ../../common.mk
 
-$(ELF): $(APP_DIR)/src/$(APP).c $(APP_DIR)/data/data.h $(LIBS) | $(BUILDDIR)
+$(ELF): $(APP_DIR)/src/$(APP).c $(LIBS) | $(BUILDDIR)
 	$(RISCV_CC) $(RISCV_CFLAGS) $(RISCV_LDFLAGS) $< -o $@

@@ -32,7 +32,10 @@ ticked here when its entry is in the notes.
 2. Round 2, the workflow: on push to main and on pull requests, in the
    image, GVSoC built for `snitch;snax_alu`, then `make regress`. Only
    `snax/`, `sw/` and `tests/snax/` are built and tested; GVSoC's other
-   components stay out. Planned when round 1 is merged.
+   components stay out; the unit tests of `tests/snax/` run with
+   `python3 -m unittest discover -s tests/snax -p 'test_*.py'`, which needs
+   nothing beyond the image. It lands in the same pull request as round 1
+   and its fix-up.
 
 ## Round 1
 
@@ -52,12 +55,20 @@ ticked here when its entry is in the notes.
   Makefile loses `SNAX_CLUSTER` and `regress-plain`; `regress.py` builds
   with `make -C sw` first and fails on missing plain ELFs. Checks: every
   ELF of step 0, stripped, equals its new build; `make regress` passes (14
-  SNAX runs, 17 plain); `test_phases.py` passes.
+  SNAX runs, 17 plain); `python3 -m unittest discover -s tests/snax -p
+  'test_*.py'` passes in the image.
 - Step 3: the READMEs and the notes. Check: a clone of the branch with no
   snax_cluster beside it builds GVSoC and passes `make regress`; only
   `sync-snax-cluster` names a snax_cluster path in the Makefiles.
 - Step 4: snax-forge's docs: D126, CI1's row, M16's intro, open item 68,
   Next Up.
+- Fix-up after review: one list of plain tests (`COPIED` in `sw/sync.py`;
+  `sw/Makefile` and `regress.py` take the names from `sw/tests/*.c`); a
+  dependency file beside each app's ELF, so an edited header relinks the
+  programs that include it; the unit tests run with `unittest`. Checks:
+  every ELF equals the one built before the fix, byte for byte; a touched
+  header relinks only the programs that include it; `make regress` and the
+  unit tests pass.
 
 ## Acceptance
 
@@ -76,4 +87,5 @@ ticked here when its entry is in the notes.
 | 2 | `make sw`, the apps in `sw/apps/`, `regress.py` | done 2026-10-15 |
 | 3 | READMEs, notes; the standalone check | done 2026-10-15 |
 | 4 | snax-forge's docs (D126, CI1, open item 68) | on snax-forge's `ry/ci1` |
+| 4a | Fix-up after review: one list of plain tests, header dependencies, `unittest` | done 2026-10-15 |
 | 5 | Round 2: the workflow | |

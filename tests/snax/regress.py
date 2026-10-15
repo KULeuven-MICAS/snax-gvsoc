@@ -5,12 +5,13 @@
 """SNAX-GVSoC's regression (SG5, pass/finish only since SG6): `make regress`.
 
 Builds sw/ (`make -C sw`: the runtime per cluster, the math library and
-snax_cluster's 17 plain tests, from the pinned copy, CI1) and the programs
+snax_cluster's plain tests, from the pinned copy, CI1) and the programs
 of sw/apps/, then runs each SNAX program on the `snax_alu` target:
 `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096, `snax-stream`,
 `alu-timing`, the five `stream-timing` cases, `dma-timing` and `snax-csr`;
-then the 17 plain tests (build/sw/tests/) on the `snitch` target. A plain
-ELF missing is a failure.
+then the plain tests on the `snitch` target: one per sw/tests/*.c (the 17
+of COPIED in sw/sync.py), each from build/sw/tests/; a plain ELF missing
+is a failure.
 
 A program passes when it exits 0 within TIMEOUT seconds: every SNAX program
 but `stream-timing` returns its error count, `stream-timing` returns 0. No
@@ -40,12 +41,7 @@ BUILD = ROOT / "build" / "sw"
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0"]
 PLAIN_DIR = BUILD / "tests"
-PLAIN_TESTS = [  # snax_cluster's runtime.yaml and standard-fp.yaml at the pin (sw/Makefile)
-    "atomics", "barrier", "dma_simple", "fence_i", "interrupt_local", "multi_cluster",
-    "perf_cnt", "printf_simple", "printf_fmtint", "simple", "tls", "varargs_1", "varargs_2",
-    "fp16_comparison_scalar", "fp16_computation_scalar", "fp32_comparison_scalar",
-    "fp32_computation_scalar",
-]
+PLAIN_TESTS = sorted(c.stem for c in (SW / "tests").glob("*.c"))  # COPIED in sw/sync.py
 WORK = ROOT / "build" / "regress" / "work"
 TIMEOUT = 300  # seconds per program; each takes a few
 TAIL = 20  # lines of a failed run's log printed

@@ -15,8 +15,9 @@ in `sync.py`, and nowhere else.
 
 `make sw` at the top (`make -C sw`, `Makefile` here) builds into
 `build/sw/`: `libmath.a`; per cluster, `<cluster>/libsnRuntime.a`, and for
-`snax_alu_cluster_old` `snax-alu-lib.o`; the 17 plain tests for
-`snitch_cluster` into `tests/`. Flags come from `toolchain.mk`, include
+`snax_alu_cluster_old` `snax-alu-lib.o`; every plain test in `tests/`
+(the 17 of `COPIED`) for `snitch_cluster` into `tests/`; the regression
+runs the same set. Flags come from `toolchain.mk`, include
 order and link flags from upstream's Makefiles (`MIRRORED` in `sync.py`).
 Each program in `apps/` has a Makefile of its own on `common.mk` and builds
 into `build/sw/apps/<name>/`, building the libraries first when needed:

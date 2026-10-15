@@ -27,6 +27,10 @@ RISCV_LDFLAGS += $(LIB_OBJS)
 
 include $(SW)/toolchain.mk
 
+# Each ELF's dependency file, beside it (included at the end), so an edited
+# header relinks every program that includes it
+RISCV_CFLAGS += -MMD -MP -MT $@ -MF $(@:.elf=.d)
+
 SNRT_DIR    := $(SW)/snRuntime
 RUNTIME_DIR := $(SW)/runtime/rtl-generic
 
@@ -67,3 +71,5 @@ $(BUILDDIR)/%.dump: $(BUILDDIR)/%.elf
 
 clean:
 	rm -rf $(BUILDDIR)
+
+-include $(ELFS:.elf=.d)

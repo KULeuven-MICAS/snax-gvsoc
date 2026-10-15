@@ -1710,3 +1710,43 @@ stay there.
   Makefiles only `sync-snax-cluster` names a snax_cluster path.
 - Figures from Claude Code's runs in the snax-forge image on the MICAS
   server.
+
+### CI1 fix-up after review
+
+- 2026-10-15. On `ry/ci1` (the open pull request), after round 1's review.
+  No change to what any program is built from or prints.
+- One list of plain tests (D117 in snax-forge): `COPIED` in `sw/sync.py`.
+  `sw/Makefile` takes `TESTS` from `sw/tests/*.c` and `regress.py` its
+  plain tests from the same files; a test whose ELF is missing from
+  `build/sw/tests/` still fails the run.
+- Header dependencies: `sw/common.mk` adds `-MMD -MP -MT $@ -MF` with the
+  ELF's name in `.d` to every program's compile and includes the files, so
+  each ELF in `build/sw/apps/<name>/` has its `.d` beside it. The
+  hand-listed headers are gone from `stream-timing`'s Makefile
+  (`streamer_csr_addr_map.h`) and from `dma-timing`'s (`data/data.h`);
+  `snax-alu` keeps its generated `data.h` as a prerequisite, since it must
+  be made before the first compile.
+- Correction to round 1's entry: `test_phases.py` is a `unittest` file;
+  `python3 -m unittest discover -s tests/snax -p 'test_*.py'` runs it in the
+  image with nothing installed (Ran 11 tests, OK). Round 1 installed pytest
+  in a throwaway container for it; that was not needed. `CI1.md` names
+  this command, and round 2's workflow will run it.
+- `CI1.md`: round 2 lands in the same pull request as round 1 and this
+  fix; the fix-up is ticked there.
+- Checks, in the image:
+  - Before any edit, `make sw` and every program (`snax-alu` at 4, 100,
+    128, 1024, 4096) were built and the 31 ELFs of `build/sw/` kept outside
+    the repos. After the fix, a clean rebuild gives 31 ELFs, each equal
+    byte for byte.
+  - `touch sw/generated/snax_alu_cluster_old/streamer_csr_addr_map.h`:
+    `make -C sw/apps/snax-alu` relinks, `make -C sw/apps/snax-csr` does not;
+    then `make -q` exits 0 for both. `touch sw/apps/dma-timing/data/data.h`
+    relinks `dma-timing` through its `.d` alone.
+  - `simple.elf` moved out of `build/sw/tests/`, and `regress.py`'s
+    `main()` called from Python with its `make` of `sw/` replaced by a
+    no-op, `-k plain`: `FAIL plain simple: build/sw/tests/simple.elf
+    missing`, 16 run, `regression FAILED: 1 program(s): plain simple`, exit
+    1. The ELF was moved back.
+  - `make regress`: `regression passed`, 14 SNAX runs and 17 plain.
+- Figures from Claude Code's runs in the snax-forge image on the MICAS
+  server.
