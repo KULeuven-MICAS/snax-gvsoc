@@ -1,0 +1,86 @@
+# SNAX-GVSoC's CI (CI1 in snax-forge, D124): in snax-forge's development
+# image, GVSoC built for `snitch;snax_alu` only, the unit tests of
+# tests/snax/, then `make regress` (every program in sw/ built from the
+# pinned copy and run to exit 0). Only snax/, sw/ and tests/snax/ are built
+# and tested; GVSoC's other targets and their tests stay out.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  regress:
+    name: Build, unit tests, regress
+    # Only hosts Docker and Node; pinned, ubuntu-latest moves to Ubuntu 26 from 2026-10-19.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Public image with GVSoC's build tools and snax_cluster's toolchain (D118).
+    container: ghcr.io/kuleuven-micas/snax-forge:main
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The repository only: GVSoC's submodules are folded in, sw/ is a copy.
+      - uses: actions/checkout@v7
+
+      # ccache for GVSoC's C++ build. $GITHUB_WORKSPACE is the container's
+      # path (github.workspace is the host's); CMake takes the launchers from
+      # the environment, so the Makefile stays as it is.
+      - name: ccache environment
+        run: |
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+
+      # The latest saved ccache, from any branch this run may read.
+      - name: Restore ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-
+
+      # GVSoC for the two SNAX-GVSoC targets, then ccache's hit rate.
+      - name: Build GVSoC
+        id: build
+        run: |
+          make build TARGETS="snitch;snax_alu" CMAKE_FLAGS=-j$(nproc)
+          ccache -s
+
+      # phases.py's tests, with the image's Python as is.
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests/snax -p 'test_*.py'
+
+      # sw/ and the programs built, each run to exit 0 (14 SNAX, 17 plain).
+      - name: Regress
+        run: make regress
+
+      # The run.log of every program, when a step failed.
+      - name: Upload regress logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: regress-logs
+          path: build/regress/work/**/run.log
+          if-no-files-found: ignore
+
+      # Saved on every run with a build, PRs included: the cache is tens of MB.
+      - name: Save ccache
+        if: always() && steps.build.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-${{ github.run_id }}-${{ github.run_attempt }}

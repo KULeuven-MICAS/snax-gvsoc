@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the programs and the RTL reference | `9fbf35de566cbfed6fd1b5d6bf51903fa5ce33d1` (#657, 2026-10-14), from SG6 on: `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
+| snax_cluster, the programs and the RTL reference | `sw/README.md`, "Pin": the copy in `sw/` is at it, and the RTL runs in a checkout at it (CI1). From SG6 on `9fbf35d` (#657): `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -1659,3 +1659,152 @@ stay there.
     lines (the four `0 errors`, then `Input error: Platform returned an error
     (exitcode: 1)`), `regression FAILED: 1 program(s): snax-csr`, `make` exit
     2. Reverted. `-k snax-csr` runs 1 program, `-k stream-timing` 5.
+
+### CI1 round 1
+
+- 2026-10-15. Branch `ry/ci1` from main `86a85e3` (#7); `docs/plans/CI1.md`.
+  snax-gvsoc builds its programs from a pinned copy of snax_cluster's
+  software in `sw/`, so no snax_cluster checkout is needed to build or run
+  them; the RTL still runs in one. Round 2, the workflow, comes later.
+- Step 0, on main before any change: `make regress-plain` (exit 0; its
+  second `make sw` built `snax-alu-lib.c` without error), then every
+  program: `snax-alu` at `DATA_LEN` 4, 100, 128, 1024, 4096 and without,
+  `snax-stream`, `alu-timing`, the five `stream-timing` cases,
+  `dma-timing`, `snax-csr`. The 32 ELFs (17 plain, 15 SNAX) were kept
+  outside the repos as the reference.
+- `sw/` (144 files): 114 copied unchanged from snax_cluster `9fbf35d` and
+  its two submodules (the list is `COPIED` and `MATH` in `sw/sync.py`: the
+  runtime, `math/` but its Makefile, `.gitignore` and `include/bits/`, the
+  17 plain tests, the `snax-alu` app and library, the two cluster hjsons,
+  `data_utils.py`, the licences), snax_cluster's `sw/` and
+  `target/snitch_cluster/sw/` merged so every relative include works;
+  6 generated with upstream's rules (`snitch_cluster_cfg.h` and
+  `snitch_cluster_addrmap.h` per cluster, `snitch_cluster_peripheral.h`,
+  equal for both, `alltypes.h`); `streamer_csr_addr_map.h`, a hand copy,
+  moved from `tests/snax/snax-alu/include/`; `sync.py`, `README.md`,
+  `Makefile`, `common.mk`; the 19 files of the six programs, moved from
+  `tests/snax/` to `sw/apps/` (`snax-alu`'s checked-in `data.h`, `lib/`
+  and `include/` removed: `data.h` is made per build, default `DATA_LEN`
+  100). Nothing beyond the planned copy list was needed.
+- `make sync-snax-cluster SNAX_CLUSTER=../snax_cluster`, in the image: run
+  twice at the pin, the second left `git status` clean; a file added under
+  `sw/math/` by hand was removed. It refuses tracked changes only in what it
+  reads (`CHECKED`: `sw/`, `target/`, `util/`, `hw/snitch_cluster/`,
+  `LICENSE`), so the generated `StreamParamGen.scala` that `rtl-gen` leaves
+  modified does not stop it. The checkout's `streamer_csr_addr_map.h` (from
+  its last `rtl-gen`) equals ours but for its `Generated at` line, which
+  the comparison skips.
+- ELF comparison: every one of the 32 ELFs built from `sw/` equals its
+  reference, stripped with `llvm-objcopy --strip-all` and also unstripped,
+  byte for byte; `snax-alu` without `DATA_LEN` was compared with the new
+  default 100 (the old checked-in `data.h` was the 100-element one).
+- `make build TARGETS="snitch;snax_alu"`, then `make regress`:
+  `regression passed`, 14 SNAX runs and 17 plain, about 70 s.
+  `test_phases.py`: 11 passed (pytest is not in the image; it ran from a
+  throwaway install in the container). A plain ELF missing fails the run
+  (`FAIL plain simple: build/nonexistent/simple.elf missing`, exit 1, with
+  the folder pointed elsewhere).
+- Standalone: `ry/ci1` cloned into a folder with nothing else in it,
+  mounted alone in the image: `make build TARGETS="snitch;snax_alu"` (1 min
+  39 s), then `make regress`: `regression passed`, 14 and 17. In the
+  Makefiles only `sync-snax-cluster` names a snax_cluster path.
+- Figures from Claude Code's runs in the snax-forge image on the MICAS
+  server.
+
+### CI1 fix-up after review
+
+- 2026-10-15. On `ry/ci1` (the open pull request), after round 1's review.
+  No change to what any program is built from or prints.
+- One list of plain tests (D117 in snax-forge): `COPIED` in `sw/sync.py`.
+  `sw/Makefile` takes `TESTS` from `sw/tests/*.c` and `regress.py` its
+  plain tests from the same files; a test whose ELF is missing from
+  `build/sw/tests/` still fails the run.
+- Header dependencies: `sw/common.mk` adds `-MMD -MP -MT $@ -MF` with the
+  ELF's name in `.d` to every program's compile and includes the files, so
+  each ELF in `build/sw/apps/<name>/` has its `.d` beside it. The
+  hand-listed headers are gone from `stream-timing`'s Makefile
+  (`streamer_csr_addr_map.h`) and from `dma-timing`'s (`data/data.h`);
+  `snax-alu` keeps its generated `data.h` as a prerequisite, since it must
+  be made before the first compile.
+- Correction to round 1's entry: `test_phases.py` is a `unittest` file;
+  `python3 -m unittest discover -s tests/snax -p 'test_*.py'` runs it in the
+  image with nothing installed (Ran 11 tests, OK). Round 1 installed pytest
+  in a throwaway container for it; that was not needed. `CI1.md` names
+  this command, and round 2's workflow will run it.
+- `CI1.md`: round 2 lands in the same pull request as round 1 and this
+  fix; the fix-up is ticked there.
+- Checks, in the image:
+  - Before any edit, `make sw` and every program (`snax-alu` at 4, 100,
+    128, 1024, 4096) were built and the 31 ELFs of `build/sw/` kept outside
+    the repos. After the fix, a clean rebuild gives 31 ELFs, each equal
+    byte for byte.
+  - `touch sw/generated/snax_alu_cluster_old/streamer_csr_addr_map.h`:
+    `make -C sw/apps/snax-alu` relinks, `make -C sw/apps/snax-csr` does not;
+    then `make -q` exits 0 for both. `touch sw/apps/dma-timing/data/data.h`
+    relinks `dma-timing` through its `.d` alone.
+  - `simple.elf` moved out of `build/sw/tests/`, and `regress.py`'s
+    `main()` called from Python with its `make` of `sw/` replaced by a
+    no-op, `-k plain`: `FAIL plain simple: build/sw/tests/simple.elf
+    missing`, 16 run, `regression FAILED: 1 program(s): plain simple`, exit
+    1. The ELF was moved back.
+  - `make regress`: `regression passed`, 14 SNAX runs and 17 plain.
+- Figures from Claude Code's runs in the snax-forge image on the MICAS
+  server.
+
+### CI1 round 2
+
+- 2026-10-15. On `ry/ci1` (the open pull request); `docs/plans/CI1.md`,
+  "Round 2".
+- `.github/workflows/ci.yml`, workflow `CI`: on push to main, on pull
+  requests and by hand; one run per ref at a time (a newer one cancels
+  it); read-only contents. One job `regress` on `ubuntu-latest` in
+  `ghcr.io/kuleuven-micas/snax-forge:main`, 30 minutes at most: checkout
+  (no submodules); the ccache environment set through `$GITHUB_ENV` from
+  `$GITHUB_WORKSPACE` (`CCACHE_DIR` in `.ccache`, 500 MB, CMake's C and C++
+  launchers, so the Makefile is unchanged); the latest ccache restored;
+  `make build TARGETS="snitch;snax_alu"` and `ccache -s`; `python3 -m
+  unittest discover -s tests/snax -p 'test_*.py'`; `make regress`; on a
+  failure every `run.log` as the `regress-logs` artifact; ccache saved
+  after every run whose build passed, pull requests included. Only
+  `snax/`, `sw/` and `tests/snax/` are built and tested.
+- `regress.py`: with `GITHUB_ACTIONS=true` each failure also prints
+  `::error title=<program>::<why>, log <path>` (no log part for a missing
+  plain ELF); nothing changes outside Actions. `.ccache/` is ignored.
+- Local checks, Claude Code's runs in the snax-forge image on the MICAS
+  server (the workflow itself runs only on GitHub):
+  - `yaml.safe_load` reads the workflow: one job, 8 steps.
+  - With `build/`, `install/` and `.ccache` removed, the commands of steps
+    2 to 6 as written, from the repository root with the same variables
+    (`GITHUB_WORKSPACE` the repository, `GITHUB_ENV` a file read back):
+    `make build` passed with CMake's cache holding the `ccache` launchers
+    (cmake 3.28.3); `ccache -s`: 509 cacheable calls, 485 misses, the cache
+    in `.ccache` (21 MB); the unit tests ran 11, OK; `make regress`:
+    `regression passed`, 14 SNAX runs and 17 plain. A second build after
+    removing `build/` and `install/` hit the cache on all 509 calls.
+  - With `snax-csr` returning one more than its error count (not
+    committed) and `GITHUB_ACTIONS=true`, `regress.py -k snax-csr` printed
+    `::error title=snax-csr::exit 1, log build/regress/work/snax-csr/run.log`
+    beside its `FAIL` line and log tail, then `regression FAILED: 1
+    program(s): snax-csr`, exit 1.
+- The GitHub runs; the figures are from GitHub's run pages, not from
+  Claude Code's runs:
+  - https://github.com/KULeuven-MICAS/snax-gvsoc/actions/runs/38748023138,
+    PR #8 at `0b71d09` (the revert; the break commit arrived in the same
+    push, so it was not run on its own): passed, the job 6 min 21 s with
+    no cache yet.
+  - https://github.com/KULeuven-MICAS/snax-gvsoc/actions/runs/38757868926,
+    a throwaway PR #9 from branch `ry/ci1-break` at `8022f16` (`snax-csr`
+    returning one more than its errors): failed at Regress, annotation
+    "snax-csr: exit 1, log build/regress/work/snax-csr/run.log", artifact
+    `regress-logs` (5.7 KB), the job 6 min 38 s cold (a pull request does
+    not read another pull request's cache). PR #9 closed unmerged, the
+    branch deleted.
+  - The runs gave two notices: the v4 actions run on Node 20, which
+    GitHub deprecated, and `ubuntu-latest` moves to Ubuntu 26 from
+    2026-10-19. So `actions/checkout` and `actions/upload-artifact` went
+    to v7 and `actions/cache/restore` and `actions/cache/save` to v6, all
+    on Node 24, with the same inputs (none we use changed meaning in their
+    READMEs and release notes at those tags), and the runner is pinned to
+    `ubuntu-24.04`: the job runs in the image, the runner only hosts
+    Docker and Node. `yaml.safe_load` still reads the workflow (one job,
+    8 steps); the new versions are not run yet.

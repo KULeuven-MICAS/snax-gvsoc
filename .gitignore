@@ -24,3 +24,4 @@ tests/rv64/riscv-tests/
 tests/siracusa/pulp-sdk-siracusa/
 tests/pulp-nn/
 *.patch
+/.ccache/

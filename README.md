@@ -17,10 +17,11 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
 | `snax/` | SNAX targets and components: the `snax_alu` target, its streamer, ALU and TCDM crossbar |
-| `tests/snax/` | Programs for the SNAX targets, built against snax_cluster's runtime |
+| `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
+| `tests/snax/` | The regression (`regress.py`) and the phase script (`phases.py`) |
 | `docs/plans/` | One checklist per task (`SG0.md`, `SG1.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
-| `build/`, `install/` | GVSoC's build and run output, and what it installs; not tracked |
+| `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
 ## Quick start
 
@@ -31,8 +32,8 @@ bender 0.28.2), pixi and zsh. It is built from snax-forge's `container/`; its
 README says how. The image holds tools only: this repo is mounted at its own
 path and GVSoC is built there.
 
-Run it from the folder that holds this repo (and `snax-forge`,
-`snax_cluster` next to it), then go into this one:
+Run it from the folder that holds this repo (and `snax-forge`, and
+`snax_cluster` when the RTL is run, next to it), then go into this one:
 
     podman run --rm -it -v "$PWD":"$PWD" -w "$PWD" ghcr.io/kuleuven-micas/snax-forge:main
     cd snax-gvsoc
@@ -53,24 +54,16 @@ cycle 7909 to 23862.
 
 ## Running snax_cluster's tests
 
-Programs are built with snax_cluster's own flow, in a snax_cluster checkout
-beside this repo; only the ELF files are run here. Clone it next to this
-repo, at the commit in `docs/notes/NOTES.md`, with its submodules:
+snax_cluster's runtime and plain tests are built from the copy in `sw/`
+("Where sw/ comes from"); no snax_cluster checkout is needed. In the
+container, started from the parent folder as above, build them and run them
+all; each prints `exit 0`, and `printf_simple` prints `Hello, World!` once
+per core:
 
-    git clone https://github.com/KULeuven-MICAS/snax_cluster.git ../snax_cluster
-    git -C ../snax_cluster checkout 9fbf35de566cbfed6fd1b5d6bf51903fa5ce33d1
-    git -C ../snax_cluster submodule update --init --recursive
-
-In the container, started from the parent folder as above, build
-snax_cluster's plain tests (the first build needs internet: bender fetches a
-dependency) and run them all; each prints `exit 0`, and `printf_simple`
-prints `Hello, World!` once per core:
-
-    make -C ../snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snitch_cluster.hjson
+    make sw
     source sourceme.sh
     mkdir -p build/work
-    T=../snax_cluster/target/snitch_cluster/sw/tests/build
-    for e in $T/*.elf; do
+    for e in build/sw/tests/*.elf; do
       n=$(basename $e .elf)
       gvrun --target snitch --work-dir build/work/$n --param chip/soc/binary=$PWD/$e run > build/work/$n.log 2>&1
       echo "$n exit $?"
@@ -82,42 +75,36 @@ prints `Hello, World!` once per core:
 `snax_alu` is snax_cluster's `cfg/snax_alu_cluster_old.hjson`: a compute
 core and a DMA core, the compute core's accelerator (`snax/snax_alu_acc.py`)
 with its streamer and the ALU, its TCDM ports through a crossbar into the
-banks. Build snax_cluster's runtime for that cluster (this also rebuilds its
-plain tests for 2 cores), then GVSoC and the programs in `tests/snax/`:
+banks. Build `sw/` (the runtime for both clusters), GVSoC and the programs
+in `sw/apps/`, each into `build/sw/apps/<name>/`:
 
-    make -C ../snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
+    make sw
     make build TARGETS="snitch;snax_alu"
-    make -C tests/snax/snax-csr
-    make -C tests/snax/snax-alu
+    make -C sw/apps/snax-csr
+    make -C sw/apps/snax-alu
     source sourceme.sh
     gvrun --target snax_alu --work-dir build/work/snax-csr \
-        --param chip/soc/binary=$PWD/tests/snax/snax-csr/build/snax-csr.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-csr/snax-csr.elf run
     gvrun --target snax_alu --work-dir build/work/snax-alu \
-        --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-alu/100/snax-alu.elf run
 
 `snax-csr` prints four lines of `0 errors` and exits 0. `snax-alu` prints
 `Accelerator Done!`, `Accelerator Cycles: 25` and `Number of errors: 0` and
 exits 0, as on the RTL. Adding `--trace=snax_acc0` before `run` prints every
-CSR access the streamer and the ALU get. Each program in `tests/snax/` has a
+CSR access the streamer and the ALU get. Each program in `sw/apps/` has a
 README with its own expected output.
 
 ## Regression
 
-`make regress` builds the programs of `tests/snax/` and runs each on
+`make regress` builds `sw/` and the programs of `sw/apps/`, runs each on
 `snax_alu`: `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the five
-`stream-timing` cases, `dma-timing` and `snax-csr`. A program passes when it
-exits 0 within its timeout: each returns its error count, `stream-timing`
-returns 0. No output or cycle count is compared (SG6). It needs GVSoC built
-for `snitch;snax_alu` and snax_cluster's runtime built for the ALU cluster,
-as above, and takes about a minute.
+`stream-timing` cases, `dma-timing` and `snax-csr`, then snax_cluster's 17
+plain tests on `snitch`. A program passes when it exits 0 within its
+timeout: each SNAX program returns its error count, `stream-timing` returns
+0, and a plain test missing from `build/sw/tests/` fails. No output or cycle
+count is compared (SG6). It needs GVSoC built for `snitch;snax_alu`, as
+above, and takes about a minute.
 
-snax_cluster's 17 plain tests run on `snitch` too once their ELFs are in
-`build/regress/plain/`. `make regress-plain` puts them there: it builds them
-for snax_cluster's 9-core cluster and then rebuilds the runtime for the ALU
-cluster (run it again after moving the snax_cluster pin); `make regress`
-rebuilds the programs against it.
-
-    make regress-plain
     make regress
 
 It ends with `regression passed` and exit 0, or names each program that
@@ -126,23 +113,54 @@ failed or did not finish and exits 1. Each run's output goes to
 log's last 20 lines. `python3 tests/snax/regress.py -k SUBSTRING` runs only
 the programs whose name holds it, as `-k stream-timing` or `-k plain`.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to main, on every pull
+request, and by hand (`workflow_dispatch`), in snax-forge's image
+`ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
+`snitch;snax_alu` (with ccache, kept between runs), runs the unit tests
+(`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
+`make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
+tested; GVSoC's other targets stay out.
+
+When a program fails, the job log holds the last 20 lines of its
+`run.log`, the run's summary shows one annotation per failed program, and
+the `regress-logs` artifact holds every `run.log`. Actions must be enabled
+in the repository's settings for the workflow to run.
+
+## Where sw/ comes from
+
+`sw/` holds the files of snax_cluster a build reads, at one pinned commit,
+with the headers generated from them, so the programs build without a
+snax_cluster checkout. `sw/README.md` gives the pin, the path map, the
+licences and how each generated file is made; `make sync-snax-cluster
+SNAX_CLUSTER=<checkout>` refreshes the copy from a checkout and reports what
+moved, to be reviewed and committed with the new pin.
+
 ## Comparing with the RTL (by hand)
 
 Cycles are compared with the RTL by hand, on demand, from fresh runs of one
 ELF on both sides, against SG5's target (`docs/plans/SG5.md`, "The target";
-D124 in snax-forge). For `snax-alu` at size `n`
-(`make -C tests/snax/snax-alu DATA_LEN=$n`), run the ELF on snax_cluster's
-RTL with Questa as its `target/snitch_cluster/README.md` says, from that
-folder:
+D124 in snax-forge). Only the RTL needs a snax_cluster checkout: clone it
+next to this repo at the pin in `sw/README.md`, with its submodules:
+
+    PIN=$(sed -n 's/^| `snax_cluster` | `\([0-9a-f]*\)`.*/\1/p' sw/README.md)
+    git clone https://github.com/KULeuven-MICAS/snax_cluster.git ../snax_cluster
+    git -C ../snax_cluster checkout $PIN
+    git -C ../snax_cluster submodule update --init --recursive
+
+For `snax-alu` at size `n` (`make -C sw/apps/snax-alu DATA_LEN=$n`), run the
+ELF on snax_cluster's RTL with Questa as its `target/snitch_cluster/README.md`
+says, from that folder:
 
     rm -rf logs
-    bin/snitch_cluster.vsim ../../../snax-gvsoc/tests/snax/snax-alu/build/$n/snax-alu.elf
+    bin/snitch_cluster.vsim ../../../snax-gvsoc/build/sw/apps/snax-alu/$n/snax-alu.elf
     rm -rf logs-$n && mv logs logs-$n
 
 then here, on SNAX-GVSoC with both cores' instruction traces, and cut both
 runs into phases:
 
-    E=tests/snax/snax-alu/build/$n/snax-alu.elf
+    E=build/sw/apps/snax-alu/$n/snax-alu.elf
     gvrun --target snax_alu --work-dir build/work/cmp-$n --trace=pe0/insn:pe0.txt \
         --trace=pe1/insn:pe1.txt --param chip/soc/binary=$PWD/$E run
     python3 tests/snax/phases.py $E --rtl ../snax_cluster/target/snitch_cluster/logs-$n
