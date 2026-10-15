@@ -5,6 +5,9 @@ at `93cedc4`, made on 2026-10-12. It is developed on its own and is never
 merged or rebased from upstream (D116 in
 [snax-forge](https://github.com/KULeuven-MICAS/snax-forge)).
 
+`sw/` is a pinned copy of snax_cluster's software, not of GVSoC: its pin,
+licences and sync are in `sw/README.md`.
+
 ## Upstream commits
 
 | Path | Upstream | Commit | Date |

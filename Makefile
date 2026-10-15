@@ -80,7 +80,12 @@ regress-plain:
 	cp $(SNAX_CLUSTER)/target/snitch_cluster/sw/tests/build/*.elf build/regress/plain/
 	$(SNAX_CLUSTER_SW) CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
 
-.PHONY: regress regress-plain
+# Refreshes sw/ from a snax_cluster checkout (CI1, sw/README.md)
+sync-snax-cluster:
+	$(if $(filter command line environment,$(origin SNAX_CLUSTER)),,$(error set SNAX_CLUSTER to a snax_cluster checkout))
+	python3 sw/sync.py $(SNAX_CLUSTER)
+
+.PHONY: regress regress-plain sync-snax-cluster
 
 checkout:
 	git submodule update --recursive --init
