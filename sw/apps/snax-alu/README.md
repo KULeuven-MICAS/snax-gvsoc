@@ -1,51 +1,41 @@
 # snax-alu
 
-snax_cluster's `snax-alu` app, copied here so SNAX-GVSoC is developed against
-a fixed program. Source: snax_cluster `9fbf35d` (#657, SG6's Zicsr fix; the
-app as at `d7dd789`, `b2672f8` with the DMA core waiting for its transfers
-before the barrier, SG5 P2), cluster `cfg/snax_alu_cluster_old.hjson`.
-
-| File | From snax_cluster |
-|---|---|
-| `src/snax-alu.c` | `target/snitch_cluster/sw/apps/snax-alu/src/`, unchanged |
-| `lib/snax-alu-lib.c` | `target/snitch_cluster/sw/snax/snax-alu/src/`, unchanged |
-| `include/snax-alu-lib.h` | `target/snitch_cluster/sw/snax/snax-alu/include/`, unchanged |
-| `include/streamer_csr_addr_map.h` | written by the Chisel streamer in `rtl-gen` for that cluster |
-| `data/datagen.py` | `target/snitch_cluster/sw/apps/snax-alu/data/`, unchanged |
-| `data/data.h` | made once with NumPy seed 0, command below |
+snax_cluster's `snax-alu` app, copied into `sw/` so SNAX-GVSoC is developed
+against a fixed program: `src/snax-alu.c` and `data/datagen.py` here, its
+library in `sw/snax/snax-alu/`, the streamer's CSR map in
+`sw/generated/snax_alu_cluster_old/`, cluster `cfg/snax_alu_cluster_old.hjson`.
+Where each file comes from: `sw/README.md`, "Provenance of snax-alu".
 
 ## Build
 
-In the container, from the folder that holds this repo and snax_cluster,
-build snax_cluster's runtime for the cluster once, then the app:
+In the container, from snax-gvsoc:
 
-    make -C snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
-    make -C snax-gvsoc/tests/snax/snax-alu
+    make -C sw/apps/snax-alu
 
-The ELF is `build/snax-alu.elf`. `SNAX_CLUSTER=<path>` points the Makefile at
-another checkout. Built with the same `data.h`, snax_cluster's own build of
-the app gives a byte-identical ELF.
+The ELF is `build/sw/apps/snax-alu/100/snax-alu.elf`; the Makefile builds
+the runtime and the library from `sw/` first when needed. `DATA_LEN=N` (100
+when unset, N a multiple of 4) builds into `build/sw/apps/snax-alu/N/`
+(below). At each size the ELF is byte-identical to the one built with
+snax_cluster's flow in a checkout at the pin (CI1).
 
 ## data.h
 
-From this folder, with the image's Python:
+`make` writes `data.h` into the build folder with `datagen.py`, NumPy seed
+0, mode 0, `DATA_LEN` elements; from snax-gvsoc, at 100:
 
-    PYTHONPATH=../../../../snax_cluster/util/sim python3 -c "
+    PYTHONPATH=sw/util python3 -c "
     import sys, runpy, numpy as np
     np.random.seed(0)
     sys.argv = ['datagen.py', '--mode=0', '--length=100']
-    runpy.run_path('data/datagen.py', run_name='__main__')
-    " > data/data.h
-
-`make DATA_LEN=N` runs the same command for N elements into `build/N/` and
-builds the ELF there (below); at 100 it gives this `data.h` and the same ELF.
+    runpy.run_path('sw/apps/snax-alu/data/datagen.py', run_name='__main__')
+    " > data.h
 
 ## Run
 
 From snax-gvsoc, after `make build TARGETS=snax_alu` and `source sourceme.sh`:
 
     gvrun --target snax_alu --work-dir build/work/snax-alu \
-        --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-alu/100/snax-alu.elf run
 
 ## Expected output
 
@@ -66,16 +56,16 @@ directory; a trace file name is taken relative to the work directory, so
 give the name only:
 
     gvrun --target snax_alu --work-dir build/work/snax-alu \
-        --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/snax-alu.elf \
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-alu/100/snax-alu.elf \
         --trace=pe0/insn:pe0.txt --trace=pe1/insn:pe1.txt run
-    python3 tests/snax/phases.py tests/snax/snax-alu/build/snax-alu.elf \
+    python3 tests/snax/phases.py build/sw/apps/snax-alu/100/snax-alu.elf \
         --gvsoc build/work/snax-alu --json build/work/snax-alu/phases.json
 
 On the RTL, after the run in snax_cluster's `target/snitch_cluster`, with
 the same ELF. The script reads the raw `logs/trace_chip_*_hart_*.dasm` the
 run writes, so `make traces` (and its `spike-dasm`) is not needed:
 
-    python3 tests/snax/phases.py tests/snax/snax-alu/build/snax-alu.elf \
+    python3 tests/snax/phases.py build/sw/apps/snax-alu/100/snax-alu.elf \
         --rtl ../snax_cluster/target/snitch_cluster/logs
 
 It prints one table per core and the totals. At `DATA_LEN` 100 on
@@ -90,20 +80,19 @@ read of 982. The unit tests of the script:
 ## Sizes
 
 SG5 runs the app at five `DATA_LEN` values. `make DATA_LEN=N` writes
-`build/N/data.h` (NumPy seed 0, mode 0, N elements; N a multiple of 4) and
-`build/N/snax-alu.elf`; without `DATA_LEN` the build is the one above. From
+`build/sw/apps/snax-alu/N/data.h` and `snax-alu.elf` there. From
 snax-gvsoc, after `source sourceme.sh`:
 
     for n in 4 100 128 1024 4096; do
-      make -C tests/snax/snax-alu DATA_LEN=$n
+      make -C sw/apps/snax-alu DATA_LEN=$n
       gvrun --target snax_alu --work-dir build/work/sg5-$n \
-          --param chip/soc/binary=$PWD/tests/snax/snax-alu/build/$n/snax-alu.elf \
+          --param chip/soc/binary=$PWD/build/sw/apps/snax-alu/$n/snax-alu.elf \
           --trace=pe0/insn:pe0.txt --trace=pe1/insn:pe1.txt \
           --trace=streamer:streamer.txt run > build/work/sg5-$n.log 2>&1
       echo "$n exit $?"
       grep -a 'Cycles\|errors' build/work/sg5-$n.log
       grep -a 'Done' build/work/sg5-$n/streamer.txt | sed 's/.*Done/Done/'
-      python3 tests/snax/phases.py tests/snax/snax-alu/build/$n/snax-alu.elf \
+      python3 tests/snax/phases.py build/sw/apps/snax-alu/$n/snax-alu.elf \
           --gvsoc build/work/sg5-$n --json build/work/sg5-$n/phases.json
     done
 

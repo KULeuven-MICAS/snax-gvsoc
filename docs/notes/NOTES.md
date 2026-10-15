@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the programs and the RTL reference | `9fbf35de566cbfed6fd1b5d6bf51903fa5ce33d1` (#657, 2026-10-14), from SG6 on: `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
+| snax_cluster, the programs and the RTL reference | `sw/README.md`, "Pin": the copy in `sw/` is at it, and the RTL runs in a checkout at it (CI1). From SG6 on `9fbf35d` (#657): `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -1659,3 +1659,54 @@ stay there.
     lines (the four `0 errors`, then `Input error: Platform returned an error
     (exitcode: 1)`), `regression FAILED: 1 program(s): snax-csr`, `make` exit
     2. Reverted. `-k snax-csr` runs 1 program, `-k stream-timing` 5.
+
+### CI1 round 1
+
+- 2026-10-15. Branch `ry/ci1` from main `86a85e3` (#7); `docs/plans/CI1.md`.
+  snax-gvsoc builds its programs from a pinned copy of snax_cluster's
+  software in `sw/`, so no snax_cluster checkout is needed to build or run
+  them; the RTL still runs in one. Round 2, the workflow, comes later.
+- Step 0, on main before any change: `make regress-plain` (exit 0; its
+  second `make sw` built `snax-alu-lib.c` without error), then every
+  program: `snax-alu` at `DATA_LEN` 4, 100, 128, 1024, 4096 and without,
+  `snax-stream`, `alu-timing`, the five `stream-timing` cases,
+  `dma-timing`, `snax-csr`. The 32 ELFs (17 plain, 15 SNAX) were kept
+  outside the repos as the reference.
+- `sw/` (144 files): 114 copied unchanged from snax_cluster `9fbf35d` and
+  its two submodules (the list is `COPIED` and `MATH` in `sw/sync.py`: the
+  runtime, `math/` but its Makefile, `.gitignore` and `include/bits/`, the
+  17 plain tests, the `snax-alu` app and library, the two cluster hjsons,
+  `data_utils.py`, the licences), snax_cluster's `sw/` and
+  `target/snitch_cluster/sw/` merged so every relative include works;
+  6 generated with upstream's rules (`snitch_cluster_cfg.h` and
+  `snitch_cluster_addrmap.h` per cluster, `snitch_cluster_peripheral.h`,
+  equal for both, `alltypes.h`); `streamer_csr_addr_map.h`, a hand copy,
+  moved from `tests/snax/snax-alu/include/`; `sync.py`, `README.md`,
+  `Makefile`, `common.mk`; the 19 files of the six programs, moved from
+  `tests/snax/` to `sw/apps/` (`snax-alu`'s checked-in `data.h`, `lib/`
+  and `include/` removed: `data.h` is made per build, default `DATA_LEN`
+  100). Nothing beyond the planned copy list was needed.
+- `make sync-snax-cluster SNAX_CLUSTER=../snax_cluster`, in the image: run
+  twice at the pin, the second left `git status` clean; a file added under
+  `sw/math/` by hand was removed. It refuses tracked changes only in what it
+  reads (`CHECKED`: `sw/`, `target/`, `util/`, `hw/snitch_cluster/`,
+  `LICENSE`), so the generated `StreamParamGen.scala` that `rtl-gen` leaves
+  modified does not stop it. The checkout's `streamer_csr_addr_map.h` (from
+  its last `rtl-gen`) equals ours but for its `Generated at` line, which
+  the comparison skips.
+- ELF comparison: every one of the 32 ELFs built from `sw/` equals its
+  reference, stripped with `llvm-objcopy --strip-all` and also unstripped,
+  byte for byte; `snax-alu` without `DATA_LEN` was compared with the new
+  default 100 (the old checked-in `data.h` was the 100-element one).
+- `make build TARGETS="snitch;snax_alu"`, then `make regress`:
+  `regression passed`, 14 SNAX runs and 17 plain, about 70 s.
+  `test_phases.py`: 11 passed (pytest is not in the image; it ran from a
+  throwaway install in the container). A plain ELF missing fails the run
+  (`FAIL plain simple: build/nonexistent/simple.elf missing`, exit 1, with
+  the folder pointed elsewhere).
+- Standalone: `ry/ci1` cloned into a folder with nothing else in it,
+  mounted alone in the image: `make build TARGETS="snitch;snax_alu"` (1 min
+  39 s), then `make regress`: `regression passed`, 14 and 17. In the
+  Makefiles only `sync-snax-cluster` names a snax_cluster path.
+- Figures from Claude Code's runs in the snax-forge image on the MICAS
+  server.

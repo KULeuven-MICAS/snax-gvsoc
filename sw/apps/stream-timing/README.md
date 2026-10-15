@@ -31,15 +31,14 @@ core's timing (SG5), not only on the streamer.
 
 ## Build and run
 
-In the container, from the folder that holds this repo and snax_cluster,
-after snax_cluster's runtime is built for the cluster (see
-`../snax-alu/README.md`):
+In the container, from snax-gvsoc (the Makefile builds the runtime from
+`sw/` first when needed):
 
-    make -C snax-gvsoc/tests/snax/stream-timing
-    cd snax-gvsoc && source sourceme.sh
+    make -C sw/apps/stream-timing
+    source sourceme.sh
     for c in zero_bound a_alone ab_other_banks ab_same_banks a_stride0; do
       gvrun --target snax_alu --work-dir build/work/st-$c \
-        --param chip/soc/binary=$PWD/tests/snax/stream-timing/build/stream-timing-$c.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/stream-timing/stream-timing-$c.elf run
     done
 
 `--trace="snax_xbar:<file>"` writes the crossbar's grants per bank and cycle,

@@ -71,9 +71,9 @@ ticked here when its entry is in the notes.
 
 | # | Step | Status |
 |---|---|---|
-| 0 | Reference ELFs from main; this plan | |
-| 1 | `sw/`: the copy, the generated headers, `sync.py`, `sw/README.md` | |
-| 2 | `make sw`, the apps in `sw/apps/`, `regress.py` | |
-| 3 | READMEs, notes; the standalone check | |
-| 4 | snax-forge's docs (D126, CI1, open item 68) | |
+| 0 | Reference ELFs from main; this plan | done 2026-10-15 |
+| 1 | `sw/`: the copy, the generated headers, `sync.py`, `sw/README.md` | done 2026-10-15 |
+| 2 | `make sw`, the apps in `sw/apps/`, `regress.py` | done 2026-10-15 |
+| 3 | READMEs, notes; the standalone check | done 2026-10-15 |
+| 4 | snax-forge's docs (D126, CI1, open item 68) | on snax-forge's `ry/ci1` |
 | 5 | Round 2: the workflow | |

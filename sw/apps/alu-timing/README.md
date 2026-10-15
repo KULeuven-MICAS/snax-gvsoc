@@ -28,19 +28,18 @@ returns the error count.
 
 ## Build and run
 
-In the container, from the folder that holds this repo and snax_cluster,
-after snax_cluster's runtime is built for the cluster (see
-`../snax-alu/README.md`):
+In the container, from snax-gvsoc (the Makefile builds the runtime from
+`sw/` first when needed):
 
-    make -C snax-gvsoc/tests/snax/alu-timing
-    cd snax-gvsoc && source sourceme.sh
+    make -C sw/apps/alu-timing
+    source sourceme.sh
     gvrun --target snax_alu --work-dir build/work/alu-timing \
-        --param chip/soc/binary=$PWD/tests/snax/alu-timing/build/alu-timing.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/alu-timing/alu-timing.elf run
 
 On the RTL built from the same hjson:
 
     cd snax_cluster/target/snitch_cluster
-    bin/snitch_cluster.vlt <snax-gvsoc>/tests/snax/alu-timing/build/alu-timing.elf
+    bin/snitch_cluster.vlt <snax-gvsoc>/build/sw/apps/alu-timing/alu-timing.elf
 
 ## Output
 

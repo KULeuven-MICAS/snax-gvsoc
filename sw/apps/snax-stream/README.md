@@ -2,7 +2,7 @@
 
 `snax-alu`'s three streamers and the ALU in its four modes (SG4). Readers A
 and B and the writer O are set up as `snax-alu` sets them, through its
-library (`../snax-alu/lib`, `../snax-alu/include`): 25 beats of 4 lanes, A,
+library (`sw/snax/snax-alu/`): 25 beats of 4 lanes, A,
 B and O one after the other from the start of L1 (+0, +800, +1600 B). A and
 B are full 64-bit words from a fixed generator, so sub underflows and mul
 keeps the low 64 bits of its product, as `snax_alu_pe.sv` does.
@@ -22,19 +22,18 @@ SNAX-GVSoC's `snax_alu` target. The timing of the ALU against the RTL is
 
 ## Build and run
 
-In the container, from the folder that holds this repo and snax_cluster,
-after snax_cluster's runtime is built for the cluster (see
-`../snax-alu/README.md`):
+In the container, from snax-gvsoc (the Makefile builds the runtime from
+`sw/` first when needed):
 
-    make -C snax-gvsoc/tests/snax/snax-stream
-    cd snax-gvsoc && source sourceme.sh
+    make -C sw/apps/snax-stream
+    source sourceme.sh
     gvrun --target snax_alu --work-dir build/work/snax-stream \
-        --param chip/soc/binary=$PWD/tests/snax/snax-stream/build/snax-stream.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-stream/snax-stream.elf run
 
 On the RTL built from the same hjson:
 
     cd snax_cluster/target/snitch_cluster
-    bin/snitch_cluster.vlt <snax-gvsoc>/tests/snax/snax-stream/build/snax-stream.elf
+    bin/snitch_cluster.vlt <snax-gvsoc>/build/sw/apps/snax-stream/snax-stream.elf
 
 ## Expected output
 

@@ -37,14 +37,13 @@ SNAX-GVSoC only.
 
 ## Build and run
 
-In the container, from the folder that holds this repo and snax_cluster,
-after snax_cluster's runtime is built for the cluster (see
-`../snax-alu/README.md`):
+In the container, from snax-gvsoc (the Makefile builds the runtime from
+`sw/` first when needed):
 
-    make -C snax-gvsoc/tests/snax/snax-csr
-    cd snax-gvsoc && source sourceme.sh
+    make -C sw/apps/snax-csr
+    source sourceme.sh
     gvrun --target snax_alu --work-dir build/work/sa_csr \
-        --param chip/soc/binary=$PWD/tests/snax/snax-csr/build/snax-csr.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-csr/snax-csr.elf run
 
 Adding `--trace=snax_acc0` prints every access the streamer and the ALU
 receive.

@@ -38,13 +38,13 @@ counters read 0 until SG2's P3 adds counting.
 
 ## Build
 
-In the container, from the folder that holds this repo and snax_cluster,
-build snax_cluster's runtime for the cluster once, then the program:
+In the container, from snax-gvsoc (the Makefile builds the runtime from
+`sw/` first when needed):
 
-    make -C snax_cluster/target/snitch_cluster sw CFG_OVERRIDE=cfg/snax_alu_cluster_old.hjson
-    make -C snax-gvsoc/tests/snax/dma-timing
+    make -C sw/apps/dma-timing
 
-The ELF is `build/dma-timing.elf`. `data/data.h` is generated:
+The ELF is `build/sw/apps/dma-timing/dma-timing.elf`. `data/data.h` is
+generated, from this folder:
 
     python3 data/datagen.py > data/data.h
 
@@ -54,13 +54,13 @@ On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_alu` and
 `source sourceme.sh`:
 
     gvrun --target snax_alu --work-dir build/work/dma-timing \
-        --param chip/soc/binary=$PWD/tests/snax/dma-timing/build/dma-timing.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/dma-timing/dma-timing.elf run
 
 On the RTL built from the same hjson (Verilator here; `.vsim` and `.vcs`
 take the same argument):
 
     cd snax_cluster/target/snitch_cluster
-    bin/snitch_cluster.vlt <snax-gvsoc>/tests/snax/dma-timing/build/dma-timing.elf
+    bin/snitch_cluster.vlt <snax-gvsoc>/build/sw/apps/dma-timing/dma-timing.elf
 
 Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from
 that folder (the iDMA's own trace, hart 1), and the iDMA commit Bender
