@@ -45,6 +45,17 @@
 // the beat (IO_REQ_OK) or is refused (IO_REQ_DENIED, no grant follows: the
 // accelerator tries again in a later cycle).
 //
+// Priority (DataRequestor.scala, ComplexQueue.scala): each TCDM request
+// carries a bit for the sparse interconnect, on the wire tcdm_prio_<i> set
+// just before the request is sent (and resent). With dynamic priority it is
+// the lane's queue hint, reader count <= 1, writer count >= fifo_depth - 1;
+// the RTL holds the hint in a register reloaded in every cycle without a
+// request or in which the request fires, so a request first sent in cycle t
+// carries the hint of the queue count during t - 1, and keeps it while it is
+// resent. Without dynamic priority the bit is higherStaticPriority. The count
+// during a cycle is the RTL queue's: the words visible by then and not popped
+// before it.
+//
 // Per mover, the cycles of each run are classed as SNAX-MODEL classed them:
 // busy (a channel granted) > stall_xbar (requested, none granted) >
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
@@ -69,6 +80,13 @@ struct Word
     uint64_t value;
 };
 
+// A word popped from a lane's queue: when it became visible, when it left
+struct PoppedWord
+{
+    int64_t visible;
+    int64_t popped;
+};
+
 enum CycleClass { BUSY, STALL_XBAR, STALL_FIFO, IDLE, NB_CLASSES };
 static const char *class_names[NB_CLASSES] = {"busy", "stall_xbar", "stall_fifo", "idle"};
 
@@ -81,6 +99,8 @@ struct Mover
     int temporal_dim;
     int num_channel;
     int fifo_depth;
+    bool dynamic_priority;      // the priority bit from the queue count
+    bool higher_static_priority;  // else this bit
     int csr_first;              // offset of its first CSR
     int first_channel;          // index of its first channel in the streamer
 
@@ -114,7 +134,9 @@ struct Channel
     bool requested;             // sent a request in this cycle
     bool granted;               // granted in this cycle
     std::deque<Word> data;      // the lane's queue, fifo_depth deep
+    std::deque<PoppedWord> popped;  // words popped in the last two cycles
     int max_count;              // highest count of the lane's queue in this run
+    bool priority;              // the priority bit of the request sent
 
     // Requests in flight, at most fifo_depth, plus the one being sent
     std::vector<vp::IoReq> reqs;
@@ -150,11 +172,14 @@ private:
     bool can_request(Channel &ch, int64_t cycle);
     void wake(int64_t delay);
     void trace_count(Channel &ch);
+    void pop_word(Channel &ch, int64_t cycle);
+    bool priority_hint(Channel &ch, int64_t cycle);
     void end_run(int64_t cycle);
 
     vp::Trace trace;
     vp::IoSlave csr_itf;
     std::vector<vp::IoMaster> tcdm_itf;
+    std::vector<vp::WireMaster<bool>> tcdm_prio_itf;
     std::vector<vp::IoSlave> reader_itf;
     std::vector<vp::IoSlave> writer_itf;
     vp::ClockEvent step_event;
@@ -205,6 +230,8 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
         mover.temporal_dim = m->get_child_int("temporal_dim");
         mover.num_channel = m->get_child_int("num_channel");
         mover.fifo_depth = m->get_child_int("fifo_depth");
+        mover.dynamic_priority = m->get_child_bool("dynamic_priority");
+        mover.higher_static_priority = m->get_child_bool("higher_static_priority");
         mover.csr_first = csr;
         mover.first_channel = nb_channels;
         // Pointer low and high, spatial strides, temporal bounds and strides
@@ -228,6 +255,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     // Sized once, before any port is registered: never resized after
     this->channels.resize(nb_channels);
     this->tcdm_itf.resize(nb_channels);
+    this->tcdm_prio_itf.resize(nb_channels);
     this->reader_itf.resize(this->readers.size());
     this->writer_itf.resize(this->writers.size());
     for (Mover &mover : this->movers)
@@ -244,6 +272,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
             this->tcdm_itf[id].set_grant_meth_muxed(&SnaxStreamer::tcdm_grant, id);
             this->tcdm_itf[id].set_resp_meth_muxed(&SnaxStreamer::tcdm_resp, id);
             this->new_master_port("tcdm_" + std::to_string(id), &this->tcdm_itf[id]);
+            this->new_master_port("tcdm_prio_" + std::to_string(id), &this->tcdm_prio_itf[id]);
         }
     }
 
@@ -274,6 +303,8 @@ void SnaxStreamer::reset(bool active)
         {
             ch.addrs.clear();
             ch.data.clear();
+            ch.popped.clear();
+            ch.priority = false;
             ch.used = 0;
             ch.held = NULL;
             ch.requested = false;
@@ -400,6 +431,36 @@ void SnaxStreamer::trace_count(Channel &ch)
     }
     this->trace.msg(vp::Trace::LEVEL_TRACE, "Queue %s.lane%d: %d\n", ch.mover->name.c_str(),
         ch.lane, count);
+}
+
+
+// The lane's head word leaves its queue in cycle
+void SnaxStreamer::pop_word(Channel &ch, int64_t cycle)
+{
+    // Only pops from the cycle before on still count (priority_hint)
+    while (!ch.popped.empty() && ch.popped.front().popped < cycle - 1)
+    {
+        ch.popped.pop_front();
+    }
+    ch.popped.push_back({ch.data.front().visible, cycle});
+    ch.data.pop_front();
+}
+
+
+// The queue hint of the RTL in cycle: from the count during it, the words
+// visible by then and not popped before it
+bool SnaxStreamer::priority_hint(Channel &ch, int64_t cycle)
+{
+    int count = 0;
+    for (const Word &word : ch.data)
+    {
+        count += word.visible <= cycle;
+    }
+    for (const PoppedWord &word : ch.popped)
+    {
+        count += word.visible <= cycle && word.popped >= cycle;
+    }
+    return ch.mover->is_reader ? count <= 1 : count >= ch.mover->fifo_depth - 1;
 }
 
 
@@ -598,7 +659,7 @@ vp::IoReqStatus SnaxStreamer::reader_req(vp::Block *__this, vp::IoReq *req, int 
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
             Channel &ch = _this->channel(mover, lane);
-            ch.data.pop_front();
+            _this->pop_word(ch, cycle);
             ch.used--;
             _this->trace_count(ch);
         }
@@ -684,9 +745,15 @@ void SnaxStreamer::step_handler(vp::Block *__this, vp::ClockEvent *event)
             }
             req->set_data((uint8_t *)&ch.bufs[slot]);
             ch.held = req;
+            ch.priority = ch.mover->dynamic_priority ? _this->priority_hint(ch, cycle - 1)
+                : ch.mover->higher_static_priority;
         }
 
         ch.requested = true;
+        if (_this->tcdm_prio_itf[id].is_bound())
+        {
+            _this->tcdm_prio_itf[id].sync(ch.priority);
+        }
         vp::IoReqStatus status = _this->tcdm_itf[id].req(ch.held);
         if (status != vp::IO_REQ_PENDING)
         {
@@ -816,7 +883,7 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
             }
             else
             {
-                ch.data.pop_front();
+                _this->pop_word(ch, cycle);
                 _this->trace_count(ch);
             }
             ch.held = NULL;

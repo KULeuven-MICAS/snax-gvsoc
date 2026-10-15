@@ -28,6 +28,12 @@
 // that cycle). An input that loses gets nothing and is dropped: as an RTL
 // master keeps valid high, it sends the same request again the next cycle.
 //
+// The priority bit of a request comes on the wire prio_<i>, set by its master
+// just before it sends the request (and before each resend), and holds for
+// that cycle only. A master that does not set it, as a core reaching the
+// crossbar through routers would, asks with priority 0; the wire keeps the bit
+// out of the request's argument slots, which routers use.
+//
 // Inputs are numbered as on the RTL, where the SNAX ports come first. The
 // cores and the DMA do not go through this crossbar; they reach the same banks
 // on their own paths.
@@ -56,6 +62,7 @@ public:
 
 private:
     static vp::IoReqStatus req(vp::Block *__this, vp::IoReq *req, int id);
+    static void priority_sync(vp::Block *__this, bool value, int id);
     static void arbitrate(vp::Block *__this, vp::ClockEvent *event);
     static void respond(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
@@ -72,6 +79,7 @@ private:
 
     vp::Trace trace;
     std::vector<vp::IoSlave> inputs;
+    std::vector<vp::WireSlave<bool>> priority_itf;
     std::vector<vp::IoMaster> banks;
     vp::ClockEvent arb_event;
     vp::ClockEvent resp_event;
@@ -93,7 +101,7 @@ private:
     std::vector<uint64_t> bank_req;
     // Per input: its owner's name for the trace, in_<i> when none is given
     std::vector<std::string> names;
-    // Per input: the priority bit of its request (sparse only)
+    // Per input: the priority bit of its request in this cycle (sparse only)
     std::vector<bool> priority;
 
     // Sparse: the ports, and per bank its arbiter and its inputs in local order
@@ -142,6 +150,7 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
 
     // Sized once, before any port is registered: never resized after
     this->inputs.resize(this->nb_inputs);
+    this->priority_itf.resize(this->nb_inputs);
     this->banks.resize(this->nb_banks);
     this->pending.assign(this->nb_inputs, NULL);
     this->pending_bank.assign(this->nb_inputs, 0);
@@ -172,6 +181,8 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     {
         this->inputs[i].set_req_meth_muxed(&SnaxTcdmXbar::req, i);
         this->new_slave_port("in_" + std::to_string(i), &this->inputs[i]);
+        this->priority_itf[i].set_sync_meth_muxed(&SnaxTcdmXbar::priority_sync, i);
+        this->new_slave_port("prio_" + std::to_string(i), &this->priority_itf[i]);
     }
     for (int i = 0; i < this->nb_banks; i++)
     {
@@ -233,6 +244,13 @@ vp::IoReqStatus SnaxTcdmXbar::req(vp::Block *__this, vp::IoReq *req, int id)
         _this->arb_event.enqueue(0);
     }
     return vp::IO_REQ_PENDING;
+}
+
+
+void SnaxTcdmXbar::priority_sync(vp::Block *__this, bool value, int id)
+{
+    SnaxTcdmXbar *_this = (SnaxTcdmXbar *)__this;
+    _this->priority[id] = value;
 }
 
 
@@ -385,10 +403,12 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         resp_port->grant(req);
     }
 
-    // The losers are dropped; their masters send them again next cycle.
+    // The losers are dropped; their masters send them again next cycle, with
+    // their priority bit.
     for (int i = 0; i < _this->nb_inputs; i++)
     {
         _this->pending[i] = NULL;
+        _this->priority[i] = false;
     }
 
     // Keeps the earlier cycle if the event is already queued for a later one

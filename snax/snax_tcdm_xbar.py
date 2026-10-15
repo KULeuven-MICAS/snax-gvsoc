@@ -40,6 +40,9 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
     -----
     in_<i> : io slave
         SNAX port i, TCDM offsets.
+    prio_<i> : wire<bool> slave
+        The priority bit of the request port i sends next in the cycle; 0 for a
+        port that does not set it. Sparse only.
     out_<b> : io master
         Bank b, bank-local offsets.
     """
@@ -70,6 +73,9 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
+
+    def i_PRIORITY(self, port: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'prio_{port}', signature='wire<bool>')
 
     def o_BANK(self, bank: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'out_{bank}', itf, signature='io')

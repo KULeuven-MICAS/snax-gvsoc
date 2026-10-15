@@ -107,6 +107,36 @@ structure.
 In round 1 only the 12 SNAX ports go through the crossbar; the cores, AXI
 and the DMA keep their paths (rounds 3 and 4).
 
+## The priority bit
+
+From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
+`Writer.scala` (step 6):
+
+- The hint is combinational on the lane's data queue (`dataBuffer`, the
+  `Queue` per lane, `fifo_depth` deep): reader `count <= 1`, writer
+  `count >= fifo_depth - 1`. `count` comes from the queue's registers, so in
+  cycle c it is the count after cycle c - 1's enqueue and dequeue. A
+  reader's word enters at the response, one cycle after the grant, and
+  counts from the cycle after that; a writer's beat counts from the cycle
+  after the accelerator gives it, and leaves at its grant.
+- `priorityHold` is reloaded at the end of every cycle in which the
+  channel has no request or its request fires. So a request first sent in
+  cycle t carries the hint of cycle t - 1 (the channel had no request then,
+  or its previous one fired), and a request resent keeps the bit it was
+  first sent with.
+- With `dynamicPriority` false the bit is `higherStaticPriority`. The
+  streamer template's keys are lists per reader or writer, defaults true and
+  false.
+- In SNAX-GVSoC the bit is the count during t - 1 of the words visible by
+  then and not popped before it (`priority_hint()` in `snax_streamer.cpp`),
+  taken when the channel makes a new request and kept while it is resent.
+- Carried on a `wire<bool>` per SNAX port (`tcdm_prio_<i>` on the streamer,
+  `prio_<i>` on the crossbar), set just before every send and resend of the
+  request and holding for that cycle only. Not in the request's argument
+  slots, which routers push and pop: a port that never sets its wire, as a
+  core's reaching the crossbar through routers in round 3, asks with
+  priority 0, as the RTL's cores and AXI do.
+
 ## The rounds
 
 | Round | Content |

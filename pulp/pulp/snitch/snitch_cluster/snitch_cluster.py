@@ -196,12 +196,16 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
                 snax_xbar.o_BANK(i, banks[i].i_INPUT())
             for i in range(0, nb_snax_ports):
                 self.bind(self, f'snax_in_{i}', snax_xbar, f'in_{i}')
+                self.bind(self, f'snax_prio_{i}', snax_xbar, f'prio_{i}')
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
 
     def i_SNAX_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'snax_in_{port}', signature='io')
+
+    def i_SNAX_PRIORITY(self, port: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'snax_prio_{port}', signature='wire<bool>')
 
     def i_DMA_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'dma_input', signature='io')
@@ -311,6 +315,9 @@ class SnitchCluster(gvsoc.systree.Component):
             cores[core_id].o_SNAX_CSR(acc.i_INPUT())
             for port in range(0, getattr(make_acc, 'nb_tcdm_ports', 0)):
                 acc.o_TCDM(port, tcdm.i_SNAX_INPUT(snax_port))
+                # The priority bit of each request, for the sparse interconnect
+                if hasattr(acc, 'o_TCDM_PRIORITY'):
+                    acc.o_TCDM_PRIORITY(port, tcdm.i_SNAX_PRIORITY(snax_port))
                 snax_port += 1
 
         # Cluster DMA

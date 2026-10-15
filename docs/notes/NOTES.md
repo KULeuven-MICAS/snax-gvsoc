@@ -1934,3 +1934,39 @@ stay there.
   one rule broken (no restart after an idle cycle; no lock; priority
   ignored), against `alu` at seed 1: 1534, 1244 and 8248 selection
   differences, exit 1.
+
+### SG7 step 6: the streamer's priority bit
+
+- 2026-10-15. The rule, read from `DataRequestor.scala`,
+  `ComplexQueue.scala`, `Reader.scala` and `Writer.scala`, is in
+  `SG7.md`, "The priority bit": a request first sent in cycle t carries the
+  lane queue's hint of cycle t - 1 (reader `count <= 1`, writer
+  `count >= fifo_depth - 1`, the count from the queue's registers), and a
+  resent request keeps its bit; `priorityHold` reloads only in a cycle with
+  no request or when the request fires.
+- `snax/snax_streamer.{cpp,py}`: the template keys `dynamicPriority` and
+  `higherStaticPriority` per reader and writer, read as
+  `stream_param_gen.scala.tpl` reads them (default dynamic, static 0).
+  Each channel takes its bit when it makes a new request, from the count
+  during the cycle before (the words visible by then and not popped before
+  it; the words popped in the last two cycles are kept for that), and sets
+  its wire `tcdm_prio_<i>` before every send and resend.
+- The bit is carried on a `wire<bool>` per SNAX port, not in the
+  request: `SnaxTcdmXbar`'s `prio_<i>` stores it for the cycle and clears it
+  with the cycle's requests, so a port that never sets it (a core through
+  routers, round 3) asks with priority 0. `snax_alu_acc.py` and
+  `snitch_cluster.py` (`SnitchClusterTcdm`, `SnitchCluster`) bind the
+  wires; a row in `UPSTREAM.md`.
+- In snax-forge's image, `make build TARGETS="snitch;snax_alu"`, then
+  `make regress`: passed; all 31 `run.log` files and, but for the
+  configuration lines at time 0 (the new wires' bindings), the 14 SNAX
+  programs' output and `snax_xbar` and `streamer` traces equal step 4's
+  main baseline: the plain crossbar ignores the bit.
+- The bits checked by hand on a sparse run, with step 7's target built
+  from the work tree before step 7's commit: `stream-timing`'s
+  `ab_same_banks`, start written at 4713. Reader A's lane 0 asks at 4715,
+  4716, 4717 and 4718 with priority 1 (its queue counts 0, 0, 0 and 1 in the
+  cycle before) and at 4719 with 0 (count 2); reader B's lane 0, held on
+  bank 0 at 4715, is resent at 4716 with the same 1, then asks with 1 up to
+  4719 and with 0 at 4720. Counter 10, as on the plain target. The writer's
+  bit was not looked at here: the writer does not run in `stream-timing`.
