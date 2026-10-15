@@ -16,7 +16,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | Path | What |
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `snax/` | SNAX targets and components: the `snax_alu` target, the CSR stub |
+| `snax/` | SNAX targets and components: the `snax_alu` target, its streamer, ALU and TCDM crossbar |
 | `tests/snax/` | Programs for the SNAX targets, built against snax_cluster's runtime |
 | `docs/plans/` | One checklist per task (`SG0.md`, `SG1.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
@@ -121,7 +121,10 @@ rebuilds the programs against it.
     make regress
 
 It ends with `regression passed` and exit 0, or names each program that
-failed or did not finish and exits 1.
+failed or did not finish and exits 1. Each run's output goes to
+`build/regress/work/<name>/run.log`; a failure prints that path and the
+log's last 20 lines. `python3 tests/snax/regress.py -k SUBSTRING` runs only
+the programs whose name holds it, as `-k stream-timing` or `-k plain`.
 
 ## Comparing with the RTL (by hand)
 

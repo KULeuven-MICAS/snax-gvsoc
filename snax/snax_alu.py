@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""The snax_alu target: snax_cluster's cfg/snax_alu_cluster_old.hjson at b2672f8.
+"""The snax_alu target: snax_cluster's cfg/snax_alu_cluster_old.hjson at b2672f8,
+unchanged up to the pin, 9fbf35d.
 
 One cluster with a compute core (hart 0, the one that drives the accelerator)
 and a DMA core (hart 1), both rv32ima, 128 KiB TCDM in 32 banks and the plain

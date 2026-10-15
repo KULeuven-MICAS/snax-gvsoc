@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Checks the compute core's SNAX CSRs on the snax_alu target (the streamer
-// model and the test datapath in the ALU's place): every read-write CSR reads
+// model and the ALU model): every read-write CSR reads
 // back what was written, through each kind of CSR instruction, the forms that
 // must not write (csrrc with x0, csrrsi / csrrci with 0) leave a read-only CSR
 // alone, and the read-only CSRs read 0, as nothing is started. Returns the

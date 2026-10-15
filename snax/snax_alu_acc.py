@@ -24,7 +24,7 @@ from snax_alu_shell import SnaxAluShell
 
 
 # snax_alu_streamer_template of snax_cluster's cfg/snax_alu_cluster_old.hjson
-# at b2672f8, with the hjson's keys
+# at b2672f8 (unchanged up to the pin, 9fbf35d), with the hjson's keys
 STREAMER_TEMPLATE = {
     'data_reader_params': {
         'spatial_bounds': [[4], [4]],
@@ -45,9 +45,9 @@ STREAMER_TEMPLATE = {
 # log2, 17 bits
 TCDM_SIZE = 128 * 1024
 
-# The first SNAX CSR (CSR_SNAX_BEGIN, 0x3C0) and the last one the core sends
-# out (0x5FF). The core puts CSR n at byte address 4 * n on its snax_csr port.
-SNAX_CSR_FIRST = 960
+# The first SNAX CSR (CSR_SNAX_BEGIN, 960) and the last one the core sends
+# out (1535). The core puts CSR n at byte address 4 * n on its snax_csr port.
+SNAX_CSR_FIRST = 0x3C0
 SNAX_CSR_LAST = 0x5FF
 
 # The streamer's CSRs come first: 3 movers x 5 read-write CSRs and start, then

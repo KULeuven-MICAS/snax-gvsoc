@@ -38,7 +38,7 @@ On the RTL built from the same hjson:
 
 ## Expected output
 
-On SNAX-GVSoC at SG4 P2, exit code 0:
+On SNAX-GVSoC, exit code 0:
 
     snax-stream add: errors 0, streamer counter 31, alu counter 25
     snax-stream sub: errors 0, streamer counter 31, alu counter 25
