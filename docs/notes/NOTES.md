@@ -2247,3 +2247,32 @@ model, sparse, the growing phases (as SG5's "Result"):
   Tier 3 (fixed costs, every phase at 4 and 100) is explained as SG5 did,
   with C5's and C6's growth above.
 - `snax_alu.py`'s comment on `CORE_LATENCY` says why 2 still gives 4.
+
+### SG7 round 3, step 5: core-tcdm and its predictions
+
+- 2026-10-15. `sw/apps/core-tcdm` (README there): one ELF per case,
+  `subword`, `core_vs_reader`, `after_stores`, on `common.mk`; in
+  `regress.py` on both SNAX targets (`subword` returns its error count, the
+  other two 0); the README's regression paragraph says so.
+- The ELFs' disassembly, built in snax-forge's image: no FP instruction in
+  `main`. `subword` uses `sb`, `sh`, `sw`, `lbu`, `lhu`, `lw`, one
+  `amoadd.w` and `lr.w` then `sc.w`; the compiler reads the signed byte and
+  half with `lbu` and `lhu`, so `lb` and `lh` are not exercised; the
+  doubleword is two `sw` and two `lw`. In the two streamer cases the area's
+  stores (`sw` pairs, 8 KiB) end with a `fence`, then only CSR
+  instructions up to the start write; `core_vs_reader` has `csrw 975`,
+  `lw` on bank 16, `lw` on bank 0, in that order.
+- Predictions in `SG7.md`, "Predictions of round 3", from source before any
+  run of `core-tcdm` (none on SNAX-GVSoC either), with a throwaway
+  predictor (`build/sg7/r3/predict3.py`: round 1's plus a core at input 12,
+  priority 0, holding, the next L1 load 4 cycles after the previous grant).
+  It gives round 1's counters without the core, with 15 inputs as with 12;
+  the existing programs' compared counters do not move with the plain
+  pointer at 0, 12 or 13. `core_vs_reader` was laid out with it so its
+  counter holds for any core offset from 0 to 6 cycles (a first load on
+  another bank keeps the core's bank-0 load after the readers' first
+  requests; without it a load arriving at s + 2 wins there on the plain
+  interconnect and moves the counter).
+- On the sparse RTL `subword` is predicted to fail its SC: the sparse
+  wrapper does not drive the memory side's user field, so the AMO shim's
+  `core_id` is unknown. A prediction from source only.

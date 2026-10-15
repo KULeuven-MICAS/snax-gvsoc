@@ -167,6 +167,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | `stream-timing`, `alu-timing`, `snax-alu` at five sizes | Sparse RTL and both targets | The compared counters, the phases of `snax-alu` |
 | New `stream-timing` cases | Plain and sparse RTL, both targets | A winner that priority or the idle reset changes |
 | Regression | Both targets | Every SNAX program exits 0 on `snax_alu` and `snax_alu_sparse`, the plain tests on `snitch` |
+| `core-tcdm` (round 3) | Plain and sparse RTL, both targets | The cores' sub-word accesses, AMO and LR/SC through the interconnect; a core's load against reader lanes; the plain pointer the cores' stores leave |
 
 ## Steps
 
@@ -185,7 +186,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3.2 | The crossbar: inputs that hold, sub-word accesses; nothing wired | done 2026-10-15 |
 | 3.3 | The cores and AXI into the crossbar on both SNAX targets | done 2026-10-15 |
 | 3.4 | D125's `tcdm` latency fitted again | done 2026-10-15 |
-| 3.5 | `core-tcdm` and its predictions | |
+| 3.5 | `core-tcdm` and its predictions | done 2026-10-15 |
 | 3.6 | Runs on both RTLs and both targets; the comparison | |
 
 ## Predictions
@@ -374,6 +375,39 @@ cycle takes the place of the cycle the LSU added to a synchronous answer;
 the core goes on in the cycle after the response. What changes is that a
 core's L1 load now blocks the core until its data (3 cycles more per element
 in the check loop, C5 +5% against the RTL); tiers 1 and 2 still hold.
+
+### Predictions of round 3
+
+Made in step 3.5 from source, before any run of `core-tcdm` on the RTL or on
+SNAX-GVSoC. The cases with contention were worked through with a throwaway
+restatement (`build/sg7/r3/predict3.py`, not committed): round 1's predictor
+plus a core as input 12, asking with priority 0, its losing request held,
+its next L1 load 4 cycles after the previous one's grant (D125). Without the
+core it gives round 1's counters with 15 inputs as with 12.
+
+`core-tcdm`:
+
+| Case | Compare | Plain RTL | Plain target | Sparse RTL | Sparse target | Why |
+|---|---|---|---|---|---|---|
+| `subword` | errors, `sc` | 0, 0 | 0, 0 | 2, 1 | 0, 0 | Each access stays in one bank word, at the byte offset, and reaches the bank as on the L1 path. On the sparse RTL the AMO shim's `core_id` and `is_core` are not driven (the wrapper leaves the memory side's user field unconnected), so the SC's test of the reservation's core against its own is unknown and the SC fails: `sc` 1, the word stays 7, the LR/SC group counts 2 errors and the program returns 2. `amoadd.w` does not use `core_id`. On the plain RTL the user field passes through (core 0, a core); on SNAX-GVSoC the bank keeps the reservation by hart |
+| `core_vs_reader` | 977 | 18 | 18 | 17 | 17 | 16 reader requests on bank 0, all asking with priority 1 (queue counts 0 and 1). Plain: the core's bank-0 load gets its turn after the 8 lanes' first requests, at s + 11 for any arrival from s + 4 to s + 10, and costs the readers a cycle. Sparse: the core, with 0, waits until the readers are done (s + 18). Both hold for the core's first load (bank 16) issued 0 to 6 cycles after the start write |
+| `after_stores` | 977 | 5 | 5 | 6 | 6 | Plain: core 0's stores leave `rr_q` at 12 on banks 0 to 3 (13 would give the same), from which the tree takes B first; A then waits a cycle, B ends at s + 5. Sparse: the pointer restarts after the idle cycles, A goes first, B ends a cycle later. The plain target before round 3 (`rr_q` 0 from reset) would give 6. So the plain RTL's 5 shows its pointer at the core's input, round 1's open prediction for `ab_same_banks` |
+
+The other programs, with the cores in the crossbar on both targets:
+
+- Every compared counter of `stream-timing`, `alu-timing` and `snax-alu` as
+  in round 1 on each side, and the plain RTL's at the pin as SG3's, SG4's
+  and round 1's values. In these programs the cores' accesses meet no
+  streamer request (the core reads only CSRs while the streamer and the ALU
+  run), and the counters do not move with the plain pointer the cores leave
+  (the predictor with `rr_q` 0, 12 or 13 at the start). The plain target's
+  grants now follow the cores' stores: in `ab_same_banks` B goes first on
+  banks 0 to 3 at s + 2, as on the plain RTL (round 1's prediction), the
+  counter still 10.
+- `snax-alu`'s phases on both RTLs: SG5's reference (the same ELFs, the RTL
+  unchanged); on the targets, step 3.4's.
+- What is not compared may move on SNAX-GVSoC with the core's timing: start
+  gaps, `polls`, `mcycle`, 977 where it is not compared.
 
 ### Acceptance of round 3
 

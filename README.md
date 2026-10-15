@@ -109,10 +109,11 @@ with priority 1.
 `make regress` builds `sw/` and the programs of `sw/apps/`, runs each ELF
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
-cases, `dma-timing` and `snax-csr`, then snax_cluster's 17 plain tests on
-`snitch`. A program passes when it exits 0 within its timeout: each SNAX
-program returns its error count, `stream-timing` returns 0, and a plain
-test missing from `build/sw/tests/` fails. No output or cycle count is
+cases, `dma-timing`, `snax-csr` and the `core-tcdm` cases, then
+snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
+within its timeout: each SNAX program returns its error count,
+`stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
+plain test missing from `build/sw/tests/` fails. No output or cycle count is
 compared (SG6). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse`,
 as above, and takes about two minutes.
 
