@@ -183,7 +183,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 9 | Runs on the RTL and both targets; the comparison | done 2026-10-15 |
 | 3.1 | Round 3: this section ("Round 3") | done 2026-10-15 |
 | 3.2 | The crossbar: inputs that hold, sub-word accesses; nothing wired | done 2026-10-15 |
-| 3.3 | The cores and AXI into the crossbar on both SNAX targets | |
+| 3.3 | The cores and AXI into the crossbar on both SNAX targets | done 2026-10-15 |
 | 3.4 | D125's `tcdm` latency fitted again | |
 | 3.5 | `core-tcdm` and its predictions | |
 | 3.6 | Runs on both RTLs and both targets; the comparison | |

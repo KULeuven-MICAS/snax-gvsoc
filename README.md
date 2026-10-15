@@ -74,13 +74,14 @@ per core:
 
 `snax_alu` is snax_cluster's `cfg/snax_alu_cluster_old.hjson`: a compute
 core and a DMA core, the compute core's accelerator (`snax/snax_alu_acc.py`)
-with its streamer and the ALU, its TCDM ports through a crossbar into the
-banks, arbitrated as the plain interconnect does. `snax_alu_sparse`
+with its streamer and the ALU; its TCDM ports, the cores' and the narrow
+AXI port's go through a crossbar into the banks, arbitrated as the plain
+interconnect does. `snax_alu_sparse`
 (`snax/snax_alu_sparse.py`) is `cfg/snax_alu_cluster.hjson`, the same
 cluster with the sparse interconnect: the crossbar takes the streamer's
 priority bit first, then round robin from the last pick (SG7,
-`docs/plans/SG7.md`); the cores, AXI and the DMA keep their own paths into
-the banks on both. The two clusters build the same ELF (`sw/README.md`).
+`docs/plans/SG7.md`); the cores and AXI ask with priority 0. The DMA keeps
+its own path into the banks on both. The two clusters build the same ELF (`sw/README.md`).
 Build `sw/` (the runtime for both clusters), GVSoC and the programs in
 `sw/apps/`, each into `build/sw/apps/<name>/`:
 

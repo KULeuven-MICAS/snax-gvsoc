@@ -2161,3 +2161,36 @@ model, sparse, the growing phases (as SG5's "Result"):
   the port pointers in the time-0 lines.
 - Not exercised by this step: holding, the write answered at its grant, the
   carried latency and sub-word accesses (no master uses them before step 3).
+
+### SG7 round 3, step 3: the cores and AXI into the crossbar
+
+- 2026-10-15. `snitch_cluster.py`, only for a cluster with SNAX ports: the
+  crossbar's inputs are the SNAX ports, then `core0`, `core1` (each core's
+  TCDM and `tcdm_alias` maps in `pe<i>_ico`, keeping `core_latency['tcdm']`),
+  then `axi` (`narrow_axi`'s TCDM map, straight to the crossbar at TCDM
+  offsets instead of through `pe0_ico`). These three hold a losing request;
+  their priority wires are bound to nothing, so they ask with 0. The plain
+  crossbar has 15 inputs as the RTL; the sparse config is `[[12, 1], [1, 1],
+  [1, 1], [1, 1]]`, snaxgen's. The `snitch` target builds as before (no SNAX
+  ports). `snax_alu.py`, `snax_alu_sparse.py`, the crossbar's docstring,
+  `ClusterArch`'s comment and the README say so; a row in `UPSTREAM.md`.
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
+  `make regress`: `regression passed` (32 SNAX runs, 17 plain); no warning
+  in any `run.log`. Against step 2, every `run.log` is equal but
+  `dma-timing`'s on both targets, whose `l2l1 4x800` line goes from done 82,
+  busy 66 to done 96, busy 81 (RTL 84 for done, SG5).
+- That line, traced on `snax_alu` (`idma`, `wide_axi`, `narrow_axi`, the
+  DRAM, the I-cache), with and without this step's wiring on the same
+  build (the installed `snitch_cluster.py` swapped): no core touches the
+  banks during the four copies. The DMA core reaches the second run's first
+  copy at 227988 instead of 228013, 25 cycles earlier (its loads and stores
+  now take the crossbar's timing), and the copies now overlap GVSoC's HTIF
+  poll of `tohost`: every 1000 cycles (at ...001) the core's HTIF model reads
+  `tohost` byte by byte through the core's data port and `narrow_axi` into
+  the DRAM. At 228001 it delays the third copy's DRAM read from 15 to 30
+  cycles. A GVSoC artefact of the host model, not of the crossbar; the RTL
+  has no such poll. Not changed here.
+- `dma-timing` on `snax_alu`, crossbar traced: 3516 grants to `core0` and
+  18833 to `core1`, reads and writes of 1 and 4 bytes; a core's request held
+  behind the other's twice; no AMO in L1 and no access on `axi` (nothing in
+  these programs sends into the cluster's narrow AXI port).

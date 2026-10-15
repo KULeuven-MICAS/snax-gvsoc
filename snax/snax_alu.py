@@ -10,10 +10,11 @@ unchanged up to the pin, 9fbf35d.
 One cluster with a compute core (hart 0, the one that drives the accelerator)
 and a DMA core (hart 1), both rv32ima, 128 KiB TCDM in 32 banks and the plain
 interconnect. The compute core's accelerator CSRs go to snax_alu_acc.py,
-which splits them between the streamer and the ALU. The values are written
-here by hand; everything else is the Snitch chip of
-pulp/pulp/chips/snitch/snitch.py, whose own arch tree fixes the core count
-at 9.
+which splits them between the streamer and the ALU. The SNAX ports, the cores'
+and AXI's TCDM ports go through one crossbar into the banks, the DMA on its
+own path. The values are written here by hand; everything else is the Snitch
+chip of pulp/pulp/chips/snitch/snitch.py, whose own arch tree fixes the core
+count at 9.
 
     gvrun --target snax_alu --work-dir build/work/<name> \
         --param chip/soc/binary=<elf> run
