@@ -1843,3 +1843,30 @@ stay there.
   (copied from `target/snitch_cluster/generated/`, sha256 `befb96a997bebd81`)
   and `build/sg7/mixed/SparseInterconnect.sv` (`786ffb0cddd09c93`).
 - Figures from Claude Code's runs on the MICAS server.
+
+### SG7 step 3: the sparse hjson in sw/
+
+- 2026-10-15. `sw/sync.py`: `target/snitch_cluster/cfg/snax_alu_cluster.hjson`
+  in `COPIED`; `SAME_HEADERS` maps `snax_alu_cluster` to
+  `snax_alu_cluster_old`: sync makes the sparse cluster's
+  `snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` and
+  `snitch_cluster_peripheral.h` with upstream's rule, after the two
+  clusters it keeps, and fails unless all three equal the old cluster's.
+  No `generated/snax_alu_cluster/` folder and no runtime of its own: its
+  programs are the old cluster's ELFs. The streamer header comparison is
+  unchanged. The checkout is left on the sparse cluster (`cfg/lru.hjson`).
+- `make sync-snax-cluster SNAX_CLUSTER=../snax_cluster` in snax-forge's
+  image, at the pin: `9fbf35de -> 9fbf35de`; the diff is `sw/sync.py` and
+  the new `sw/cfg/snax_alu_cluster.hjson` (identical to the checkout's),
+  no change upstream in the mirrored build files, the streamer header
+  equal but for its `Generated at` line. Run again after the README edit:
+  the same, plus `sw/README.md`.
+- The failure path, with `SAME_HEADERS` pointed at `snitch_cluster` in a
+  throwaway call of `generate()`: `snax_alu_cluster: snitch_cluster_cfg.h
+  not equal to snitch_cluster's`, exit 1, nothing under `sw/` changed.
+- The checkout's `generated/SparseInterconnect.sv` is unchanged by the
+  syncs (same sha256 as step 2's copy).
+- `sw/README.md`: three cluster configurations; a row in "Generated files"
+  for the sparse cluster's headers (made, compared, not kept); the
+  hand-copied `streamer_csr_addr_map.h` comes from either hjson; `snax-alu`
+  builds the same ELF for both clusters.

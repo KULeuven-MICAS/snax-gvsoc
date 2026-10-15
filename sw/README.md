@@ -3,7 +3,7 @@
 The software snax-gvsoc's programs are built from: a pinned copy of the
 files of [snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)
 a build reads (the Snitch runtime, the math library, the 17 plain tests,
-the `snax-alu` app and library, two cluster configurations), the headers
+the `snax-alu` app and library, three cluster configurations), the headers
 generated from them, and our own programs in `apps/` (CI1, D126 in
 snax-forge). No snax_cluster checkout is needed to build or run them; one
 is needed only for the RTL and to refresh this copy.
@@ -66,9 +66,10 @@ upstream's own rules, in the checkout:
 | File | Made by |
 |---|---|
 | `generated/<cluster>/snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` | `make -C target/snitch_cluster CFG_OVERRIDE=cfg/<cluster>.hjson` (clustergen and the `.h.tpl` templates), for `snitch_cluster` and `snax_alu_cluster_old` |
+| none for `snax_alu_cluster` (the sparse interconnect, SG7) | `sync.py` makes its three headers the same way and fails unless they equal `snax_alu_cluster_old`'s (`SAME_HEADERS`), so its programs are `snax_alu_cluster_old`'s, with no folder and no runtime of their own |
 | `runtime/common/snitch_cluster_peripheral.h` | the same `make` (regtool from `snitch_cluster_peripheral_reg.hjson`, then clang-format); the same for both clusters, which `sync.py` checks |
 | `math/include/bits/alltypes.h` | `sed -f math/tools/mkalltypes.sed` on the two `alltypes.h.in`, the rule of snax_cluster's `sw/math/Makefile` |
-| `generated/snax_alu_cluster_old/streamer_csr_addr_map.h` | by hand: a copy of what the Chisel streamer writes in `rtl-gen` for `snax_alu_cluster_old.hjson` (`target/snitch_cluster/sw/snax/snax-alu/include/`); `sync.py` never writes it and only compares it with the checkout's when there is one |
+| `generated/snax_alu_cluster_old/streamer_csr_addr_map.h` | by hand: a copy of what the Chisel streamer writes in `rtl-gen` (`target/snitch_cluster/sw/snax/snax-alu/include/`), the same for `snax_alu_cluster_old.hjson` and `snax_alu_cluster.hjson` (SG7 step 2); `sync.py` never writes it and only compares it with the checkout's when there is one |
 
 ## Sync and review
 
@@ -97,7 +98,8 @@ to `COPIED` and sync again. Then build and run the regression
 
 The `snax-alu` app is snax_cluster's, at the pin (the app as at `d7dd789`,
 `b2672f8` with the DMA core waiting for its transfers before the barrier,
-SG5 P2), cluster `cfg/snax_alu_cluster_old.hjson`.
+SG5 P2), clusters `cfg/snax_alu_cluster_old.hjson` (plain interconnect)
+and `cfg/snax_alu_cluster.hjson` (sparse, SG7), which build the same ELF.
 
 | File | From snax_cluster |
 |---|---|
@@ -105,4 +107,4 @@ SG5 P2), cluster `cfg/snax_alu_cluster_old.hjson`.
 | `apps/snax-alu/data/datagen.py` | `target/snitch_cluster/sw/apps/snax-alu/data/`, unchanged |
 | `snax/snax-alu/src/snax-alu-lib.c` | `target/snitch_cluster/sw/snax/snax-alu/src/`, unchanged |
 | `snax/snax-alu/include/snax-alu-lib.h` | `target/snitch_cluster/sw/snax/snax-alu/include/`, unchanged |
-| `generated/snax_alu_cluster_old/streamer_csr_addr_map.h` | written by the Chisel streamer in `rtl-gen` for that cluster |
+| `generated/snax_alu_cluster_old/streamer_csr_addr_map.h` | written by the Chisel streamer in `rtl-gen` for either cluster |

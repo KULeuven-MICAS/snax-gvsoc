@@ -14,8 +14,10 @@ SNAX_CLUSTER=<path>` (CI1, sw/README.md).
    (CLUSTERS), snitch_cluster_cfg.h and snitch_cluster_addrmap.h into
    sw/generated/<cluster>/ and snitch_cluster_peripheral.h (the same for
    every cluster) into sw/runtime/common/, made in the checkout by
-   `make -C target/snitch_cluster`; sw/math/include/bits/alltypes.h with
-   the sed rule of snax_cluster's sw/math/Makefile.
+   `make -C target/snitch_cluster`; for the clusters of SAME_HEADERS, the
+   same headers, only compared with another cluster's (a difference fails
+   the sync); sw/math/include/bits/alltypes.h with the sed rule of
+   snax_cluster's sw/math/Makefile.
 4. Writes the new pin (snax_cluster HEAD, the printf and riscv-opcodes
    submodule commits) into sw/README.md.
 5. Reports what changed in sw/, what changed upstream in the build files
@@ -80,6 +82,7 @@ COPIED = [
     f"{TSW}/apps/snax-alu/data/datagen.py",
     f"{TSW}/snax/snax-alu/src/snax-alu-lib.c",
     f"{TSW}/snax/snax-alu/include/snax-alu-lib.h",
+    "target/snitch_cluster/cfg/snax_alu_cluster.hjson",
     "target/snitch_cluster/cfg/snax_alu_cluster_old.hjson",
     "target/snitch_cluster/cfg/snitch_cluster.hjson",
     "util/sim/data_utils.py",
@@ -88,7 +91,11 @@ COPIED = [
 MATH = "sw/math"
 MATH_SKIP = ("Makefile", ".gitignore", "include/bits/")
 
-CLUSTERS = ["snitch_cluster", "snax_alu_cluster_old"]  # the checkout is left on the last
+CLUSTERS = ["snitch_cluster", "snax_alu_cluster_old"]
+# Clusters whose headers must equal another's, so they share its generated/
+# folder and runtime: made and compared, not kept. The checkout is left on
+# the last one made.
+SAME_HEADERS = {"snax_alu_cluster": "snax_alu_cluster_old"}
 COMMON = f"{TSW}/runtime/common"
 CLUSTER_GEN = ["snitch_cluster_cfg.h", "snitch_cluster_addrmap.h"]
 PERIPHERAL = "snitch_cluster_peripheral.h"
@@ -174,19 +181,27 @@ def copy(checkout):
     return gone
 
 
+def make_headers(checkout, cluster):
+    """Makes the cluster's headers in the checkout; returns their text by name."""
+    common = checkout / COMMON
+    names = CLUSTER_GEN + [PERIPHERAL]
+    for n in names:
+        (common / n).unlink(missing_ok=True)
+    targets = [f"sw/runtime/common/{n}" for n in names]
+    p = subprocess.run(["make", "-C", str(checkout / "target/snitch_cluster"),
+                        f"CFG_OVERRIDE=cfg/{cluster}.hjson", *targets],
+                       text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode != 0:
+        raise SystemExit(f"header generation failed for {cluster}:\n{p.stdout}")
+    return {n: (common / n).read_text() for n in names}
+
+
 def generate(checkout):
     common = checkout / COMMON
     peripheral = None
+    made = {}
     for cluster in CLUSTERS:
-        names = CLUSTER_GEN + [PERIPHERAL]
-        for n in names:
-            (common / n).unlink(missing_ok=True)
-        targets = [f"sw/runtime/common/{n}" for n in names]
-        p = subprocess.run(["make", "-C", str(checkout / "target/snitch_cluster"),
-                            f"CFG_OVERRIDE=cfg/{cluster}.hjson", *targets],
-                           text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        if p.returncode != 0:
-            raise SystemExit(f"header generation failed for {cluster}:\n{p.stdout}")
+        made[cluster] = make_headers(checkout, cluster)
         out = SW / "generated" / cluster
         out.mkdir(parents=True, exist_ok=True)
         for n in CLUSTER_GEN:
@@ -195,6 +210,11 @@ def generate(checkout):
         if peripheral is not None and text != peripheral:
             raise SystemExit(f"{PERIPHERAL} differs between {CLUSTERS[0]} and {cluster}")
         peripheral = text
+    for cluster, same in SAME_HEADERS.items():
+        headers = make_headers(checkout, cluster)
+        differ = [n for n in headers if headers[n] != made[same][n]]
+        if differ:
+            raise SystemExit(f"{cluster}: {', '.join(differ)} not equal to {same}'s")
     (SW / "runtime/common" / PERIPHERAL).write_text(peripheral)
     # sw/math/Makefile's rule for $(ALLTYPES_H)
     math = SW / "math"
