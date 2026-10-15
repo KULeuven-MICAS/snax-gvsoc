@@ -181,6 +181,12 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 7 | The `snax_alu_sparse` target; regress, CI, README | done 2026-10-15 |
 | 8 | Predictions, and new `stream-timing` cases | done 2026-10-15 |
 | 9 | Runs on the RTL and both targets; the comparison | done 2026-10-15 |
+| 3.1 | Round 3: this section ("Round 3") | done 2026-10-15 |
+| 3.2 | The crossbar: inputs that hold, sub-word accesses; nothing wired | |
+| 3.3 | The cores and AXI into the crossbar on both SNAX targets | |
+| 3.4 | D125's `tcdm` latency fitted again | |
+| 3.5 | `core-tcdm` and its predictions | |
+| 3.6 | Runs on both RTLs and both targets; the comparison | |
 
 ## Predictions
 
@@ -254,6 +260,125 @@ RTL. Every prediction above held:
   so the plain RTL's different winner in `ab_same_banks` (cores in its
   interconnect) stays a prediction; the lock and the granularity warning
   are exercised only by the winner check, nothing refuses in GVSoC yet.
+
+## Round 3: the cores and AXI
+
+Round 1 named no new gap, so round 2 had nothing to fix. Round 3 puts the
+two cores' TCDM ports and the narrow AXI port's into the crossbar, on both
+SNAX targets, numbered as on the RTL. The DMA keeps its path (round 4); the
+`snitch` target is not changed.
+
+### On the RTL
+
+From source at `9fbf35d`: `hw/snitch_cluster/src/snitch_cluster.sv`,
+`snitch_cc.sv`, `hw/tcdm_interface/src/reqrsp_to_tcdm.sv` and
+`axi_to_tcdm.sv`, `hw/snitch_cluster/src/snitch_amo_shim.sv`,
+`hw/templates/sparse_interconnect_wrapper.sv.tpl`, `util/snaxgen/snaxgen.py`.
+
+- Inputs. Both interconnects take `{axi_soc_req, tcdm_req, snax_tcdm_req_i}`:
+  the SNAX ports 0 to 11, core 0's TCDM port 12, core 1's 13, AXI 14.
+  snaxgen's `sparse_config` lists them in that order: the accelerators'
+  ports, `[1, 1]` per core (no SSR assumed), `[1, 1]` for AXI. The plain one
+  is the same `snitch_tcdm_interconnect` with 15 inputs, of which round 1
+  modelled 12 (the same tree of 16 leaves).
+- A core's path (`snitch_cc.sv`). The LSU's request goes through
+  `reqrsp_iso` (a register on the request and one on the response:
+  `register_core_req` and `register_core_rsp` are true), `reqrsp_demux`
+  (the cluster's TCDM range, else `data_req_o` to the narrow AXI) and
+  `reqrsp_to_tcdm` to its port. The cores are rv32ima with no SSR and no
+  FPU: one TCDM port each, and accesses of 1, 2 or 4 bytes with byte
+  strobes into the 64-bit bank word. `reqrsp_to_tcdm` sets the user field
+  to 0 and `snitch_cluster.sv` adds `core_id` and `is_core`: priority 0.
+- AXI's path. The narrow AXI crossbar's TCDM slave, `axi_to_tcdm`
+  (`axi_to_reqrsp`, then `reqrsp_to_tcdm`, user 0): port 14, priority 0.
+- What a core sees: its request waits at the interconnect until granted;
+  read data comes one cycle after the grant; a store needs only its grant
+  (up to 4 accesses in flight, `num_int_outstanding_mem`, and one integer
+  load, `num_int_outstanding_loads`). From one load to the next, 4 cycles
+  from L1 (SG5): the interconnect's cycle, the two registers and the write
+  back.
+- AMOs and LR/SC go through the AMO shim before each bank (left out of the
+  model, as in round 1). The shim keeps an LR's reservation by `core_id`
+  and lets an SC succeed only when its `core_id` equals the reservation's.
+  The sparse wrapper leaves the memory side's user field unconnected
+  ("user signal not used"), so on the sparse RTL the shim's `core_id` and
+  `is_core` are not driven.
+
+### In SNAX-GVSoC before round 3
+
+- Core i's data port goes to its router `pe<i>_ico`, whose TCDM map (and
+  `tcdm_alias` map) leads to `tcdm.in_<i>`, the `L1_interleaver` and the
+  bank, with `core_latency['tcdm']` (2) added on the map; the rest goes to
+  `narrow_axi` with `core_latency['narrow']` (6).
+- The bank answers at once. When two accesses meet in a bank in one cycle,
+  the later one gets a cycle of latency (`next_packet_start`) instead of a
+  round-robin wait (open item 58 in snax-forge), and the cores' accesses
+  never move the crossbar's pointers.
+- `narrow_axi`'s TCDM map goes into `pe0_ico`: an AXI access to the TCDM
+  takes core 0's router and its latency.
+- The core's LSU (`lsu.cpp`, io v1, one request at a time): on
+  `IO_REQ_OK` the core goes on, a load's register is scoreboarded with the
+  request's latency, and one integer load is in flight by `load_wait`
+  (D125); on `IO_REQ_PENDING` the core stalls until the response. Routers
+  forward a request (`req_forward` keeps the core's response port), so a
+  grant and a response from the crossbar reach the core's LSU directly;
+  `Lsu::data_grant` does something only with
+  `CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING`, which the Snitch core does not set
+  (`nb_outstanding` 1): a grant is a no-op for it, as `io.hpp`'s default
+  grant callback is for a master that sets none.
+
+### The design
+
+- Inputs 12 + i, after the SNAX ports in core order: core i's TCDM and
+  `tcdm_alias` maps in `pe<i>_ico`, which keep `core_latency['tcdm']`.
+  Input 14: `narrow_axi`'s TCDM map, straight to the crossbar at TCDM
+  offsets. Named `core0`, `core1`, `axi` in the trace; their priority wires
+  stay unbound (priority 0). Only when the cluster has SNAX ports.
+- A per-input property `holds`. An input that holds (cores, AXI) sends a
+  request once and waits; the crossbar keeps a request that loses and puts
+  it in the next cycle's arbitration, with its priority bit. An input that
+  does not hold (the SNAX ports) is dropped when it loses and sends again,
+  as in round 1. While a request is held, an event at the start of the next
+  cycle queues that cycle's arbitration behind the events already queued, so
+  the arbitration still comes after every master's request of the cycle.
+- What a holding input gets back: a read, an AMO or an LR/SC is answered one
+  cycle after its grant, plus the latency the request carries (the core's
+  `tcdm` cycles) and any the bank adds; a write is answered at its grant,
+  as the RTL core waits only for a store's grant. The core waits on
+  `IO_REQ_PENDING` until then, so its loads block, and one integer load is
+  in flight by construction. A request answered after its grant carries no
+  latency in the response: the cycle of the response holds it all.
+- Accesses of 1, 2, 4 or 8 bytes inside one bank word, at the bank-local
+  address with the byte offset; one that crosses a word is refused with a
+  warning naming the input. AMOs and LR/SC go to the bank as on the L1
+  path (the bank keeps an LR's reservation by the request's initiator, the
+  hart).
+- Plain: 15 inputs. Sparse: the `sparse_config` gets `[1, 1]` per core and
+  `[1, 1]` for AXI after the accelerators' ports, as snaxgen builds it.
+- `grant()` is sent at the grant as before.
+
+### D125 fitted again
+
+Before round 3, `core_latency['tcdm']` 2 gives 4 cycles from one L1 load to
+the next: the answer's latency 2, a cycle for the write back, and the next
+load one cycle later (SG5 P5). The crossbar now adds its cycle (data one
+cycle after the grant) and the core waits for the response. Step 3.4
+measures the L1 load-to-load cycles in `snax-alu`'s check loop as SG5 P5 did
+(`phases.py --show 'C5 check loop'`), on both targets with `tcdm` still 2,
+then sets `tcdm` so it is 4 again (expected 1). `narrow` is unchanged. Then
+`snax-alu` at the five sizes: phases against round 1's step 9 and SG5's plain
+RTL reference, within SG5's target, each change named.
+
+### Acceptance of round 3
+
+- 3.2: nothing wired; `make regress` passes; the SNAX programs' `run.log`
+  files and crossbar traces equal round 1's on both targets.
+- 3.3: `make regress` passes with the cores and AXI wired.
+- 3.4: L1 load-to-load 4 on both targets; `snax-alu` within SG5's target.
+- 3.6: the compared counters of `stream-timing`, `alu-timing`, `snax-alu`
+  and `core-tcdm` equal on the plain RTL and the plain target, and on the
+  sparse RTL and the sparse target; every prediction marked held or not;
+  every gap named with its likely cause.
 
 ## Decided
 
