@@ -77,7 +77,9 @@ DRAM_LATENCY = 6
 # meanwhile, and the next load or an instruction on the loaded register runs in
 # the cycle after: 4 from one L1 load to the next with tcdm 2, as before the
 # cores went through the crossbar (SG7 rounds 3 and 3b).
-SNAX_CORE = {'int_loads_in_flight': 1}
+# GVSoC's host reads tohost every 1000 cycles; the RTL's host does not use the
+# bus, so the poll reads DRAM through the zero-time debug backdoor (SG7 round 3b).
+SNAX_CORE = {'int_loads_in_flight': 1, 'htif_poll_backdoor': True}
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 

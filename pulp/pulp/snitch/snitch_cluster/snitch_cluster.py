@@ -328,9 +328,12 @@ class SnitchCluster(gvsoc.systree.Component):
                     snax_cluster_core_idx=core_id, misa=getattr(arch, 'misa', None),
                     **(getattr(arch, 'core', None) or {})))
 
+                # SNAX: its tohost poll as the integer core's
                 fp_cores.append(iss.Snitch_fp_ss(self, f'fp_ss{core_id}', isa=arch.isa,
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,
-                    core_id=arch.first_hartid + core_id, htif=True, binaries=binaries))
+                    core_id=arch.first_hartid + core_id, htif=True, binaries=binaries,
+                    htif_poll_backdoor=(getattr(arch, 'core', None) or {}).get(
+                        'htif_poll_backdoor', False)))
                 if xfrep:
                     fpu_sequencers.append(Sequencer(self, f'fpu_sequencer{core_id}', latency=0))
 

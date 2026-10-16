@@ -25,6 +25,7 @@
 
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+#include <vp/debug_mem.hpp>
 #include <stdio.h>
 #include <math.h>
 #include <unistd.h>
@@ -89,6 +90,8 @@ void Htif::build()
     this->tohost_addr = this->iss.top.get_js_config()->get_uint("htif_tohost");
     this->fromhost_addr = this->iss.top.get_js_config()->get_uint("htif_fromhost");
 #endif
+    js::Config *poll_backdoor = this->iss.top.get_js_config()->get("htif_poll_backdoor");
+    this->poll_backdoor = poll_backdoor && poll_backdoor->get_bool();
 }
 
 void Htif::data_response(vp::Block *__this, vp::IoReq *req)
@@ -136,6 +139,21 @@ void Htif::dispatch(uint64_t cmd)
 void Htif::target_access(iss_reg_t addr, int size, bool is_write, uint8_t *data)
 {
     this->iss.syscalls.user_access(addr, data, size, is_write);
+}
+
+void Htif::poll_access(iss_reg_t addr, int size, bool is_write, uint8_t *data)
+{
+    if (!this->poll_backdoor)
+    {
+        this->target_access(addr, size, is_write, data);
+        return;
+    }
+    std::vector<vp::SlavePort *> finals = this->iss.lsu.data.get_final_ports();
+    vp::DebugMemIf *mem = finals.size() == 1 ? finals[0]->get_owner()->debug_mem_if() : nullptr;
+    if (mem == nullptr || mem->debug_mem_access(addr, data, size, is_write) != 0)
+    {
+        this->iss.syscalls.trace.fatal("tohost poll: no debug backdoor at 0x%lx\n", (uint64_t)addr);
+    }
 }
 
 uint8_t Htif::read_uint8(iss_reg_t addr)
@@ -465,12 +483,12 @@ void Htif::htif_handler(vp::Block *__this, vp::ClockEvent *event)
     if (iss->exec.fetch_enable_reg.get())
     {
         iss_reg_t cmd;
-        iss->syscalls.htif.target_access(iss->syscalls.htif.tohost_addr, sizeof(cmd), false, (uint8_t *)&cmd);
+        iss->syscalls.htif.poll_access(iss->syscalls.htif.tohost_addr, sizeof(cmd), false, (uint8_t *)&cmd);
 
         if (cmd != 0)
         {
             iss_reg_t value = 0;
-            iss->syscalls.user_access(iss->syscalls.htif.tohost_addr, (uint8_t *)&value, sizeof(value), true);
+            iss->syscalls.htif.poll_access(iss->syscalls.htif.tohost_addr, sizeof(value), true, (uint8_t *)&value);
             iss->syscalls.htif.handle_syscall(cmd);
         }
     }

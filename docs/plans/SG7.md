@@ -190,7 +190,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3.6 | Runs on both RTLs and both targets; the comparison | done 2026-10-15 |
 | 3b.1 | Round 3b: this section ("Round 3b"); `subword` on the sparse RTL noted | done 2026-10-16 |
 | 3b.2 | The core goes on after an L1 load answered later | done 2026-10-16 |
-| 3b.3 | GVSoC's `tohost` poll | |
+| 3b.3 | GVSoC's `tohost` poll | done 2026-10-16 |
 | 3b.4 | `core_vs_reader`'s layout | |
 | 3b.5 | Runs on both targets against round 3's RTL numbers | |
 
@@ -478,7 +478,9 @@ can fix, and one that only snax_cluster can. Results in the notes.
   on a DMA copy it delays the copy's DRAM read (`dma-timing`'s 4x800 B from
   done 82, busy 66 to 96, 81; RTL 84 for done). The RTL has no such poll.
   Made a zero-time debug access, on the SNAX targets, if it can be without
-  changing what programs see or the period.
+  changing what programs see or the period. Done with GVSoC's debug
+  backdoor (`vp/debug_mem.hpp`) behind the core's data port, for the cores
+  and their FP subsystems (`htif_poll_backdoor`).
 - 3b.4, `core_vs_reader` on the plain target (17 against the plain RTL's
   18). GVSoC's I-cache misses the line holding the start write and the
   core's loads (open item 65), so the core asks 10 cycles later than on the

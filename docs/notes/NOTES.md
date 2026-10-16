@@ -2487,3 +2487,48 @@ Gaps, named, not fixed:
     streamer request meets it in these programs.
   - The instruction trace prints a pending load's register before its data
     (the bank is read at the grant, later in the cycle).
+
+### SG7 round 3b, step 3: GVSoC's tohost poll
+
+- 2026-10-16. Read: `Htif::htif_handler` (`htif.cpp`) reads `tohost` every
+  1000 cycles with `Syscalls::user_access`, one byte per request with the
+  debug flag, on the core's data port; there it goes through `pe<i>_ico`,
+  the cluster's and the SoC's `narrow_axi`, `wide_axi` and the DRAM. The
+  DRAM model skips its bandwidth for a debug request; the routers do not:
+  each byte moves their bandwidth stamps. Traced on `dma-timing`
+  (`snax_alu`, the routers, DRAM, DMA and both LSUs): four pollers, the
+  two integer cores and the two FP subsystems (`Snitch_fp_ss`, also built
+  with `htif=True`, whose data port is the same `pe<i>_ico`), 359 poll
+  requests in the run.
+- GVSoC has a zero-time path for this: `vp/debug_mem.hpp`, the out-of-band
+  debug access ("no timing, no simulation advance") that routers build into
+  a flat map of the memories behind them and `Memory` serves from its
+  storage. The poll now uses it when the core property `htif_poll_backdoor`
+  is set: `Htif::poll_access` takes the component behind the core's data
+  port (`get_final_ports`), here `pe<i>_ico`, and reads or clears `tohost`
+  through its `debug_mem_access`. Same value, same period, same clear, so
+  programs see the same. Set by `snax_alu.py`'s `SNAX_CORE`, so on both
+  SNAX targets, and passed to the FP subsystems; `snitch` keeps the poll on
+  the port. A syscall's own accesses (`dispatch`, `fromhost`) stay on the
+  port: a syscall's buffers may be in L1, behind the SNAX crossbar, which
+  has no backdoor. A failed backdoor access is fatal.
+- After: no poll request on the port (the 46 accesses near `tohost` left
+  are the program's own stores to it, one per `printf`, as on the RTL).
+- `dma-timing`, both targets, before (step 2) and after: every line equal,
+  and equal to SG2 step 7's on every line; `busy` equal to the RTL on every
+  line, `done` 2 to 6 under it (SG5's core cost), `l2l1 4x800` done 80,
+  busy 65 (RTL 84, 65; round 3 96, 81; SG5 82). After step 2 the poll no
+  longer fell on a copy here; now no copy can meet it.
+- `snax-alu`, both targets, the same phases on both. C6 before / after (RTL):
+  7604 / 7605 (6899), 7029 / 7037 (7130), 7716 / 7719 (6855), 7015 / 7131
+  (7075), 7715 / 7192 (7088) at 4, 100, 128, 1024, 4096: C6 still waits on
+  the host's 1000-cycle grid (tier 3). The poll also cost core 0's own DRAM
+  loads, which share `pe0_ico` with it, about every 1000 cycles: C5 now 44
+  cycles per element in 4094 of 4096 iterations (one of 60), where step 2
+  had 30 of 56 and 29 of 48. Those are round 3 step 4's slower iterations
+  ("not looked into"): the poll. Other phases that moved: C5 -14, -6,
+  -119, -479 at 100, 128, 1024, 4096; C0 and D0 -11, -4, -7, -7 at 4, 100,
+  128, 1024 (boot's DRAM fetches and loads); C1 and D2 -8 at 4096; D4 with
+  C2 to C7. Errors 0, `Accelerator Cycles` as before.
+- `make regress`: `regression passed`; the 17 plain `run.log` files
+  byte-identical to round 3's, every SNAX one equal to step 2's.
