@@ -45,6 +45,12 @@ misses in the I-cache, so the core asks for bank 0 at s + 14, too late to
 take a cycle from the readers on the plain target: that counter depends on
 the core's fetch timing.
 
+`subword` on the sparse RTL: snax_cluster's sparse wrapper leaves the
+memory side's user field undriven, so the AMO shim sees `core_id` X and
+`is_core` 0 and the SC fails. SNAX-GVSoC keeps the plain RTL's behaviour, a
+reservation per hart, which is the correct one; snax_cluster is to be fixed
+after SG7, and until then the case returns 2 there.
+
 The line also gives `polls` (busy reads that saw 1), and `core_vs_reader`
 the two words the core loaded; they depend on the core's timing or not at
 all on the interconnect.

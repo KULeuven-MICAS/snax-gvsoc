@@ -188,6 +188,11 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3.4 | D125's `tcdm` latency fitted again | done 2026-10-15 |
 | 3.5 | `core-tcdm` and its predictions | done 2026-10-15 |
 | 3.6 | Runs on both RTLs and both targets; the comparison | done 2026-10-15 |
+| 3b.1 | Round 3b: this section ("Round 3b"); `subword` on the sparse RTL noted | done 2026-10-16 |
+| 3b.2 | The core goes on after an L1 load answered later | |
+| 3b.3 | GVSoC's `tohost` poll | |
+| 3b.4 | `core_vs_reader`'s layout | |
+| 3b.5 | Runs on both targets against round 3's RTL numbers | |
 
 ## Predictions
 
@@ -443,6 +448,43 @@ sparse RTL and both targets.
   and `core-tcdm` equal on the plain RTL and the plain target, and on the
   sparse RTL and the sparse target; every prediction marked held or not;
   every gap named with its likely cause.
+
+## Round 3b: fix-ups of round 3
+
+Before round 4, the three things round 3 left that SNAX-GVSoC or a program
+can fix, and one that only snax_cluster can. Results in the notes.
+
+- `subword` on the sparse RTL (no change). Its SC fails there because
+  snax_cluster's sparse wrapper leaves the memory side's user field
+  undriven, so the AMO shim sees `core_id` X and `is_core` 0 and no LR/SC
+  pair can succeed. SNAX-GVSoC keeps the plain RTL's behaviour, a
+  reservation per hart, which is the correct one; snax_cluster is fixed
+  after SG7. The case stays as it is: 0 errors on three sides, 2 on the
+  sparse RTL until then.
+- 3b.2, the core's L1 loads. Round 3 made the core stall on every L1 load
+  until its data (`IO_REQ_PENDING`), so C5 went from 44 to 47 cycles per
+  element (RTL 45). The RTL core goes on after issuing a load; an
+  instruction that reads or writes the loaded register waits for its data,
+  and with `num_int_outstanding_loads` 1 the next load waits for the
+  previous load's data (D125). The Snitch core does that now for a load
+  answered later, as it does for one answered at once with latency, behind
+  `int_loads_in_flight` (the `snitch` target unchanged). Stores, AMOs and
+  LR/SC keep their behaviour.
+- 3b.3, GVSoC's `tohost` poll. GVSoC's host model reads `tohost` from DRAM
+  through the core's data port and `narrow_axi` every 1000 cycles; landing
+  on a DMA copy it delays the copy's DRAM read (`dma-timing`'s 4x800 B from
+  done 82, busy 66 to 96, 81; RTL 84 for done). The RTL has no such poll.
+  Made a zero-time debug access, on the SNAX targets, if it can be without
+  changing what programs see or the period.
+- 3b.4, `core_vs_reader` on the plain target (17 against the plain RTL's
+  18). GVSoC's I-cache misses the line holding the start write and the
+  core's loads (open item 65), so the core asks 10 cycles later than on the
+  RTL. First the traces are checked for the arbitration rule on both sides;
+  then one layout change that fetches that line before the measured run. If
+  the four sides do not then agree, the case's counter is marked as
+  depending on the core's fetch timing (shown, not compared, D123). No
+  model change.
+- 3b.5, the programs again on SNAX-GVSoC, against round 3's RTL numbers.
 
 ## Decided
 

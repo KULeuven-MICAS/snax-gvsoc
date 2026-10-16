@@ -2391,3 +2391,13 @@ Gaps, named, not fixed:
   so only the plain RTL's were read); `axi` (input 14) on any side, as no
   program here sends into the cluster's narrow AXI port; core 1 against a
   streamer channel.
+
+### SG7 round 3b, step 1: the plan
+
+- 2026-10-16. `git pull` on main in snax-gvsoc and snax-forge (nothing new;
+  main has no commit the branch lacks), `ry/sg7-sparse` checked out and
+  pulled. Round 3b's plan is in `SG7.md`, "Round 3b".
+- `subword` on the sparse RTL: noted in `SG7.md` and in
+  `sw/apps/core-tcdm/README.md` as snax_cluster's (the sparse wrapper leaves
+  the AMO shim's `core_id` and `is_core` undriven); SNAX-GVSoC keeps a
+  reservation per hart, as the plain RTL. No code change.
