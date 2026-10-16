@@ -192,7 +192,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3b.2 | The core goes on after an L1 load answered later | done 2026-10-16 |
 | 3b.3 | GVSoC's `tohost` poll | done 2026-10-16 |
 | 3b.4 | `core_vs_reader`'s layout | done 2026-10-16 |
-| 3b.5 | Runs on both targets against round 3's RTL numbers | |
+| 3b.5 | Runs on both targets against round 3's RTL numbers | done 2026-10-16 |
 
 ## Predictions
 
@@ -512,6 +512,10 @@ can fix, and one that only snax_cluster can. Results in the notes.
   core waiting behind priority-1 readers on the sparse interconnect; only
   the first run, not compared, does.
 - 3b.5, the programs again on SNAX-GVSoC, against round 3's RTL numbers.
+  Result: every compared counter matches on each interconnect but
+  `subword` on the sparse RTL (above), `core_vs_reader` now included;
+  `snax-alu` within SG5's target, C5 2% under the RTL; `dma-timing` as
+  SG2's.
 
 ## Decided
 

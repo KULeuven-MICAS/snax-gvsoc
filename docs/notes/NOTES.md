@@ -2591,3 +2591,96 @@ Gaps, named, not fixed:
   is not compared, and on the plain sides it differs with the fetch (18
   against 17). Getting both in one compared run would need a second change
   (e.g. emptying the queues between runs); not done.
+
+### SG7 round 3b, step 5: runs and comparison
+
+- 2026-10-16. SNAX-GVSoC only, this branch with steps 2 to 4, in snax-forge's
+  image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`, then the 17
+  ELFs (`snax-alu` at five sizes, `alu-timing`, the seven `stream-timing`
+  cases, the three `core-tcdm` cases, `dma-timing`) on `snax_alu` and
+  `snax_alu_sparse`, both cores, the crossbar, the streamer and the ALU
+  traced (`build/sg7/r3b/gv/`), all exit 0; `snax-alu` cut with
+  `phases.py --gvsoc`. The ELFs are round 3's (sha256 checked) but
+  `core_vs_reader` (step 4). The RTL columns are round 3 step 6's runs at
+  `9fbf35d`, `core_vs_reader`'s step 4's.
+
+`stream-timing`, 977 (first run): RTL / round 3 / now, plain and sparse.
+Equal everywhere, and `polls` and `mcycle` equal to round 3's on both
+targets:
+
+| Case | Plain | Sparse |
+|---|---|---|
+| `zero_bound` | 0 / 0 / 0 | 0 / 0 / 0 |
+| `a_alone` | 9 / 9 / 9 | 9 / 9 / 9 |
+| `ab_other_banks` | 9 / 9 / 9 | 9 / 9 / 9 |
+| `ab_same_banks` | 10 / 10 / 10 | 10 / 10 / 10 |
+| `a_stride0` | 12 / 12 / 12 | 12 / 12 / 12 |
+| `prio_queued` | 5 (5) / 5 (5) / 5 (5) | 6 (5) / 6 (5) / 6 (5) |
+| `idle_restart` | 5 (2) / 5 (2) / 5 (2) | 6 (2) / 6 (2) / 6 (2) |
+
+`alu-timing`, 977, 982 and the start gap (compared counter in bold), RTL /
+now; now equal to round 3 on both targets, errors 0 everywhere:
+
+| Case | Plain | Sparse |
+|---|---|---|
+| `alu_first` | **29**, 32, -5 / **29**, 34, -7 | **29**, 32, -5 / **29**, 34, -7 |
+| `stream_first` | 132, **25**, 103 / 132, **25**, 103 | 131, **25**, 103 / 131, **25**, 103 |
+| `out_one_bank` | 210, **72**, 104 / 209, **72**, 103 | 210, **74**, 104 / 209, **74**, 103 |
+| `len1` | **5**, **1**, -5 / **5**, **1**, -7 | **5**, **1**, -5 / **5**, **1**, -7 |
+| `restart_idle` | **29**, 32, -5 / **29**, 34, -7 | **29**, 32, -5 / **29**, 34, -7 |
+
+`snax-alu`: `Accelerator Cycles` 1, 25, 32, 256, 1024 and 0 errors on all
+four sides. Phases, the same on both targets (and equal to step 3's), RTL
+(SG5's reference, which both RTLs give) / round 3 / now:
+
+| Phase | 128 | 1024 | 4096 |
+|---|---|---|---|
+| C1 barrier | 147 / 157 / 154 (+5%) | 373 / 384 / 381 (+2%) | 1153 / 1174 / 1161 (+1%) |
+| D2 DMA wait | 45 / 36 / 36 (-20%, accepted in SG5) | 270 / 262 / 262 (-3%) | 1050 / 1052 / 1042 (-1%) |
+| C3 ALU poll | 37 / 39 / 39 (+5%) | 262 / 261 / 261 (0%) | 1032 / 1029 / 1029 (0%) |
+| C5 check loop | 5795 / 6098 / 5683 (-2%) | 46115 / 48446 / 45107 (-2%) | 184355 / 193543 / 180275 (-2%) |
+| Total up to 982 | 6713 / 7093 / 6661 (-1%) | 47495 / 49916 / 46552 (-2%) | 187285 / 196571 / 183268 (-2%) |
+
+Tiers 1 and 2 hold.
+
+`core-tcdm`, RTL / round 3 / now:
+
+| Case | Compare | Plain | Sparse |
+|---|---|---|---|
+| `subword` | errors, `sc` | 0, 0 / 0, 0 / 0, 0 | 2, 1 / 0, 0 / 0, 0 (the sparse RTL's wrapper) |
+| `core_vs_reader` | 977 (first run) | 18 (18) / 17 / 18 (17) | 18 (17) / 17 / 18 (17) |
+| `after_stores` | 977 | 5 / 5 / 5 | 6 / 6 / 6 |
+
+`dma-timing`, done / busy, both targets the same; RTL SG2 step 3's: every
+line as round 3 but `l2l1 4x800`, 96 / 81 to 80 / 65 (RTL 84 / 65), so every
+line now equals SG2 step 7's; `busy` equal to the RTL on every line.
+
+- Every compared counter matches: on the plain RTL and the plain target,
+  and on the sparse RTL and the sparse target, but `subword` on the sparse
+  RTL (snax_cluster's wrapper, step 1). `core_vs_reader` now matches on both
+  (round 3: 17 on the plain target against 18).
+- What depends on the core's timing and moved, all on both targets:
+  - `snax-alu` phases against round 3: C5 -12, -330, -415, -3339, -13268 at
+    4, 100, 128, 1024, 4096 (the core goes on after an L1 load, step 2: 3
+    cycles per element; and the poll off `pe0_ico`, step 3: the slower
+    iterations); C6 -990, -1677, -585, -653, -714 (C6 waits on the host's
+    1000-cycle grid; it starts earlier); C0 and D0 -14, -10, -14, -22, -22
+    and C1 -3, -3, -3, -3, -13, D1 -3 at every size (the cores' L1 loads in
+    boot, the barrier and the DMA issue, step 2; the poll's DRAM reads in
+    boot, step 3); D2 -10 at 4096 (step 3); D4 and the totals with them.
+    C2a, C2b, C3, C4, C7, D3 unchanged.
+  - `dma-timing`'s `l2l1 4x800`: 96 / 81 to 80 / 65 (step 2 moved the core
+    against the poll, step 3 took the poll off the bus).
+  - `core_vs_reader`'s first run 17 on both targets (round 3's single run;
+    the line misses in the first run), the measured run 18 (step 4).
+  - Unchanged: `stream-timing`'s `polls` and `mcycle`, `alu-timing`'s start
+    gaps and non-compared counters, `after_stores`' and `subword`'s lines.
+- `make regress`: `regression passed`, 38 SNAX runs and 17 plain; the 17
+  plain `run.log` files byte-identical to round 3's; of the SNAX ones only
+  `dma-timing`'s and `core_vs_reader`'s differ, as above.
+- Not verified: the sparse RTL's grants in `core_vs_reader` (no list for the
+  Chisel module); the RTL's priority bits in that case's measured run (the
+  counter only); a store or AMO right after a pending load against the RTL
+  (no program here does it in a measured window); the effect of the early
+  crossbar request of an L1 load after a DRAM load (step 2) on any program
+  with a streamer request in that window.
