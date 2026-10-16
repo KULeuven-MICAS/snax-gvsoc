@@ -2701,3 +2701,41 @@ line now equals SG2 step 7's; `busy` equal to the RTL on every line.
   The streamer's commit is queued with delay 0 after its requests and relies
   on running after the arbitration, so the arbitration cannot simply be
   moved to the end of the cycle.
+
+### SG7 round 4, step 2: the plain path's lock
+
+- 2026-10-16. The plain pick moves from `snax_tcdm_xbar.cpp` into
+  `snax/snax_plain_arb.hpp` (`SnaxPlainArb`, one per bank), so the crossbar
+  and the check run the same code, as the sparse pick in round 1. Added:
+  `rr_arb_tree`'s `LockIn`. A winner the bank refuses (`refused()`, reached
+  only through `bank_refuses()`) leaves `rr_q` where it is and locks the
+  bank: in the next cycle it arbitrates the vector it arbitrated then, of
+  which the inputs still asking (the RTL's `req_q`; equal to it while the
+  masters hold their requests), which gives the same winner while that
+  winner still asks; `granted()` then moves `rr_q` over that vector. A
+  request that comes during the lock is not seen until the locked one is
+  granted. Without a refusal the pick is round 3b's.
+- The check, `tests/snax/plain_arb/` (README there): `rr_arb_tree.sv` at
+  v1.40.0 (`1281545`, with `lzc.sv` and `cf_math_pkg.sv`) wrapped with
+  `stream_xbar`'s parameters (`FairArb`, `LockIn`, `AxiVldRdy`, no external
+  priority), against `SnaxPlainArb`, per cycle: `req_o` and `idx_o` against
+  the model's pick, each requesting input's `gnt_o` against the model's.
+  Inputs hold their requests until granted; new requests and `gnt_i` at
+  random, in phases of 500 cycles. Verilator 5.024 in `d3d8f5572ff4`, with
+  common_cells' assertions on (`lock` and `lock_req` compiled in, none
+  fired). 100000 cycles, seeds 1 to 3, each with 0 differences:
+
+  | Inputs | Selections (seed 1) | Contested | After a refusal | Of them with a request new in the lock |
+  |---|---|---|---|---|
+  | 15 (the targets') | 91149 | 84497 | 28762 | 5276 |
+  | 12 | 88182 | 80075 | 31635 | 4978 |
+  | 16 | 93158 | 86975 | 30920 | 5780 |
+  | 5 | 75014 | 58130 | 25637 | 2911 |
+
+- Broken copies (`build/sg7/r4/broken*/`, through `MODEL_DIR`), 15 inputs,
+  20000 cycles: a refused winner losing its turn (`rr_q` moved, no lock),
+  27128 differences, the first at cycle 11; the lock kept but new requests
+  seen during it, 11605. Both exit 1.
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
+  `make regress`: `regression passed`; every `run.log` byte-identical to
+  round 3b step 5's. Nothing refuses yet.

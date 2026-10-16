@@ -14,7 +14,7 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
     """Per-bank arbitration of the TCDM ports of a SNAX cluster.
 
     As one of snax_cluster's interconnects: plain (sparse_interconnect false),
-    one rr_arb_tree per bank; or sparse (sparse_interconnect true), per bank
+    one rr_arb_tree per bank (snax_plain_arb.hpp); or sparse (sparse_interconnect true), per bank
     the highest priority first, then round robin from the last pick
     (snax_sparse_arb.hpp). One grant per bank and cycle, read data one cycle
     after the grant. A request that loses is dropped and sent again by its

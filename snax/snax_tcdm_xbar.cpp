@@ -9,7 +9,8 @@
 // interconnect:
 //   plain   snitch_tcdm_interconnect.sv (sparse_interconnect false): one
 //           stream_xbar, one rr_arb_tree per bank (FairArb, LockIn, no
-//           external priority: the priority bit is ignored). common_cells
+//           external priority: the priority bit is ignored), a winner
+//           refused by its bank locked in (snax_plain_arb.hpp). common_cells
 //           v1.40.0, src/rr_arb_tree.sv and src/stream_xbar.sv.
 //   sparse  the Chisel SparseInterconnect (sparse_interconnect true): per
 //           bank the highest priority first, then round robin from the last
@@ -50,6 +51,7 @@
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+#include "snax_plain_arb.hpp"
 #include "snax_sparse_arb.hpp"
 
 
@@ -76,10 +78,6 @@ private:
     void answer(vp::IoReq *req, int input);
     void reset(bool active) override;
 
-    // rr_arb_tree's choice among the inputs in req_mask, from the state rr_q
-    int tree_pick(uint64_t req_mask, int rr_q, int level, int node, bool &has_req);
-    // rr_arb_tree's next state after a grant (FairArb)
-    int next_rr(uint64_t req_mask, int rr_q);
     // The sparse interconnect's winner on bank among the inputs in req_mask
     int sparse_pick(int bank, uint64_t req_mask, int64_t cycle);
     // Whether bank refuses this cycle's winner. Nothing refuses yet; the
@@ -101,7 +99,6 @@ private:
     int nb_banks;
     int bank_bits;         // log2(nb_banks)
     int width_bits;        // log2 of the bank width in bytes
-    int nb_levels;         // levels of the arbitration tree, clog2(nb_inputs)
     bool sparse;           // the sparse interconnect, else the plain one
 
     // Per input: whether it holds a losing request (else its master resends it)
@@ -110,8 +107,8 @@ private:
     std::vector<vp::IoReq *> pending;
     // Per input: its bank, decoded when the request arrives
     std::vector<int> pending_bank;
-    // Per bank: rr_q, the round-robin state of its tree
-    std::vector<int> rr_q;
+    // Plain: per bank its arbitration tree
+    std::vector<SnaxPlainArb> plain_arbs;
     // Per bank: the inputs requesting it in this cycle, one bit each
     std::vector<uint64_t> bank_req;
     // Per input: its owner's name for the trace, in_<i> when none is given
@@ -150,7 +147,6 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
         "interconnect must be plain or sparse, got %s\n", interconnect.c_str());
     this->sparse = interconnect == "sparse";
     this->width_bits = __builtin_ctz(bank_width);
-    this->nb_levels = this->nb_inputs > 1 ? 32 - __builtin_clz(this->nb_inputs - 1) : 0;
 
     js::Config *names = this->get_js_config()->get("input_names");
     std::vector<js::Config *> given;
@@ -181,7 +177,6 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     this->banks.resize(this->nb_banks);
     this->pending.assign(this->nb_inputs, NULL);
     this->pending_bank.assign(this->nb_inputs, 0);
-    this->rr_q.assign(this->nb_banks, 0);
     this->bank_req.assign(this->nb_banks, 0);
     this->priority.assign(this->nb_inputs, false);
 
@@ -203,6 +198,10 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
             this->sparse_arbs.push_back(SnaxSparseArb(this->sparse_config.inputs_per_bank()));
         }
     }
+    else
+    {
+        this->plain_arbs.assign(this->nb_banks, SnaxPlainArb(this->nb_inputs));
+    }
 
     for (int i = 0; i < this->nb_inputs; i++)
     {
@@ -223,7 +222,10 @@ void SnaxTcdmXbar::reset(bool active)
     if (active)
     {
         this->pending.assign(this->nb_inputs, NULL);
-        this->rr_q.assign(this->nb_banks, 0);
+        for (SnaxPlainArb &arb : this->plain_arbs)
+        {
+            arb.reset();
+        }
         this->priority.assign(this->nb_inputs, false);
         this->arb_cycle = -1;
         for (SnaxSparseArb &arb : this->sparse_arbs)
@@ -297,43 +299,6 @@ void SnaxTcdmXbar::priority_sync(vp::Block *__this, bool value, int id)
 }
 
 
-// One node of rr_arb_tree: level 0 is the root, nb_levels - 1 the level fed by
-// the inputs. Returns the index of the input the node passes on.
-int SnaxTcdmXbar::tree_pick(uint64_t req_mask, int rr_q, int level, int node, bool &has_req)
-{
-    bool rr_bit = (rr_q >> (this->nb_levels - 1 - level)) & 1;
-
-    if (level == this->nb_levels - 1)
-    {
-        int left = 2 * node, right = 2 * node + 1;
-        bool req_left = left < this->nb_inputs && ((req_mask >> left) & 1);
-        bool req_right = right < this->nb_inputs && ((req_mask >> right) & 1);
-        has_req = req_left || req_right;
-        // sel = ~req_d[l*2] | req_d[l*2+1] & rr_q[NumLevels-1-level]
-        bool sel = !req_left || (req_right && rr_bit);
-        return sel ? right : left;
-    }
-
-    bool req_left, req_right;
-    int left = this->tree_pick(req_mask, rr_q, level + 1, 2 * node, req_left);
-    int right = this->tree_pick(req_mask, rr_q, level + 1, 2 * node + 1, req_right);
-    has_req = req_left || req_right;
-    // sel = ~req_nodes[Idx1] | req_nodes[Idx1+1] & rr_q[NumLevels-1-level]
-    bool sel = !req_left || (req_right && rr_bit);
-    return sel ? right : left;
-}
-
-
-// FairArb: the next state is the first requesting input above rr_q, or, if
-// there is none, the first requesting input at or below it.
-int SnaxTcdmXbar::next_rr(uint64_t req_mask, int rr_q)
-{
-    uint64_t upper = req_mask & ~((2ULL << rr_q) - 1);
-    uint64_t lower = req_mask & ((2ULL << rr_q) - 1);
-    return upper ? __builtin_ctzll(upper) : __builtin_ctzll(lower);
-}
-
-
 int SnaxTcdmXbar::sparse_pick(int bank, uint64_t req_mask, int64_t cycle)
 {
     std::vector<int> &inputs = this->bank_inputs[bank];
@@ -377,29 +342,27 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
             continue;
         }
 
-        int winner;
-        if (_this->sparse)
+        int winner = _this->sparse ? _this->sparse_pick(bank, req_mask, cycle)
+            : _this->plain_arbs[bank].pick(cycle, req_mask);
+        if (_this->bank_refuses(bank))
         {
-            winner = _this->sparse_pick(bank, req_mask, cycle);
-            if (_this->bank_refuses(bank))
+            // Dropped with the losers; locked in, it wins again next cycle if
+            // it still competes
+            if (_this->sparse)
             {
-                // Dropped with the losers; it wins again next cycle if it
-                // still competes
                 _this->sparse_arbs[bank].refused();
-                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Bank %d: refused %s\n", bank,
-                    _this->names[winner].c_str());
-                continue;
             }
+            else
+            {
+                _this->plain_arbs[bank].refused();
+            }
+            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Bank %d: refused %s\n", bank,
+                _this->names[winner].c_str());
+            continue;
         }
-        else if (_this->nb_levels == 0)
+        if (!_this->sparse)
         {
-            winner = 0;
-        }
-        else
-        {
-            bool has_req;
-            winner = _this->tree_pick(req_mask, _this->rr_q[bank], 0, 0, has_req);
-            _this->rr_q[bank] = _this->next_rr(req_mask, _this->rr_q[bank]);
+            _this->plain_arbs[bank].granted();
         }
 
         vp::IoReq *req = _this->pending[winner];
