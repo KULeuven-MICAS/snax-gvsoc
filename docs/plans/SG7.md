@@ -197,7 +197,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 4.2 | The plain path's lock; its check against `rr_arb_tree` | done 2026-10-16 |
 | 4.3 | The DMA's wide input on both SNAX targets | done 2026-10-16 |
 | 4.4 | `dma-tcdm` and its predictions | done 2026-10-16 |
-| 4.5 | Runs on both RTLs and both targets; the comparison | |
+| 4.5 | Runs on both RTLs and both targets; the comparison | done 2026-10-16 |
 
 ## Predictions
 
@@ -672,6 +672,24 @@ copies, round 3 step 3; `snax-alu`: both cores are at the barrier or in CSR
 setup during its two copies, SG2; the others have no DMA copy), so every
 `run.log` stays round 3b's and every compared counter round 3b's on each
 side.
+
+### Result of round 4
+
+Step 5 (`docs/notes/NOTES.md`): the same 18 ELFs; `dma-tcdm` and
+`dma-timing` on both RTLs, every program on both targets.
+
+- `dma-tcdm`'s `dma_vs_reader`: 264 (first run 260) on the plain RTL, the
+  plain target, the sparse RTL and the sparse target, errors 0: the
+  prediction held. On the plain RTL's waveform the four DMA beats raise
+  superbank 0's `sel_wide` and refuse A's four lanes in exactly those
+  cycles, which are granted the next, as on both targets' traces.
+- `dma-timing`: both RTLs at the pin give SG2's RTL lines; both targets
+  round 3b's; `busy` equal on every line.
+- The other programs: no DMA beat meets a narrow request on either target,
+  every output and `snax-alu` phase as round 3b's; their RTL comparison
+  stands. `make regress` passes.
+- No gap in a compared counter. Not compared and different: the DMA's beat
+  spacing into L1 and the ALU's counter (the start gap).
 
 ### Acceptance of round 4
 

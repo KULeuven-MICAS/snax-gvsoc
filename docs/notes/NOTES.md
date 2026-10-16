@@ -2802,3 +2802,87 @@ line now equals SG2 step 7's; `busy` equal to the RTL on every line.
   run of `dma-tcdm`: 264 measured, 260 first run, on all four sides. A second
   case was not added (`SG7.md` says why). The other programs: no DMA beat
   meets a narrow request, so every `run.log` as round 3b's.
+
+### SG7 round 4, step 5: runs and comparison
+
+- 2026-10-16. The same 18 ELFs everywhere: round 3b's 17 (sha256 unchanged
+  against `build/sg7/r3/elfs.sha256` and `r3b/cvr.sha256`) and
+  `dma-tcdm-dma_vs_reader`, built in snax-forge's image; all 18 sha256
+  (`build/sg7/r4/elfs.sha256`) checked again after the RTL runs.
+- SNAX-GVSoC, step 3's build (step 4 changed no model code): each ELF on
+  `snax_alu` and `snax_alu_sparse`, both cores, the crossbar, the streamer and
+  the ALU traced (`build/sg7/r4/gv/`), all exit 0; `snax-alu` cut with
+  `phases.py --gvsoc`.
+- The RTL, round 1's builds at `9fbf35d` (no rebuild): `dma-tcdm-dma_vs_reader`
+  and `dma-timing` on the plain one (`../snax_cluster_plain`) and the sparse
+  one (`../snax_cluster`), `bin/snitch_cluster.vsim` on the host, Questa
+  2022.4, `logs/` kept as `logs-r4-<plain|sparse>-<program>`, all four
+  `[SUCCESS]`; 2 min 7 s and 2 min 3 s. The other programs' RTL numbers are
+  round 3's and 3b's: no DMA beat meets a narrow request in any of them on
+  GVSoC (below), so none was run again.
+
+`dma-tcdm`, counter 977 (first run), and the ALU's counter 982, not compared;
+errors 0 on all four sides:
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|
+| `dma_vs_reader` 977 | 264 (260) | 264 (260) | 264 (260) | 264 (260) | held on all four |
+| `dma_vs_reader` 982 | 266 (262) | 268 (264) | 266 (262) | 268 (264) | +4 on each side, held |
+
+- The grants. GVSoC, both targets the same: the measured run's A lane 0
+  granted from 98120 to 98379, 260 cycles for 256 beats; the four beats on
+  superbank 0 at +69, +78, +81, +89 from A's first grant, each refusing
+  A's four lanes (`Bank 0` to `3: refused snax_acc0.streamer.reader0.laneN
+  (dma)`, nothing held), which win the next cycle; the first run's four beats
+  on superbank 3 refuse nothing. Plain RTL, from its waveform (round 3's
+  list plus each superbank mux's `sel_wide_i`, `build/sg7/r4/wlf/`): first
+  run, A asks for 256 cycles and is granted in all, `sel_wide` of superbank
+  3 high at +91, +106, +113, +123; measured run, A asks for 260 cycles,
+  granted in 256, `sel_wide` of superbank 0 high at +74, +84, +91, +98, A's
+  four lanes refused (`q_ready` 0) in exactly those cycles and granted the
+  next. The sparse RTL's grants are not read (Chisel module, no list); its
+  counter agrees.
+- 982 on the RTL is 2 under the targets in both runs: the gap between the
+  two start writes, as `alu-timing`'s `alu_first` (32 against 34). Not
+  compared.
+
+`dma-timing`, both RTLs at the pin, both targets: the two RTLs give the same
+lines, equal on every line to SG2 step 3's RTL run at `b2672f8`; the two
+targets give the same lines, equal to round 3b's (SG2 step 7's). `busy`, `r`
+and `w` equal RTL and target on every line; `done` 2 to 6 under the RTL,
+`issue` 2 to 5 under (the core, SG5); the stall counters are not counted on
+GVSoC (SG2).
+
+| Case | done RTL / target | busy RTL / target |
+|---|---|---|
+| idle | 12 / 6 | 0 / 0 |
+| l2l1 1x64 | 34 / 29 | 14 / 14 |
+| l2l1 1x256 | 39 / 33 | 17 / 17 |
+| l2l1 1x800 | 44 / 41 | 26 / 26 |
+| l2l1 1x4096 | 99 / 93 | 77 / 77 |
+| l2l1 1x8192 | 159 / 157 | 141 / 141 |
+| l2l1 2x800 | 59 / 54 | 39 / 39 |
+| l2l1 4x800 | 84 / 80 | 65 / 65 |
+| l1l2 1x800 | 39 / 35 | 20 / 20 |
+
+The other programs, both targets: every program's output equal to round
+3b's (`stream-timing`, `alu-timing`, `core-tcdm` with all their counters,
+`polls` and `mcycle`; `snax-alu`'s lines), every `snax-alu` phase file equal
+to round 3b's at the five sizes. DMA beats through the crossbar, refusing
+none: `snax-alu` 2, 27, 33, 260, 1040 at 4, 100, 128, 1024, 4096,
+`dma-timing` 602; none in `stream-timing`, `alu-timing`, `core-tcdm`. So their
+RTL comparison is round 3's and 3b's, unchanged. Prediction held.
+
+- `make regress`: `regression passed`, 40 SNAX runs (`dma-tcdm` on both
+  targets added) and 17 plain; every `run.log` of round 3b byte-identical.
+- Gaps, named, not fixed: none in a compared counter. Not compared and
+  different: the DMA's beat spacing into L1 (beats +69 to +89 into A's run on
+  GVSoC against +74 to +98 on the RTL; D121 fits the engine's `busy`, not
+  the beats' cycles), and the ALU's counter (the core's start gap).
+- Not verified: the sparse RTL's grants one by one (only its counter); a
+  narrow request refused while another competes for the same bank, on any
+  RTL run (the winner checks cover the lock against the RTL modules); a DMA
+  beat after its cycle's arbitration (the fatal never fired, and no program
+  here makes an L1-to-L1 copy, the one path that could send one); a DMA
+  request crossing a superbank line (none sent); a core or AXI request
+  refused by the DMA on any side (none in these programs).
