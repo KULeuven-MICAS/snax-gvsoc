@@ -199,7 +199,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 4.4 | `dma-tcdm` and its predictions | done 2026-10-16 |
 | 4.5 | Runs on both RTLs and both targets; the comparison | done 2026-10-16 |
 | 4f.1 | Round 4 follow-up: where the DMA's beat cycles come from; the TCDM write path and the stages fixed | done 2026-10-16 |
-| 4f.2 | `dma-timing` checks `busy`, `r` and `w` against the RTL | |
+| 4f.2 | `dma-timing` checks `busy`, `r` and `w` against the RTL | done 2026-10-16 |
 
 ## Predictions
 
@@ -804,6 +804,11 @@ order).
 - `dma-timing` on both targets: every line equal to round 4's, so `busy`,
   `r` and `w` equal the RTL's on every line. `dma-tcdm`: 264 (260) on both
   targets. `make regress`: every `run.log` equal to round 4's.
+
+`dma-timing` holds the RTL's `busy`, `r` and `w` per case (SG2 step 3,
+the same at the pin in round 4) and returns the cases off them with its copy
+errors, so `make regress` and CI fail when the DMA's own timing moves
+(4f.2). `issue` and `done` are printed, not compared.
 
 Not verified: the DMA's reads from L1 (`l1l2`): where the bank read falls
 inside D121's 5-cycle read path on the RTL was not split, and the TCDM

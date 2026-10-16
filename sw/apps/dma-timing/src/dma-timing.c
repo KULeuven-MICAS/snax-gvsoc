@@ -5,7 +5,8 @@
 // DMA timing program for SG2: the same ELF runs on snax_cluster's RTL and on
 // SNAX-GVSoC. The DMA core copies between DRAM (L2) and L1 at a few sizes and
 // measures each case with mcycle and the cluster's DMA perf counters; the
-// compute core prints one line per case after the barrier.
+// compute core prints one line per case after the barrier, checks busy, r
+// and w against the RTL's and returns the errors and the cases off them.
 
 #include "snrt.h"
 
@@ -31,12 +32,22 @@ typedef struct {
     enum dir dir;
     uint32_t copies;  // back-to-back copies, each `bytes` long, placed
     uint32_t bytes;   // one after the other
+    // The RTL's busy, r and w (SG2 step 3 at b2672f8, the same at 9fbf35d in
+    // SG7 round 4): they do not depend on the core (D123), so any other value
+    // is the DMA's own timing moving
+    uint32_t rtl_busy, rtl_r, rtl_w;
 } dma_case_t;
 
 static const dma_case_t cases[] = {
-    {IDLE, 0, 0},       {L2_TO_L1, 1, 64},  {L2_TO_L1, 1, 256},
-    {L2_TO_L1, 1, 800}, {L2_TO_L1, 1, 4096}, {L2_TO_L1, 1, 8192},
-    {L2_TO_L1, 2, 800}, {L2_TO_L1, 4, 800}, {L1_TO_L2, 1, 800},
+    {IDLE, 0, 0, 0, 0, 0},
+    {L2_TO_L1, 1, 64, 14, 1, 1},
+    {L2_TO_L1, 1, 256, 17, 4, 4},
+    {L2_TO_L1, 1, 800, 26, 13, 13},
+    {L2_TO_L1, 1, 4096, 77, 64, 64},
+    {L2_TO_L1, 1, 8192, 141, 128, 128},
+    {L2_TO_L1, 2, 800, 39, 26, 26},
+    {L2_TO_L1, 4, 800, 65, 52, 52},
+    {L1_TO_L2, 1, 800, 20, 13, 13},
 };
 #define NB_CASES (sizeof(cases) / sizeof(cases[0]))
 
@@ -119,6 +130,7 @@ int main() {
 
     if (snrt_is_compute_core()) {
         uint32_t errors = 0;
+        uint32_t mismatches = 0;
         for (uint32_t i = 0; i < NB_CASES; i++) {
             const dma_case_t *c = &cases[i];
             const result_t *r = &results[i];
@@ -132,9 +144,17 @@ int main() {
                 r->cnt[1], r->cnt[2], r->cnt[3], r->cnt[4], r->cnt[5],
                 r->errors);
             errors += r->errors;
+            if (r->cnt[0] != c->rtl_busy || r->cnt[1] != c->rtl_r ||
+                r->cnt[2] != c->rtl_w) {
+                printf("dma %s %ux%u B: busy r w %u %u %u, the RTL's %u %u %u\n",
+                       dir, c->copies, c->bytes, r->cnt[0], r->cnt[1],
+                       r->cnt[2], c->rtl_busy, c->rtl_r, c->rtl_w);
+                mismatches++;
+            }
         }
         printf("Number of errors: %u\n", errors);
-        return errors;
+        printf("Cases off the RTL's busy, r, w: %u\n", mismatches);
+        return errors + mismatches;
     }
 
     return 0;

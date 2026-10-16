@@ -2932,3 +2932,20 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   `run.log` byte-identical to round 4's.
 - What is left, (a): open item 67 (`SG7.md`). Not verified: the DMA's L1
   reads (`SG7.md`).
+
+### SG7 round 4 follow-up, step 2: dma-timing against the RTL
+
+- 2026-10-16. `dma-timing`'s cases carry the RTL's `busy`, `r` and `w` (SG2
+  step 3 at `b2672f8`, the same on both RTLs at `9fbf35d` in round 4); the
+  compute core prints a line per case off them and `Cases off the RTL's
+  busy, r, w: N`, and returns the copy errors plus N. README says so.
+- Both targets: 0 cases off, exit 0; the nine case lines equal to round 4's.
+- A drift on purpose: `read_latency` 6 in `snax_alu.py`, `snax_alu` rebuilt:
+  8 cases off (every copy's `busy` one over), exit 1. Reverted and rebuilt.
+- The new ELF on the plain RTL (`out-r4f-plain-dma-timing.txt`,
+  `logs-r4f-plain-dma-timing`): `[SUCCESS]`, 0 cases off; `busy`, `r`, `w`
+  as before on every line, `issue` 1 under and `done` 1 to 6 over round 4's
+  ELF (the new code's layout, the core's timing): why they are not compared.
+- `make regress`: `regression passed`, 40 SNAX and 17 plain; every `run.log`
+  equal to round 4's but `dma-timing`'s on both targets, which gain the
+  `Cases off the RTL's busy, r, w: 0` line.
