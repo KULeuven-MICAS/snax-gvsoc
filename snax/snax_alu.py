@@ -61,9 +61,13 @@ SNAX_ACC = {0: SnaxAluAcc}
 # (dma_req_fifo_depth) and 3 bursts in flight (dma_axi_req_fifo_depth). A DMA
 # read's first beat comes 5 cycles after its request from L1 and 11 from DRAM:
 # the 5 common to both are the DMA's own read path (read_latency), the other 6
-# are the DRAM's.
+# are the DRAM's. From the SG7 round 4 follow-up (docs/plans/SG7.md): a beat
+# reaches L1 2 cycles after the DMA sends it, the wide crossbar's cut and
+# axi_to_mem_interleaved, and the DMA is done at the send
+# (tcdm_write_latency); the DMA's midend, backend and AXI read each take a
+# cycle, whatever else the DMA is doing (one_cycle_per_stage).
 SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
-    'read_latency': 5}
+    'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage': True}
 DRAM_LATENCY = 6
 # The hjson's dma_data_width in bits: a DMA beat takes a superbank of
 # dma_data_width / data_width banks (data_width 64, the TCDM's 8 B bank), 8,

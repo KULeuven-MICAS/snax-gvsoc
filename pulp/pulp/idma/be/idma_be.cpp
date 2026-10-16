@@ -43,6 +43,9 @@ IDmaBe::IDmaBe(vp::Component *idma, IdmaTransferProducer *me,
     // Get the local area description to differentiate local and remote backend protocols
     this->loc_base = idma->get_js_config()->get_int("loc_base");
     this->loc_size = idma->get_js_config()->get_int("loc_size");
+    // SNAX: see one_cycle_per_stage
+    js::Config *one_cycle_per_stage = idma->get_js_config()->get("one_cycle_per_stage");
+    this->one_cycle_per_stage = one_cycle_per_stage && one_cycle_per_stage->get_bool();
 }
 
 
@@ -65,6 +68,7 @@ void IDmaBe::enqueue_transfer(IdmaTransfer *transfer)
 
     // Remember the transfer as it has to be provided when burst are sent to backend protocols
     this->current_transfer = transfer;
+    this->transfer_cycle = this->clock.get_cycles();
 
     // Extract information abouth the transfer. This will be used to split it into smaller bursts
     this->current_transfer_size = transfer->size;
@@ -93,6 +97,14 @@ bool IDmaBe::can_accept_transfer()
 void IDmaBe::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     IDmaBe *_this = (IDmaBe *)__this;
+
+    // SNAX: a transfer that arrived in this cycle is split from the next one
+    if (_this->one_cycle_per_stage && _this->current_transfer_size > 0
+        && _this->transfer_cycle == _this->clock.get_cycles())
+    {
+        _this->fsm_event.enqueue();
+        return;
+    }
 
     // We can send a new transfer if:
     // - a transfer is active

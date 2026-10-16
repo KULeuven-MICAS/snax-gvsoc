@@ -198,6 +198,8 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 4.3 | The DMA's wide input on both SNAX targets | done 2026-10-16 |
 | 4.4 | `dma-tcdm` and its predictions | done 2026-10-16 |
 | 4.5 | Runs on both RTLs and both targets; the comparison | done 2026-10-16 |
+| 4f.1 | Round 4 follow-up: where the DMA's beat cycles come from; the TCDM write path and the stages fixed | done 2026-10-16 |
+| 4f.2 | `dma-timing` checks `busy`, `r` and `w` against the RTL | |
 
 ## Predictions
 
@@ -689,7 +691,8 @@ Step 5 (`docs/notes/NOTES.md`): the same 18 ELFs; `dma-tcdm` and
   every output and `snax-alu` phase as round 3b's; their RTL comparison
   stands. `make regress` passes.
 - No gap in a compared counter. Not compared and different: the DMA's beat
-  spacing into L1 and the ALU's counter (the start gap).
+  spacing into L1 and the ALU's counter (the start gap). The beats' cycles
+  are split in the follow-up below.
 
 ### Acceptance of round 4
 
@@ -707,6 +710,107 @@ Step 5 (`docs/notes/NOTES.md`): the same 18 ELFs; `dma-tcdm` and
   target, and on the sparse RTL and the sparse target; `dma-timing` and
   the other programs as round 3b on the targets; every prediction marked
   held or not, every gap named.
+
+## Round 4 follow-up: the DMA's beat cycles
+
+`dma_vs_reader`'s four beats landed at +69, +78, +81, +89 from A's first
+grant on GVSoC and +74, +84, +91, +98 on the plain RTL. Each beat's cycle is
+split into (a) the cycle the DMA core issues that copy's `dmcpyi` and (b)
+`dmcpyi` to the beat in L1, the DMA's own path; the same for `dma-timing`'s
+`l2l1 1x64` and `4x800` (second runs, from `t0`, the `mcycle` before the
+first start). The method and the files are in `docs/notes/NOTES.md`.
+
+### The split
+
+Both RTLs give the same DMA events cycle for cycle in both programs, and
+both targets the same; the numbers hold for all four sides. GVSoC before
+and after the fix below.
+
+`dma_vs_reader`, measured run, from A's first grant:
+
+| Copy | (a) GVSoC | (a) RTL | (b) GVSoC before / after | (b) RTL | Beat GVSoC before / after | Beat RTL |
+|---|---|---|---|---|---|---|
+| 1 | +55 | +58 | 14 / 16 | 16 | +69 / +71 | +74 |
+| 2 | +64 | +68 | 14 / 16 | 16 | +78 / +80 | +84 |
+| 3 | +69 | +75 | 12 / 16 | 16 | +81 / +85 | +91 |
+| 4 | +75 | +82 | 14 / 16 | 16 | +89 / +91 | +98 |
+
+First run (superbank 3): (a) +73, +100, +105, +120 on GVSoC against +75,
++90, +97, +107; (b) 14 on GVSoC before, 16 after and on the RTL, each copy.
+
+`dma-timing`, from `t0`:
+
+| Copy | (a) GVSoC | (a) RTL | (b) GVSoC before / after | (b) RTL | Beat GVSoC before / after | Beat RTL |
+|---|---|---|---|---|---|---|
+| `1x64` | +12 | +12 | 14 / 16 | 16 | +26 / +28 | +28 |
+| `4x800` 1 | +12 | +12 | 14 / 16 | 16 | +26 / +28 | +28 |
+| `4x800` 2 | +21 | +22 | 18 / 20 | 19 | +39 / +41 | +41 |
+| `4x800` 3 | +30 | +32 | 22 / 24 | 22 | +52 / +54 | +54 |
+| `4x800` 4 | +39 | +42 | 26 / 28 | 25 | +65 / +67 | +67 |
+
+In `4x800` the copies after the first wait behind the 13 beats of the one
+ahead: on both sides copy k's first beat is the first copy's + 13 (k - 1),
+whenever it was issued, so their (b) differ by their (a).
+
+### Where in the DMA's path
+
+`l2l1 1x64`, from its `dmcpyi` at c (every copy above has the same steps):
+
+| Point | RTL | GVSoC before | GVSoC after |
+|---|---|---|---|
+| `busy` (`DMA_BUSY`, `dmstati 2`) | c + 1 to c + 14 | c to c + 13 | c to c + 13 |
+| Read request to AXI | c + 2 | c + 3 | c + 3 |
+| Read data at the DMA | c + 13 | c + 14 | c + 14 |
+| Write leaves the DMA (the iDMA's W) | c + 14 | c + 14 | c + 14 |
+| Write in L1 | c + 16 | c + 14 | c + 16 |
+| Write response | c + 19 | none | none |
+
+- DRAM read: the read request to its data is 11 cycles on both, D121's
+  `hbm_latency` 6 and `read_latency` 5. The parameters hold.
+- Queue: the RTL sends the read request 2 cycles after `dmcpyi`, the model
+  3 (midend, backend, AXI read, a cycle each), and its data comes a cycle
+  after the RTL's R, in the cycle the RTL's iDMA sends the W. From there the
+  two agree; `busy` is fitted on it (D121), so it stays.
+- Queue, a model gap: a stage whose event was already queued for the cycle
+  its work arrived in ran in that cycle. `dma_vs_reader`'s third measured
+  copy, issued in the cycle the first one finished, went to AXI 1 cycle
+  after its `dmcpyi`, not 3: (b) 12. Fixed: `one_cycle_per_stage`, each of
+  the midend, the backend and the AXI read takes work from the cycle after
+  it arrives.
+- TCDM write, a model gap: on the RTL the beat crosses the wide crossbar's
+  cut and `axi_to_mem_interleaved`, 2 cycles after the iDMA's W, and
+  `busy_o` falls at the W: `dmstati` sees a copy done 2 cycles before its
+  last beat is in L1. The model wrote L1 in the cycle the beat left the DMA.
+  Fixed: `tcdm_write_latency` 2, the line acknowledged when it leaves, so
+  `busy` and the DMA's done stay where they were.
+- Bursts in flight: not involved.
+
+Both are DMA properties set by the SNAX targets (`SNAX_DMA` in
+`snax_alu.py`, as `read_latency`); `snitch` and the other targets keep the
+model as it was. The beat reaches the crossbar from an event queued 2 cycles
+ahead, so it still comes before its cycle's arbitration (round 4's call
+order).
+
+### After the fix
+
+- (b) is equal per copy on both sides: 16 for every `dma_vs_reader` copy
+  and for `1x64`; in `4x800` the beats are equal from `t0`.
+- What is left is (a), the core's issue timing: a copy's `dmsrc`, `dmdst`,
+  `dmcpyi` take 9 cycles on GVSoC against 10 on the RTL in `dma-timing`, 9,
+  5, 6 against 10, 7, 7 between `dma_vs_reader`'s copies, more in the first
+  run with a cold instruction cache. That is open item 67 in snax-forge
+  (the core's own timing beyond its loads), kept (D124). `dma_vs_reader`'s
+  beats are now 3, 4, 6, 7 cycles before the RTL's, all of it (a).
+- `dma-timing` on both targets: every line equal to round 4's, so `busy`,
+  `r` and `w` equal the RTL's on every line. `dma-tcdm`: 264 (260) on both
+  targets. `make regress`: every `run.log` equal to round 4's.
+
+Not verified: the DMA's reads from L1 (`l1l2`): where the bank read falls
+inside D121's 5-cycle read path on the RTL was not split, and the TCDM
+back-end's own queue has no `one_cycle_per_stage`; no program has the DMA
+read L1 against a narrow request. An L1-to-L1 copy's read and a delayed
+write in the same cycle both go (the RTL's `axi_to_mem` takes one a
+cycle); no program makes one.
 
 ## Decided
 

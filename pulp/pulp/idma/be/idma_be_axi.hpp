@@ -99,6 +99,9 @@ private:
     std::queue<vp::IoReq *> read_bursts_waiting_ack;
     // List of timestamps for each burst where they can be considered as finished
     std::vector<int64_t> read_timestamps;
+    // SNAX: property one_cycle_per_stage (see IDmaMe2D), and per burst the cycle it was queued
+    bool one_cycle_per_stage;
+    std::vector<int64_t> enqueue_cycles;
 
     // Queue of pending bursts. This contains both read and write bursts. This is mostly used
     // to process them in order. The front burst is removed from the queue once it is fully

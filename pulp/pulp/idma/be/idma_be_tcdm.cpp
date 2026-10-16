@@ -26,7 +26,8 @@
 
 IDmaBeTcdm::IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer *be)
 :   Block(idma, itf_name),
-    fsm_event(this, &IDmaBeTcdm::fsm_handler)
+    fsm_event(this, &IDmaBeTcdm::fsm_handler),
+    delayed_write_event(this, &IDmaBeTcdm::delayed_write_handler)
 {
     // Backend will be used later for interaction
     this->be = be;
@@ -49,6 +50,9 @@ IDmaBeTcdm::IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer
     // SNAX: the DMA's own read path latency
     js::Config *read_latency = idma->get_js_config()->get("read_latency");
     this->read_latency = read_latency ? read_latency->get_int() : 0;
+    // SNAX: the path from the DMA to the TCDM for writes
+    js::Config *tcdm_write_latency = idma->get_js_config()->get("tcdm_write_latency");
+    this->tcdm_write_latency = tcdm_write_latency ? tcdm_write_latency->get_int() : 0;
 }
 
 
@@ -151,6 +155,7 @@ void IDmaBeTcdm::reset(bool active)
 
         this->last_line_timestamp = -1;
         this->last_read_push_timestamp = -2;
+        this->delayed_lines.clear();
     }
 }
 
@@ -171,6 +176,28 @@ void IDmaBeTcdm::write_line()
         this->trace.msg(vp::Trace::LEVEL_TRACE, "Writing line to TCDM (base: 0x%lx, size: 0x%lx)\n",
             base, size);
 
+        uint8_t *data = this->write_current_chunk_data;
+
+        // Update chunk info for next line
+        this->write_current_chunk_base += size;
+        this->write_current_chunk_size -= size;
+        this->write_current_chunk_data += size;
+
+        if (this->tcdm_write_latency > 0)
+        {
+            // SNAX: the line reaches the TCDM later and is acknowledged now
+            this->delayed_lines.push_back({this->clock.get_cycles()
+                + (int64_t)this->tcdm_write_latency, base,
+                std::vector<uint8_t>(data, data + size)});
+            if (!this->delayed_write_event.is_enqueued())
+            {
+                this->delayed_write_event.enqueue(this->tcdm_write_latency);
+            }
+            this->remove_chunk_from_current_burst(size);
+            this->write_handle_req_ack();
+            return;
+        }
+
         // Prepare the line request
         vp::IoReq *req = &this->req;
 
@@ -178,12 +205,7 @@ void IDmaBeTcdm::write_line()
         req->set_is_write(true);
         req->set_addr(base - this->loc_base);
         req->set_size(size);
-        req->set_data(this->write_current_chunk_data);
-
-        // Update chunk info for next line
-        this->write_current_chunk_base += size;
-        this->write_current_chunk_size -= size;
-        this->write_current_chunk_data += size;
+        req->set_data(data);
 
         // Send request to TCDM
         vp::IoReqStatus status = this->ico_itf.req(req);
@@ -217,6 +239,43 @@ void IDmaBeTcdm::write_line()
     else
     {
         this->update();
+    }
+}
+
+
+
+void IDmaBeTcdm::delayed_write_handler(vp::Block *__this, vp::ClockEvent *event)
+{
+    IDmaBeTcdm *_this = (IDmaBeTcdm *)__this;
+    int64_t now = _this->clock.get_cycles();
+
+    while (_this->delayed_lines.size() > 0 && _this->delayed_lines.front().cycle <= now)
+    {
+        DelayedLine &line = _this->delayed_lines.front();
+        _this->trace.msg(vp::Trace::LEVEL_TRACE, "Line reaches TCDM (base: 0x%lx, size: 0x%lx)\n",
+            line.base, line.data.size());
+        vp::IoReq *req = &_this->delayed_req;
+        req->prepare();
+        req->set_is_write(true);
+        req->set_addr(line.base - _this->loc_base);
+        req->set_size(line.data.size());
+        req->set_data(line.data.data());
+        vp::IoReqStatus status = _this->ico_itf.req(req);
+        if (status == vp::IoReqStatus::IO_REQ_INVALID)
+        {
+            _this->trace.force_warning("Invalid access during TCDM write line (base: 0x%lx, "
+                "size: 0x%lx)\n", line.base, line.data.size());
+        }
+        else if (status != vp::IoReqStatus::IO_REQ_OK)
+        {
+            _this->trace.fatal("Asynchronous response is not supported on TCDM backend\n");
+        }
+        _this->delayed_lines.pop_front();
+    }
+
+    if (_this->delayed_lines.size() > 0)
+    {
+        _this->delayed_write_event.enqueue(_this->delayed_lines.front().cycle - now);
     }
 }
 

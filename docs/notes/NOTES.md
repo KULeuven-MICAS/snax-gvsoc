@@ -2886,3 +2886,49 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   here makes an L1-to-L1 copy, the one path that could send one); a DMA
   request crossing a superbank line (none sent); a core or AXI request
   refused by the DMA on any side (none in these programs).
+
+### SG7 round 4 follow-up, step 1: where the DMA's beat cycles come from
+
+- 2026-10-16. Round 4's ELFs, no rebuild of `sw/`. The split per copy and
+  what was fixed are in `SG7.md`, "Round 4 follow-up".
+- (a), the `dmcpyi` cycle: GVSoC's `pe1` instruction trace; the RTL's
+  `trace_chip_00_hart_00001.dasm` in `logs-r4-<plain|sparse>-<program>`
+  (cycle column), on both RTLs. Reference: `dma_vs_reader`, A lane 0's first
+  grant (GVSoC's crossbar trace; the RTL's first cycle A0 asks, granted at
+  once); `dma-timing`, `t0`'s `csrr mcycle` (`0x80000840`), second run.
+- (b), the beat in L1: GVSoC's crossbar trace (`Superbank s: grant dma`)
+  with the iDMA's own traces (`--trace=idma --trace-level=trace`,
+  `build/sg7/r4f/run_dma.sh`); the RTL's waveforms of round 4's runs
+  (`wlf-r4-<plain|sparse>-<program>.wlf`, the `dma-timing` ones kept from
+  `vsim.wlf` of the last run), listed with `build/sg7/r4f/wlf/dma.do`: the
+  iDMA's offload handshake, `busy_o`, its AXI request and response structs,
+  `i_axi_to_mem_dma`'s `mem_req_o`, `mem_gnt_i`, `mem_we_o` and the four
+  superbank muxes' `sel_wide_i`; `dma_events.py` gives the events per
+  cycle. A falling-edge row at p ps is the trace's cycle (p - 500) / 1000 -
+  45: core 0's first load after the run and the DMA's offload handshake for
+  each `dmcpyi` fall in their trace line's cycle. The iDMA's own trace
+  (`dma_trace_00001_00000.log`, kept in both `logs-r4-*-dma-timing`) puts
+  the backend's request 2 cycles after each `dmcpyi`.
+- The plain and the sparse RTL's DMA events are identical in both programs
+  (`cmp` of the event lists). Both targets' `pe1` and crossbar DMA lines are
+  identical.
+- Before the fix, GVSoC, `dma_vs_reader`'s third measured copy: `dmcpyi` at
+  98189, the cycle the first copy's line was acknowledged; the backend's and
+  the AXI back-end's events were already queued for 98190 (the
+  acknowledgement's `update()`), so both ran with the new work in the cycle
+  it came: read request at 98190, data 98201, (b) 12. Every other copy: read
+  request at c + 3.
+- Fix: `tcdm_write_latency` 2 in `IDmaBeTcdm` (a line is queued with its
+  data and sent to the crossbar 2 cycles later; acknowledged when queued)
+  and `one_cycle_per_stage` in `IDmaMe2D`, `IDmaBe`, `IDmaBeAxi`; both in
+  `SNAX_DMA`, so only the SNAX targets have them. Built in snax-forge's
+  image (`snitch;snax_alu;snax_alu_sparse`).
+- After: (b) 16 for every copy of `dma_vs_reader` (both runs), `1x64` and
+  `4x800`'s first, equal to the RTL; `4x800`'s beats at +28, +41, +54, +67
+  from `t0` on both sides. `dma-timing` on both targets equal to round 4's
+  on every line; `dma-tcdm` 264 (260), 982 268 (264), errors 0, on both
+  targets.
+- `make regress`: `regression passed`, 40 SNAX and 17 plain; all 57
+  `run.log` byte-identical to round 4's.
+- What is left, (a): open item 67 (`SG7.md`). Not verified: the DMA's L1
+  reads (`SG7.md`).
