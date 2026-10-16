@@ -2949,3 +2949,46 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - `make regress`: `regression passed`, 40 SNAX and 17 plain; every `run.log`
   equal to round 4's but `dma-timing`'s on both targets, which gain the
   `Cases off the RTL's busy, r, w: 0` line.
+
+### SG7 round 5: SG7 closed
+
+- 2026-10-16. All steps done (`docs/plans/SG7.md`, "Result" and "Decided").
+  No model or program change in this round.
+- Final state, the 18 ELFs on the plain RTL, the plain target, the sparse
+  RTL and the sparse target: every compared counter equal on each
+  interconnect but `subword`'s SC on the sparse RTL (snax_cluster's sparse
+  wrapper leaves the AMO shim's `core_id` and `is_core` undriven; SG8 in
+  snax-forge). `snax-alu`'s phases within SG5's target against SG5's plain
+  RTL reference, which the sparse RTL gives too (C5 -2%, the total up to
+  982 -1% to -2%). `dma-timing`'s `busy`, `r` and `w` equal the RTL's and
+  are checked on every run.
+- Settled: the model's scope per port and cycle; the priority bit on a wire;
+  both interconnects' picks checked against their RTL modules; the cores and
+  AXI as holding inputs 12 to 14; the core going on after a pending L1 load;
+  the `tohost` poll through the debug backdoor; the DMA's superbank as a
+  wide input that refuses narrow winners, locked by each interconnect's
+  rule; the DMA's `tcdm_write_latency` and `one_cycle_per_stage`; the
+  `dma-timing` drift guard. In snax-forge (branch `ry/sg7-docs`): D119, D121,
+  D122, D124, D125 and D126 amended; open item 58 closed; open items 69 to
+  75 and SG8 added.
+- Open: the subword SC on the sparse RTL (SG8); open items 65 to 67 (fetch,
+  DRAM atomics, the core's issue timing, with the DMA core's copy issue in
+  `dma-tcdm`); and 69 to 75: the AXI input (14) used by no program; a store
+  or AMO after a pending load waits for its data (RTL: up to 4 in flight);
+  an L1 load after a DRAM load reaches the crossbar up to 13 cycles early
+  (round 3b, step 2); L1-to-L1 DMA copies (a read and a delayed write in one
+  cycle); the DMA reading L1 against a narrow request, not split against
+  the RTL (round 4 follow-up); the iDMA through the sparse interconnect as
+  ports instead of the superbank mux, a snax_cluster design change; sparse
+  granularity above 1, checked against the RTL module (step 5) but used by
+  no target.
+- Upstream files changed in SG7: the rows marked SG7 in `UPSTREAM.md`. New:
+  `snax/snax_alu_sparse.py`, `snax_plain_arb.hpp`, `snax_sparse_arb.hpp`,
+  `tests/snax/plain_arb/`, `tests/snax/sparse_arb/`, `sw/apps/core-tcdm/`,
+  `sw/apps/dma-tcdm/`, `sw/cfg/snax_alu_cluster.hjson`.
+- README checked against the targets: the regression paragraph now says
+  `dma-timing` fails when its DMA counters move.
+- `make regress` at the branch head, in snax-forge's image: `regression passed`,
+  40 SNAX runs and 17 plain, in 1 min 54 s.
+- Next: SG8, then planning one generator (open item 68 in snax-forge),
+  then GEN1.

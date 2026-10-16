@@ -19,7 +19,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `snax/` | SNAX targets and components: the `snax_alu` and `snax_alu_sparse` targets, their streamer, ALU and TCDM crossbar |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
 | `tests/snax/` | The regression (`regress.py`) and the phase script (`phases.py`) |
-| `docs/plans/` | One checklist per task (`SG0.md`, `SG1.md`) |
+| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
@@ -117,7 +117,8 @@ snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
 plain test missing from `build/sw/tests/` fails. No output or cycle count is
-compared (SG6). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse`,
+compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
+and `w` and fails when they move (SG7). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse`,
 as above, and takes about two minutes.
 
     make regress
@@ -156,7 +157,7 @@ moved, to be reviewed and committed with the new pin.
 ## Comparing with the RTL (by hand)
 
 Cycles are compared with the RTL by hand, on demand, from fresh runs of one
-ELF on both sides, against SG5's target (`docs/plans/SG5.md`, "The target";
+ELF on both sides (only `dma-timing` checks its DMA counters itself), against SG5's target (`docs/plans/SG5.md`, "The target";
 D124 in snax-forge). Only the RTL needs a snax_cluster checkout: clone it
 next to this repo at the pin in `sw/README.md`, with its submodules:
 

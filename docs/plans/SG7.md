@@ -200,6 +200,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 4.5 | Runs on both RTLs and both targets; the comparison | done 2026-10-16 |
 | 4f.1 | Round 4 follow-up: where the DMA's beat cycles come from; the TCDM write path and the stages fixed | done 2026-10-16 |
 | 4f.2 | `dma-timing` checks `busy`, `r` and `w` against the RTL | done 2026-10-16 |
+| 5.1 | Close: this file's Result and Decided, the notes, README | done 2026-10-16 |
 
 ## Predictions
 
@@ -817,13 +818,77 @@ read L1 against a narrow request. An L1-to-L1 copy's read and a delayed
 write in the same cycle both go (the RTL's `axi_to_mem` takes one a
 cycle); no program makes one.
 
+## Result
+
+SG7 is done. Both SNAX targets put every TCDM master of the cluster
+through the SNAX crossbar as the RTL does: the 12 SNAX ports, the two
+cores and AXI as inputs 0 to 14, arbitrated per bank by the plain
+interconnect's rule on `snax_alu` and the sparse one's on
+`snax_alu_sparse`, and the DMA as a wide input that takes its superbank.
+The 18 ELFs of `stream-timing`, `alu-timing`, `snax-alu` at five sizes,
+`core-tcdm`, `dma-tcdm` and `dma-timing` ran on the plain RTL, the plain
+target, the sparse RTL and the sparse target (rounds 1, 3, 3b, 4 and the
+follow-up; the tables are above and in the notes):
+
+- Every compared counter is equal on the plain RTL and the plain target,
+  and on the sparse RTL and the sparse target, but `subword`'s SC on the
+  sparse RTL (2 errors there, 0 on the other three sides): snax_cluster's
+  sparse wrapper leaves the AMO shim's `core_id` and `is_core` undriven, an
+  RTL issue, fixed in snax_cluster by SG8 in snax-forge. Where the two
+  interconnects differ, both sides differ alike: `prio_queued` and
+  `idle_restart` 5 plain, 6 sparse; `out_one_bank`'s 982 72 and 74;
+  `after_stores` 5 and 6.
+- `snax-alu`'s phases on the sparse RTL equal SG5's plain RTL reference,
+  on the sparse target the plain target's; against the RTL within SG5's
+  target, tiers 1 and 2 (C5 -2%, the total up to 982 -1%, -2%, -2% at
+  128, 1024, 4096; D2 at 128 -20%, accepted in SG5).
+- `dma-timing`'s `busy`, `r` and `w` equal the RTL's on every line, and
+  the program fails when they move.
+- The predictions held but two, both on `core_vs_reader`: the plain
+  target's 17 in round 3 (the core's fetch timing, fixed by the case's
+  layout in 3b) and the sparse 18 in 3b (the predictor's empty reader
+  queues; the RTL agrees with the model).
+
+What stays open, in snax-forge: the subword SC on the sparse RTL (SG8);
+the core's fetch, DRAM atomics and issue timing (open items 65 to 67,
+the DMA core's copy issue in `dma-tcdm` with them); and open items 69 to
+75: the AXI input (14) used by no program; a store or AMO after a pending
+load waits for its data; an L1 load after a DRAM load reaches the crossbar
+up to 13 cycles early; L1-to-L1 DMA copies; the DMA reading L1 against a
+narrow request; the iDMA through the sparse interconnect as ports instead
+of the superbank mux; sparse granularity above 1 used by no target.
+
 ## Decided
 
-- Round 1 puts only the SNAX ports through the sparse crossbar; the
-  plain target stays as it is.
-- The model describes what each port sees per cycle; the table above is
-  its scope.
+- The model says what each port sees per cycle, not RTL signals or
+  module structure: the tables under "Model scope" and round 4's "The
+  design" are its scope.
 - The priority bit travels on a wire per SNAX port, not in the request
-  (step 6).
+  (step 6); an unbound wire asks with 0, as the RTL's cores and AXI.
 - The sparse target shares the plain one's ELFs: the two hjsons give the
   same headers, which sync checks (step 3).
+- Both interconnects in one crossbar: the plain pick copies `rr_arb_tree`
+  v1.40.0 (`LockIn`), the sparse one `SparseInterconnect`'s arbiter, each
+  checked against its RTL module in Verilator (steps 5 and 4.2).
+- The cores and AXI are inputs 12, 13 and 14 of the crossbar, as on the
+  RTL, with priority 0; they hold a losing request; a read is answered a
+  cycle after its grant plus the core's `tcdm` latency, a write at its
+  grant (round 3).
+- The core goes on after an L1 load answered later; the next load or an
+  instruction on its register waits for the data, through the Snitch
+  core's scoreboard, not `NB_OUTSTANDING`; stores and AMOs still block;
+  D125's `tcdm` stays 2 (3b.2, 3.4).
+- GVSoC's `tohost` poll goes through the zero-time debug backdoor on the
+  SNAX targets (`htif_poll_backdoor`, 3b.3).
+- `core_vs_reader` runs twice, so its measured run does not depend on the
+  core's fetch (3b.4); `subword` stays as it is until SG8.
+- The DMA's superbank is a wide input: a beat takes all its banks in its
+  cycle and is never refused; a narrow winner there is refused and locked
+  by the bank's interconnect's rule; a request crossing a superbank line is
+  refused by name, a beat after its cycle's arbitration is fatal (round 4).
+- The DMA's `tcdm_write_latency` 2 and `one_cycle_per_stage` on the SNAX
+  targets, from splitting the beat cycles against the RTL; `snitch` keeps
+  the model as it was (4f.1).
+- `dma-timing` holds the RTL's `busy`, `r` and `w` and returns the cases
+  off them, so `make regress` and CI fail when the DMA's own timing moves
+  (4f.2).
