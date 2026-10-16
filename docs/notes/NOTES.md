@@ -2532,3 +2532,62 @@ Gaps, named, not fixed:
   C2 to C7. Errors 0, `Accelerator Cycles` as before.
 - `make regress`: `regression passed`; the 17 plain `run.log` files
   byte-identical to round 3's, every SNAX one equal to step 2's.
+
+### SG7 round 3b, step 4: core_vs_reader
+
+- 2026-10-16. The arbitration first, from round 3's traces (`build/sg7/r3`,
+  the plain target's crossbar trace and the plain RTL's waveform list):
+  - Plain target: start write at s = 7290; the core's bank-16 load granted
+    at s + 10; its bank-0 load first asks at s + 14, behind reader0.lane3
+    and reader1.lanes 1 to 3, and wins at s + 18. Each cycle the winner is
+    the next requester above the last pick, the core (input 12) after the
+    readers' inputs 3, 5, 6, 7.
+  - Plain RTL: bank-16 load at s + 1; the bank-0 load asks from s + 5 (edge
+    3 from the readers' first requests), wins at s + 11 after A3, B0 to B3,
+    then A0's second beat: the same rule.
+  - Up to the core's arrival the readers' grants are the same on both
+    sides; with the RTL's arrival the plain target's rule gives the RTL's
+    grants. So the arbitration is not the cause; the arrival is.
+- The change (`sw/apps/core-tcdm/src/core-tcdm.c`): the start write and the
+  two loads in `start_and_load`, not inlined, its block behind `.balign 32`
+  (one line, 0x80000380 to 0x8000038c), returning the two words in a0 and
+  a1; main configures and calls it twice, prints the measured run's counter
+  and the first run's. The compiler unrolls the two runs, but the line is
+  one copy. Between the runs core 0 makes no TCDM access (only CSRs; read in
+  the disassembly). `after_stores` and `subword` ELFs unchanged (sha256).
+- Prediction, before any run (in `SG7.md`; `build/sg7/r3b/predict3b.py`,
+  round 3's predictor with the arbiters' state carried from the first run):
+  measured 18 plain, 17 sparse on both sides; first run 18, 17, 17, 17.
+- Runs: the new ELF (sha256 checked after the RTL runs) on `snax_alu` and
+  `snax_alu_sparse` (this branch, steps 2 and 3 in) and on both RTLs, round
+  1's builds at `9fbf35d`, Questa 2022.4, `[SUCCESS]` both, `logs/` kept as
+  `logs-r3b-<plain|sparse>-core-tcdm-core_vs_reader`, the plain one's
+  waveform read with round 3's list.
+
+  | | Plain RTL | Plain target | Sparse RTL | Sparse target |
+  |---|---|---|---|---|
+  | 977, measured run | 18 | 18 | 18 | 18 |
+  | 977, first run | 18 | 17 | 17 | 17 |
+
+  `loaded 16 768` and `polls 0` on all four.
+- Measured run, plain: the core's loads at s + 1 (bank 16) and s + 5 (bank
+  0) on both sides, the bank-0 load granted at s + 11 on both, as
+  predicted. The readers' order differs from the first grant: B3 first on
+  the RTL, B0 on the target, each the rule's pick from the bank-0 pointer
+  the first run left (7 on the RTL after B3; 12 on the target, whose core
+  came last in its cold first run); the predictor's tree gives the same
+  from 7 and 12. First run: the target's core at s + 10 and s + 14 as in
+  round 3.
+- Sparse, not held (17 predicted): in the measured run the readers ask with
+  0. Each lane's queue still holds the first run's two words (the ALU is
+  off, as in `stream-timing`'s `prio_queued`), so its count is at least 2;
+  the core asks with 0 too, and the pick is round robin from the restarted
+  pointer: the core at s + 10 on the target, 18. The predictor emptied the
+  queues between the runs. The sparse RTL gives 18 too, so the model and
+  the RTL agree; its grants are not read (Chisel module, no list).
+- The four sides agree, so the layout stays. The cost: the compared counter
+  no longer shows the core waiting behind priority-1 readers on the sparse
+  interconnect; the first run still shows it (17 on both sparse sides) but
+  is not compared, and on the plain sides it differs with the fetch (18
+  against 17). Getting both in one compared run would need a second change
+  (e.g. emptying the queues between runs); not done.

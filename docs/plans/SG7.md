@@ -191,7 +191,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3b.1 | Round 3b: this section ("Round 3b"); `subword` on the sparse RTL noted | done 2026-10-16 |
 | 3b.2 | The core goes on after an L1 load answered later | done 2026-10-16 |
 | 3b.3 | GVSoC's `tohost` poll | done 2026-10-16 |
-| 3b.4 | `core_vs_reader`'s layout | |
+| 3b.4 | `core_vs_reader`'s layout | done 2026-10-16 |
 | 3b.5 | Runs on both targets against round 3's RTL numbers | |
 
 ## Predictions
@@ -489,6 +489,28 @@ can fix, and one that only snax_cluster can. Results in the notes.
   the four sides do not then agree, the case's counter is marked as
   depending on the core's fetch timing (shown, not compared, D123). No
   model change.
+
+  The change: the start write and the two loads in one non-inlined
+  function, the block aligned to a 32 B line, called for a first run and
+  then for the measured one, the loaded words returned in registers.
+  Prediction, from round 3's predictor with the arbiters' state carried
+  from the first run, before any run: the measured counter 18 on the plain
+  RTL and target, 17 on both sparse sides, for the core's first load 0 to 6
+  cycles after the start write with the bank-0 pointer the first run leaves
+  (7 on the RTL, 12 on GVSoC, where the core asks later); expected on
+  GVSoC 1 to 3 cycles after the start write (the line in the I-cache), as
+  the RTL's 1. First run: 18, 17, 17, 17 (on GVSoC the line still misses).
+
+  Result: the measured counter 18 on all four sides, first run 18, 17, 17,
+  17; the core's loads at s + 1 and s + 5 on the plain RTL and the plain
+  target, granted at s + 1 and s + 11 on both. So the layout stays. Plain:
+  held. Sparse: not held, 18 on both sides against 17 predicted. The
+  predictor started the measured run with empty reader queues; the streamer
+  keeps the first run's 2 words per lane (ALU off), so the readers ask with
+  0, as the core, and the sparse pick is round robin as plain. The sparse
+  RTL agrees with the model. What the compared counter no longer shows: the
+  core waiting behind priority-1 readers on the sparse interconnect; only
+  the first run, not compared, does.
 - 3b.5, the programs again on SNAX-GVSoC, against round 3's RTL numbers.
 
 ## Decided

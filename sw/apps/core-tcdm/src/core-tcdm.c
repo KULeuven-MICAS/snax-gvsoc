@@ -5,8 +5,7 @@
 // The cores' TCDM accesses through the interconnect (SG7 round 3): the same
 // ELFs run on snax_cluster's RTL and on SNAX-GVSoC. One ELF per case, chosen
 // with CASE_<name>; each prints the value it compares, chosen not to depend
-// on the core's timing (D123; core_vs_reader's depends on its instruction
-// fetch, see the README).
+// on the core's timing (D123).
 //
 //   subword          the compute core's stores and loads of bytes, halves,
 //                    words and doublewords (two words on rv32ima), an
@@ -14,7 +13,9 @@
 //                    the error count
 //   core_vs_reader   readers A and B, 2 beats each, every lane on bank 0;
 //                    the core loads from bank 16, then from bank 0 while they
-//                    stream; prints the streamer's counter (977)
+//                    stream; twice, so that the measured run does not depend
+//                    on the core's instruction fetch; prints the streamer's
+//                    counter (977) of both runs
 //   after_stores     the core's stores to the area leave banks 0 to 3 to the
 //                    core; then A (1 beat) and B (4 beats) on those banks;
 //                    prints 977
@@ -156,11 +157,29 @@ static const mover_t rb = {0x800, 8, 4, 32};
 #error "Build with -DCASE_<name>, see the Makefile"
 #endif
 
-int main() {
-    if (!snrt_is_compute_core()) return 0;
+#if CORE_LOADS
+// The start write and the core's two loads, in this order, in one 32 B
+// instruction line. Not inlined, so that both runs execute this one line: the
+// first run fetches it, and in the second (measured) one the core's loads
+// follow the start write as on the RTL (README). The words come back in
+// registers, so no stack access meets the readers.
+static __attribute__((noinline)) uint64_t start_and_load(uint32_t a) {
+    uint32_t other, bank0;
+    asm volatile(
+        ".balign 32\n\t"
+        "csrw " STR(STREAMER_START_CSR) ", %[one]\n\t"
+        "lw %[other], 0(%[p_other])\n\t"
+        "lw %[bank0], 0(%[p_bank0])"
+        : [other] "=&r"(other), [bank0] "=&r"(bank0)
+        : [one] "r"(1), [p_other] "r"(a + OTHER_BANK_WORD),
+          [p_bank0] "r"(a + BANK0_WORD)
+        : "memory");
+    return ((uint64_t)bank0 << 32) | other;
+}
+#endif
 
-    uint32_t a = area_init();
-
+// The readers' and the writer's CSRs for one run
+static inline void configure(uint32_t a) {
     csrw_ss(BASE_PTR_READER_0_LOW, a + ra.ptr);
     csrw_ss(BASE_PTR_READER_0_HIGH, 0);
     csrw_ss(S_STRIDE_READER_0_0, ra.sstride);
@@ -176,29 +195,35 @@ int main() {
     csrw_ss(S_STRIDE_WRITER_0_0, 8);
     csrw_ss(T_BOUND_WRITER_0_0, 0);
     csrw_ss(T_STRIDE_WRITER_0_0, 32);
+}
+
+int main() {
+    if (!snrt_is_compute_core()) return 0;
+
+    uint32_t a = area_init();
 
 #if CORE_LOADS
-    // The start write and the core's two loads, in this order
-    uint32_t other, bank0;
-    asm volatile(
-        "csrw " STR(STREAMER_START_CSR) ", %[one]\n\t"
-        "lw %[other], 0(%[p_other])\n\t"
-        "lw %[bank0], 0(%[p_bank0])"
-        : [other] "=&r"(other), [bank0] "=&r"(bank0)
-        : [one] "r"(1), [p_other] "r"(a + OTHER_BANK_WORD),
-          [p_bank0] "r"(a + BANK0_WORD)
-        : "memory");
+    // Two runs, the first a warm-up (start_and_load)
+    uint32_t first_counter = 0;
+    for (int run = 0; run < 2; run++) {
+        configure(a);
+        uint64_t loaded = start_and_load(a);
+        uint32_t polls = 0;
+        while (csrr_ss(STREAMER_BUSY_CSR)) polls++;
+        uint32_t counter = csrr_ss(STREAMER_PERFORMANCE_COUNTER_CSR);
+        if (run == 0) {
+            first_counter = counter;
+            continue;
+        }
+        printf("core-tcdm %s: counter %u (first run %u), polls %u, loaded %u %u\n", name,
+               counter, first_counter, polls, (uint32_t)loaded, (uint32_t)(loaded >> 32));
+    }
 #else
+    configure(a);
     csrw_ss(STREAMER_START_CSR, 1);
-#endif
     uint32_t polls = 0;
     while (csrr_ss(STREAMER_BUSY_CSR)) polls++;
     uint32_t counter = csrr_ss(STREAMER_PERFORMANCE_COUNTER_CSR);
-
-#if CORE_LOADS
-    printf("core-tcdm %s: counter %u, polls %u, loaded %u %u\n", name, counter, polls,
-           other, bank0);
-#else
     printf("core-tcdm %s: counter %u, polls %u\n", name, counter, polls);
 #endif
     return 0;
