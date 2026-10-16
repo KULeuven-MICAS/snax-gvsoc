@@ -111,7 +111,8 @@ with priority 1.
 `make regress` builds `sw/` and the programs of `sw/apps/`, runs each ELF
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
-cases, `dma-timing`, `snax-csr` and the `core-tcdm` cases, then
+cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
+case, then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a

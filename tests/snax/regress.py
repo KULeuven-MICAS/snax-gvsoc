@@ -10,7 +10,7 @@ of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
 (SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
-`snax-csr` and the three `core-tcdm` cases; then the plain tests on the
+`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then the plain tests on the
 `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
@@ -46,6 +46,7 @@ SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]
 CORE_TCDM_CASES = ["subword", "core_vs_reader", "after_stores"]
+DMA_TCDM_CASES = ["dma_vs_reader"]
 PLAIN_DIR = BUILD / "tests"
 PLAIN_TESTS = sorted(c.stem for c in (SW / "tests").glob("*.c"))  # COPIED in sw/sync.py
 WORK = ROOT / "build" / "regress" / "work"
@@ -150,6 +151,11 @@ def main():
     for case in CORE_TCDM_CASES:
         check.run_snax(f"core-tcdm-{case}",
                        BUILD / "apps" / "core-tcdm" / f"core-tcdm-{case}.elf")
+    if any(check.selected_snax(f"dma-tcdm-{case}") for case in DMA_TCDM_CASES):
+        make(APPS / "dma-tcdm")
+    for case in DMA_TCDM_CASES:
+        check.run_snax(f"dma-tcdm-{case}",
+                       BUILD / "apps" / "dma-tcdm" / f"dma-tcdm-{case}.elf")
     print(f"  {check.count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")

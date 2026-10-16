@@ -196,7 +196,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 4.1 | Round 4: this section ("Round 4") | done 2026-10-16 |
 | 4.2 | The plain path's lock; its check against `rr_arb_tree` | done 2026-10-16 |
 | 4.3 | The DMA's wide input on both SNAX targets | done 2026-10-16 |
-| 4.4 | `dma-tcdm` and its predictions | |
+| 4.4 | `dma-tcdm` and its predictions | done 2026-10-16 |
 | 4.5 | Runs on both RTLs and both targets; the comparison | |
 
 ## Predictions
@@ -638,6 +638,40 @@ The crossbar stops with an error naming the superbank, as it does for a
 narrow request after the arbitration (round 3). On a superbank with no
 grant in that cycle the late beat is taken as any other. Step 3 runs every
 program with this check.
+
+### Predictions of round 4
+
+Made in step 4 from source, before any run of `dma-tcdm` on the RTL or on
+SNAX-GVSoC.
+
+`dma-tcdm` (`sw/apps/dma-tcdm/README.md`), counter 977, first run in
+brackets:
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Why |
+|---|---|---|---|---|---|
+| `dma_vs_reader` | 264 (260) | 264 (260) | 264 (260) | 264 (260) | The ALU first, A, B and O each alone on its banks: beats + 4 without contention, as `alu_first`'s 29 for 25. First run: the copies on superbank 3, which no mover uses: 260. Measured: each of the four beats on superbank 0 refuses A's four lanes in a cycle they ask; they ask again in the next and win (alone, locked or not), one beat late, and the ALU, taking one beat of A and B per cycle with no slack in A's queue, fires a cycle later each time: +4. B runs up to 4 beats ahead (its credit is 8). Plain and sparse alike: nobody competes with A |
+
+The beats land some 65 to 90 cycles after the DMA core leaves the barrier
+(a 50-cycle wait, the issue, the DRAM read), the movers ask from s + 2 to
+s + 257; the counter holds while the two cores leave the barrier within
+about 60 cycles of each other. The ALU's counter (982) moves with the gap
+between the two start writes, as in `alu-timing`, and is not compared;
+on each side it is predicted 4 above its first run's.
+
+A second case was not added. A writer refused on its banks costs a cycle
+in the same way (nothing new). The lock keeping a lane's turn against
+another lane on the sparse interconnect changes which of the two goes
+first after the refusal, not when the bank's last grant comes (one grant
+per bank and cycle either way), so a counter would not show it; and placing
+a DMA beat on a contested cycle needs the cores' timing to the cycle,
+against D123. The lock is checked against the RTL by the two winner checks.
+
+The other programs, with the DMA in the crossbar on both targets: no DMA
+beat meets a narrow request (`dma-timing`: no core touches L1 during the
+copies, round 3 step 3; `snax-alu`: both cores are at the barrier or in CSR
+setup during its two copies, SG2; the others have no DMA copy), so every
+`run.log` stays round 3b's and every compared counter round 3b's on each
+side.
 
 ### Acceptance of round 4
 

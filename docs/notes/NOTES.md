@@ -2777,3 +2777,28 @@ line now equals SG2 step 7's; `busy` equal to the RTL on every line.
 - Read, not run: whether `wide_axi` carries TCDM traffic other than the
   iDMA's in these programs (none crossed a line, and the iDMA's back-end
   cuts at 64 B); which programs' DMA beats meet a narrow request (step 5).
+
+### SG7 round 4, step 4: dma-tcdm and its predictions
+
+- 2026-10-16. `sw/apps/dma-tcdm` (README there): one ELF per case on
+  `common.mk` with snax-alu's library, in `regress.py` on both SNAX targets
+  (it returns its error count); the README's regression paragraph says so.
+  One case, `dma_vs_reader`: the ALU (add, 256 beats) first, then the
+  streamer, A, B and O each on its own four banks (0 to 3, 8 to 11, 16 to
+  19), one 256 B row per beat; 50 cycles after a barrier the DMA core copies
+  four 64 B blocks from DRAM into the rows after the movers', one row apart,
+  at the rows' last 64 B (superbank 3) in a first run and at their first
+  64 B (superbank 0, A's) in the measured run; both runs execute one
+  non-inlined function, so the measured one runs warm. Prints 977 of both
+  runs, 982 of both, the errors (O against A + B, the copies against their
+  source).
+- Built in snax-forge's image; its disassembly (`run`): between the two
+  barriers the compute core runs `start_alu`, `start_streamer` and the busy
+  polls (CSR instructions only, leaf calls with no stack access), the DMA
+  core an `mcycle` loop, the four copies' DMA instructions from registers
+  (unrolled) and the `dmstat` poll; their stack saves and restores are
+  before the first barrier and after the second. Not run.
+- Predictions in `SG7.md`, "Predictions of round 4", from source before any
+  run of `dma-tcdm`: 264 measured, 260 first run, on all four sides. A second
+  case was not added (`SG7.md` says why). The other programs: no DMA beat
+  meets a narrow request, so every `run.log` as round 3b's.
