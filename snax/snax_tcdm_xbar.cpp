@@ -42,9 +42,17 @@
 // a core reaching the crossbar through routers, asks with priority 0; the wire
 // keeps the bit out of the request's argument slots, which routers use.
 //
-// Inputs are numbered as on the RTL: the SNAX ports, the cores, AXI. The DMA
-// does not go through this crossbar; it reaches the same banks on its own
-// path.
+// Inputs are numbered as on the RTL: the SNAX ports, the cores, AXI.
+//
+// The DMA (property superbank_banks, port dma) is not one of them: as on the
+// RTL (mem_wide_narrow_mux), a DMA beat takes every bank of its superbank in
+// its cycle and is answered at once, never refused, and a narrow winner on
+// those banks is refused by the bank and locked by its interconnect's rule
+// (bank_refuses()). A beat is a request inside one aligned superbank line; one
+// that crosses a line is refused. The DMA's beat of a cycle comes before that
+// cycle's arbitration, which runs after every event queued before the cycle
+// (docs/plans/SG7.md, round 4); one that comes after it on a superbank already
+// granted to a narrow request is fatal.
 
 #include <algorithm>
 #include <string>
@@ -71,6 +79,7 @@ public:
 
 private:
     static vp::IoReqStatus req(vp::Block *__this, vp::IoReq *req, int id);
+    static vp::IoReqStatus dma_req(vp::Block *__this, vp::IoReq *req);
     static void priority_sync(vp::Block *__this, bool value, int id);
     static void arbitrate(vp::Block *__this, vp::ClockEvent *event);
     static void held_cycle(vp::Block *__this, vp::ClockEvent *event);
@@ -80,14 +89,23 @@ private:
 
     // The sparse interconnect's winner on bank among the inputs in req_mask
     int sparse_pick(int bank, uint64_t req_mask, int64_t cycle);
-    // Whether bank refuses this cycle's winner. Nothing refuses yet; the
-    // DMA's superbank will (SG7 round 4).
-    bool bank_refuses(int bank) { return false; }
+    // Whether bank refuses this cycle's winner: the DMA took its superbank
+    bool bank_refuses(int bank)
+    {
+        return this->superbank_banks > 0
+            && this->superbank_cycle[bank / this->superbank_banks] == this->clock.get_cycles();
+    }
+    // The inputs requesting in req_mask but winner, for the trace
+    std::string others(uint64_t req_mask, int winner);
+    // An input's name for the trace; sparse, one asking with priority 1 is
+    // marked with !
+    std::string name(int input);
 
     vp::Trace trace;
     std::vector<vp::IoSlave> inputs;
     std::vector<vp::WireSlave<bool>> priority_itf;
     std::vector<vp::IoMaster> banks;
+    vp::IoSlave dma;
     vp::ClockEvent arb_event;
     // Queues the arbitration of a cycle that starts with a held request
     vp::ClockEvent held_event;
@@ -100,6 +118,7 @@ private:
     int bank_bits;         // log2(nb_banks)
     int width_bits;        // log2 of the bank width in bytes
     bool sparse;           // the sparse interconnect, else the plain one
+    int superbank_banks;   // banks per DMA beat, 0 without a DMA port
 
     // Per input: whether it holds a losing request (else its master resends it)
     std::vector<bool> holds;
@@ -123,6 +142,12 @@ private:
 
     // Granted requests waiting for their response, in grant order
     std::vector<Response> responses;
+
+    // Per superbank: the cycle the DMA last took it
+    std::vector<int64_t> superbank_cycle;
+    // Per bank: the cycle of its last narrow grant, and to whom
+    std::vector<int64_t> grant_cycle;
+    std::vector<int> grant_input;
 };
 
 
@@ -147,6 +172,11 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
         "interconnect must be plain or sparse, got %s\n", interconnect.c_str());
     this->sparse = interconnect == "sparse";
     this->width_bits = __builtin_ctz(bank_width);
+    js::Config *superbank = this->get_js_config()->get("superbank_banks");
+    this->superbank_banks = superbank != NULL ? superbank->get_int() : 0;
+    vp_assert_always(this->superbank_banks >= 0 && (this->superbank_banks == 0
+        || this->nb_banks % this->superbank_banks == 0), &this->trace,
+        "superbank_banks must divide nb_banks, got %d\n", this->superbank_banks);
 
     js::Config *names = this->get_js_config()->get("input_names");
     std::vector<js::Config *> given;
@@ -179,6 +209,12 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     this->pending_bank.assign(this->nb_inputs, 0);
     this->bank_req.assign(this->nb_banks, 0);
     this->priority.assign(this->nb_inputs, false);
+    this->grant_cycle.assign(this->nb_banks, -1);
+    this->grant_input.assign(this->nb_banks, 0);
+    if (this->superbank_banks > 0)
+    {
+        this->superbank_cycle.assign(this->nb_banks / this->superbank_banks, -1);
+    }
 
     if (this->sparse)
     {
@@ -214,6 +250,11 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     {
         this->new_master_port("out_" + std::to_string(i), &this->banks[i]);
     }
+    if (this->superbank_banks > 0)
+    {
+        this->dma.set_req_meth(&SnaxTcdmXbar::dma_req);
+        this->new_slave_port("dma", &this->dma);
+    }
 }
 
 
@@ -233,6 +274,8 @@ void SnaxTcdmXbar::reset(bool active)
             arb.reset();
         }
         this->responses.clear();
+        std::fill(this->superbank_cycle.begin(), this->superbank_cycle.end(), -1);
+        std::fill(this->grant_cycle.begin(), this->grant_cycle.end(), -1);
     }
 }
 
@@ -299,6 +342,96 @@ void SnaxTcdmXbar::priority_sync(vp::Block *__this, bool value, int id)
 }
 
 
+// A DMA beat: its superbank is taken in this cycle, its bank words accessed
+// at once
+vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
+{
+    SnaxTcdmXbar *_this = (SnaxTcdmXbar *)__this;
+    int64_t cycle = _this->clock.get_cycles();
+    uint64_t addr = req->get_addr();
+    uint64_t size = req->get_size();
+    uint64_t line = (uint64_t)_this->superbank_banks << _this->width_bits;
+    if (size == 0 || (addr & ~(line - 1)) != ((addr + size - 1) & ~(line - 1)))
+    {
+        _this->trace.force_warning("DMA request crosses a superbank line (addr: 0x%lx, "
+            "size: %ld); refused\n", addr, size);
+        return vp::IO_REQ_INVALID;
+    }
+
+    int first_bank = (addr >> _this->width_bits) & (_this->nb_banks - 1);
+    int superbank = first_bank / _this->superbank_banks;
+    if (_this->arb_cycle == cycle)
+    {
+        for (int bank = superbank * _this->superbank_banks;
+            bank < (superbank + 1) * _this->superbank_banks; bank++)
+        {
+            if (_this->grant_cycle[bank] == cycle)
+            {
+                _this->trace.fatal("DMA beat on superbank %d after this cycle's arbitration "
+                    "granted bank %d to %s\n", superbank, bank,
+                    _this->names[_this->grant_input[bank]].c_str());
+                return vp::IO_REQ_INVALID;
+            }
+        }
+    }
+    _this->superbank_cycle[superbank] = cycle;
+    _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Superbank %d: grant dma (%s 0x%lx, %ld B)\n",
+        superbank, req->get_is_write() ? "write" : "read", addr, size);
+
+    // Each bank word it covers, as DmaInterleaver did: the largest bank
+    // latency is the answer's
+    uint64_t width = 1ULL << _this->width_bits;
+    uint8_t *data = req->get_data();
+    int64_t latency = 0;
+    while (size > 0)
+    {
+        uint64_t chunk = std::min(width - (addr & (width - 1)), size);
+        int bank = (addr >> _this->width_bits) & (_this->nb_banks - 1);
+        vp::IoReq bank_req;
+        bank_req.init();
+        bank_req.set_addr(((addr >> (_this->width_bits + _this->bank_bits)) << _this->width_bits)
+            | (addr & (width - 1)));
+        bank_req.set_size(chunk);
+        bank_req.set_data(data);
+        bank_req.set_is_write(req->get_is_write());
+        bank_req.set_opcode(req->get_opcode());
+        vp::IoReqStatus status = _this->banks[bank].req(&bank_req);
+        if (status != vp::IO_REQ_OK)
+        {
+            _this->trace.fatal("Bank %d did not answer the DMA at once (status: %d)\n", bank,
+                status);
+            return vp::IO_REQ_INVALID;
+        }
+        latency = std::max(latency, (int64_t)bank_req.get_latency());
+        addr += chunk;
+        data += chunk;
+        size -= chunk;
+    }
+    req->inc_latency(latency);
+    return vp::IO_REQ_OK;
+}
+
+
+std::string SnaxTcdmXbar::name(int input)
+{
+    return this->names[input] + (this->sparse && this->priority[input] ? "!" : "");
+}
+
+
+std::string SnaxTcdmXbar::others(uint64_t req_mask, int winner)
+{
+    std::string held;
+    for (int i = 0; i < this->nb_inputs; i++)
+    {
+        if (i != winner && ((req_mask >> i) & 1))
+        {
+            held += " " + this->name(i);
+        }
+    }
+    return held.empty() ? "" : ", held:" + held;
+}
+
+
 int SnaxTcdmXbar::sparse_pick(int bank, uint64_t req_mask, int64_t cycle)
 {
     std::vector<int> &inputs = this->bank_inputs[bank];
@@ -356,8 +489,8 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
             {
                 _this->plain_arbs[bank].refused();
             }
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Bank %d: refused %s\n", bank,
-                _this->names[winner].c_str());
+            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Bank %d: refused %s (dma)%s\n", bank,
+                _this->name(winner).c_str(), _this->others(req_mask, winner).c_str());
             continue;
         }
         if (!_this->sparse)
@@ -368,29 +501,20 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         vp::IoReq *req = _this->pending[winner];
         uint64_t addr = req->get_addr();
 
+        _this->grant_cycle[bank] = cycle;
+        _this->grant_input[bank] = winner;
+
         if (_this->trace.get_active(vp::Trace::LEVEL_DEBUG))
         {
-            // Sparse: an input asking with priority 1 is marked with !
-            auto name = [&](int i) {
-                return _this->names[i] + (_this->sparse && _this->priority[i] ? "!" : "");
-            };
-            std::string held;
-            for (int i = 0; i < _this->nb_inputs; i++)
-            {
-                if (i != winner && ((req_mask >> i) & 1))
-                {
-                    held += " " + name(i);
-                }
-            }
             // The size only when it is less than a bank word
             vp::IoReqOpcode opcode = req->get_opcode();
             std::string size = req->get_size() < (1ULL << _this->width_bits)
                 ? ", " + std::to_string(req->get_size()) + " B" : "";
             _this->trace.msg(vp::Trace::LEVEL_DEBUG,
-                "Bank %d: grant %s (%s 0x%lx%s)%s%s\n", bank, name(winner).c_str(),
+                "Bank %d: grant %s (%s 0x%lx%s)%s\n", bank, _this->name(winner).c_str(),
                 opcode == vp::IoReqOpcode::READ ? "read"
                     : opcode == vp::IoReqOpcode::WRITE ? "write" : "amo",
-                addr, size.c_str(), held.empty() ? "" : ", held:", held.c_str());
+                addr, size.c_str(), _this->others(req_mask, winner).c_str());
         }
 
         // The bank access, at the bank-local address: the memory answers at

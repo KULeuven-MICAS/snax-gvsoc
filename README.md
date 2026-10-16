@@ -80,8 +80,10 @@ interconnect does. `snax_alu_sparse`
 (`snax/snax_alu_sparse.py`) is `cfg/snax_alu_cluster.hjson`, the same
 cluster with the sparse interconnect: the crossbar takes the streamer's
 priority bit first, then round robin from the last pick (SG7,
-`docs/plans/SG7.md`); the cores and AXI ask with priority 0. The DMA keeps
-its own path into the banks on both. The two clusters build the same ELF (`sw/README.md`).
+`docs/plans/SG7.md`); the cores and AXI ask with priority 0. On both, a
+DMA beat takes the whole superbank (8 banks) it writes or reads in its cycle,
+and a narrow request there is refused and keeps its turn. The two clusters
+build the same ELF (`sw/README.md`).
 Build `sw/` (the runtime for both clusters), GVSoC and the programs in
 `sw/apps/`, each into `build/sw/apps/<name>/`:
 

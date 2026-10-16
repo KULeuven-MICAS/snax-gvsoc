@@ -2739,3 +2739,41 @@ line now equals SG2 step 7's; `busy` equal to the RTL on every line.
 - In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
   `make regress`: `regression passed`; every `run.log` byte-identical to
   round 3b step 5's. Nothing refuses yet.
+
+### SG7 round 4, step 3: the DMA's wide input
+
+- 2026-10-16. `snax/snax_tcdm_xbar.{cpp,py}`: a port `dma` with the property
+  `superbank_banks` (0: no port). A DMA request inside one aligned superbank
+  line (`superbank_banks * bank_width` bytes) is a beat: it marks its
+  superbank taken in its cycle, its bank words are accessed at once (as
+  `DmaInterleaver` did) and it is answered `IO_REQ_OK` with the largest bank
+  latency. `bank_refuses(b)` is true while the DMA holds `b`'s superbank in
+  this cycle, so the winner there is refused: plain, locked (step 2); sparse,
+  `refused()`. A request crossing a superbank line is refused with a
+  warning (`IO_REQ_INVALID`). A beat after its cycle's arbitration on a
+  superbank where a narrow request was granted in that cycle is fatal,
+  naming the superbank, the bank and the input (the crossbar keeps each
+  bank's last grant cycle and input). Trace: `Superbank s: grant dma (read|write
+  addr, size)` and `Bank b: refused <input> (dma), held: ...`.
+- `snitch_cluster.py`: `ClusterArch` takes `snax_dma_data_width` (both arch
+  paths); with SNAX ports and it, `SnitchClusterTcdm` binds `dma_input` (the
+  iDMA's TCDM port and `wide_axi`'s TCDM and alias maps) to the crossbar's
+  `dma` port, `superbank_banks = dma_data_width / (8 * bank_width)`, and builds
+  no `DmaInterleaver`; `SnitchCluster` refuses a DMA `tcdm_width` that is not
+  one superbank. `snax_alu.py` sets `DMA_DATA_WIDTH = 512`, the hjson's: 8
+  banks, 64 B, the DMA's `tcdm_width`. `snitch` has no SNAX ports and keeps
+  `DmaInterleaver`. UPSTREAM.md row; README, target docstrings.
+- A DMA request that is not one full aligned beat: one inside a line but
+  shorter or unaligned is taken as the RTL's beat with partial strobes (all
+  banks of the superbank, only the covered words accessed); seen in
+  `dma-timing`, whose 800 B copies end mid-line (on `snax_alu`: 562 writes
+  and 24 reads of 64 B, 14 writes and 2 reads of 32 B). One crossing a line
+  is refused by name; no program sends one (no warning in any run).
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`;
+  `dma-timing` on both targets with the crossbar traced: every line equal
+  to round 3b's (so to SG2 step 7's), 602 beats through the `dma` port, none
+  refusing a narrow request. `make regress`: `regression passed`; every
+  `run.log` byte-identical to round 3b step 5's; no warning, no fatal.
+- Read, not run: whether `wide_axi` carries TCDM traffic other than the
+  iDMA's in these programs (none crossed a line, and the iDMA's back-end
+  cuts at 64 B); which programs' DMA beats meet a narrow request (step 5).

@@ -81,6 +81,7 @@ if os.environ.get('USE_GVRUN') is None:
             self.dma = getattr(properties, 'dma', None)
             self.snax_interconnect = getattr(properties, 'snax_interconnect', 'plain')
             self.snax_sparse_config = getattr(properties, 'snax_sparse_config', None)
+            self.snax_dma_data_width = getattr(properties, 'snax_dma_data_width', None)
 
         class Tcdm:
             def __init__(self, base, nb_masters):
@@ -98,7 +99,7 @@ else:
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
                 core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None,
                 dma=None, core=None, core_latency=None, snax_interconnect='plain',
-                snax_sparse_config=None):
+                snax_sparse_config=None, snax_dma_data_width=None):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -159,6 +160,11 @@ else:
             # cores and AXI are [1, 1] each after them.
             self.snax_interconnect = snax_interconnect
             self.snax_sparse_config = snax_sparse_config
+            # SNAX: the DMA's data width in bits (the hjson's dma_data_width). With SNAX
+            # ports, the DMA's TCDM accesses go through the SNAX crossbar, each beat taking
+            # a superbank of dma_data_width / (8 * bank_width) banks; None keeps the DMA on
+            # its own path.
+            self.snax_dma_data_width = snax_dma_data_width
 
         class Tcdm(Tree):
             def __init__(self, parent, name, base, nb_masters):
@@ -176,9 +182,12 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
     # SNAX: nb_snax_ports adds a crossbar with that many inputs in front of the same banks
     # (the accelerators' TCDM ports, then the cores and AXI), arbitrated per bank as
     # snax_cluster's plain or sparse interconnect (snax/snax_tcdm_xbar); snax_holds says
-    # per input whether it holds a losing request.
+    # per input whether it holds a losing request. With snax_superbank_banks too, the DMA
+    # input goes to the crossbar's DMA port instead of DmaInterleaver, each beat taking a
+    # superbank of that many banks.
     def __init__(self, parent, name, arch, nb_snax_ports=0, snax_port_names=None,
-            snax_holds=None, snax_interconnect='plain', snax_sparse_config=None):
+            snax_holds=None, snax_interconnect='plain', snax_sparse_config=None,
+            snax_superbank_banks=0):
         super().__init__(parent, name)
 
         banks = []
@@ -191,28 +200,35 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
             nb_masters=arch.nb_masters, interleaving_bits=int(math.log2(arch.bank_width)),
             offset_mask=arch.area.size - 1)
 
-        dma_interleaver = DmaInterleaver(self, 'dma_interleaver', 1,
-            nb_banks, arch.bank_width)
+        dma_in_snax_xbar = nb_snax_ports > 0 and snax_superbank_banks > 0
+        if not dma_in_snax_xbar:
+            dma_interleaver = DmaInterleaver(self, 'dma_interleaver', 1,
+                nb_banks, arch.bank_width)
 
         for i in range(0, nb_banks):
             self.bind(interleaver, 'out_%d' % i, banks[i], 'input')
-            self.bind(dma_interleaver, 'out_%d' % i, banks[i], 'input')
+            if not dma_in_snax_xbar:
+                self.bind(dma_interleaver, 'out_%d' % i, banks[i], 'input')
 
         for i in range(0, arch.nb_masters):
             self.bind(self, f'in_{i}', interleaver, f'in_{i}')
-            self.bind(self, f'dma_input', dma_interleaver, f'input')
+            if not dma_in_snax_xbar:
+                self.bind(self, f'dma_input', dma_interleaver, f'input')
 
         if nb_snax_ports > 0:
             from snax_tcdm_xbar import SnaxTcdmXbar
             snax_xbar = SnaxTcdmXbar(self, 'snax_xbar', nb_inputs=nb_snax_ports,
                 nb_banks=nb_banks, bank_width=arch.bank_width, input_names=snax_port_names,
                 holds=snax_holds, interconnect=snax_interconnect,
-                sparse_config=snax_sparse_config)
+                sparse_config=snax_sparse_config,
+                superbank_banks=snax_superbank_banks if dma_in_snax_xbar else 0)
             for i in range(0, nb_banks):
                 snax_xbar.o_BANK(i, banks[i].i_INPUT())
             for i in range(0, nb_snax_ports):
                 self.bind(self, f'snax_in_{i}', snax_xbar, f'in_{i}')
                 self.bind(self, f'snax_prio_{i}', snax_xbar, f'prio_{i}')
+            if dma_in_snax_xbar:
+                self.bind(self, 'dma_input', snax_xbar, 'dma')
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
@@ -275,12 +291,19 @@ class SnitchCluster(gvsoc.systree.Component):
             snax_port_names += [f'core{core_id}' for core_id in range(0, arch.nb_core)] + ['axi']
             snax_sparse_config += [[1, 1]] * (arch.nb_core + 1)
             snax_holds = [False] * nb_snax_ports + [True] * (arch.nb_core + 1)
+        # With SNAX ports and the DMA's data width, the DMA's TCDM accesses go through the
+        # same crossbar, a beat taking a superbank of dma_data_width / data_width banks
+        snax_superbank_banks = 0
+        snax_dma_data_width = getattr(arch, 'snax_dma_data_width', None)
+        if nb_snax_ports > 0 and snax_dma_data_width is not None:
+            snax_superbank_banks = snax_dma_data_width // (8 * arch.tcdm.bank_width)
 
         # L1 Memory
         tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=len(snax_port_names),
             snax_port_names=snax_port_names, snax_holds=snax_holds,
             snax_interconnect=snax_interconnect,
-            snax_sparse_config=snax_sparse_config if snax_interconnect == 'sparse' else None)
+            snax_sparse_config=snax_sparse_config if snax_interconnect == 'sparse' else None,
+            snax_superbank_banks=snax_superbank_banks)
 
         # Zero memory
         zero_mem = ZeroMem(self, 'zero_mem', size=arch.zero_mem.size)
@@ -364,6 +387,11 @@ class SnitchCluster(gvsoc.systree.Component):
         # SNAX: the arch may replace these defaults (ClusterArch's dma)
         dma_args = dict(tcdm_width=4096, transfer_queue_size=8, burst_queue_size=24)
         dma_args.update(getattr(arch, 'dma', None) or {})
+        # SNAX: a DMA line into the crossbar is one beat, one superbank
+        if snax_superbank_banks and \
+                dma_args['tcdm_width'] != snax_superbank_banks * arch.tcdm.bank_width:
+            raise RuntimeError(f"DMA tcdm_width {dma_args['tcdm_width']} is not a superbank of "
+                f"{snax_superbank_banks * arch.tcdm.bank_width} bytes")
         idma = SnitchDma(self, 'idma', loc_base=arch.tcdm.area.base, loc_size=arch.tcdm.area.size,
             **dma_args)
 

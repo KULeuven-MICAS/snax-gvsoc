@@ -11,7 +11,7 @@ interconnect (SG7).
 The snax_alu target (snax_alu.py) with its SNAX crossbar sparse: priority
 first, then round robin from the last pick (snax_tcdm_xbar.cpp). The
 accelerator's ports, then the two cores' and AXI's, [1, 1] each, as snaxgen
-lists them; the DMA keeps its path for now (SG7 round 4).
+lists them; the DMA's beats take their superbank as on the plain target.
 
     gvrun --target snax_alu_sparse --work-dir build/work/<name> \
         --param chip/soc/binary=<elf> run

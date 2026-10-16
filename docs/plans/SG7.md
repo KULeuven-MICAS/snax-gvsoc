@@ -195,7 +195,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3b.5 | Runs on both targets against round 3's RTL numbers | done 2026-10-16 |
 | 4.1 | Round 4: this section ("Round 4") | done 2026-10-16 |
 | 4.2 | The plain path's lock; its check against `rr_arb_tree` | done 2026-10-16 |
-| 4.3 | The DMA's wide input on both SNAX targets | |
+| 4.3 | The DMA's wide input on both SNAX targets | done 2026-10-16 |
 | 4.4 | `dma-tcdm` and its predictions | |
 | 4.5 | Runs on both RTLs and both targets; the comparison | |
 

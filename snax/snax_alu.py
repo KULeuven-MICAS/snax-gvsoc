@@ -10,9 +10,9 @@ unchanged up to the pin, 9fbf35d.
 One cluster with a compute core (hart 0, the one that drives the accelerator)
 and a DMA core (hart 1), both rv32ima, 128 KiB TCDM in 32 banks and the plain
 interconnect. The compute core's accelerator CSRs go to snax_alu_acc.py,
-which splits them between the streamer and the ALU. The SNAX ports, the cores'
-and AXI's TCDM ports go through one crossbar into the banks, the DMA on its
-own path. The values are written here by hand; everything else is the Snitch
+which splits them between the streamer and the ALU. The SNAX ports, the cores',
+AXI's and the DMA's TCDM ports go through one crossbar into the banks, the DMA
+taking a superbank per beat. The values are written here by hand; everything else is the Snitch
 chip of pulp/pulp/chips/snitch/snitch.py, whose own arch tree fixes the core
 count at 9.
 
@@ -65,6 +65,10 @@ SNAX_ACC = {0: SnaxAluAcc}
 SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
     'read_latency': 5}
 DRAM_LATENCY = 6
+# The hjson's dma_data_width in bits: a DMA beat takes a superbank of
+# dma_data_width / data_width banks (data_width 64, the TCDM's 8 B bank), 8,
+# in the SNAX crossbar (SG7 round 4)
+DMA_DATA_WIDTH = 512
 
 # The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
 # in snax-alu's check loop. One integer load in flight, as the hjson's
@@ -127,7 +131,8 @@ class SnaxAluAttr(Tree):
                     ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
                         nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
                         snax_acc=SNAX_ACC, dma=SNAX_DMA, core=SNAX_CORE,
-                        core_latency=CORE_LATENCY, **interconnect)
+                        core_latency=CORE_LATENCY, snax_dma_data_width=DMA_DATA_WIDTH,
+                        **interconnect)
                 ]
 
             def get_cluster_base(self, id: int):
@@ -151,6 +156,7 @@ class SnaxAluBoard(gvsoc.systree.Component):
             properties.nb_core_per_cluster = NB_CORE
             properties.snax_acc = SNAX_ACC
             properties.dma = SNAX_DMA
+            properties.snax_dma_data_width = DMA_DATA_WIDTH
             for key, value in self.interconnect.items():
                 setattr(properties, key, value)
             arch = SnitchArch(self, properties=properties)
