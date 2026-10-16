@@ -858,6 +858,8 @@ up to 13 cycles early; L1-to-L1 DMA copies; the DMA reading L1 against a
 narrow request; the iDMA through the sparse interconnect as ports instead
 of the superbank mux; sparse granularity above 1 used by no target.
 
+The subword SC on the sparse RTL: fixed in snax_cluster #658, see SG8 in the notes.
+
 ## Decided
 
 - The model says what each port sees per cycle, not RTL signals or

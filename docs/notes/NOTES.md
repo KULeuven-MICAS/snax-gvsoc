@@ -10,7 +10,7 @@ stay there.
 | What | Commit |
 |---|---|
 | GVSoC and its seven folded submodules | see `UPSTREAM.md` |
-| snax_cluster, the programs and the RTL reference | `sw/README.md`, "Pin": the copy in `sw/` is at it, and the RTL runs in a checkout at it (CI1). From SG6 on `9fbf35d` (#657): `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
+| snax_cluster, the programs and the RTL reference | `sw/README.md`, "Pin": the copy in `sw/` is at it, and the RTL runs in a checkout at it (CI1). From SG8 on `05615e4` (#658): `9fbf35d` plus the sparse interconnect's user field, the programs unchanged; SG6 and SG7 used `9fbf35d` (#657): `d7dd789` plus SG6's Zicsr fix in `snitch.sv` and `snax_intf_translator.sv`, the programs unchanged; SG0 used `8ebd422`, SG1 to SG4 `b2672f8`, SG5 `d7dd789` (`b2672f8` plus the DMA wait in `snax-alu.c`, SG5 P2) |
 | common_cells, the TCDM arbiter (SG3) | `v1.40.0` (`1281545696eb3fcba50ec5b4275993476a3c710e`), in the RTL build's `Bender.lock` (SG3 step 4) |
 
 ## Log
@@ -2992,3 +2992,28 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   40 SNAX runs and 17 plain, in 1 min 54 s.
 - Next: SG8, then planning one generator (open item 68 in snax-forge),
   then GEN1.
+- The subword SC on the sparse RTL: fixed in snax_cluster #658, see SG8.
+
+### SG8: the sparse interconnect's LR/SC
+
+- 2026-10-16. The bug (SG7 round 3, step 6): snax_cluster's Chisel
+  `TcdmReq` had no user field and the sparse wrapper left
+  `mem_req_o[].q.user` undriven, so each bank's AMO shim saw `core_id` X
+  and `is_core` 0: no SC succeeded and every write cleared the
+  reservations. Only `core-tcdm` `subword` showed it, on the sparse RTL
+  only: 2 errors, `sc` 1.
+- The fix, snax_cluster #658 (`05615e4`): the whole user struct carried
+  through the Chisel interconnect to the banks, the arbitration unchanged.
+- Ryan's Questa run on the fixed sparse RTL: `subword` passes, 0 errors,
+  `sc` 0. `stream-timing`, `alu-timing`, `snax-alu` at five sizes,
+  `core-tcdm` and `dma-tcdm` give the same counters as SG7, the core traces
+  byte-identical. SNAX-GVSoC already kept a reservation per hart: no model
+  or program change.
+- The pin moved to `05615e4` (`sw/README.md`): `make sync-snax-cluster` in
+  snax-forge's image, `9fbf35de -> 05615e45`, only the pin row changed (the
+  fix is in `hw/` and `util/snaxgen/`, which `sw/` does not copy), no
+  change in the mirrored build files. `make regress`: `regression passed`,
+  40 SNAX runs and 17 plain.
+- Every compared counter is now equal on the sparse RTL and the sparse
+  target. Next: planning the single generator (open item 68 in
+  snax-forge), then GEN1.
