@@ -10,10 +10,11 @@ unchanged up to the pin, 9fbf35d.
 One cluster with a compute core (hart 0, the one that drives the accelerator)
 and a DMA core (hart 1), both rv32ima, 128 KiB TCDM in 32 banks and the plain
 interconnect. The compute core's accelerator CSRs go to snax_alu_acc.py,
-which splits them between the streamer and the ALU. The values are written
-here by hand; everything else is the Snitch chip of
-pulp/pulp/chips/snitch/snitch.py, whose own arch tree fixes the core count
-at 9.
+which splits them between the streamer and the ALU. The SNAX ports, the cores',
+AXI's and the DMA's TCDM ports go through one crossbar into the banks, the DMA
+taking a superbank per beat. The values are written here by hand; everything else is the Snitch
+chip of pulp/pulp/chips/snitch/snitch.py, whose own arch tree fixes the core
+count at 9.
 
     gvrun --target snax_alu --work-dir build/work/<name> \
         --param chip/soc/binary=<elf> run
@@ -35,7 +36,8 @@ from snax_alu_acc import SnaxAluAcc
 # defines different arch classes for the two, so this target does too: the
 # build reuses SnitchArch with the core count changed, the run uses
 # SnaxAluAttr below. Only the run needs misa, a value read at run time; both
-# need the accelerators, since the build compiles their sources.
+# need the accelerators and the interconnect, since the build compiles their
+# sources and checks the crossbar's configuration.
 if os.environ.get('USE_GVRUN') is None:
     from pulp.chips.snitch.snitch import SnitchArch, SnitchArchProperties
 
@@ -59,10 +61,18 @@ SNAX_ACC = {0: SnaxAluAcc}
 # (dma_req_fifo_depth) and 3 bursts in flight (dma_axi_req_fifo_depth). A DMA
 # read's first beat comes 5 cycles after its request from L1 and 11 from DRAM:
 # the 5 common to both are the DMA's own read path (read_latency), the other 6
-# are the DRAM's.
+# are the DRAM's. From the SG7 round 4 follow-up (docs/plans/SG7.md): a beat
+# reaches L1 2 cycles after the DMA sends it, the wide crossbar's cut and
+# axi_to_mem_interleaved, and the DMA is done at the send
+# (tcdm_write_latency); the DMA's midend, backend and AXI read each take a
+# cycle, whatever else the DMA is doing (one_cycle_per_stage).
 SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
-    'read_latency': 5}
+    'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage': True}
 DRAM_LATENCY = 6
+# The hjson's dma_data_width in bits: a DMA beat takes a superbank of
+# dma_data_width / data_width banks (data_width 64, the TCDM's 8 B bank), 8,
+# in the SNAX crossbar (SG7 round 4)
+DMA_DATA_WIDTH = 512
 
 # The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
 # in snax-alu's check loop. One integer load in flight, as the hjson's
@@ -70,18 +80,28 @@ DRAM_LATENCY = 6
 # data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
 # the core's data path gets the cycles GVSoC lacks for that (core_latency), on
 # its TCDM port and on its way out of the cluster (narrow_axi). Instruction
-# fetches keep their own path.
-SNAX_CORE = {'int_loads_in_flight': 1}
+# fetches keep their own path. On the TCDM port the SNAX crossbar answers a
+# core's read one cycle after its grant plus these cycles; the core goes on
+# meanwhile, and the next load or an instruction on the loaded register runs in
+# the cycle after: 4 from one L1 load to the next with tcdm 2, as before the
+# cores went through the crossbar (SG7 rounds 3 and 3b).
+# GVSoC's host reads tohost every 1000 cycles; the RTL's host does not use the
+# bus, so the poll reads DRAM through the zero-time debug backdoor (SG7 round 3b).
+SNAX_CORE = {'int_loads_in_flight': 1, 'htif_poll_backdoor': True}
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
+
+# The SNAX ports' interconnect, ClusterArch arguments: the hjson's plain one
+# (tcdm.sparse_interconnect false). snax_alu_sparse.py replaces it.
+INTERCONNECT = {'snax_interconnect': 'plain'}
 
 
 class SnaxAluAttr(Tree):
     """The address map and cluster of the target, as SnitchAttr gives them."""
 
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, interconnect):
         super().__init__(parent, name)
-        self.chip = SnaxAluAttr.Chip(self, 'chip')
+        self.chip = SnaxAluAttr.Chip(self, 'chip', interconnect)
         self.hbm = SnaxAluAttr.Hbm(self, 'hbm')
 
     class Hbm(Tree):
@@ -93,13 +113,13 @@ class SnaxAluAttr(Tree):
 
     class Chip(Tree):
 
-        def __init__(self, parent, name):
+        def __init__(self, parent, name, interconnect):
             super().__init__(parent, name)
-            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc')
+            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc', interconnect)
 
         class Soc(Tree):
 
-            def __init__(self, parent, name):
+            def __init__(self, parent, name, interconnect):
                 super().__init__(parent, name)
                 self.bootrom = Area(self, 'rom', 0x0000_1000, 0x0001_0000,
                     description='Bootrom range')
@@ -115,7 +135,8 @@ class SnaxAluAttr(Tree):
                     ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
                         nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
                         snax_acc=SNAX_ACC, dma=SNAX_DMA, core=SNAX_CORE,
-                        core_latency=CORE_LATENCY)
+                        core_latency=CORE_LATENCY, snax_dma_data_width=DMA_DATA_WIDTH,
+                        **interconnect)
                 ]
 
             def get_cluster_base(self, id: int):
@@ -127,6 +148,8 @@ class SnaxAluAttr(Tree):
 
 class SnaxAluBoard(gvsoc.systree.Component):
 
+    interconnect = INTERCONNECT
+
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
 
@@ -137,9 +160,12 @@ class SnaxAluBoard(gvsoc.systree.Component):
             properties.nb_core_per_cluster = NB_CORE
             properties.snax_acc = SNAX_ACC
             properties.dma = SNAX_DMA
+            properties.snax_dma_data_width = DMA_DATA_WIDTH
+            for key, value in self.interconnect.items():
+                setattr(properties, key, value)
             arch = SnitchArch(self, properties=properties)
         else:
-            arch = SnaxAluAttr(self, 'snax_alu')
+            arch = SnaxAluAttr(self, 'snax_alu', self.interconnect)
         # Exposed so tools like the build process can query the memory map.
         self.set_attributes(arch)
 

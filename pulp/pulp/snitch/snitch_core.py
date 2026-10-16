@@ -121,7 +121,8 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
             snax_cluster_base_addr: int=0,
             snax_cluster_nb_cores: int=0,
             snax_cluster_core_idx: int=0,
-            int_loads_in_flight: int=0):
+            int_loads_in_flight: int=0,
+            htif_poll_backdoor: bool=False):
 
         isa_instance = isa_instances.get(isa)
 
@@ -155,6 +156,8 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
             'snax_cluster_core_idx': snax_cluster_core_idx,
             # snax_cluster's num_int_outstanding_loads; 0 for no limit (lsu.cpp)
             'int_loads_in_flight': int_loads_in_flight,
+            # The host's tohost poll through the zero-time debug backdoor (htif.cpp)
+            'htif_poll_backdoor': htif_poll_backdoor,
         })
 
         self.add_c_flags([
@@ -451,7 +454,8 @@ class Snitch_fp_ss(cpu.iss.riscv.RiscvCommon):
             core_id: int=0,
             timed: bool=False,
             htif: bool=False,
-            pulp_v2: bool=False):
+            pulp_v2: bool=False,
+            htif_poll_backdoor: bool=False):
 
         isa_instance = isa_instances.get(isa)
 
@@ -475,6 +479,9 @@ class Snitch_fp_ss(cpu.iss.riscv.RiscvCommon):
 
         if pulp_v2:
             self.add_c_flags([f'-DCONFIG_GVSOC_ISS_SNITCH_PULP_V2=1'])
+
+        # The host's tohost poll through the zero-time debug backdoor (htif.cpp)
+        self.add_property('htif_poll_backdoor', htif_poll_backdoor)
 
         self.add_c_flags([
             "-DCONFIG_ISS_CORE=snitch_fp_ss",

@@ -75,9 +75,13 @@ if os.environ.get('USE_GVRUN') is None:
             self.use_spatz = properties.use_spatz
             self.spatz_nb_lanes = properties.spatz_nb_lanes
             self.isa = properties.isa
-            # SNAX accelerators and DMA arguments, see the run-time ClusterArch below.
+            # SNAX accelerators, DMA arguments and the SNAX ports' interconnect, see the
+            # run-time ClusterArch below.
             self.snax_acc = getattr(properties, 'snax_acc', None)
             self.dma = getattr(properties, 'dma', None)
+            self.snax_interconnect = getattr(properties, 'snax_interconnect', 'plain')
+            self.snax_sparse_config = getattr(properties, 'snax_sparse_config', None)
+            self.snax_dma_data_width = getattr(properties, 'snax_dma_data_width', None)
 
         class Tcdm:
             def __init__(self, base, nb_masters):
@@ -94,7 +98,8 @@ else:
         def __init__(self, parent, name, base, first_hartid, auto_fetch=False,
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
                 core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None,
-                dma=None, core=None, core_latency=None):
+                dma=None, core=None, core_latency=None, snax_interconnect='plain',
+                snax_sparse_config=None, snax_dma_data_width=None):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -148,6 +153,18 @@ else:
             # core to the TCDM, and to everything outside the cluster through narrow_axi.
             # None adds none.
             self.core_latency = core_latency
+            # SNAX: the interconnect of the SNAX crossbar, 'plain' or 'sparse' (the hjson's
+            # tcdm.sparse_interconnect), and for sparse each accelerator's
+            # sparse_interconnect_config by core index, {core: [[width, granularity], ...]};
+            # an accelerator without one is [[nb_tcdm_ports, 1]], as snaxgen does, and the
+            # cores and AXI are [1, 1] each after them.
+            self.snax_interconnect = snax_interconnect
+            self.snax_sparse_config = snax_sparse_config
+            # SNAX: the DMA's data width in bits (the hjson's dma_data_width). With SNAX
+            # ports, the DMA's TCDM accesses go through the SNAX crossbar, each beat taking
+            # a superbank of dma_data_width / (8 * bank_width) banks; None keeps the DMA on
+            # its own path.
+            self.snax_dma_data_width = snax_dma_data_width
 
         class Tcdm(Tree):
             def __init__(self, parent, name, base, nb_masters):
@@ -162,9 +179,15 @@ else:
 
 class SnitchClusterTcdm(gvsoc.systree.Component):
 
-    # SNAX: nb_snax_ports adds a crossbar for the accelerators' TCDM ports in front of the
-    # same banks, arbitrated per bank as snax_cluster's plain interconnect (snax/snax_tcdm_xbar).
-    def __init__(self, parent, name, arch, nb_snax_ports=0, snax_port_names=None):
+    # SNAX: nb_snax_ports adds a crossbar with that many inputs in front of the same banks
+    # (the accelerators' TCDM ports, then the cores and AXI), arbitrated per bank as
+    # snax_cluster's plain or sparse interconnect (snax/snax_tcdm_xbar); snax_holds says
+    # per input whether it holds a losing request. With snax_superbank_banks too, the DMA
+    # input goes to the crossbar's DMA port instead of DmaInterleaver, each beat taking a
+    # superbank of that many banks.
+    def __init__(self, parent, name, arch, nb_snax_ports=0, snax_port_names=None,
+            snax_holds=None, snax_interconnect='plain', snax_sparse_config=None,
+            snax_superbank_banks=0):
         super().__init__(parent, name)
 
         banks = []
@@ -177,31 +200,44 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
             nb_masters=arch.nb_masters, interleaving_bits=int(math.log2(arch.bank_width)),
             offset_mask=arch.area.size - 1)
 
-        dma_interleaver = DmaInterleaver(self, 'dma_interleaver', 1,
-            nb_banks, arch.bank_width)
+        dma_in_snax_xbar = nb_snax_ports > 0 and snax_superbank_banks > 0
+        if not dma_in_snax_xbar:
+            dma_interleaver = DmaInterleaver(self, 'dma_interleaver', 1,
+                nb_banks, arch.bank_width)
 
         for i in range(0, nb_banks):
             self.bind(interleaver, 'out_%d' % i, banks[i], 'input')
-            self.bind(dma_interleaver, 'out_%d' % i, banks[i], 'input')
+            if not dma_in_snax_xbar:
+                self.bind(dma_interleaver, 'out_%d' % i, banks[i], 'input')
 
         for i in range(0, arch.nb_masters):
             self.bind(self, f'in_{i}', interleaver, f'in_{i}')
-            self.bind(self, f'dma_input', dma_interleaver, f'input')
+            if not dma_in_snax_xbar:
+                self.bind(self, f'dma_input', dma_interleaver, f'input')
 
         if nb_snax_ports > 0:
             from snax_tcdm_xbar import SnaxTcdmXbar
             snax_xbar = SnaxTcdmXbar(self, 'snax_xbar', nb_inputs=nb_snax_ports,
-                nb_banks=nb_banks, bank_width=arch.bank_width, input_names=snax_port_names)
+                nb_banks=nb_banks, bank_width=arch.bank_width, input_names=snax_port_names,
+                holds=snax_holds, interconnect=snax_interconnect,
+                sparse_config=snax_sparse_config,
+                superbank_banks=snax_superbank_banks if dma_in_snax_xbar else 0)
             for i in range(0, nb_banks):
                 snax_xbar.o_BANK(i, banks[i].i_INPUT())
             for i in range(0, nb_snax_ports):
                 self.bind(self, f'snax_in_{i}', snax_xbar, f'in_{i}')
+                self.bind(self, f'snax_prio_{i}', snax_xbar, f'prio_{i}')
+            if dma_in_snax_xbar:
+                self.bind(self, 'dma_input', snax_xbar, 'dma')
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
 
     def i_SNAX_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'snax_in_{port}', signature='io')
+
+    def i_SNAX_PRIORITY(self, port: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'snax_prio_{port}', signature='wire<bool>')
 
     def i_DMA_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'dma_input', signature='io')
@@ -230,16 +266,44 @@ class SnitchCluster(gvsoc.systree.Component):
         # order as snax_cluster packs snax_tcdm_req_i
         snax_acc = getattr(arch, 'snax_acc', None) or {}
         snax_port_names = []
+        # and for the sparse interconnect, the ports [width, granularity] in that order
+        snax_interconnect = getattr(arch, 'snax_interconnect', 'plain')
+        snax_sparse_config = []
         for core_id, make_acc in sorted(snax_acc.items()):
             nb_ports = getattr(make_acc, 'nb_tcdm_ports', 0)
             names = getattr(make_acc, 'tcdm_port_names', None) or \
                 [f'port{port}' for port in range(0, nb_ports)]
             snax_port_names += [f'snax_acc{core_id}.{name}' for name in names]
+            if nb_ports > 0:
+                snax_sparse_config += (getattr(arch, 'snax_sparse_config', None) or {}).get(
+                    core_id, [[nb_ports, 1]])
         nb_snax_ports = len(snax_port_names)
+        # With SNAX ports, the cores' and AXI's TCDM accesses go through the same crossbar,
+        # after them as snax_cluster packs its interconnect's inputs: core i at
+        # nb_snax_ports + i, AXI last, [1, 1] each in the sparse config, as snaxgen. They
+        # hold a losing request and ask with priority 0.
+        snax_core_input = None
+        snax_axi_input = None
+        snax_holds = None
+        if nb_snax_ports > 0:
+            snax_core_input = nb_snax_ports
+            snax_axi_input = nb_snax_ports + arch.nb_core
+            snax_port_names += [f'core{core_id}' for core_id in range(0, arch.nb_core)] + ['axi']
+            snax_sparse_config += [[1, 1]] * (arch.nb_core + 1)
+            snax_holds = [False] * nb_snax_ports + [True] * (arch.nb_core + 1)
+        # With SNAX ports and the DMA's data width, the DMA's TCDM accesses go through the
+        # same crossbar, a beat taking a superbank of dma_data_width / data_width banks
+        snax_superbank_banks = 0
+        snax_dma_data_width = getattr(arch, 'snax_dma_data_width', None)
+        if nb_snax_ports > 0 and snax_dma_data_width is not None:
+            snax_superbank_banks = snax_dma_data_width // (8 * arch.tcdm.bank_width)
 
         # L1 Memory
-        tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=nb_snax_ports,
-            snax_port_names=snax_port_names)
+        tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=len(snax_port_names),
+            snax_port_names=snax_port_names, snax_holds=snax_holds,
+            snax_interconnect=snax_interconnect,
+            snax_sparse_config=snax_sparse_config if snax_interconnect == 'sparse' else None,
+            snax_superbank_banks=snax_superbank_banks)
 
         # Zero memory
         zero_mem = ZeroMem(self, 'zero_mem', size=arch.zero_mem.size)
@@ -287,9 +351,12 @@ class SnitchCluster(gvsoc.systree.Component):
                     snax_cluster_core_idx=core_id, misa=getattr(arch, 'misa', None),
                     **(getattr(arch, 'core', None) or {})))
 
+                # SNAX: its tohost poll as the integer core's
                 fp_cores.append(iss.Snitch_fp_ss(self, f'fp_ss{core_id}', isa=arch.isa,
                     fetch_enable=arch.auto_fetch, boot_addr=arch.boot_addr,
-                    core_id=arch.first_hartid + core_id, htif=True, binaries=binaries))
+                    core_id=arch.first_hartid + core_id, htif=True, binaries=binaries,
+                    htif_poll_backdoor=(getattr(arch, 'core', None) or {}).get(
+                        'htif_poll_backdoor', False)))
                 if xfrep:
                     fpu_sequencers.append(Sequencer(self, f'fpu_sequencer{core_id}', latency=0))
 
@@ -311,12 +378,20 @@ class SnitchCluster(gvsoc.systree.Component):
             cores[core_id].o_SNAX_CSR(acc.i_INPUT())
             for port in range(0, getattr(make_acc, 'nb_tcdm_ports', 0)):
                 acc.o_TCDM(port, tcdm.i_SNAX_INPUT(snax_port))
+                # The priority bit of each request, for the sparse interconnect
+                if hasattr(acc, 'o_TCDM_PRIORITY'):
+                    acc.o_TCDM_PRIORITY(port, tcdm.i_SNAX_PRIORITY(snax_port))
                 snax_port += 1
 
         # Cluster DMA
         # SNAX: the arch may replace these defaults (ClusterArch's dma)
         dma_args = dict(tcdm_width=4096, transfer_queue_size=8, burst_queue_size=24)
         dma_args.update(getattr(arch, 'dma', None) or {})
+        # SNAX: a DMA line into the crossbar is one beat, one superbank
+        if snax_superbank_banks and \
+                dma_args['tcdm_width'] != snax_superbank_banks * arch.tcdm.bank_width:
+            raise RuntimeError(f"DMA tcdm_width {dma_args['tcdm_width']} is not a superbank of "
+                f"{snax_superbank_banks * arch.tcdm.bank_width} bytes")
         idma = SnitchDma(self, 'idma', loc_base=arch.tcdm.area.base, loc_size=arch.tcdm.area.size,
             **dma_args)
 
@@ -329,7 +404,12 @@ class SnitchCluster(gvsoc.systree.Component):
         narrow_axi.o_MAP(self.i_NARROW_SOC())
         # TODO check on real HW where this should go. This probably go through wide axi to
         # have good bandwidth when transferring from one cluster to another
-        narrow_axi.o_MAP(cores_ico[0].i_INPUT(), base=arch.tcdm.area.base, size=arch.tcdm.area.size, rm_base=False)
+        # SNAX: with SNAX ports, straight to the SNAX crossbar's AXI input
+        if snax_axi_input is not None:
+            narrow_axi.o_MAP(tcdm.i_SNAX_INPUT(snax_axi_input), base=arch.tcdm.area.base,
+                size=arch.tcdm.area.size, rm_base=True)
+        else:
+            narrow_axi.o_MAP(cores_ico[0].i_INPUT(), base=arch.tcdm.area.base, size=arch.tcdm.area.size, rm_base=False)
 
         # Wire router for DMA and instruction caches
         self.o_WIDE_INPUT(wide_axi.i_INPUT())
@@ -359,10 +439,13 @@ class SnitchCluster(gvsoc.systree.Component):
         for core_id in range(0, arch.nb_core):
             cores[core_id].o_DATA(cores_ico[core_id].i_INPUT())
             core_latency = getattr(arch, 'core_latency', None) or {}
-            cores_ico[core_id].o_MAP(tcdm.i_INPUT(tcdm_port), base=arch.tcdm.area.base,
+            # SNAX: with SNAX ports, the core's TCDM accesses go to its SNAX crossbar input
+            core_tcdm = tcdm.i_INPUT(tcdm_port) if snax_core_input is None \
+                else tcdm.i_SNAX_INPUT(snax_core_input + core_id)
+            cores_ico[core_id].o_MAP(core_tcdm, base=arch.tcdm.area.base,
                 size=arch.tcdm.area.size, rm_base=True, latency=core_latency.get('tcdm', 0))
             if arch.alias_base is not None:
-                cores_ico[core_id].o_MAP(tcdm.i_INPUT(tcdm_port), name='tcdm_alias',
+                cores_ico[core_id].o_MAP(core_tcdm, name='tcdm_alias',
                     base=arch.tcdm_alias.base, size=arch.tcdm_alias.size, rm_base=True,
                     latency=core_latency.get('tcdm', 0))
             tcdm_port += 1

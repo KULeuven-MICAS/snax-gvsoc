@@ -258,6 +258,10 @@ private:
     // Current transfer being processed. This transfer is kept active until all bursts
     // have been delegated to backend protocols.
     IdmaTransfer *current_transfer;
+    // SNAX: property one_cycle_per_stage (see IDmaMe2D), and the cycle in which the current
+    // transfer arrived
+    bool one_cycle_per_stage;
+    int64_t transfer_cycle = -1;
     // Current source address of the current transfer. This is increased everytime a burst is
     // delegated
     uint64_t current_transfer_src;

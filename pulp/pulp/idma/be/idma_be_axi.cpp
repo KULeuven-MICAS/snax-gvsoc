@@ -50,10 +50,14 @@ IDmaBeAxi::IDmaBeAxi(vp::Component *idma, std::string itf_name, IdmaBeProducer *
     // SNAX: the DMA's own read path latency
     js::Config *read_latency = idma->get_js_config()->get("read_latency");
     this->read_latency = read_latency ? read_latency->get_int() : 0;
+    // SNAX: see one_cycle_per_stage
+    js::Config *one_cycle_per_stage = idma->get_js_config()->get("one_cycle_per_stage");
+    this->one_cycle_per_stage = one_cycle_per_stage && one_cycle_per_stage->get_bool();
 
     // Use it to size the array of bursts and associated timestamps
     this->bursts.resize(burst_queue_size);
     this->read_timestamps.resize(burst_queue_size);
+    this->enqueue_cycles.resize(burst_queue_size);
 
     for (int i=0; i<burst_queue_size; i++)
     {
@@ -155,6 +159,7 @@ void IDmaBeAxi::enqueue_burst(uint64_t base, uint64_t size, bool is_write, IdmaT
     req->set_addr(base);
     req->set_size(size);
     *req->arg_get(0) = (void *)transfer;
+    this->enqueue_cycles[req->id] = this->clock.get_cycles();
 
     this->pending_bursts.push(req);
     this->pending_bursts_ack.push(req);
@@ -384,7 +389,16 @@ void IDmaBeAxi::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
     // At each cycle, ,if the next burst is a read one, we send it
     if (_this->pending_bursts.size() > 0 && !_this->pending_bursts.front()->get_is_write())
     {
-        _this->send_read_burst_to_axi();
+        // SNAX: not in the cycle it was queued
+        if (!_this->one_cycle_per_stage
+            || _this->enqueue_cycles[_this->pending_bursts.front()->id] < _this->clock.get_cycles())
+        {
+            _this->send_read_burst_to_axi();
+        }
+        else
+        {
+            _this->fsm_event.enqueue();
+        }
     }
 
     // In case we have pending read bursts waiting for pushing data, only do it if the backend

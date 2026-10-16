@@ -1808,3 +1808,1187 @@ stay there.
     `ubuntu-24.04`: the job runs in the image, the runner only hosts
     Docker and Node. `yaml.safe_load` still reads the workflow (one job,
     8 steps); the new versions are not run yet.
+
+### SG7 step 2: RTL generation
+
+- 2026-10-15. Branch `ry/sg7-sparse` from main `130cc70` (#8);
+  `docs/plans/SG7.md`. snax_cluster at the pin `9fbf35d`, submodules
+  updated, in `../snax_cluster`; in the snax image `d3d8f5572ff4`
+  (`ghcr.io/kuleuven-micas/snax:main`), the parent folder mounted at its
+  own path, from `../snax_cluster`:
+
+      make -C target/snitch_cluster clean
+      make -C target/snitch_cluster rtl-gen CFG_OVERRIDE=cfg/snax_alu_cluster.hjson
+
+  Exit 0. snaxgen ran `SparseInterconnectGen` with `--NumInp 15 --NumOut 32
+  --memAddrWidth 9 --tcdmAddrWidth 17 --dataWidth 64 --strbWidth 8
+  --priorityWidth 1 --sparseConfig "[[12, 1], [1, 1], [1, 1], [1, 1]]"`:
+  the 12 SNAX ports, the two cores, AXI. `StreamParamGen.scala` is
+  rewritten by `rtl-gen`, as always; nothing else tracked changed.
+- `target/snitch_cluster/sw/snax/snax-alu/include/streamer_csr_addr_map.h`
+  against `sw/generated/snax_alu_cluster_old/streamer_csr_addr_map.h`,
+  without the `// Generated at` line: equal.
+- The second module, with granularity, from `hw/chisel` in the same image;
+  the widths are snaxgen's formulas for this cluster (512 words per bank:
+  9 and 17 bits, 64-bit data, 8 strobes):
+
+      sbt 'runMain snax.sparse_interconnect.SparseInterconnectGen --NumInp 23
+        --NumOut 32 --memAddrWidth 9 --tcdmAddrWidth 17 --dataWidth 64
+        --strbWidth 8 --priorityWidth 1
+        --sparseConfig "[[12, 1], [8, 8], [1, 1], [1, 1], [1, 1]]"
+        --hw-target-dir <snax-gvsoc>/build/sg7/mixed'
+
+  Exit 0: 23 inputs, 16 per bank.
+- The two modules, not committed: `build/sg7/alu/SparseInterconnect.sv`
+  (copied from `target/snitch_cluster/generated/`, sha256 `befb96a997bebd81`)
+  and `build/sg7/mixed/SparseInterconnect.sv` (`786ffb0cddd09c93`).
+- Figures from Claude Code's runs on the MICAS server.
+
+### SG7 step 3: the sparse hjson in sw/
+
+- 2026-10-15. `sw/sync.py`: `target/snitch_cluster/cfg/snax_alu_cluster.hjson`
+  in `COPIED`; `SAME_HEADERS` maps `snax_alu_cluster` to
+  `snax_alu_cluster_old`: sync makes the sparse cluster's
+  `snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` and
+  `snitch_cluster_peripheral.h` with upstream's rule, after the two
+  clusters it keeps, and fails unless all three equal the old cluster's.
+  No `generated/snax_alu_cluster/` folder and no runtime of its own: its
+  programs are the old cluster's ELFs. The streamer header comparison is
+  unchanged. The checkout is left on the sparse cluster (`cfg/lru.hjson`).
+- `make sync-snax-cluster SNAX_CLUSTER=../snax_cluster` in snax-forge's
+  image, at the pin: `9fbf35de -> 9fbf35de`; the diff is `sw/sync.py` and
+  the new `sw/cfg/snax_alu_cluster.hjson` (identical to the checkout's),
+  no change upstream in the mirrored build files, the streamer header
+  equal but for its `Generated at` line. Run again after the README edit:
+  the same, plus `sw/README.md`.
+- The failure path, with `SAME_HEADERS` pointed at `snitch_cluster` in a
+  throwaway call of `generate()`: `snax_alu_cluster: snitch_cluster_cfg.h
+  not equal to snitch_cluster's`, exit 1, nothing under `sw/` changed.
+- The checkout's `generated/SparseInterconnect.sv` is unchanged by the
+  syncs (same sha256 as step 2's copy).
+- `sw/README.md`: three cluster configurations; a row in "Generated files"
+  for the sparse cluster's headers (made, compared, not kept); the
+  hand-copied `streamer_csr_addr_map.h` comes from either hjson; `snax-alu`
+  builds the same ELF for both clusters.
+
+### SG7 step 4: the sparse pick in the crossbar
+
+- 2026-10-15. `snax/snax_sparse_arb.hpp`, plain C++ with no GVSoC include,
+  so the crossbar and step 5's check run the same code:
+  `SnaxSparseConfig` (the ports `[width, granularity]`; `bank_inputs(b)`,
+  `get_global_idx_list`'s order; `reaches(input, bank)`, the RTL's
+  assertion) and `SnaxSparseArb`, one bank's arbiter: the mask is the
+  valid inputs with priority 1 if any, else all valid ones; if locked and
+  the last pick is in the mask it wins, else the lowest masked input above
+  the last pick, else the lowest masked input; the pick becomes the
+  pointer. `pick()` runs only in cycles where the bank has a request, so a
+  pick whose last cycle is not the one before restarts the pointer at
+  `inputs - 1` and clears the lock (the RTL's selection in an idle cycle).
+  `refused()` sets the lock for the next cycle. One priority bit, as
+  snaxgen elaborates the module.
+- `snax/snax_tcdm_xbar.{cpp,py}`: property `interconnect`, `plain` (the
+  `rr_arb_tree` path, unchanged) or `sparse`, and `sparse_config`, whose
+  widths must add up to the inputs (checked in Python and C++). In sparse
+  mode each bank keeps its arbiter and its inputs in local order; a request
+  to a bank its input may not reach is refused with a warning naming the
+  input (`IO_REQ_INVALID`, which stops the streamer); `bank_refuses()` is
+  the one entry point for a bank refusing its winner, false for now (the
+  DMA in round 4): the winner is then dropped with the losers and locked.
+  The priority bit is per input, 0 until step 6; the plain path ignores
+  it. In the trace a sparse input asking with priority 1 gets a `!`.
+- In snax-forge's image, `make build TARGETS="snitch;snax_alu"` on main's
+  crossbar, then `make regress` (passed), keeping every `run.log` and a
+  `snax_xbar` and `streamer` trace of the 14 SNAX programs; the same after
+  the change: `make regress` passed, and all 31 `run.log` files, the 14
+  programs' output and both traces (but the lines with port pointers) are
+  byte-identical. The sparse path runs from step 7; the granularity
+  warning cannot occur on the ALU cluster (every granularity 1) and was not
+  exercised in GVSoC.
+
+### SG7 step 5: the winner check
+
+- 2026-10-15. `tests/snax/sparse_arb/` (README there): `tb.cpp` drives an
+  elaborated `SparseInterconnect.sv` and `snax/snax_sparse_arb.hpp` with
+  the same random stimulus and compares, per bank and cycle, the module's
+  request valid and address with the model's pick, and per input its
+  `ready` with the model's. Each input's bank-local address is its own
+  index, so the address names the selection, also when the bank refuses.
+  Phases of 500 cycles with their own load (0.05 to 0.95), bank spread
+  (1, 2, 4 or 32 banks), priority rate (0 to 1) and refusal rate (0 to
+  0.4); only accesses the granularity allows. `ports.py` writes the port
+  accessors; `run.sh` builds and runs. Run by hand, not in regress or CI.
+- Simulator: Verilator 5.024 in `d3d8f5572ff4`, which has no Icarus.
+  The module's own legality assertion stayed silent.
+- Results, 20000 cycles each, seeds 1, 2 and 3; every selection and every
+  `ready` equal in all nine runs. Seed 1:
+
+  | Module | Model | Selections | Contested | By priority | After a refusal | After an idle cycle | Refusals | Differences |
+  |---|---|---|---|---|---|---|---|---|
+  | `alu` (15 inputs) | the same | 56885 | 25073 | 11057 | 2831 | 4582 | 10343 | 0 |
+  | `mixed` (23 inputs, `[8, 8]`) | the same | 104766 | 27430 | 9140 | 2498 | 5679 | 12769 | 0 |
+  | `alu` (15 inputs, 12 to 14 idle) | `[[12, 1]]` | 42244 | 17035 | 7454 | 2566 | 3149 | 6684 | 0 |
+
+  Seeds 2 and 3: 44361 and 51250, 104523 and 135022, 43757 and 45590
+  selections, 0 differences.
+- The check fails on a wrong rule: three copies of the header, each with
+  one rule broken (no restart after an idle cycle; no lock; priority
+  ignored), against `alu` at seed 1: 1534, 1244 and 8248 selection
+  differences, exit 1.
+
+### SG7 step 6: the streamer's priority bit
+
+- 2026-10-15. The rule, read from `DataRequestor.scala`,
+  `ComplexQueue.scala`, `Reader.scala` and `Writer.scala`, is in
+  `SG7.md`, "The priority bit": a request first sent in cycle t carries the
+  lane queue's hint of cycle t - 1 (reader `count <= 1`, writer
+  `count >= fifo_depth - 1`, the count from the queue's registers), and a
+  resent request keeps its bit; `priorityHold` reloads only in a cycle with
+  no request or when the request fires.
+- `snax/snax_streamer.{cpp,py}`: the template keys `dynamicPriority` and
+  `higherStaticPriority` per reader and writer, read as
+  `stream_param_gen.scala.tpl` reads them (default dynamic, static 0).
+  Each channel takes its bit when it makes a new request, from the count
+  during the cycle before (the words visible by then and not popped before
+  it; the words popped in the last two cycles are kept for that), and sets
+  its wire `tcdm_prio_<i>` before every send and resend.
+- The bit is carried on a `wire<bool>` per SNAX port, not in the
+  request: `SnaxTcdmXbar`'s `prio_<i>` stores it for the cycle and clears it
+  with the cycle's requests, so a port that never sets it (a core through
+  routers, round 3) asks with priority 0. `snax_alu_acc.py` and
+  `snitch_cluster.py` (`SnitchClusterTcdm`, `SnitchCluster`) bind the
+  wires; a row in `UPSTREAM.md`.
+- In snax-forge's image, `make build TARGETS="snitch;snax_alu"`, then
+  `make regress`: passed; all 31 `run.log` files and, but for the
+  configuration lines at time 0 (the new wires' bindings), the 14 SNAX
+  programs' output and `snax_xbar` and `streamer` traces equal step 4's
+  main baseline: the plain crossbar ignores the bit.
+- The bits checked by hand on a sparse run, with step 7's target built
+  from the work tree before step 7's commit: `stream-timing`'s
+  `ab_same_banks`, start written at 4713. Reader A's lane 0 asks at 4715,
+  4716, 4717 and 4718 with priority 1 (its queue counts 0, 0, 0 and 1 in the
+  cycle before) and at 4719 with 0 (count 2); reader B's lane 0, held on
+  bank 0 at 4715, is resent at 4716 with the same 1, then asks with 1 up to
+  4719 and with 0 at 4720. Counter 10, as on the plain target. The writer's
+  bit was not looked at here: the writer does not run in `stream-timing`.
+
+### SG7 step 7: the snax_alu_sparse target
+
+- 2026-10-15. `snax/snax_alu_sparse.py`: the `snax_alu` board with
+  `interconnect = {'snax_interconnect': 'sparse', 'snax_sparse_config':
+  {0: [[12, 1]]}}`, the accelerator's `sparse_interconnect_config` in
+  `cfg/snax_alu_cluster.hjson`; target `snax_alu_sparse`. `snax_alu.py`
+  takes the interconnect from the board's class attribute (`INTERCONNECT`,
+  plain) on both arch paths: `SnitchArchProperties` for `make build`
+  (without `USE_GVRUN`), `SnaxAluAttr` for gvrun.
+- `snitch_cluster.py`: `ClusterArch` (both paths) takes
+  `snax_interconnect` and `snax_sparse_config`; `SnitchCluster` lists the
+  accelerators' sparse ports in core order, `[nb_tcdm_ports, 1]` for one
+  without a config, as snaxgen does, and passes them to the crossbar only
+  for `sparse`, so the plain target's configuration is as before. A row in
+  `UPSTREAM.md`.
+- `tests/snax/regress.py`: each SNAX ELF runs on `SNAX_TARGETS`
+  (`snax_alu`, `snax_alu_sparse`), named `<program>.<target>`; `-k` selects
+  by that name. CI builds `snitch;snax_alu;snax_alu_sparse`; the Makefile's
+  comment says so. README: the layout, "The snax_alu targets" (build,
+  the sparse target, `!` in the crossbar's trace), "Regression", "Continuous
+  integration" and "Comparing with the RTL" (one checkout per
+  configuration, the commands for the sparse one, the target to run
+  against each).
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
+  then `make regress`: `regression passed`, 28 SNAX runs and 17 plain, 1 min
+  28 s. The 14 `.snax_alu` and 17 plain `run.log` files equal main's
+  (step 4's baseline), and so do the plain target's traces but for their
+  time-0 configuration lines. The CI workflow parses (`yaml.safe_load`, one
+  job, 8 steps); it was not run on GitHub (nothing is pushed). The
+  `.snax_alu_sparse` logs were not read before step 8's predictions.
+
+### SG7 step 8: predictions
+
+- 2026-10-15. Predictions for `stream-timing`, `alu-timing` and
+  `snax-alu` on the sparse RTL and the sparse target are in `SG7.md`,
+  "Predictions", written before any sparse RTL run and committed before any
+  run of the new cases. The sparse target's `run.log` files of step 7's
+  regression were not read before.
+- How: the rules of `SG7.md` worked through each case's requests. For the
+  cases with contention, a throwaway Python restatement of the streamer,
+  the ALU, `rr_arb_tree` and the sparse rule (`build/sg7/predict.py`, not
+  committed; it reads no C++). Run with the plain rule at the plain
+  target's start cycles it gave every grant of the plain target's traces
+  (cycle, bank and winner): all 1212 of `alu-timing`, all of the five
+  `stream-timing` cases and of `snax-alu` at the five sizes, and every
+  counter. Then with the sparse rule. The compared counters stay as they
+  are when either start write moves by up to 3 cycles.
+- Expected: every compared counter as on the plain RTL but `out_one_bank`'s
+  982, 74 against 72, a priority effect (a writer lane with 7 or 8 queued
+  wins repeatedly on bank 0, so the ALU fires in bursts of three).
+  Non-compared: `stream_first`'s 977 and `snax-alu`'s at 100 one lower (the
+  pointer rule gives the writer the second conflict on banks 8 to 11).
+  Grants change without a counter effect in `snax-alu` at 128 to 4096 (idle
+  restart) and, on the plain RTL against the plain target, in
+  `ab_same_banks` (the cores' stores leave `rr_q` 12 in the RTL's plain
+  interconnect, where the model has no cores).
+- Two new `stream-timing` cases, a first run then the measured run, with
+  only CSR instructions between the two start writes (checked in the
+  disassembly of both ELFs): `prio_queued` (B with an empty queue against A
+  with 4 queued: priority) and `idle_restart` (A against B after B's first
+  run on the same banks: the sparse pointer restarts). Predicted 5 on the
+  plain RTL and target, 6 on the sparse ones; first runs 5 and 2. The
+  program sets up each run in `stream()`; the old five cases keep their
+  output line and are otherwise unchanged but for the writer's unused
+  pointer, now at +3 KiB. `Makefile` and `regress.py` list the seven
+  cases; the app's README has them with both interconnects' counters.
+- Built in snax-forge's image (`make -C sw/apps/stream-timing`), not run
+  before this commit.
+
+### SG7 step 9: runs and comparison
+
+- 2026-10-15. The same 13 ELFs everywhere (`snax-alu` at five sizes,
+  `alu-timing`, seven `stream-timing` cases), built from `sw/` in
+  snax-forge's image; their sha256 were taken before the RTL runs and
+  checked after.
+- SNAX-GVSoC: each ELF on `snax_alu` and `snax_alu_sparse`, with both cores'
+  instruction traces and the crossbar, streamer and ALU traces; `snax-alu`
+  cut with `phases.py --gvsoc`.
+- Sparse RTL, `../snax_cluster` at `9fbf35d` with step 2's `rtl-gen`
+  (`generated/SparseInterconnect.sv` still step 2's): `make -C
+  target/snitch_cluster vsim_preparation CFG_OVERRIDE=cfg/snax_alu_cluster.hjson`
+  in `d3d8f5572ff4`, then `make -C target/snitch_cluster
+  bin/snitch_cluster.vsim CFG_OVERRIDE=cfg/snax_alu_cluster.hjson` on the
+  host, Questa 2022.4: 755 modules, 0 errors, `TARGET_SPARSE_INTERCONNECT`
+  defined. Each ELF run from `target/snitch_cluster`, its `logs/` kept as
+  `logs-sparse-<program>`; all 13 end `[SUCCESS]`; 3 min 4 s in all.
+  `snax-alu` cut with `phases.py --rtl`.
+- Plain RTL for the new cases: `../snax_cluster_plain`, cloned at `9fbf35d`
+  with its submodules; `rtl-gen` and `vsim_preparation` with
+  `cfg/snax_alu_cluster_old.hjson` in `d3d8f5572ff4`, the binary on the
+  host (750 modules, as in SG6, 0 errors); `prio_queued` and
+  `idle_restart` only, both `[SUCCESS]`.
+
+`stream-timing`, counter 977 (plain RTL: SG3 step 4 for the first five, this
+step for the two new ones):
+
+| Case | Plain RTL | Sparse RTL | Sparse SNAX-GVSoC | Plain SNAX-GVSoC | Prediction |
+|---|---|---|---|---|---|
+| `zero_bound` | 0 | 0 | 0 | 0 | held |
+| `a_alone` | 9 | 9 | 9 | 9 | held |
+| `ab_other_banks` | 9 | 9 | 9 | 9 | held |
+| `ab_same_banks` | 10 | 10 | 10 | 10 | held (the plain RTL's winner not observed) |
+| `a_stride0` | 12 | 12 | 12 | 12 | held |
+| `prio_queued` (first run) | 5 (5) | 6 (5) | 6 (5) | 5 (5) | held |
+| `idle_restart` (first run) | 5 (2) | 6 (2) | 6 (2) | 5 (2) | held |
+
+`alu-timing`, 977 and 982 (plain RTL: SG4 step 5, Verilator at `b2672f8`;
+compared counter in bold), errors 0 on every side:
+
+| Case | Plain RTL | Sparse RTL | Sparse SNAX-GVSoC | Plain SNAX-GVSoC | Prediction |
+|---|---|---|---|---|---|
+| `alu_first` | **29**, 32 | **29**, 32 | **29**, 34 | **29**, 34 | held |
+| `stream_first` | 132, **25** | 131, **25** | 131, **25** | 132, **25** | held, 977 one lower too |
+| `out_one_bank` | 210, **72** | 210, **74** | 209, **74** | 209, **72** | held, 977 as plain on each side |
+| `len1` | **5**, **1** | **5**, **1** | **5**, **1** | **5**, **1** | held |
+| `restart_idle` | **29**, 32 | **29**, 32 | **29**, 34 | **29**, 34 | held |
+
+`snax-alu`, `Accelerator Cycles` and errors: 1, 25, 32, 256, 1024 and 0 on
+all four sides (plain RTL: SG5's references). Phases (plain RTL: SG5's
+`tests/snax/snax-alu/rtl/<N>.json`, removed in SG6, read from git at
+`44453a3`; SG6's run at the pin reproduced them): on the sparse RTL every
+phase equals that reference at every size; on the sparse target every
+phase equals the plain target's. Prediction held (C4 at 100 did not end a
+poll earlier: 5 on both RTLs, 6 on both targets). The RTL against the
+model, sparse, the growing phases (as SG5's "Result"):
+
+| Phase | 128 | 1024 | 4096 |
+|---|---|---|---|
+| C1 barrier | 147 / 154 | 373 / 381 | 1153 / 1169 |
+| D2 DMA wait | 45 / 36 | 270 / 262 | 1050 / 1050 |
+| C3 ALU poll | 37 / 39 | 262 / 261 | 1032 / 1029 |
+| C5 check loop | 5795 / 5698 | 46115 / 45244 | 184355 / 180754 |
+| Total up to 982 | 6713 / 6698 | 47495 / 46696 | 187285 / 183755 |
+
+- Gaps. None new: every compared counter is equal on the sparse RTL and
+  the sparse target, and the sparse interconnect changes no phase on
+  either side. What differs is what differed before, the core's timing:
+  the start gap (`alu-timing` -5 against -7, `out_one_bank` 104 against
+  103), so the gap-dependent counters (982 with the ALU first: 32 against
+  34; `out_one_bank`'s 977: 210 against 209); `polls` and `mcycle`; and
+  SG5's phase gaps (C0, C2a, C6, C7, D1 to D3: open items 65 to 67).
+- Not verified: grants on the RTL one by one (no grant trace was taken),
+  so the plain RTL's other winner in `ab_same_banks` (its `rr_q` left at
+  12 by the core's stores) is still a prediction, and so is the order on
+  the RTL in `out_one_bank` beyond its counter; the writer's priority bit
+  against the RTL's signal (only through the counters); the lock and the
+  granularity warning in GVSoC (only the winner check exercises the lock,
+  against the RTL module); the plain RTL's `alu-timing` and first five
+  `stream-timing` cases at this pin with these ELFs (SG3's and SG4's values
+  used); the CI workflow on GitHub (nothing pushed).
+
+### SG7 round 3, step 2: the crossbar, holding inputs and sub-word accesses
+
+- 2026-10-15. `git pull` on main in snax-gvsoc and snax-forge (nothing new;
+  main has no commit the branch lacks), `ry/sg7-sparse` checked out and
+  pulled. Round 3's plan is in `SG7.md`, "Round 3".
+- `snax/snax_tcdm_xbar.{cpp,py}`:
+  - Property `holds`, per input (False when not given; its length is
+    checked). An input that holds keeps a losing request, with its priority
+    bit, for the next cycle's arbitration; while one is held, `held_event`
+    at the start of the next cycle queues that cycle's arbitration behind
+    the events already queued (an arbitration queued directly for the next
+    cycle could come before a streamer's step of that cycle). A request
+    arriving after its cycle's arbitration is fatal (it would be arbitrated
+    twice in one cycle).
+  - The response carries the latency the request brings (a core's router)
+    on top of the bank's: due one cycle after the grant plus both; a write
+    on an input that holds is answered at its grant. Every response is sent
+    with no latency in the request (`prepare()`): its cycle holds it all.
+  - Accesses of 1, 2, 4 or 8 bytes inside one bank word, at the bank-local
+    address with the byte offset (as before); one that crosses a word is
+    refused with a warning naming the input. AMOs and LR/SC go to the bank
+    as they come, as on the L1 path; the trace says `amo` for them and
+    gives the size of an access smaller than a word, so a full-word read or
+    write prints as before.
+  - `grant()` is sent at the grant, as before. A router forwards a request
+    (`req_forward`), so the grant goes to the master that sent it; for a
+    core that is `Lsu::data_grant`, which acts only with
+    `CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING` (unset for Snitch,
+    `nb_outstanding` 1): a no-op. The routers on the way have no grant
+    callback of their own; `io.hpp`'s default does nothing. Read, not run.
+- Nothing wired yet: no input holds. Baseline at the branch's head (round 1)
+  and after the change, each with `make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse"`, `make regress` and every SNAX
+  program traced on both targets (`snax_xbar`, `streamer`) in snax-forge's
+  image: `regression passed` both times (32 SNAX runs, 17 plain); all 49
+  `run.log` files byte-identical; the 64 traces and 32 outputs equal but for
+  the port pointers in the time-0 lines.
+- Not exercised by this step: holding, the write answered at its grant, the
+  carried latency and sub-word accesses (no master uses them before step 3).
+
+### SG7 round 3, step 3: the cores and AXI into the crossbar
+
+- 2026-10-15. `snitch_cluster.py`, only for a cluster with SNAX ports: the
+  crossbar's inputs are the SNAX ports, then `core0`, `core1` (each core's
+  TCDM and `tcdm_alias` maps in `pe<i>_ico`, keeping `core_latency['tcdm']`),
+  then `axi` (`narrow_axi`'s TCDM map, straight to the crossbar at TCDM
+  offsets instead of through `pe0_ico`). These three hold a losing request;
+  their priority wires are bound to nothing, so they ask with 0. The plain
+  crossbar has 15 inputs as the RTL; the sparse config is `[[12, 1], [1, 1],
+  [1, 1], [1, 1]]`, snaxgen's. The `snitch` target builds as before (no SNAX
+  ports). `snax_alu.py`, `snax_alu_sparse.py`, the crossbar's docstring,
+  `ClusterArch`'s comment and the README say so; a row in `UPSTREAM.md`.
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
+  `make regress`: `regression passed` (32 SNAX runs, 17 plain); no warning
+  in any `run.log`. Against step 2, every `run.log` is equal but
+  `dma-timing`'s on both targets, whose `l2l1 4x800` line goes from done 82,
+  busy 66 to done 96, busy 81 (RTL 84 for done, SG5).
+- That line, traced on `snax_alu` (`idma`, `wide_axi`, `narrow_axi`, the
+  DRAM, the I-cache), with and without this step's wiring on the same
+  build (the installed `snitch_cluster.py` swapped): no core touches the
+  banks during the four copies. The DMA core reaches the second run's first
+  copy at 227988 instead of 228013, 25 cycles earlier (its loads and stores
+  now take the crossbar's timing), and the copies now overlap GVSoC's HTIF
+  poll of `tohost`: every 1000 cycles (at ...001) the core's HTIF model reads
+  `tohost` byte by byte through the core's data port and `narrow_axi` into
+  the DRAM. At 228001 it delays the third copy's DRAM read from 15 to 30
+  cycles. A GVSoC artefact of the host model, not of the crossbar; the RTL
+  has no such poll. Not changed here.
+- `dma-timing` on `snax_alu`, crossbar traced: 3516 grants to `core0` and
+  18833 to `core1`, reads and writes of 1 and 4 bytes; a core's request held
+  behind the other's twice; no AMO in L1 and no access on `axi` (nothing in
+  these programs sends into the cluster's narrow AXI port).
+
+### SG7 round 3, step 4: D125 fitted again
+
+- 2026-10-15. `snax-alu` at the five sizes on both targets with step 3's
+  build, `core_latency` unchanged (`tcdm` 2, `narrow` 6), both cores traced,
+  phases with `phases.py --gvsoc` and the check loop with `--show 'C5 check
+  loop'`; the crossbar traced for one run (`snax_alu`, 100).
+- L1 load to the next load, in the check loop at 100 (`lw a4, 4(s0)` on L1,
+  then `lw a5, 4(a2)` on DRAM): the L1 load granted on bank 10 at 2892,
+  answered at 2895 (one cycle after the grant plus 2), the DRAM load issued
+  at 2896: 4, the RTL's. Before round 3: 4 too (2874 to 2878). So `tcdm`
+  stays 2; the expected 1 did not hold. The crossbar's cycle took the place
+  of the cycle the LSU adds to a synchronous answer (`latency + 1`), and the
+  core goes on in the cycle after the response, as it issued the next load
+  in the cycle after `load_ready_cycle` before. DRAM load to load: 14, as
+  before. The listing stamps a load answered after its grant at the
+  response, so its wait shows on the instruction before it (`bne` +4).
+- What changed: the core waits for an L1 load's data (`IO_REQ_PENDING`),
+  where it went on before and only the register waited. In the check loop
+  the 11 instructions after the second L1 load (`lw a7, 0(s0)`), of which
+  only one uses it, now start after its data: 47 cycles per element against
+  44 (RTL 45), in 3999 of 4096 iterations at 4096 (round 1: 44 in 4034).
+  The other iterations take 53 to 65 cycles (96 of them; round 1, 51 to 59,
+  61 of them); not looked into.
+- `Accelerator Cycles` and errors: 1, 25, 32, 256, 1024 and 0 on both
+  targets. Both targets give the same phases at every size. Phases, RTL
+  (SG5's plain reference, which the sparse RTL equals at every phase,
+  round 1) / round 1 / now; the growing phases, the target's tier 2:
+
+  | Phase | 128 | 1024 | 4096 |
+  |---|---|---|---|
+  | C1 barrier | 147 / 154 / 157 (+7%) | 373 / 381 / 384 (+3%) | 1153 / 1169 / 1174 (+2%) |
+  | D2 DMA wait | 45 / 36 / 36 (-20%, accepted in SG5) | 270 / 262 / 262 (-3%) | 1050 / 1050 / 1052 (0%) |
+  | C3 ALU poll | 37 / 39 / 39 (+5%) | 262 / 261 / 261 (0%) | 1032 / 1029 / 1029 (0%) |
+  | C5 check loop | 5795 / 5698 / 6098 (+5%) | 46115 / 45244 / 48446 (+5%) | 184355 / 180754 / 193543 (+5%) |
+  | Total up to 982 | 6713 / 6698 / 7093 (+6%) | 47495 / 46696 / 49916 (+5%) | 187285 / 183755 / 196571 (+5%) |
+
+  Tiers 1 and 2 hold. Every change against round 1, the same on both
+  targets:
+  - C5: 3 cycles per element (the blocking L1 load), plus 15, 16, 130 and
+    501 at 100, 128, 1024 and 4096 in the slower iterations; +12 at 4.
+  - C1 +3 (+5 at 4096) and D1 +3: likely the cores' blocking L1 loads
+    before the barrier and in the DMA issue (stack and TLS are in L1); not
+    traced.
+  - C0 and D0: +3, +6, -8, +15, +22 at 4, 100, 128, 1024, 4096: likely
+    boot's L1 loads, and where the I-cache misses fall; not traced.
+  - C6: +992, +1683, +612, +787, +191: likely `printf`'s L1 loads, then the
+    host's answers on their grid of about 1000 cycles (tier 3); not traced.
+  - D2 +2 at 4096; D4 holds C2 to C7 of hart 0.
+  - C2a, C2b, C3, C4, C7, D3: unchanged.
+  Tier 3 (fixed costs, every phase at 4 and 100) is explained as SG5 did,
+  with C5's and C6's growth above.
+- `snax_alu.py`'s comment on `CORE_LATENCY` says why 2 still gives 4.
+
+### SG7 round 3, step 5: core-tcdm and its predictions
+
+- 2026-10-15. `sw/apps/core-tcdm` (README there): one ELF per case,
+  `subword`, `core_vs_reader`, `after_stores`, on `common.mk`; in
+  `regress.py` on both SNAX targets (`subword` returns its error count, the
+  other two 0); the README's regression paragraph says so.
+- The ELFs' disassembly, built in snax-forge's image: no FP instruction in
+  `main`. `subword` uses `sb`, `sh`, `sw`, `lbu`, `lhu`, `lw`, one
+  `amoadd.w` and `lr.w` then `sc.w`; the compiler reads the signed byte and
+  half with `lbu` and `lhu`, so `lb` and `lh` are not exercised; the
+  doubleword is two `sw` and two `lw`. In the two streamer cases the area's
+  stores (`sw` pairs, 8 KiB) end with a `fence`, then only CSR
+  instructions up to the start write; `core_vs_reader` has `csrw 975`,
+  `lw` on bank 16, `lw` on bank 0, in that order.
+- Predictions in `SG7.md`, "Predictions of round 3", from source before any
+  run of `core-tcdm` (none on SNAX-GVSoC either), with a throwaway
+  predictor (`build/sg7/r3/predict3.py`: round 1's plus a core at input 12,
+  priority 0, holding, the next L1 load 4 cycles after the previous grant).
+  It gives round 1's counters without the core, with 15 inputs as with 12;
+  the existing programs' compared counters do not move with the plain
+  pointer at 0, 12 or 13. `core_vs_reader` was laid out with it so its
+  counter holds for any core offset from 0 to 6 cycles (a first load on
+  another bank keeps the core's bank-0 load after the readers' first
+  requests; without it a load arriving at s + 2 wins there on the plain
+  interconnect and moves the counter).
+- On the sparse RTL `subword` is predicted to fail its SC: the sparse
+  wrapper does not drive the memory side's user field, so the AMO shim's
+  `core_id` is unknown. A prediction from source only.
+
+### SG7 round 3, step 6: runs and comparison
+
+- 2026-10-15. The same 16 ELFs everywhere: `snax-alu` at 4, 100, 128, 1024,
+  4096, `alu-timing`, the seven `stream-timing` cases (these 13 are round
+  1's, sha256 unchanged) and the three `core-tcdm` cases, built in
+  snax-forge's image; their sha256 (`build/sg7/r3/elfs.sha256`) checked
+  again after all runs.
+- SNAX-GVSoC, step 3's build (step 5 changed no model code): each ELF on
+  `snax_alu` and `snax_alu_sparse`, both cores, the crossbar, the streamer
+  and the ALU traced, all exit 0; `snax-alu` cut with `phases.py --gvsoc`
+  (every phase equal to step 4's on both targets). Then `make regress`:
+  `regression passed`, 38 SNAX runs and 17 plain.
+- The RTL, round 1's builds at `9fbf35d` (no rebuild needed): the plain one
+  in `../snax_cluster_plain` (`cfg/snax_alu_cluster_old.hjson`), the sparse
+  one in `../snax_cluster` (`cfg/snax_alu_cluster.hjson`),
+  `bin/snitch_cluster.vsim` on the host, Questa 2022.4, each ELF from
+  `target/snitch_cluster`, `logs/` kept as `logs-r3-<plain|sparse>-<program>`;
+  3 min 21 s and 3 min 38 s. Every run `[SUCCESS]` but `core-tcdm-subword` on
+  the sparse RTL, `[FAILURE]` with exit code 2, as predicted. `snax-alu` cut
+  with `phases.py --rtl`. This replaces round 1's borrowed plain RTL values
+  (SG3's `stream-timing`, SG4's `alu-timing` at `b2672f8`) with runs at the
+  pin: every one of them is the same.
+- The plain RTL's grants, without editing RTL: the vsim wrapper already runs
+  `log -r /*`, so after a run `vsim -view` on `vsim.wlf` with a list of the
+  interconnect's `req_q_valid_flat`, `rsp_q_ready_flat` and `bank_select`
+  (binary radix, one row per clock edge) gives each input's request and
+  grant per bank and cycle (`build/sg7/r3/wlf/`, not committed). Kept for
+  `stream-timing-ab_same_banks` and the three `core-tcdm` cases.
+
+`stream-timing`, counter 977 (first run in brackets):
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|
+| `zero_bound` | 0 | 0 | 0 | 0 | held |
+| `a_alone` | 9 | 9 | 9 | 9 | held |
+| `ab_other_banks` | 9 | 9 | 9 | 9 | held |
+| `ab_same_banks` | 10 | 10 | 10 | 10 | held; plain grants below |
+| `a_stride0` | 12 | 12 | 12 | 12 | held |
+| `prio_queued` | 5 (5) | 5 (5) | 6 (5) | 6 (5) | held |
+| `idle_restart` | 5 (2) | 5 (2) | 6 (2) | 6 (2) | held |
+
+`alu-timing`, 977, 982 and the start gap (compared counter in bold), errors
+0 on every side:
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|
+| `alu_first` | **29**, 32, -5 | **29**, 34, -7 | **29**, 32, -5 | **29**, 34, -7 | held |
+| `stream_first` | 132, **25**, 103 | 132, **25**, 103 | 131, **25**, 103 | 131, **25**, 103 | held |
+| `out_one_bank` | 210, **72**, 104 | 209, **72**, 103 | 210, **74**, 104 | 209, **74**, 103 | held |
+| `len1` | **5**, **1**, -5 | **5**, **1**, -7 | **5**, **1**, -5 | **5**, **1**, -7 | held |
+| `restart_idle` | **29**, 32, -5 | **29**, 34, -7 | **29**, 32, -5 | **29**, 34, -7 | held |
+
+`snax-alu`: `Accelerator Cycles` 1, 25, 32, 256, 1024 and 0 errors on all
+four sides. Phases: the plain RTL's equal SG5's reference at every size and
+phase, the sparse RTL's equal round 1's; on the targets, step 4's table
+(tiers 1 and 2 held, C5 +5% from the blocking L1 loads). Prediction held.
+
+`core-tcdm`:
+
+| Case | Compare | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|---|
+| `subword` | errors, `sc` | 0, 0 | 0, 0 | 2, 1 | 0, 0 | held on all four |
+| `core_vs_reader` | 977 | 18 | 17 | 17 | 17 | held but on the plain target (18 predicted) |
+| `after_stores` | 977 | 5 | 5 | 6 | 6 | held |
+
+- The plain RTL's grants. `ab_same_banks`: core 0's stores are the last
+  accesses to banks 0 to 3; at the readers' first requests B wins on all
+  four, then A. Round 1's open prediction (B first, from `rr_q` 12) held;
+  the plain target now does the same (its trace: `reader1.laneN` first),
+  where round 1's gave A. `after_stores`: the same, B first on banks 0 to 3,
+  hence 5. `core_vs_reader`: the core's load on bank 16 granted at s + 1,
+  its load on bank 0 asks from s + 5 and is granted at s + 11 after the
+  eight lanes' first requests, as predicted.
+- The sparse RTL's SC, in its waveform: at the `lr.w` and the `sc.w` the
+  AMO shim of bank 5 sees `core_id` X and `is_core` 0 (`is_core` is a `bit`,
+  so undriven reads 0); on the plain RTL, core 0 and 1. The SC returns 1
+  and does not write. Every other access of `subword`, the `amoadd.w`
+  included, is right on all four sides.
+- In the existing programs the cores' accesses meet no streamer request on
+  either target (no grant in any trace with a core and a streamer channel
+  on one bank but in `core_vs_reader`); the two cores meet each other once
+  or twice in boot. Prediction held.
+
+Gaps, named, not fixed:
+
+- `core_vs_reader` on the plain target, 17 against the plain RTL's 18. On
+  SNAX-GVSoC the core's load on bank 16 is granted 10 cycles after the
+  start write (RTL: 1): the instruction line holding the start write and
+  the loads (0x800002a0) misses in GVSoC's I-cache, about 10 cycles, as
+  each new 32 B line of the CSR setup does; snax_cluster's L0 prefetches it
+  (open item 65). So the core's bank-0 load asks at s + 14, behind four
+  lanes still to go in the round, and is granted at s + 18, after the
+  readers: no cycle taken from them. The case was laid out for the core
+  asking 4 to 10 cycles after the start write; its counter depends on the
+  core's fetch timing beyond that, so it does not meet D123 as it stands. A
+  layout that keeps the start write and the loads in a line the core
+  fetched before the start would remove it (not done: the case and its
+  prediction stay as committed). On the sparse sides the core waits for the
+  priority-1 readers either way (17 on both).
+- `subword` on the sparse RTL, 2 errors and `sc` 1 against 0 and 0 on the
+  sparse target: snax_cluster's sparse wrapper
+  (`sparse_interconnect_wrapper.sv.tpl`, "user signal not used") does not
+  drive the memory side's user field, so no LR/SC pair can succeed on the
+  sparse RTL. An RTL issue, not the model's; SNAX-GVSoC follows the plain
+  RTL (the reservation kept by hart).
+- As before, the core's own timing: start gaps (-5 against -7, 104 against
+  103), so `alu-timing`'s gap-dependent counters (982 with the ALU first, 32
+  against 34; `out_one_bank`'s 977, 210 against 209), `polls` and `mcycle`;
+  SG5's phase gaps (open items 65 to 67); and now C5's +5% (step 4).
+- Not observed: the sparse RTL's grants one by one (its interconnect is the
+  Chisel module; the list above reads `snitch_tcdm_interconnect`'s signals,
+  so only the plain RTL's were read); `axi` (input 14) on any side, as no
+  program here sends into the cluster's narrow AXI port; core 1 against a
+  streamer channel.
+
+### SG7 round 3b, step 1: the plan
+
+- 2026-10-16. `git pull` on main in snax-gvsoc and snax-forge (nothing new;
+  main has no commit the branch lacks), `ry/sg7-sparse` checked out and
+  pulled. Round 3b's plan is in `SG7.md`, "Round 3b".
+- `subword` on the sparse RTL: noted in `SG7.md` and in
+  `sw/apps/core-tcdm/README.md` as snax_cluster's (the sparse wrapper leaves
+  the AMO shim's `core_id` and `is_core` undriven); SNAX-GVSoC keeps a
+  reservation per hart, as the plain RTL. No code change.
+
+### SG7 round 3b, step 2: the core goes on after a pending L1 load
+
+- 2026-10-16. What the ISS has, read before the change:
+  - `CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING` (set only for `nb_outstanding` > 1;
+    Snitch has 1): a pool of requests, a load's register invalidated
+    (`scoreboard_reg_invalidate`, -1) until its response. Not used: it is a
+    compile-time path that also makes stores and AMOs non-blocking, and its
+    `data_grant` lowers the core's stall count on every grant, which the
+    crossbar sends for every request.
+  - The -1 timestamp stalls an instruction only through
+    `CONFIG_GVSOC_ISS_EXEC_SCOREBOARD`'s check in `exec_inorder.cpp`, which
+    only `SnitchFast` is built with; Snitch's `scoreboard_reg_check` treats
+    -1 as ready.
+  - The Snitch core's own scoreboard, `scoreboard_reg_valid` in
+    `SnitchRegfile`: `int_offload_exec` (`src/snitch/decode.cpp`) runs before
+    every integer instruction and holds it while an input or output register
+    is not valid; today the FP subsystem's results use it. Used: it is the
+    RTL scoreboard's place in this ISS, and it is runtime.
+- The change (`lsu.hpp`, `lsu_implem.hpp`, `lsu.cpp`, `snitch/decode.cpp`),
+  compiled for the Snitch core with its scoreboard and without
+  `NB_OUTSTANDING`, active only with `int_loads_in_flight` set (the SNAX
+  targets; 0 on `snitch`):
+  - A load answered `IO_REQ_PENDING` sets `load_pending` and its register
+    not valid; the core goes on.
+  - `wait_for_load()`: while a load is pending, the next load, store or AMO,
+    and (from `int_offload_exec`) an instruction that reads or writes its
+    register stall the core until the response, then run in the cycle
+    after. Stall cycles the core already has (a fetch) go first; without
+    that, a fetch's cycles were counted again after the wait (seen: a
+    dependent load on a new I-cache line 3 cycles after the response, not
+    1). `int_offload_exec` does not look at a load's or store's base
+    register (an indirect argument); the LSU's wait covers it.
+  - The response (`pending_load_response`): sign extension, the register
+    valid, its scoreboard time and `load_ready_cycle` the cycle after the
+    response, as a load answered at once with latency. A load that would
+    run in the response's own cycle (the response's event came first) runs
+    again in the next.
+  - Stores, AMOs and LR/SC are answered as before (the core waits). The LSU
+    keeps its one request (`io_req`), so a store or AMO after a pending load
+    waits for the load's data: as in round 3, where the load blocked; the
+    RTL can send it (`num_int_outstanding_mem` 4). Not in the measured loops.
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`;
+  `snax-alu` at five sizes on both targets with both cores traced, phases
+  and the C5 listing (`build/sg7/r3/snaxalu.sh`); `snax_alu` at 100 with
+  core 0's LSU, the crossbar and core 0's instructions traced at trace
+  level.
+- Load to load, check loop at 100: `lw a4, 4(s0)` granted on bank 13 at
+  3009, answered at 3012, the DRAM load `lw a5, 4(a2)` issued at 3013: L1 4,
+  the RTL's. DRAM to the next load 14, as before. So `tcdm` stays 2. An
+  instruction on the loaded register runs the cycle after the response,
+  4 after the grant (e.g. `jalr` on `lw ra` at +4), as before round 3.
+- C5: 44 cycles per element in 4034 of 4096 iterations at 4096 (round 1: 44
+  in 4034; round 3: 47 in 3999; RTL 45); the others 47, 48, 56, 60. Errors 0,
+  `Accelerator Cycles` 1, 25, 32, 256, 1024 on both targets, which give the
+  same phases at every size. Phases, RTL (SG5) / round 1 / round 3 / now,
+  growing phases:
+
+  | Phase | 128 | 1024 | 4096 |
+  |---|---|---|---|
+  | C1 barrier | 147 / 154 / 157 / 154 (+5%) | 373 / 381 / 384 / 381 (+2%) | 1153 / 1169 / 1174 / 1169 (+1%) |
+  | D2 DMA wait | 45 / 36 / 36 / 36 (-20%, accepted in SG5) | 270 / 262 / 262 / 262 (-3%) | 1050 / 1050 / 1052 / 1050 (0%) |
+  | C3 ALU poll | 37 / 39 / 39 / 39 (+5%) | 262 / 261 / 261 / 261 (0%) | 1032 / 1029 / 1029 / 1029 (0%) |
+  | C5 check loop | 5795 / 5698 / 6098 / 5689 (-2%) | 46115 / 45244 / 48446 / 45226 (-2%) | 184355 / 180754 / 193543 / 180754 (-2%) |
+  | Total up to 982 | 6713 / 6698 / 7093 / 6674 (-1%) | 47495 / 46696 / 49916 / 46678 (-2%) | 187285 / 183755 / 196571 / 183755 (-2%) |
+
+  Round 3's changes are gone: at 4096 every phase is round 1's again; C1,
+  D1, D2 and C0 / D0 at 4, 100, 1024, 4096 too. What is left against round
+  1, both targets: C5 -1, -9, -18 at 100, 128, 1024 (fewer slow
+  iterations); C6 +1, -2, +24, +18 at 4, 100, 128, 1024 and D4 with it; C0
+  and D0 -15 at 128. Where I-cache misses and the host's answers to
+  `printf` fall; not traced.
+- `make regress`: `regression passed`. The 17 plain tests' `run.log` files
+  are byte-identical to round 3's (step 6). Of the SNAX ones, all equal but
+  `dma-timing`'s `l2l1 4x800` (done 96, busy 81 to 80, 65 on both targets:
+  the core reaches the copies at other cycles of GVSoC's `tohost` poll,
+  step 3) and `core_vs_reader`'s `polls` (0 to 1; its counter stays 17).
+- Gaps, named, not fixed:
+  - A load that waits for a DRAM load's data (D125's wait, stall cycles
+    counted at once) sends its request at the start of the wait, so an L1
+    load after a DRAM load reaches the crossbar up to 13 cycles early (seen
+    in boot, held one cycle behind core 1). The core's timing is right; only
+    the crossbar sees the request early. So it was before this step. No
+    streamer request meets it in these programs.
+  - The instruction trace prints a pending load's register before its data
+    (the bank is read at the grant, later in the cycle).
+
+### SG7 round 3b, step 3: GVSoC's tohost poll
+
+- 2026-10-16. Read: `Htif::htif_handler` (`htif.cpp`) reads `tohost` every
+  1000 cycles with `Syscalls::user_access`, one byte per request with the
+  debug flag, on the core's data port; there it goes through `pe<i>_ico`,
+  the cluster's and the SoC's `narrow_axi`, `wide_axi` and the DRAM. The
+  DRAM model skips its bandwidth for a debug request; the routers do not:
+  each byte moves their bandwidth stamps. Traced on `dma-timing`
+  (`snax_alu`, the routers, DRAM, DMA and both LSUs): four pollers, the
+  two integer cores and the two FP subsystems (`Snitch_fp_ss`, also built
+  with `htif=True`, whose data port is the same `pe<i>_ico`), 359 poll
+  requests in the run.
+- GVSoC has a zero-time path for this: `vp/debug_mem.hpp`, the out-of-band
+  debug access ("no timing, no simulation advance") that routers build into
+  a flat map of the memories behind them and `Memory` serves from its
+  storage. The poll now uses it when the core property `htif_poll_backdoor`
+  is set: `Htif::poll_access` takes the component behind the core's data
+  port (`get_final_ports`), here `pe<i>_ico`, and reads or clears `tohost`
+  through its `debug_mem_access`. Same value, same period, same clear, so
+  programs see the same. Set by `snax_alu.py`'s `SNAX_CORE`, so on both
+  SNAX targets, and passed to the FP subsystems; `snitch` keeps the poll on
+  the port. A syscall's own accesses (`dispatch`, `fromhost`) stay on the
+  port: a syscall's buffers may be in L1, behind the SNAX crossbar, which
+  has no backdoor. A failed backdoor access is fatal.
+- After: no poll request on the port (the 46 accesses near `tohost` left
+  are the program's own stores to it, one per `printf`, as on the RTL).
+- `dma-timing`, both targets, before (step 2) and after: every line equal,
+  and equal to SG2 step 7's on every line; `busy` equal to the RTL on every
+  line, `done` 2 to 6 under it (SG5's core cost), `l2l1 4x800` done 80,
+  busy 65 (RTL 84, 65; round 3 96, 81; SG5 82). After step 2 the poll no
+  longer fell on a copy here; now no copy can meet it.
+- `snax-alu`, both targets, the same phases on both. C6 before / after (RTL):
+  7604 / 7605 (6899), 7029 / 7037 (7130), 7716 / 7719 (6855), 7015 / 7131
+  (7075), 7715 / 7192 (7088) at 4, 100, 128, 1024, 4096: C6 still waits on
+  the host's 1000-cycle grid (tier 3). The poll also cost core 0's own DRAM
+  loads, which share `pe0_ico` with it, about every 1000 cycles: C5 now 44
+  cycles per element in 4094 of 4096 iterations (one of 60), where step 2
+  had 30 of 56 and 29 of 48. Those are round 3 step 4's slower iterations
+  ("not looked into"): the poll. Other phases that moved: C5 -14, -6,
+  -119, -479 at 100, 128, 1024, 4096; C0 and D0 -11, -4, -7, -7 at 4, 100,
+  128, 1024 (boot's DRAM fetches and loads); C1 and D2 -8 at 4096; D4 with
+  C2 to C7. Errors 0, `Accelerator Cycles` as before.
+- `make regress`: `regression passed`; the 17 plain `run.log` files
+  byte-identical to round 3's, every SNAX one equal to step 2's.
+
+### SG7 round 3b, step 4: core_vs_reader
+
+- 2026-10-16. The arbitration first, from round 3's traces (`build/sg7/r3`,
+  the plain target's crossbar trace and the plain RTL's waveform list):
+  - Plain target: start write at s = 7290; the core's bank-16 load granted
+    at s + 10; its bank-0 load first asks at s + 14, behind reader0.lane3
+    and reader1.lanes 1 to 3, and wins at s + 18. Each cycle the winner is
+    the next requester above the last pick, the core (input 12) after the
+    readers' inputs 3, 5, 6, 7.
+  - Plain RTL: bank-16 load at s + 1; the bank-0 load asks from s + 5 (edge
+    3 from the readers' first requests), wins at s + 11 after A3, B0 to B3,
+    then A0's second beat: the same rule.
+  - Up to the core's arrival the readers' grants are the same on both
+    sides; with the RTL's arrival the plain target's rule gives the RTL's
+    grants. So the arbitration is not the cause; the arrival is.
+- The change (`sw/apps/core-tcdm/src/core-tcdm.c`): the start write and the
+  two loads in `start_and_load`, not inlined, its block behind `.balign 32`
+  (one line, 0x80000380 to 0x8000038c), returning the two words in a0 and
+  a1; main configures and calls it twice, prints the measured run's counter
+  and the first run's. The compiler unrolls the two runs, but the line is
+  one copy. Between the runs core 0 makes no TCDM access (only CSRs; read in
+  the disassembly). `after_stores` and `subword` ELFs unchanged (sha256).
+- Prediction, before any run (in `SG7.md`; `build/sg7/r3b/predict3b.py`,
+  round 3's predictor with the arbiters' state carried from the first run):
+  measured 18 plain, 17 sparse on both sides; first run 18, 17, 17, 17.
+- Runs: the new ELF (sha256 checked after the RTL runs) on `snax_alu` and
+  `snax_alu_sparse` (this branch, steps 2 and 3 in) and on both RTLs, round
+  1's builds at `9fbf35d`, Questa 2022.4, `[SUCCESS]` both, `logs/` kept as
+  `logs-r3b-<plain|sparse>-core-tcdm-core_vs_reader`, the plain one's
+  waveform read with round 3's list.
+
+  | | Plain RTL | Plain target | Sparse RTL | Sparse target |
+  |---|---|---|---|---|
+  | 977, measured run | 18 | 18 | 18 | 18 |
+  | 977, first run | 18 | 17 | 17 | 17 |
+
+  `loaded 16 768` and `polls 0` on all four.
+- Measured run, plain: the core's loads at s + 1 (bank 16) and s + 5 (bank
+  0) on both sides, the bank-0 load granted at s + 11 on both, as
+  predicted. The readers' order differs from the first grant: B3 first on
+  the RTL, B0 on the target, each the rule's pick from the bank-0 pointer
+  the first run left (7 on the RTL after B3; 12 on the target, whose core
+  came last in its cold first run); the predictor's tree gives the same
+  from 7 and 12. First run: the target's core at s + 10 and s + 14 as in
+  round 3.
+- Sparse, not held (17 predicted): in the measured run the readers ask with
+  0. Each lane's queue still holds the first run's two words (the ALU is
+  off, as in `stream-timing`'s `prio_queued`), so its count is at least 2;
+  the core asks with 0 too, and the pick is round robin from the restarted
+  pointer: the core at s + 10 on the target, 18. The predictor emptied the
+  queues between the runs. The sparse RTL gives 18 too, so the model and
+  the RTL agree; its grants are not read (Chisel module, no list).
+- The four sides agree, so the layout stays. The cost: the compared counter
+  no longer shows the core waiting behind priority-1 readers on the sparse
+  interconnect; the first run still shows it (17 on both sparse sides) but
+  is not compared, and on the plain sides it differs with the fetch (18
+  against 17). Getting both in one compared run would need a second change
+  (e.g. emptying the queues between runs); not done.
+
+### SG7 round 3b, step 5: runs and comparison
+
+- 2026-10-16. SNAX-GVSoC only, this branch with steps 2 to 4, in snax-forge's
+  image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`, then the 17
+  ELFs (`snax-alu` at five sizes, `alu-timing`, the seven `stream-timing`
+  cases, the three `core-tcdm` cases, `dma-timing`) on `snax_alu` and
+  `snax_alu_sparse`, both cores, the crossbar, the streamer and the ALU
+  traced (`build/sg7/r3b/gv/`), all exit 0; `snax-alu` cut with
+  `phases.py --gvsoc`. The ELFs are round 3's (sha256 checked) but
+  `core_vs_reader` (step 4). The RTL columns are round 3 step 6's runs at
+  `9fbf35d`, `core_vs_reader`'s step 4's.
+
+`stream-timing`, 977 (first run): RTL / round 3 / now, plain and sparse.
+Equal everywhere, and `polls` and `mcycle` equal to round 3's on both
+targets:
+
+| Case | Plain | Sparse |
+|---|---|---|
+| `zero_bound` | 0 / 0 / 0 | 0 / 0 / 0 |
+| `a_alone` | 9 / 9 / 9 | 9 / 9 / 9 |
+| `ab_other_banks` | 9 / 9 / 9 | 9 / 9 / 9 |
+| `ab_same_banks` | 10 / 10 / 10 | 10 / 10 / 10 |
+| `a_stride0` | 12 / 12 / 12 | 12 / 12 / 12 |
+| `prio_queued` | 5 (5) / 5 (5) / 5 (5) | 6 (5) / 6 (5) / 6 (5) |
+| `idle_restart` | 5 (2) / 5 (2) / 5 (2) | 6 (2) / 6 (2) / 6 (2) |
+
+`alu-timing`, 977, 982 and the start gap (compared counter in bold), RTL /
+now; now equal to round 3 on both targets, errors 0 everywhere:
+
+| Case | Plain | Sparse |
+|---|---|---|
+| `alu_first` | **29**, 32, -5 / **29**, 34, -7 | **29**, 32, -5 / **29**, 34, -7 |
+| `stream_first` | 132, **25**, 103 / 132, **25**, 103 | 131, **25**, 103 / 131, **25**, 103 |
+| `out_one_bank` | 210, **72**, 104 / 209, **72**, 103 | 210, **74**, 104 / 209, **74**, 103 |
+| `len1` | **5**, **1**, -5 / **5**, **1**, -7 | **5**, **1**, -5 / **5**, **1**, -7 |
+| `restart_idle` | **29**, 32, -5 / **29**, 34, -7 | **29**, 32, -5 / **29**, 34, -7 |
+
+`snax-alu`: `Accelerator Cycles` 1, 25, 32, 256, 1024 and 0 errors on all
+four sides. Phases, the same on both targets (and equal to step 3's), RTL
+(SG5's reference, which both RTLs give) / round 3 / now:
+
+| Phase | 128 | 1024 | 4096 |
+|---|---|---|---|
+| C1 barrier | 147 / 157 / 154 (+5%) | 373 / 384 / 381 (+2%) | 1153 / 1174 / 1161 (+1%) |
+| D2 DMA wait | 45 / 36 / 36 (-20%, accepted in SG5) | 270 / 262 / 262 (-3%) | 1050 / 1052 / 1042 (-1%) |
+| C3 ALU poll | 37 / 39 / 39 (+5%) | 262 / 261 / 261 (0%) | 1032 / 1029 / 1029 (0%) |
+| C5 check loop | 5795 / 6098 / 5683 (-2%) | 46115 / 48446 / 45107 (-2%) | 184355 / 193543 / 180275 (-2%) |
+| Total up to 982 | 6713 / 7093 / 6661 (-1%) | 47495 / 49916 / 46552 (-2%) | 187285 / 196571 / 183268 (-2%) |
+
+Tiers 1 and 2 hold.
+
+`core-tcdm`, RTL / round 3 / now:
+
+| Case | Compare | Plain | Sparse |
+|---|---|---|---|
+| `subword` | errors, `sc` | 0, 0 / 0, 0 / 0, 0 | 2, 1 / 0, 0 / 0, 0 (the sparse RTL's wrapper) |
+| `core_vs_reader` | 977 (first run) | 18 (18) / 17 / 18 (17) | 18 (17) / 17 / 18 (17) |
+| `after_stores` | 977 | 5 / 5 / 5 | 6 / 6 / 6 |
+
+`dma-timing`, done / busy, both targets the same; RTL SG2 step 3's: every
+line as round 3 but `l2l1 4x800`, 96 / 81 to 80 / 65 (RTL 84 / 65), so every
+line now equals SG2 step 7's; `busy` equal to the RTL on every line.
+
+- Every compared counter matches: on the plain RTL and the plain target,
+  and on the sparse RTL and the sparse target, but `subword` on the sparse
+  RTL (snax_cluster's wrapper, step 1). `core_vs_reader` now matches on both
+  (round 3: 17 on the plain target against 18).
+- What depends on the core's timing and moved, all on both targets:
+  - `snax-alu` phases against round 3: C5 -12, -330, -415, -3339, -13268 at
+    4, 100, 128, 1024, 4096 (the core goes on after an L1 load, step 2: 3
+    cycles per element; and the poll off `pe0_ico`, step 3: the slower
+    iterations); C6 -990, -1677, -585, -653, -714 (C6 waits on the host's
+    1000-cycle grid; it starts earlier); C0 and D0 -14, -10, -14, -22, -22
+    and C1 -3, -3, -3, -3, -13, D1 -3 at every size (the cores' L1 loads in
+    boot, the barrier and the DMA issue, step 2; the poll's DRAM reads in
+    boot, step 3); D2 -10 at 4096 (step 3); D4 and the totals with them.
+    C2a, C2b, C3, C4, C7, D3 unchanged.
+  - `dma-timing`'s `l2l1 4x800`: 96 / 81 to 80 / 65 (step 2 moved the core
+    against the poll, step 3 took the poll off the bus).
+  - `core_vs_reader`'s first run 17 on both targets (round 3's single run;
+    the line misses in the first run), the measured run 18 (step 4).
+  - Unchanged: `stream-timing`'s `polls` and `mcycle`, `alu-timing`'s start
+    gaps and non-compared counters, `after_stores`' and `subword`'s lines.
+- `make regress`: `regression passed`, 38 SNAX runs and 17 plain; the 17
+  plain `run.log` files byte-identical to round 3's; of the SNAX ones only
+  `dma-timing`'s and `core_vs_reader`'s differ, as above.
+- Not verified: the sparse RTL's grants in `core_vs_reader` (no list for the
+  Chisel module); the RTL's priority bits in that case's measured run (the
+  counter only); a store or AMO right after a pending load against the RTL
+  (no program here does it in a measured window); the effect of the early
+  crossbar request of an L1 load after a DRAM load (step 2) on any program
+  with a streamer request in that window.
+
+### SG7 round 4, step 1: the plan
+
+- 2026-10-16. `git pull` on main in snax-gvsoc and snax-forge (nothing new;
+  main has no commit the branch lacks), `ry/sg7-sparse` checked out and
+  pulled. Round 4's plan is in `SG7.md`, "Round 4": the RTL's superbank mux
+  and both interconnects' lock on a refusal, read at `9fbf35d` and common_cells
+  v1.40.0; GVSoC's DMA path (`IDmaBeTcdm`, `DmaInterleaver`); the design, a
+  `dma` port on the crossbar; the call order within a cycle.
+- Read, not run: the DMA back-ends' enqueues (`idma_be_tcdm.cpp`,
+  `idma_be_axi.cpp`, `idma_be.cpp`, `idma_me_2d.cpp`): all at delay 1 or
+  more but `IDmaBeTcdm::read_line`'s `enqueue(latency)` with latency 0, for a
+  read line whose destination is not ready; the event it queues sends a TCDM
+  line only if a TCDM write chunk is pending, i.e. in an L1-to-L1 copy.
+  The streamer's commit is queued with delay 0 after its requests and relies
+  on running after the arbitration, so the arbitration cannot simply be
+  moved to the end of the cycle.
+
+### SG7 round 4, step 2: the plain path's lock
+
+- 2026-10-16. The plain pick moves from `snax_tcdm_xbar.cpp` into
+  `snax/snax_plain_arb.hpp` (`SnaxPlainArb`, one per bank), so the crossbar
+  and the check run the same code, as the sparse pick in round 1. Added:
+  `rr_arb_tree`'s `LockIn`. A winner the bank refuses (`refused()`, reached
+  only through `bank_refuses()`) leaves `rr_q` where it is and locks the
+  bank: in the next cycle it arbitrates the vector it arbitrated then, of
+  which the inputs still asking (the RTL's `req_q`; equal to it while the
+  masters hold their requests), which gives the same winner while that
+  winner still asks; `granted()` then moves `rr_q` over that vector. A
+  request that comes during the lock is not seen until the locked one is
+  granted. Without a refusal the pick is round 3b's.
+- The check, `tests/snax/plain_arb/` (README there): `rr_arb_tree.sv` at
+  v1.40.0 (`1281545`, with `lzc.sv` and `cf_math_pkg.sv`) wrapped with
+  `stream_xbar`'s parameters (`FairArb`, `LockIn`, `AxiVldRdy`, no external
+  priority), against `SnaxPlainArb`, per cycle: `req_o` and `idx_o` against
+  the model's pick, each requesting input's `gnt_o` against the model's.
+  Inputs hold their requests until granted; new requests and `gnt_i` at
+  random, in phases of 500 cycles. Verilator 5.024 in `d3d8f5572ff4`, with
+  common_cells' assertions on (`lock` and `lock_req` compiled in, none
+  fired). 100000 cycles, seeds 1 to 3, each with 0 differences:
+
+  | Inputs | Selections (seed 1) | Contested | After a refusal | Of them with a request new in the lock |
+  |---|---|---|---|---|
+  | 15 (the targets') | 91149 | 84497 | 28762 | 5276 |
+  | 12 | 88182 | 80075 | 31635 | 4978 |
+  | 16 | 93158 | 86975 | 30920 | 5780 |
+  | 5 | 75014 | 58130 | 25637 | 2911 |
+
+- Broken copies (`build/sg7/r4/broken*/`, through `MODEL_DIR`), 15 inputs,
+  20000 cycles: a refused winner losing its turn (`rr_q` moved, no lock),
+  27128 differences, the first at cycle 11; the lock kept but new requests
+  seen during it, 11605. Both exit 1.
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`,
+  `make regress`: `regression passed`; every `run.log` byte-identical to
+  round 3b step 5's. Nothing refuses yet.
+
+### SG7 round 4, step 3: the DMA's wide input
+
+- 2026-10-16. `snax/snax_tcdm_xbar.{cpp,py}`: a port `dma` with the property
+  `superbank_banks` (0: no port). A DMA request inside one aligned superbank
+  line (`superbank_banks * bank_width` bytes) is a beat: it marks its
+  superbank taken in its cycle, its bank words are accessed at once (as
+  `DmaInterleaver` did) and it is answered `IO_REQ_OK` with the largest bank
+  latency. `bank_refuses(b)` is true while the DMA holds `b`'s superbank in
+  this cycle, so the winner there is refused: plain, locked (step 2); sparse,
+  `refused()`. A request crossing a superbank line is refused with a
+  warning (`IO_REQ_INVALID`). A beat after its cycle's arbitration on a
+  superbank where a narrow request was granted in that cycle is fatal,
+  naming the superbank, the bank and the input (the crossbar keeps each
+  bank's last grant cycle and input). Trace: `Superbank s: grant dma (read|write
+  addr, size)` and `Bank b: refused <input> (dma), held: ...`.
+- `snitch_cluster.py`: `ClusterArch` takes `snax_dma_data_width` (both arch
+  paths); with SNAX ports and it, `SnitchClusterTcdm` binds `dma_input` (the
+  iDMA's TCDM port and `wide_axi`'s TCDM and alias maps) to the crossbar's
+  `dma` port, `superbank_banks = dma_data_width / (8 * bank_width)`, and builds
+  no `DmaInterleaver`; `SnitchCluster` refuses a DMA `tcdm_width` that is not
+  one superbank. `snax_alu.py` sets `DMA_DATA_WIDTH = 512`, the hjson's: 8
+  banks, 64 B, the DMA's `tcdm_width`. `snitch` has no SNAX ports and keeps
+  `DmaInterleaver`. UPSTREAM.md row; README, target docstrings.
+- A DMA request that is not one full aligned beat: one inside a line but
+  shorter or unaligned is taken as the RTL's beat with partial strobes (all
+  banks of the superbank, only the covered words accessed); seen in
+  `dma-timing`, whose 800 B copies end mid-line (on `snax_alu`: 562 writes
+  and 24 reads of 64 B, 14 writes and 2 reads of 32 B). One crossing a line
+  is refused by name; no program sends one (no warning in any run).
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`;
+  `dma-timing` on both targets with the crossbar traced: every line equal
+  to round 3b's (so to SG2 step 7's), 602 beats through the `dma` port, none
+  refusing a narrow request. `make regress`: `regression passed`; every
+  `run.log` byte-identical to round 3b step 5's; no warning, no fatal.
+- Read, not run: whether `wide_axi` carries TCDM traffic other than the
+  iDMA's in these programs (none crossed a line, and the iDMA's back-end
+  cuts at 64 B); which programs' DMA beats meet a narrow request (step 5).
+
+### SG7 round 4, step 4: dma-tcdm and its predictions
+
+- 2026-10-16. `sw/apps/dma-tcdm` (README there): one ELF per case on
+  `common.mk` with snax-alu's library, in `regress.py` on both SNAX targets
+  (it returns its error count); the README's regression paragraph says so.
+  One case, `dma_vs_reader`: the ALU (add, 256 beats) first, then the
+  streamer, A, B and O each on its own four banks (0 to 3, 8 to 11, 16 to
+  19), one 256 B row per beat; 50 cycles after a barrier the DMA core copies
+  four 64 B blocks from DRAM into the rows after the movers', one row apart,
+  at the rows' last 64 B (superbank 3) in a first run and at their first
+  64 B (superbank 0, A's) in the measured run; both runs execute one
+  non-inlined function, so the measured one runs warm. Prints 977 of both
+  runs, 982 of both, the errors (O against A + B, the copies against their
+  source).
+- Built in snax-forge's image; its disassembly (`run`): between the two
+  barriers the compute core runs `start_alu`, `start_streamer` and the busy
+  polls (CSR instructions only, leaf calls with no stack access), the DMA
+  core an `mcycle` loop, the four copies' DMA instructions from registers
+  (unrolled) and the `dmstat` poll; their stack saves and restores are
+  before the first barrier and after the second. Not run.
+- Predictions in `SG7.md`, "Predictions of round 4", from source before any
+  run of `dma-tcdm`: 264 measured, 260 first run, on all four sides. A second
+  case was not added (`SG7.md` says why). The other programs: no DMA beat
+  meets a narrow request, so every `run.log` as round 3b's.
+
+### SG7 round 4, step 5: runs and comparison
+
+- 2026-10-16. The same 18 ELFs everywhere: round 3b's 17 (sha256 unchanged
+  against `build/sg7/r3/elfs.sha256` and `r3b/cvr.sha256`) and
+  `dma-tcdm-dma_vs_reader`, built in snax-forge's image; all 18 sha256
+  (`build/sg7/r4/elfs.sha256`) checked again after the RTL runs.
+- SNAX-GVSoC, step 3's build (step 4 changed no model code): each ELF on
+  `snax_alu` and `snax_alu_sparse`, both cores, the crossbar, the streamer and
+  the ALU traced (`build/sg7/r4/gv/`), all exit 0; `snax-alu` cut with
+  `phases.py --gvsoc`.
+- The RTL, round 1's builds at `9fbf35d` (no rebuild): `dma-tcdm-dma_vs_reader`
+  and `dma-timing` on the plain one (`../snax_cluster_plain`) and the sparse
+  one (`../snax_cluster`), `bin/snitch_cluster.vsim` on the host, Questa
+  2022.4, `logs/` kept as `logs-r4-<plain|sparse>-<program>`, all four
+  `[SUCCESS]`; 2 min 7 s and 2 min 3 s. The other programs' RTL numbers are
+  round 3's and 3b's: no DMA beat meets a narrow request in any of them on
+  GVSoC (below), so none was run again.
+
+`dma-tcdm`, counter 977 (first run), and the ALU's counter 982, not compared;
+errors 0 on all four sides:
+
+| Case | Plain RTL | Plain target | Sparse RTL | Sparse target | Prediction |
+|---|---|---|---|---|---|
+| `dma_vs_reader` 977 | 264 (260) | 264 (260) | 264 (260) | 264 (260) | held on all four |
+| `dma_vs_reader` 982 | 266 (262) | 268 (264) | 266 (262) | 268 (264) | +4 on each side, held |
+
+- The grants. GVSoC, both targets the same: the measured run's A lane 0
+  granted from 98120 to 98379, 260 cycles for 256 beats; the four beats on
+  superbank 0 at +69, +78, +81, +89 from A's first grant, each refusing
+  A's four lanes (`Bank 0` to `3: refused snax_acc0.streamer.reader0.laneN
+  (dma)`, nothing held), which win the next cycle; the first run's four beats
+  on superbank 3 refuse nothing. Plain RTL, from its waveform (round 3's
+  list plus each superbank mux's `sel_wide_i`, `build/sg7/r4/wlf/`): first
+  run, A asks for 256 cycles and is granted in all, `sel_wide` of superbank
+  3 high at +91, +106, +113, +123; measured run, A asks for 260 cycles,
+  granted in 256, `sel_wide` of superbank 0 high at +74, +84, +91, +98, A's
+  four lanes refused (`q_ready` 0) in exactly those cycles and granted the
+  next. The sparse RTL's grants are not read (Chisel module, no list); its
+  counter agrees.
+- 982 on the RTL is 2 under the targets in both runs: the gap between the
+  two start writes, as `alu-timing`'s `alu_first` (32 against 34). Not
+  compared.
+
+`dma-timing`, both RTLs at the pin, both targets: the two RTLs give the same
+lines, equal on every line to SG2 step 3's RTL run at `b2672f8`; the two
+targets give the same lines, equal to round 3b's (SG2 step 7's). `busy`, `r`
+and `w` equal RTL and target on every line; `done` 2 to 6 under the RTL,
+`issue` 2 to 5 under (the core, SG5); the stall counters are not counted on
+GVSoC (SG2).
+
+| Case | done RTL / target | busy RTL / target |
+|---|---|---|
+| idle | 12 / 6 | 0 / 0 |
+| l2l1 1x64 | 34 / 29 | 14 / 14 |
+| l2l1 1x256 | 39 / 33 | 17 / 17 |
+| l2l1 1x800 | 44 / 41 | 26 / 26 |
+| l2l1 1x4096 | 99 / 93 | 77 / 77 |
+| l2l1 1x8192 | 159 / 157 | 141 / 141 |
+| l2l1 2x800 | 59 / 54 | 39 / 39 |
+| l2l1 4x800 | 84 / 80 | 65 / 65 |
+| l1l2 1x800 | 39 / 35 | 20 / 20 |
+
+The other programs, both targets: every program's output equal to round
+3b's (`stream-timing`, `alu-timing`, `core-tcdm` with all their counters,
+`polls` and `mcycle`; `snax-alu`'s lines), every `snax-alu` phase file equal
+to round 3b's at the five sizes. DMA beats through the crossbar, refusing
+none: `snax-alu` 2, 27, 33, 260, 1040 at 4, 100, 128, 1024, 4096,
+`dma-timing` 602; none in `stream-timing`, `alu-timing`, `core-tcdm`. So their
+RTL comparison is round 3's and 3b's, unchanged. Prediction held.
+
+- `make regress`: `regression passed`, 40 SNAX runs (`dma-tcdm` on both
+  targets added) and 17 plain; every `run.log` of round 3b byte-identical.
+- Gaps, named, not fixed: none in a compared counter. Not compared and
+  different: the DMA's beat spacing into L1 (beats +69 to +89 into A's run on
+  GVSoC against +74 to +98 on the RTL; D121 fits the engine's `busy`, not
+  the beats' cycles), and the ALU's counter (the core's start gap).
+- Not verified: the sparse RTL's grants one by one (only its counter); a
+  narrow request refused while another competes for the same bank, on any
+  RTL run (the winner checks cover the lock against the RTL modules); a DMA
+  beat after its cycle's arbitration (the fatal never fired, and no program
+  here makes an L1-to-L1 copy, the one path that could send one); a DMA
+  request crossing a superbank line (none sent); a core or AXI request
+  refused by the DMA on any side (none in these programs).
+
+### SG7 round 4 follow-up, step 1: where the DMA's beat cycles come from
+
+- 2026-10-16. Round 4's ELFs, no rebuild of `sw/`. The split per copy and
+  what was fixed are in `SG7.md`, "Round 4 follow-up".
+- (a), the `dmcpyi` cycle: GVSoC's `pe1` instruction trace; the RTL's
+  `trace_chip_00_hart_00001.dasm` in `logs-r4-<plain|sparse>-<program>`
+  (cycle column), on both RTLs. Reference: `dma_vs_reader`, A lane 0's first
+  grant (GVSoC's crossbar trace; the RTL's first cycle A0 asks, granted at
+  once); `dma-timing`, `t0`'s `csrr mcycle` (`0x80000840`), second run.
+- (b), the beat in L1: GVSoC's crossbar trace (`Superbank s: grant dma`)
+  with the iDMA's own traces (`--trace=idma --trace-level=trace`,
+  `build/sg7/r4f/run_dma.sh`); the RTL's waveforms of round 4's runs
+  (`wlf-r4-<plain|sparse>-<program>.wlf`, the `dma-timing` ones kept from
+  `vsim.wlf` of the last run), listed with `build/sg7/r4f/wlf/dma.do`: the
+  iDMA's offload handshake, `busy_o`, its AXI request and response structs,
+  `i_axi_to_mem_dma`'s `mem_req_o`, `mem_gnt_i`, `mem_we_o` and the four
+  superbank muxes' `sel_wide_i`; `dma_events.py` gives the events per
+  cycle. A falling-edge row at p ps is the trace's cycle (p - 500) / 1000 -
+  45: core 0's first load after the run and the DMA's offload handshake for
+  each `dmcpyi` fall in their trace line's cycle. The iDMA's own trace
+  (`dma_trace_00001_00000.log`, kept in both `logs-r4-*-dma-timing`) puts
+  the backend's request 2 cycles after each `dmcpyi`.
+- The plain and the sparse RTL's DMA events are identical in both programs
+  (`cmp` of the event lists). Both targets' `pe1` and crossbar DMA lines are
+  identical.
+- Before the fix, GVSoC, `dma_vs_reader`'s third measured copy: `dmcpyi` at
+  98189, the cycle the first copy's line was acknowledged; the backend's and
+  the AXI back-end's events were already queued for 98190 (the
+  acknowledgement's `update()`), so both ran with the new work in the cycle
+  it came: read request at 98190, data 98201, (b) 12. Every other copy: read
+  request at c + 3.
+- Fix: `tcdm_write_latency` 2 in `IDmaBeTcdm` (a line is queued with its
+  data and sent to the crossbar 2 cycles later; acknowledged when queued)
+  and `one_cycle_per_stage` in `IDmaMe2D`, `IDmaBe`, `IDmaBeAxi`; both in
+  `SNAX_DMA`, so only the SNAX targets have them. Built in snax-forge's
+  image (`snitch;snax_alu;snax_alu_sparse`).
+- After: (b) 16 for every copy of `dma_vs_reader` (both runs), `1x64` and
+  `4x800`'s first, equal to the RTL; `4x800`'s beats at +28, +41, +54, +67
+  from `t0` on both sides. `dma-timing` on both targets equal to round 4's
+  on every line; `dma-tcdm` 264 (260), 982 268 (264), errors 0, on both
+  targets.
+- `make regress`: `regression passed`, 40 SNAX and 17 plain; all 57
+  `run.log` byte-identical to round 4's.
+- What is left, (a): open item 67 (`SG7.md`). Not verified: the DMA's L1
+  reads (`SG7.md`).
+
+### SG7 round 4 follow-up, step 2: dma-timing against the RTL
+
+- 2026-10-16. `dma-timing`'s cases carry the RTL's `busy`, `r` and `w` (SG2
+  step 3 at `b2672f8`, the same on both RTLs at `9fbf35d` in round 4); the
+  compute core prints a line per case off them and `Cases off the RTL's
+  busy, r, w: N`, and returns the copy errors plus N. README says so.
+- Both targets: 0 cases off, exit 0; the nine case lines equal to round 4's.
+- A drift on purpose: `read_latency` 6 in `snax_alu.py`, `snax_alu` rebuilt:
+  8 cases off (every copy's `busy` one over), exit 1. Reverted and rebuilt.
+- The new ELF on the plain RTL (`out-r4f-plain-dma-timing.txt`,
+  `logs-r4f-plain-dma-timing`): `[SUCCESS]`, 0 cases off; `busy`, `r`, `w`
+  as before on every line, `issue` 1 under and `done` 1 to 6 over round 4's
+  ELF (the new code's layout, the core's timing): why they are not compared.
+- `make regress`: `regression passed`, 40 SNAX and 17 plain; every `run.log`
+  equal to round 4's but `dma-timing`'s on both targets, which gain the
+  `Cases off the RTL's busy, r, w: 0` line.
+
+### SG7 round 5: SG7 closed
+
+- 2026-10-16. All steps done (`docs/plans/SG7.md`, "Result" and "Decided").
+  No model or program change in this round.
+- Final state, the 18 ELFs on the plain RTL, the plain target, the sparse
+  RTL and the sparse target: every compared counter equal on each
+  interconnect but `subword`'s SC on the sparse RTL (snax_cluster's sparse
+  wrapper leaves the AMO shim's `core_id` and `is_core` undriven; SG8 in
+  snax-forge). `snax-alu`'s phases within SG5's target against SG5's plain
+  RTL reference, which the sparse RTL gives too (C5 -2%, the total up to
+  982 -1% to -2%). `dma-timing`'s `busy`, `r` and `w` equal the RTL's and
+  are checked on every run.
+- Settled: the model's scope per port and cycle; the priority bit on a wire;
+  both interconnects' picks checked against their RTL modules; the cores and
+  AXI as holding inputs 12 to 14; the core going on after a pending L1 load;
+  the `tohost` poll through the debug backdoor; the DMA's superbank as a
+  wide input that refuses narrow winners, locked by each interconnect's
+  rule; the DMA's `tcdm_write_latency` and `one_cycle_per_stage`; the
+  `dma-timing` drift guard. In snax-forge (branch `ry/sg7-docs`): D119, D121,
+  D122, D124, D125 and D126 amended; open item 58 closed; open items 69 to
+  75 and SG8 added.
+- Open: the subword SC on the sparse RTL (SG8); open items 65 to 67 (fetch,
+  DRAM atomics, the core's issue timing, with the DMA core's copy issue in
+  `dma-tcdm`); and 69 to 75: the AXI input (14) used by no program; a store
+  or AMO after a pending load waits for its data (RTL: up to 4 in flight);
+  an L1 load after a DRAM load reaches the crossbar up to 13 cycles early
+  (round 3b, step 2); L1-to-L1 DMA copies (a read and a delayed write in one
+  cycle); the DMA reading L1 against a narrow request, not split against
+  the RTL (round 4 follow-up); the iDMA through the sparse interconnect as
+  ports instead of the superbank mux, a snax_cluster design change; sparse
+  granularity above 1, checked against the RTL module (step 5) but used by
+  no target.
+- Upstream files changed in SG7: the rows marked SG7 in `UPSTREAM.md`. New:
+  `snax/snax_alu_sparse.py`, `snax_plain_arb.hpp`, `snax_sparse_arb.hpp`,
+  `tests/snax/plain_arb/`, `tests/snax/sparse_arb/`, `sw/apps/core-tcdm/`,
+  `sw/apps/dma-tcdm/`, `sw/cfg/snax_alu_cluster.hjson`.
+- README checked against the targets: the regression paragraph now says
+  `dma-timing` fails when its DMA counters move.
+- `make regress` at the branch head, in snax-forge's image: `regression passed`,
+  40 SNAX runs and 17 plain, in 1 min 54 s.
+- Next: SG8, then planning one generator (open item 68 in snax-forge),
+  then GEN1.

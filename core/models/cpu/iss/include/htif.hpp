@@ -113,6 +113,9 @@ private:
     void handle_syscall(uint64_t cmd);
     void dispatch(uint64_t cmd);
     void target_access(iss_reg_t addr, int size, bool is_write, uint8_t *data);
+    // The poll's access to tohost: through the data port, or with poll_backdoor through
+    // the zero-time debug backdoor behind it (vp/debug_mem.hpp)
+    void poll_access(iss_reg_t addr, int size, bool is_write, uint8_t *data);
     bool target_access_async(iss_reg_t addr, int size, bool is_write, uint8_t *data);
     static void data_response(vp::Block *__this, vp::IoReq *req);
     void exec_syscall();
@@ -158,4 +161,7 @@ private:
     iss_reg_t tohost_addr;
     iss_reg_t fromhost_addr;
     vp::ClockEvent htif_event;
+    // SNAX: the poll takes no time and no port, router or memory bandwidth, as the RTL
+    // testbench's host, which has no such poll on the bus
+    bool poll_backdoor;
 };

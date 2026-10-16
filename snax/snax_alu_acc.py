@@ -73,6 +73,8 @@ class SnaxAluAcc(gvsoc.systree.Component):
         The compute core's CSR accesses, a 32-bit request at 4 * CSR number.
     tcdm_<i> : io master
         The streamer's TCDM ports (nb_tcdm_ports of them).
+    tcdm_prio_<i> : wire<bool> master
+        The priority bit of each TCDM port's request.
     """
 
     # The cluster binds this many TCDM ports (snax_tcdm_ports in the hjson),
@@ -111,6 +113,7 @@ class SnaxAluAcc(gvsoc.systree.Component):
 
         for port in range(0, self.nb_tcdm_ports):
             streamer.o_TCDM(port, self.i_TCDM_INTERNAL(port))
+            streamer.o_TCDM_PRIORITY(port, self.i_TCDM_PRIORITY_INTERNAL(port))
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, 'input', signature='io')
@@ -121,3 +124,9 @@ class SnaxAluAcc(gvsoc.systree.Component):
 
     def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'tcdm_{port}', itf, signature='io')
+
+    def i_TCDM_PRIORITY_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'tcdm_prio_{port}', signature='wire<bool>')
+
+    def o_TCDM_PRIORITY(self, port: int, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind(f'tcdm_prio_{port}', itf, signature='wire<bool>')

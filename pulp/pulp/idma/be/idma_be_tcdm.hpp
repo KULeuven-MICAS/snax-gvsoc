@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <deque>
+#include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
 #include "../idma.hpp"
@@ -73,6 +75,8 @@ private:
     void activate_burst();
     // Enqueue a new burst to the queue of pending bursts
     void enqueue_burst(uint64_t base, uint64_t size, bool is_write, IdmaTransfer *transfer);
+    // SNAX: sends the delayed lines that are due
+    static void delayed_write_handler(vp::Block *__this, vp::ClockEvent *event);
 
     // Pointer to back-end, used for data synchronization
     IdmaBeProducer *be;
@@ -147,4 +151,19 @@ private:
     uint64_t read_latency;
     // SNAX: cycle in which the last read line was handed to the destination
     int64_t last_read_push_timestamp;
+    // SNAX: cycles from a line leaving the DMA to its write in the TCDM (property
+    // tcdm_write_latency, 0 when absent). The line is acknowledged when it leaves, as the
+    // RTL's iDMA is done at its last W handshake, before the beat reaches the banks.
+    uint64_t tcdm_write_latency;
+    // SNAX: a line on its way to the TCDM
+    struct DelayedLine
+    {
+        int64_t cycle;              // the cycle it is written in the TCDM
+        uint64_t base;
+        std::vector<uint8_t> data;
+    };
+    // SNAX: lines on their way to the TCDM, in order, and the request that writes them
+    std::deque<DelayedLine> delayed_lines;
+    vp::IoReq delayed_req;
+    vp::ClockEvent delayed_write_event;
 };

@@ -34,7 +34,19 @@ prints one line per case.
 
 `w_stall` and `r_stall` have the meanings of the "buffer" lines of
 `idma_inst64_events.sv`, which overwrite the AXI-side ones. On SNAX-GVSoC the
-counters read 0 until SG2's P3 adds counting.
+stall counters read 0 (not counted).
+
+## Checked against the RTL
+
+`busy`, `r` and `w` do not depend on the cores' timing (D123), and SNAX-GVSoC
+gives the RTL's on every line. The program holds the RTL's values per case
+(SG2 step 3 at `b2672f8`, the same at the pin `9fbf35d` in SG7 round 4) and
+prints a line for each case off them, so `make regress` and CI fail when the
+DMA's own timing moves. `issue` and `done` include the core's issue and
+polling (SG5, open item 67 in snax-forge): printed, not compared.
+
+The program returns the copy errors plus the cases off the RTL's values; the
+RTL itself returns 0.
 
 ## Build
 
@@ -69,4 +81,5 @@ checked out (`Bender.lock` in snax_cluster, or the folder name under
 
 ## Expected output
 
-Ten lines: nine cases, then `Number of errors: 0`; exit code 0.
+Eleven lines: nine cases, `Number of errors: 0` and `Cases off the RTL's
+busy, r, w: 0`; exit code 0.

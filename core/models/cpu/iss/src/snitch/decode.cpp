@@ -228,6 +228,8 @@ static inline iss_reg_t int_offload_exec(Iss *iss, iss_insn_t *insn, iss_reg_t p
             // Stall the stage if we either didn't get all input and output register ready.
             if (!operands_ready)
             {
+                // SNAX: on a pending load's register, stalled until its response
+                iss->lsu.wait_for_load();
                 return pc;
             }
         }

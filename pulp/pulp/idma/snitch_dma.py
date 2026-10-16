@@ -43,6 +43,13 @@ class SnitchDma(gvsoc.systree.Component):
     read_latency: int
         Cycles the DMA's own read path adds before the first data of a read stream, on top of
         the latency the memory side returns (SNAX). 0 keeps the model as it was.
+    tcdm_write_latency: int
+        Cycles from a line leaving the DMA to its write in the local memory; the line is
+        acknowledged when it leaves (SNAX). 0 keeps the model as it was.
+    one_cycle_per_stage: bool
+        The midend, the backend and the AXI read take work from the cycle after it arrives,
+        also when their event is already queued for the cycle it arrives in (SNAX). False
+        keeps the model as it was.
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str,
@@ -53,7 +60,9 @@ class SnitchDma(gvsoc.systree.Component):
             loc_size: int=0,
             tcdm_width: int=0,
             beat_size: int=64,
-            read_latency: int=0):
+            read_latency: int=0,
+            tcdm_write_latency: int=0,
+            one_cycle_per_stage: bool=False):
 
         super().__init__(parent, name)
 
@@ -75,6 +84,8 @@ class SnitchDma(gvsoc.systree.Component):
             "tcdm_width": tcdm_width,
             "beat_size": beat_size,
             "read_latency": read_latency,
+            "tcdm_write_latency": tcdm_write_latency,
+            "one_cycle_per_stage": one_cycle_per_stage,
         })
 
     def i_OFFLOAD(self) -> gvsoc.systree.SlaveItf:

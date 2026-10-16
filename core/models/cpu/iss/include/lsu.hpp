@@ -33,6 +33,13 @@
 #define ADDR_MASK (~(ISS_REG_WIDTH / 4 - 1))
 #endif
 
+// SNAX: with int_loads_in_flight set, the core goes on after a load answered later
+// (IO_REQ_PENDING); the Snitch core's scoreboard holds back what uses its register.
+#if defined(CONFIG_GVSOC_ISS_SNITCH) && defined(CONFIG_GVSOC_ISS_SCOREBOARD) && \
+    !defined(CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING)
+#define SNAX_LSU_PENDING_LOAD 1
+#endif
+
 class IssWrapper;
 
 class Lsu
@@ -91,6 +98,10 @@ public:
     inline void elw_perf(iss_insn_t *insn, iss_addr_t addr, int size, int reg);
 
     inline void stack_access_check(int reg, iss_addr_t addr);
+
+    // SNAX: true while a pending load (int_loads_in_flight) holds back the current
+    // instruction, which the core then executes again
+    inline bool wait_for_load();
 
     // Allocate a request. This can returns NULL if the core can not send more requests (last one
     // was denied or all requests are already allocated). In this case the core should stall.
@@ -166,6 +177,20 @@ private:
     inline int64_t load_wait();
     // Records when the load just issued has its data back, latency counted from now.
     inline void load_issued(int64_t latency);
+#ifdef SNAX_LSU_PENDING_LOAD
+    // A load answered later is in flight and the core went on
+    bool load_pending;
+    // The core is stalled until that load's response
+    bool core_waits_for_load;
+    // load_ready_cycle was set by a response (the cycle after it)
+    bool load_ready_from_response;
+    // That load's register, and its size if sign-extended (0 if not)
+    int pending_load_reg;
+    int pending_load_signed_size;
+    // Marks the load just issued as pending: its register invalid until the response
+    inline void load_pending_issued(int reg, int signed_size);
+    void pending_load_response();
+#endif
 
     // True if the last request has been denied. The core must not send another request until
     // the last request has been granted

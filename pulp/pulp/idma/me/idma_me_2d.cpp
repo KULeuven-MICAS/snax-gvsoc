@@ -36,6 +36,10 @@ IDmaMe2D::IDmaMe2D(vp::Component *idma, IdmaTransferProducer *fe, IdmaTransferCo
 
     // Get the top parameter giving the maximum number of enqueued transfers
     this->transfer_queue_size = idma->get_js_config()->get_int("transfer_queue_size");
+
+    // SNAX: see one_cycle_per_stage
+    js::Config *one_cycle_per_stage = idma->get_js_config()->get("one_cycle_per_stage");
+    this->one_cycle_per_stage = one_cycle_per_stage && one_cycle_per_stage->get_bool();
 }
 
 
@@ -51,6 +55,7 @@ void IDmaMe2D::enqueue_transfer(IdmaTransfer *transfer)
 
     // Enqueue the transfer
     this->transfer_queue.push(transfer);
+    this->last_enqueue_cycle = this->clock.get_cycles();
 
     // And trigger the FSM to check if the transfer must be handled
     this->fsm_event.enqueue();
@@ -106,6 +111,15 @@ void IDmaMe2D::reset(bool active)
 void IDmaMe2D::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     IDmaMe2D *_this = (IDmaMe2D *)__this;
+
+    // SNAX: a transfer queued in this cycle is taken from the next one
+    if (_this->one_cycle_per_stage && _this->current_transfer == NULL
+        && _this->transfer_queue.size() == 1
+        && _this->last_enqueue_cycle == _this->clock.get_cycles())
+    {
+        _this->fsm_event.enqueue();
+        return;
+    }
 
     // Check if one of the queued transfer can become the current one
     if (_this->transfer_queue.size() > 0 && _this->current_transfer == NULL)

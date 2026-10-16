@@ -6,16 +6,17 @@
 
 Builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy, CI1) and the programs
-of sw/apps/, then runs each SNAX program on the `snax_alu` target:
-`snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096, `snax-stream`,
-`alu-timing`, the five `stream-timing` cases, `dma-timing` and `snax-csr`;
-then the plain tests on the `snitch` target: one per sw/tests/*.c (the 17
-of COPIED in sw/sync.py), each from build/sw/tests/; a plain ELF missing
-is a failure.
+of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
+(SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
+named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
+`snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
+`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then the plain tests on the
+`snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
+from build/sw/tests/; a plain ELF missing is a failure.
 
 A program passes when it exits 0 within TIMEOUT seconds: every SNAX program
-but `stream-timing` returns its error count, `stream-timing` returns 0. No
-output or cycle count is compared; the comparison with the RTL is made by
+returns its error count, but `stream-timing` and the `core-tcdm` cases other
+than `subword`, which return 0. No output or cycle count is compared; the comparison with the RTL is made by
 hand with phases.py (README, "Comparing with the RTL").
 
 Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
@@ -24,7 +25,7 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu` (README). Exit code 0 when every
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse` (README). Exit code 0 when every
 program passes, 1 otherwise.
 """
 
@@ -40,8 +41,12 @@ SW = ROOT / "sw"
 APPS = SW / "apps"
 BUILD = ROOT / "build" / "sw"
 
+SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
 SIZES = [4, 100, 128, 1024, 4096]
-STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0"]
+STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
+                "prio_queued", "idle_restart"]
+CORE_TCDM_CASES = ["subword", "core_vs_reader", "after_stores"]
+DMA_TCDM_CASES = ["dma_vs_reader"]
 PLAIN_DIR = BUILD / "tests"
 PLAIN_TESTS = sorted(c.stem for c in (SW / "tests").glob("*.c"))  # COPIED in sw/sync.py
 WORK = ROOT / "build" / "regress" / "work"
@@ -87,6 +92,15 @@ class Check:
     def selected(self, name):
         return self.only is None or self.only in name
 
+    def selected_snax(self, program):
+        """Whether the SNAX program runs on any target."""
+        return any(self.selected(f"{program}.{target}") for target in SNAX_TARGETS)
+
+    def run_snax(self, program, elf):
+        """Runs the SNAX program's ELF on every SNAX target."""
+        for target in SNAX_TARGETS:
+            self.run(f"{program}.{target}", target, elf)
+
     def run(self, name, target, elf, work=None):
         if not self.selected(name):
             return
@@ -118,20 +132,30 @@ def main():
 
     make(SW)
 
-    print("SNAX programs on snax_alu")
+    print(f"SNAX programs on {', '.join(SNAX_TARGETS)}")
     for n in SIZES:
-        if check.selected(f"snax-alu-{n}"):
+        if check.selected_snax(f"snax-alu-{n}"):
             make(APPS / "snax-alu", f"DATA_LEN={n}")
-        check.run(f"snax-alu-{n}", "snax_alu", BUILD / "apps" / "snax-alu" / str(n) / "snax-alu.elf")
+        check.run_snax(f"snax-alu-{n}", BUILD / "apps" / "snax-alu" / str(n) / "snax-alu.elf")
     for prog in ("snax-stream", "alu-timing", "dma-timing", "snax-csr"):
-        if check.selected(prog):
+        if check.selected_snax(prog):
             make(APPS / prog)
-        check.run(prog, "snax_alu", BUILD / "apps" / prog / f"{prog}.elf")
-    if any(check.selected(f"stream-timing-{case}") for case in STREAM_CASES):
+        check.run_snax(prog, BUILD / "apps" / prog / f"{prog}.elf")
+    if any(check.selected_snax(f"stream-timing-{case}") for case in STREAM_CASES):
         make(APPS / "stream-timing")
     for case in STREAM_CASES:
-        check.run(f"stream-timing-{case}", "snax_alu",
-                  BUILD / "apps" / "stream-timing" / f"stream-timing-{case}.elf")
+        check.run_snax(f"stream-timing-{case}",
+                       BUILD / "apps" / "stream-timing" / f"stream-timing-{case}.elf")
+    if any(check.selected_snax(f"core-tcdm-{case}") for case in CORE_TCDM_CASES):
+        make(APPS / "core-tcdm")
+    for case in CORE_TCDM_CASES:
+        check.run_snax(f"core-tcdm-{case}",
+                       BUILD / "apps" / "core-tcdm" / f"core-tcdm-{case}.elf")
+    if any(check.selected_snax(f"dma-tcdm-{case}") for case in DMA_TCDM_CASES):
+        make(APPS / "dma-tcdm")
+    for case in DMA_TCDM_CASES:
+        check.run_snax(f"dma-tcdm-{case}",
+                       BUILD / "apps" / "dma-tcdm" / f"dma-tcdm-{case}.elf")
     print(f"  {check.count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")

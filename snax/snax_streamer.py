@@ -12,8 +12,11 @@ import gvsoc.systree
 
 
 # The keys of a mover group in the hjson's streamer template that the model
-# reads; any other key is refused by name.
-MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth']
+# reads; any other key is refused by name. dynamicPriority (default true) and
+# higherStaticPriority (default false) are read as stream_param_gen.scala.tpl
+# reads them.
+MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth', 'dynamicPriority',
+    'higherStaticPriority']
 # The keys of the streamer template the model reads, or that do not change it
 TEMPLATE_KEYS = ['data_reader_params', 'data_writer_params', 'snax_library_name']
 
@@ -58,6 +61,10 @@ def movers_of(template: dict) -> list[dict]:
                 'temporal_dim': params['temporal_dim'][i],
                 'num_channel': num_channel,
                 'fifo_depth': params['fifo_depth'][i],
+                'dynamic_priority': 'dynamicPriority' not in params
+                    or bool(params['dynamicPriority'][i]),
+                'higher_static_priority': 'higherStaticPriority' in params
+                    and bool(params['higherStaticPriority'][i]),
             })
     return movers
 
@@ -89,7 +96,7 @@ class SnaxStreamer(gvsoc.systree.Component):
     template : dict
         The streamer template of the cluster hjson, with its keys
         (data_reader_params, data_writer_params; spatial_bounds, temporal_dim,
-        num_channel, fifo_depth).
+        num_channel, fifo_depth, dynamicPriority, higherStaticPriority).
     csr_base : int
         Number of the streamer's first CSR, for the trace.
     tcdm_size : int
@@ -101,6 +108,8 @@ class SnaxStreamer(gvsoc.systree.Component):
         CSR accesses, offsets from the first CSR (4 bytes per CSR).
     tcdm_<i> : io master
         Channel i's TCDM port, numbered readers first, as on the RTL.
+    tcdm_prio_<i> : wire<bool> master
+        The priority bit of channel i's request, set before each request.
     reader_<i> : io slave
         Reader i's beats to the accelerator (num_channel * 8 bytes; size 0 probes).
     writer_<j> : io slave
@@ -124,6 +133,9 @@ class SnaxStreamer(gvsoc.systree.Component):
 
     def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'tcdm_{port}', itf, signature='io')
+
+    def o_TCDM_PRIORITY(self, port: int, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind(f'tcdm_prio_{port}', itf, signature='wire<bool>')
 
     def i_READER(self, reader: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'reader_{reader}', signature='io')

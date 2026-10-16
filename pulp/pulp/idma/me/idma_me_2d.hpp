@@ -73,6 +73,12 @@ private:
     // Queue of enqueued transfers. The number of transfers which can be enqueued is defined by
     // transfer_queue_size
     std::queue<IdmaTransfer *> transfer_queue;
+    // SNAX: property one_cycle_per_stage (false when absent): the midend, the backend and the
+    // AXI read take work from the cycle after it arrives, as on the RTL, also when their
+    // event is already queued for this cycle
+    bool one_cycle_per_stage;
+    // SNAX: cycle in which the last transfer was queued
+    int64_t last_enqueue_cycle = -1;
     // Block FSM event, used to trigger all checks after something has been updated
     vp::ClockEvent fsm_event;
     // FSM state (see IDmaMeState), traced for profiling

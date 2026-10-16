@@ -3,22 +3,34 @@
 The streamer's timing on its own (SG3): the compute core sets up `snax_alu`'s
 two readers, leaves the writer's temporal bound at 0, starts the streamer,
 polls its busy CSR (976) and prints the streamer's counter (977). The same
-ELFs run on snax_cluster's RTL (`cfg/snax_alu_cluster_old.hjson` at
-`b2672f8`) and on SNAX-GVSoC's `snax_alu` target; the counter is the value to
-compare.
+ELFs run on snax_cluster's RTL with the plain interconnect
+(`cfg/snax_alu_cluster_old.hjson`) and on SNAX-GVSoC's `snax_alu` target, and
+with the sparse interconnect (`cfg/snax_alu_cluster.hjson`) and on
+`snax_alu_sparse` (SG7); the counter is the value to compare.
 
 The ALU is never started, so nothing takes the readers' beats. Each lane
 reads at most `fifo_depth` (8) beats and the reader is done; the beats stay
 in its queues and hold its credit, and the RTL does not clear them at start.
-So each case is an ELF of its own.
+So each case is an ELF of its own. SG7's two cases use that: a first run
+leaves beats in one reader's queues, then the measured run starts, with no
+access to the TCDM in between; they also print the first run's counter.
 
-| Case | Readers | Counter (RTL and SNAX-GVSoC, SG3 step 5) |
-|---|---|---|
-| `zero_bound` | every temporal bound 0: busy one cycle | 0 |
-| `a_alone` | A: 8 beats from bank 0 | 9 |
-| `ab_other_banks` | A and B, B 16 banks away | 9 |
-| `ab_same_banks` | A and B, B 1 KiB away: lane i of each on the same bank | 10 |
-| `a_stride0` | A with spatial stride 0: four lanes on one bank | 12 |
+| Case | Readers | Counter, plain | Counter, sparse |
+|---|---|---|---|
+| `zero_bound` | every temporal bound 0: busy one cycle | 0 | 0 |
+| `a_alone` | A: 8 beats from bank 0 | 9 | 9 |
+| `ab_other_banks` | A and B, B 16 banks away | 9 | 9 |
+| `ab_same_banks` | A and B, B 1 KiB away: lane i of each on the same bank | 10 | 10 |
+| `a_stride0` | A with spatial stride 0: four lanes on one bank | 12 | 12 |
+| `prio_queued` | first A alone, 4 beats; then A (4 beats, 4 queued: priority 0) and B (1 beat, none queued: priority 1) on banks 0 to 3 | 5 | 6 |
+| `idle_restart` | first B alone, 1 beat on banks 0 to 3; then, after idle cycles, A (1 beat) and B (4 beats) on those banks, both priority 1 | 5 | 6 |
+
+Each counter is the same on the RTL and on SNAX-GVSoC: plain, SG3 step 5
+and, for SG7's two cases, SG7 step 9; sparse, SG7 step 9; all of them again
+with the cores in the crossbar at snax_cluster's pin (SG7 round 3). In `prio_queued` the sparse interconnect lets B, the reader with an
+empty queue, go first; in `idle_restart` its pointer restarts after the idle
+cycles, so A, the lower input, goes first; the plain one gives A and B the
+other way round. The first runs count 5 and 2 on both.
 
 Each beat is 4 lanes of 64 bit; the temporal stride is 32 B, so A's beat t
 covers banks 4t to 4t + 3. The counter is reset the cycle after the start
@@ -36,7 +48,7 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from
 
     make -C sw/apps/stream-timing
     source sourceme.sh
-    for c in zero_bound a_alone ab_other_banks ab_same_banks a_stride0; do
+    for c in zero_bound a_alone ab_other_banks ab_same_banks a_stride0 prio_queued idle_restart; do
       gvrun --target snax_alu --work-dir build/work/st-$c \
         --param chip/soc/binary=$PWD/build/sw/apps/stream-timing/stream-timing-$c.elf run
     done

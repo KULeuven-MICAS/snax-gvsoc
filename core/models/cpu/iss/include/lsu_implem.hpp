@@ -98,8 +98,49 @@ inline void Lsu::load_issued(int64_t latency)
     if (this->int_loads_in_flight != 0)
     {
         this->load_ready_cycle = this->iss.exec.get_cycles() + latency;
+#ifdef SNAX_LSU_PENDING_LOAD
+        this->load_ready_from_response = false;
+#endif
     }
 }
+
+inline bool Lsu::wait_for_load()
+{
+#ifdef SNAX_LSU_PENDING_LOAD
+    if (this->load_pending && this->iss.exec.stall_cycles > 0)
+    {
+        // The cycles the core is already stalled for (e.g. a fetch) go first
+        this->iss.trace.skip_insn_dump = true;
+        return true;
+    }
+    if (this->load_pending)
+    {
+        // The response unstalls the core, which executes this instruction in the next cycle
+        if (!this->core_waits_for_load)
+        {
+            this->core_waits_for_load = true;
+            this->iss.exec.stalled_inc();
+        }
+        return true;
+    }
+    if (this->load_ready_from_response && this->load_ready_cycle > this->iss.top.clock.get_cycles())
+    {
+        // The response came earlier in this cycle: again in the next one, traced then
+        this->iss.trace.skip_insn_dump = true;
+        return true;
+    }
+#endif
+    return false;
+}
+
+#ifdef SNAX_LSU_PENDING_LOAD
+inline void Lsu::load_pending_issued(int reg, int signed_size)
+{
+    this->pending_load_reg = reg;
+    this->pending_load_signed_size = signed_size;
+    this->iss.regfile.scoreboard_reg_valid[reg] = false;
+}
+#endif
 
 template<typename T>
 inline bool Lsu::load(iss_insn_t *insn, iss_addr_t addr, int size, int reg)
@@ -124,6 +165,11 @@ inline bool Lsu::load(iss_insn_t *insn, iss_addr_t addr, int size, int reg)
         return false;
     }
 #endif
+
+    if (this->wait_for_load())
+    {
+        return true;
+    }
 
     // First set register to zero for zero-extension
     this->iss.regfile.set_reg(reg, 0);
@@ -175,6 +221,12 @@ inline bool Lsu::load(iss_insn_t *insn, iss_addr_t addr, int size, int reg)
 #else
             this->stall_callback = &Lsu::load_resume;
             this->stall_reg = reg;
+#ifdef SNAX_LSU_PENDING_LOAD
+            if (this->load_pending)
+            {
+                this->load_pending_issued(reg, 0);
+            }
+#endif
 #endif
         }
         else
@@ -250,6 +302,11 @@ inline bool Lsu::load_signed(iss_insn_t *insn, iss_addr_t addr, int size, int re
     }
 #endif
 
+    if (this->wait_for_load())
+    {
+        return true;
+    }
+
     int err;
     int64_t latency;
     int req_id;
@@ -306,6 +363,12 @@ inline bool Lsu::load_signed(iss_insn_t *insn, iss_addr_t addr, int size, int re
             this->stall_callback = &Lsu::load_signed_resume;
             this->stall_reg = reg;
             this->stall_size = size;
+#ifdef SNAX_LSU_PENDING_LOAD
+            if (this->load_pending)
+            {
+                this->load_pending_issued(reg, size);
+            }
+#endif
 #endif
         }
         else
@@ -345,6 +408,11 @@ inline bool Lsu::store(iss_insn_t *insn, iss_addr_t addr, int size, int reg)
         return false;
     }
 #endif
+
+    if (this->wait_for_load())
+    {
+        return true;
+    }
 
 #ifdef CONFIG_GVSOC_ISS_SCOREBOARD
     // Since the input register is passed through its index and accessed through a pointer,
