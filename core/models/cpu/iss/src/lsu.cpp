@@ -31,6 +31,11 @@ void Lsu::reset(bool active)
         this->misaligned_size = 0;
         this->io_req_denied = false;
         this->load_ready_cycle = 0;
+#ifdef SNAX_LSU_PENDING_LOAD
+        this->load_pending = false;
+        this->core_waits_for_load = false;
+        this->load_ready_from_response = false;
+#endif
     }
 }
 
@@ -132,6 +137,14 @@ void Lsu::data_response(vp::Block *__this, vp::IoReq *req)
 {
     Lsu *_this = (Lsu *)__this;
     Iss *iss = &_this->iss;
+
+#ifdef SNAX_LSU_PENDING_LOAD
+    if (_this->load_pending)
+    {
+        _this->pending_load_response();
+        return;
+    }
+#endif
 
 #ifndef CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING
     iss->exec.stalled_dec();
@@ -277,11 +290,49 @@ int Lsu::data_req_aligned(iss_addr_t addr, uint8_t *data_ptr, uint8_t *memcheck_
         // the request and update the scoreboard when the response is received
     }
 #else
+#ifdef SNAX_LSU_PENDING_LOAD
+    if (!is_write && this->int_loads_in_flight != 0)
+    {
+        // The core goes on; the load's register waits for the response
+        this->trace.msg(vp::Trace::LEVEL_TRACE, "Load pending, core goes on\n");
+        this->load_pending = true;
+        return err;
+    }
+#endif
     this->trace.msg(vp::Trace::LEVEL_TRACE, "Waiting for asynchronous response\n");
     this->iss.exec.insn_stall();
 #endif
     return err;
 }
+
+#ifdef SNAX_LSU_PENDING_LOAD
+// The data of a pending load: usable from the next cycle, by an instruction that reads
+// its register and by the next load, as a load answered at once with latency
+void Lsu::pending_load_response()
+{
+    int reg = this->pending_load_reg;
+    int64_t ready = this->iss.top.clock.get_cycles() + 1;
+    this->trace.msg(vp::Trace::LEVEL_TRACE, "Pending load response (reg: %d)\n", reg);
+
+    if (this->pending_load_signed_size != 0)
+    {
+        this->iss.regfile.set_reg(reg, iss_get_signed_value(this->iss.regfile.get_reg_untimed(reg),
+            this->pending_load_signed_size * 8));
+    }
+    this->iss.regfile.scoreboard_reg_set_timestamp(reg, ready - this->iss.exec.get_cycles(),
+        CSR_PCER_LD_STALL);
+    this->iss.regfile.scoreboard_reg_valid[reg] = true;
+    this->load_ready_cycle = ready;
+    this->load_ready_from_response = true;
+    this->load_pending = false;
+
+    if (this->core_waits_for_load)
+    {
+        this->core_waits_for_load = false;
+        this->iss.exec.stalled_dec();
+    }
+}
+#endif
 
 #ifdef CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING
 bool Lsu::lsu_is_empty()
@@ -358,6 +409,11 @@ void Lsu::build()
             this->int_loads_in_flight);
     }
     this->load_ready_cycle = 0;
+#ifdef SNAX_LSU_PENDING_LOAD
+    this->load_pending = false;
+    this->core_waits_for_load = false;
+    this->load_ready_from_response = false;
+#endif
 
     if (this->iss.top.get_js_config()->get("memory_start") != NULL)
     {
@@ -505,6 +561,11 @@ bool Lsu::atomic(iss_insn_t *insn, iss_addr_t addr, int size, int reg_in, int re
     vp::IoReqOpcode opcode)
 {
     iss_addr_t phys_addr;
+
+    if (this->wait_for_load())
+    {
+        return true;
+    }
 
     this->trace.msg("Atomic request (addr: 0x%lx, size: 0x%x, opcode: %d)\n", addr, size, opcode);
     vp::IoReq *req = this->get_req();

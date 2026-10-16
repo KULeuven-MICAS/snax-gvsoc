@@ -189,7 +189,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3.5 | `core-tcdm` and its predictions | done 2026-10-15 |
 | 3.6 | Runs on both RTLs and both targets; the comparison | done 2026-10-15 |
 | 3b.1 | Round 3b: this section ("Round 3b"); `subword` on the sparse RTL noted | done 2026-10-16 |
-| 3b.2 | The core goes on after an L1 load answered later | |
+| 3b.2 | The core goes on after an L1 load answered later | done 2026-10-16 |
 | 3b.3 | GVSoC's `tohost` poll | |
 | 3b.4 | `core_vs_reader`'s layout | |
 | 3b.5 | Runs on both targets against round 3's RTL numbers | |
@@ -469,7 +469,10 @@ can fix, and one that only snax_cluster can. Results in the notes.
   previous load's data (D125). The Snitch core does that now for a load
   answered later, as it does for one answered at once with latency, behind
   `int_loads_in_flight` (the `snitch` target unchanged). Stores, AMOs and
-  LR/SC keep their behaviour.
+  LR/SC keep their behaviour. Done with the Snitch core's own scoreboard
+  (`scoreboard_reg_valid`, checked before every integer instruction, which
+  the FP subsystem's results already use), not the `NB_OUTSTANDING` path,
+  which would make stores and AMOs non-blocking too.
 - 3b.3, GVSoC's `tohost` poll. GVSoC's host model reads `tohost` from DRAM
   through the core's data port and `narrow_axi` every 1000 cycles; landing
   on a DMA copy it delays the copy's DRAM read (`dma-timing`'s 4x800 B from

@@ -2401,3 +2401,89 @@ Gaps, named, not fixed:
   `sw/apps/core-tcdm/README.md` as snax_cluster's (the sparse wrapper leaves
   the AMO shim's `core_id` and `is_core` undriven); SNAX-GVSoC keeps a
   reservation per hart, as the plain RTL. No code change.
+
+### SG7 round 3b, step 2: the core goes on after a pending L1 load
+
+- 2026-10-16. What the ISS has, read before the change:
+  - `CONFIG_GVSOC_ISS_LSU_NB_OUTSTANDING` (set only for `nb_outstanding` > 1;
+    Snitch has 1): a pool of requests, a load's register invalidated
+    (`scoreboard_reg_invalidate`, -1) until its response. Not used: it is a
+    compile-time path that also makes stores and AMOs non-blocking, and its
+    `data_grant` lowers the core's stall count on every grant, which the
+    crossbar sends for every request.
+  - The -1 timestamp stalls an instruction only through
+    `CONFIG_GVSOC_ISS_EXEC_SCOREBOARD`'s check in `exec_inorder.cpp`, which
+    only `SnitchFast` is built with; Snitch's `scoreboard_reg_check` treats
+    -1 as ready.
+  - The Snitch core's own scoreboard, `scoreboard_reg_valid` in
+    `SnitchRegfile`: `int_offload_exec` (`src/snitch/decode.cpp`) runs before
+    every integer instruction and holds it while an input or output register
+    is not valid; today the FP subsystem's results use it. Used: it is the
+    RTL scoreboard's place in this ISS, and it is runtime.
+- The change (`lsu.hpp`, `lsu_implem.hpp`, `lsu.cpp`, `snitch/decode.cpp`),
+  compiled for the Snitch core with its scoreboard and without
+  `NB_OUTSTANDING`, active only with `int_loads_in_flight` set (the SNAX
+  targets; 0 on `snitch`):
+  - A load answered `IO_REQ_PENDING` sets `load_pending` and its register
+    not valid; the core goes on.
+  - `wait_for_load()`: while a load is pending, the next load, store or AMO,
+    and (from `int_offload_exec`) an instruction that reads or writes its
+    register stall the core until the response, then run in the cycle
+    after. Stall cycles the core already has (a fetch) go first; without
+    that, a fetch's cycles were counted again after the wait (seen: a
+    dependent load on a new I-cache line 3 cycles after the response, not
+    1). `int_offload_exec` does not look at a load's or store's base
+    register (an indirect argument); the LSU's wait covers it.
+  - The response (`pending_load_response`): sign extension, the register
+    valid, its scoreboard time and `load_ready_cycle` the cycle after the
+    response, as a load answered at once with latency. A load that would
+    run in the response's own cycle (the response's event came first) runs
+    again in the next.
+  - Stores, AMOs and LR/SC are answered as before (the core waits). The LSU
+    keeps its one request (`io_req`), so a store or AMO after a pending load
+    waits for the load's data: as in round 3, where the load blocked; the
+    RTL can send it (`num_int_outstanding_mem` 4). Not in the measured loops.
+- In snax-forge's image: `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`;
+  `snax-alu` at five sizes on both targets with both cores traced, phases
+  and the C5 listing (`build/sg7/r3/snaxalu.sh`); `snax_alu` at 100 with
+  core 0's LSU, the crossbar and core 0's instructions traced at trace
+  level.
+- Load to load, check loop at 100: `lw a4, 4(s0)` granted on bank 13 at
+  3009, answered at 3012, the DRAM load `lw a5, 4(a2)` issued at 3013: L1 4,
+  the RTL's. DRAM to the next load 14, as before. So `tcdm` stays 2. An
+  instruction on the loaded register runs the cycle after the response,
+  4 after the grant (e.g. `jalr` on `lw ra` at +4), as before round 3.
+- C5: 44 cycles per element in 4034 of 4096 iterations at 4096 (round 1: 44
+  in 4034; round 3: 47 in 3999; RTL 45); the others 47, 48, 56, 60. Errors 0,
+  `Accelerator Cycles` 1, 25, 32, 256, 1024 on both targets, which give the
+  same phases at every size. Phases, RTL (SG5) / round 1 / round 3 / now,
+  growing phases:
+
+  | Phase | 128 | 1024 | 4096 |
+  |---|---|---|---|
+  | C1 barrier | 147 / 154 / 157 / 154 (+5%) | 373 / 381 / 384 / 381 (+2%) | 1153 / 1169 / 1174 / 1169 (+1%) |
+  | D2 DMA wait | 45 / 36 / 36 / 36 (-20%, accepted in SG5) | 270 / 262 / 262 / 262 (-3%) | 1050 / 1050 / 1052 / 1050 (0%) |
+  | C3 ALU poll | 37 / 39 / 39 / 39 (+5%) | 262 / 261 / 261 / 261 (0%) | 1032 / 1029 / 1029 / 1029 (0%) |
+  | C5 check loop | 5795 / 5698 / 6098 / 5689 (-2%) | 46115 / 45244 / 48446 / 45226 (-2%) | 184355 / 180754 / 193543 / 180754 (-2%) |
+  | Total up to 982 | 6713 / 6698 / 7093 / 6674 (-1%) | 47495 / 46696 / 49916 / 46678 (-2%) | 187285 / 183755 / 196571 / 183755 (-2%) |
+
+  Round 3's changes are gone: at 4096 every phase is round 1's again; C1,
+  D1, D2 and C0 / D0 at 4, 100, 1024, 4096 too. What is left against round
+  1, both targets: C5 -1, -9, -18 at 100, 128, 1024 (fewer slow
+  iterations); C6 +1, -2, +24, +18 at 4, 100, 128, 1024 and D4 with it; C0
+  and D0 -15 at 128. Where I-cache misses and the host's answers to
+  `printf` fall; not traced.
+- `make regress`: `regression passed`. The 17 plain tests' `run.log` files
+  are byte-identical to round 3's (step 6). Of the SNAX ones, all equal but
+  `dma-timing`'s `l2l1 4x800` (done 96, busy 81 to 80, 65 on both targets:
+  the core reaches the copies at other cycles of GVSoC's `tohost` poll,
+  step 3) and `core_vs_reader`'s `polls` (0 to 1; its counter stays 17).
+- Gaps, named, not fixed:
+  - A load that waits for a DRAM load's data (D125's wait, stall cycles
+    counted at once) sends its request at the start of the wait, so an L1
+    load after a DRAM load reaches the crossbar up to 13 cycles early (seen
+    in boot, held one cycle behind core 1). The core's timing is right; only
+    the crossbar sees the request early. So it was before this step. No
+    streamer request meets it in these programs.
+  - The instruction trace prints a pending load's register before its data
+    (the bank is read at the grant, later in the cycle).
