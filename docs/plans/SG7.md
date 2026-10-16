@@ -144,7 +144,7 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 1 | The sparse interconnect on the SNAX ports: the crossbar's sparse pick, checked against the elaborated RTL module; the streamer's priority bit; the `snax_alu_sparse` target; predictions, then runs on the sparse RTL and both targets |
 | 2 | The gaps round 1 names, in the crossbar or the streamer |
 | 3 | The cores and AXI into the crossbar (priority 0, after the SNAX ports as snaxgen orders them); D125's core latencies fitted again, since part of what they hold is the interconnect |
-| 4 | The DMA's superbank as a wide input that refuses the narrow requests on its 8 banks in a cycle it is active: the lock's first user (open item 58 in snax-forge) |
+| 4 | The DMA's superbank as a wide input that refuses the narrow requests on its banks in a cycle it is active: the lock's first user (open item 58 in snax-forge) |
 | 5 | Close: snax-forge's docs (D119, D122, STATUS), the README, this file |
 
 ## Acceptance
@@ -193,6 +193,11 @@ From `DataRequestor.scala`, `ComplexQueue.scala`, `Reader.scala` and
 | 3b.3 | GVSoC's `tohost` poll | done 2026-10-16 |
 | 3b.4 | `core_vs_reader`'s layout | done 2026-10-16 |
 | 3b.5 | Runs on both targets against round 3's RTL numbers | done 2026-10-16 |
+| 4.1 | Round 4: this section ("Round 4") | done 2026-10-16 |
+| 4.2 | The plain path's lock; its check against `rr_arb_tree` | |
+| 4.3 | The DMA's wide input on both SNAX targets | |
+| 4.4 | `dma-tcdm` and its predictions | |
+| 4.5 | Runs on both RTLs and both targets; the comparison | |
 
 ## Predictions
 
@@ -516,6 +521,140 @@ can fix, and one that only snax_cluster can. Results in the notes.
   `subword` on the sparse RTL (above), `core_vs_reader` now included;
   `snax-alu` within SG5's target, C5 2% under the RTL; `dma-timing` as
   SG2's.
+
+## Round 4: the DMA's superbank
+
+The DMA's TCDM accesses go through the SNAX crossbar as one wide input, on
+both SNAX targets; `snitch` is not changed. The DMA's own timing (D121) does
+not change.
+
+### On the RTL
+
+From source at `9fbf35d`: `hw/snitch_cluster/src/snitch_cluster.sv`,
+`hw/mem_interface/src/mem_wide_narrow_mux.sv`,
+`hw/snitch_cluster/src/snitch_tcdm_interconnect.sv`, common_cells v1.40.0
+(`1281545`) `rr_arb_tree.sv` and `stream_xbar.sv`, and the Chisel
+`RoundRobinArbiter` (round 1).
+
+- Superbanks. `BanksPerSuperBank = WideDataWidth / NarrowDataWidth`, the
+  hjson's `dma_data_width / data_width`, 512 / 64 = 8; `NrSuperBanks =
+  NrBanks / BanksPerSuperBank`, 4. Superbank `i` holds banks `8i` to
+  `8i + 7`, so an address's superbank is `(addr >> 6) & 3`.
+- The DMA's path. The wide AXI crossbar's TCDM slave goes to
+  `i_axi_to_mem_dma` (`axi_to_mem_interleaved`, `NumBanks` 1, 512 bit): one
+  64 B request per cycle, a read or a write, a partial beat with its
+  strobes. Then `i_dma_interconnect`, a `snitch_tcdm_interconnect` with one
+  input and one output per superbank (a pass-through tree), which drops the
+  address's low 6 bits. Every wide AXI access into the TCDM takes it: the
+  iDMA's and any other wide master's.
+- The mux, one per superbank, `sel_wide_i = sb_dma_req[i].q_valid`. While
+  set, every bank of the superbank gets the DMA's request (its 64-bit
+  slice and strobes, no AMO), the DMA's `q_ready` is 1 (asserted:
+  `ImmediateGrantWide`), and every narrow `q_ready` of the superbank is 0
+  (`SilentNarrow`). A beat with partial strobes takes all 8 banks too.
+  Otherwise the narrow requests pass.
+- The refused narrow winner, plain. The bank output is `stream_xbar`'s
+  `rr_arb_tree`, `LockIn` 1, `FairArb` 1, `AxiVldRdy` 1, no spill register:
+  its `gnt_i` is the bank's `q_ready`. With `req_o && !gnt_i` it sets
+  `lock_q`, and in the next cycle it arbitrates `req_q`, the request vector
+  it arbitrated, instead of `req_i`: the same decision while it stays
+  refused. `rr_q` moves only with `gnt_i && req_o`, to the first requester
+  above it in the vector arbitrated. A request that comes while it is
+  locked is not seen until the locked one is granted; one that was seen may
+  not be dropped (`lock_req`), and the masters hold their requests until
+  `q_ready`.
+- The refused narrow winner, sparse: the `lock` register is `valid &&
+  !ready` of the last cycle, and the last pick wins again if it is in the
+  mask (round 1's reading).
+- The master sees `q_ready` 0: it keeps its request, and gets no response.
+
+### In SNAX-GVSoC before round 4
+
+- `SnitchDma`'s TCDM back-end (`IDmaBeTcdm`) sends lines of `tcdm_width`
+  (64 B on the SNAX targets), cut at `tcdm_width` boundaries, and needs
+  `IO_REQ_OK` (it is fatal on anything else), with a latency. It and `wide_axi`'s TCDM and `tcdm_alias`
+  maps go to `tcdm.i_DMA_INPUT`.
+- There, `DmaInterleaver` cuts a request into bank words, forwards each to
+  its bank and answers `IO_REQ_OK` with the largest bank latency. A bank
+  (`memory.Memory`, 8 B wide, latency 0) gives the second access of a cycle
+  one cycle of latency. So a DMA line and a narrow grant on one bank in one
+  cycle both go through, the later in call order a cycle late (open item 58
+  in snax-forge); the crossbar never sees the DMA.
+
+### The design
+
+- A port `dma` on the crossbar, not one of its arbitrated inputs; on both
+  SNAX targets `tcdm.i_DMA_INPUT` goes to it instead of `DmaInterleaver`.
+- The superbank: property `superbank_banks`, the target's
+  `dma_data_width / data_width` (8 in `snax_alu.py`), with the cluster
+  checking that the DMA's `tcdm_width` is the superbank's bytes. A DMA
+  request inside one aligned superbank line is a beat: it takes all banks
+  of that superbank in its cycle and accesses only the bank words it covers
+  (fewer bytes or an unaligned start: the RTL's beat with partial strobes).
+  It is answered at once, `IO_REQ_OK` with the largest bank latency, as
+  today: no latency added. Two in one cycle (an L1-to-L1 copy's read and
+  write) take both superbanks.
+- A request crossing a superbank line would be two beats in two cycles on
+  the RTL (`axi_to_mem`). Nothing in SNAX-GVSoC sends one: the DMA cuts its
+  lines at 64 B, and no other wide master reaches the TCDM. It is refused
+  by name (a warning naming the address and size, `IO_REQ_INVALID`); step
+  3 checks that no program hits it.
+- `bank_refuses(b)`: the DMA took `b`'s superbank in this cycle. The winner
+  of such a bank is not granted. Plain: `rr_q` does not move, and the bank
+  is locked: in the next cycle it arbitrates the locked vector (this
+  cycle's requests that still ask), which gives the same winner while that
+  winner still requests, and `rr_q` then moves over that vector. Sparse:
+  `refused()`, as since round 1. The input that lost then does as any
+  loser: a SNAX port's request is dropped and sent again, a core's or AXI's
+  held.
+- Trace: `Superbank s: grant dma (read|write addr, size)` per DMA beat, and
+  `Bank b: refused <input> (dma)` per refused narrow winner with the inputs
+  held.
+
+| Kept | Left out |
+|---|---|
+| A DMA beat takes its whole superbank in its cycle and is never refused | `axi_to_mem`'s buffering and the DMA's AXI side (D121's fit) |
+| A narrow winner on a taken bank is refused and locked, by the bank's interconnect's rule | A request crossing a superbank line (refused) |
+
+### Call order within a cycle
+
+GVSoC runs a cycle's events in the order they were queued; one queued with
+delay 0 goes after those already queued. The arbitration of a cycle is
+queued with delay 0 by the cycle's first narrow request (or by
+`held_event`), so it runs after every event that was queued for the cycle
+before the cycle began. The DMA's TCDM lines come from its back-ends'
+events, which it queues one or more cycles ahead (`enqueue()` defaults to
+1; the only delay-0 one, a read line held for a destination not ready,
+sends a TCDM line only in an L1-to-L1 copy), and from calls made inside
+them. So a DMA beat of cycle c reaches the crossbar before c's arbitration,
+whether its event runs before or after the narrow masters' requests of c.
+The `dma` port records its superbank as taken in c when the beat comes, and
+the arbitration of c refuses the narrow winners there: the DMA wins
+whichever of the two calls first.
+
+A DMA beat that comes after its cycle's arbitration, on a superbank where
+a narrow request was granted in that cycle, cannot win: that grant is out.
+The crossbar stops with an error naming the superbank, as it does for a
+narrow request after the arbitration (round 3). On a superbank with no
+grant in that cycle the late beat is taken as any other. Step 3 runs every
+program with this check.
+
+### Acceptance of round 4
+
+- 4.2: the plain pick equals `rr_arb_tree` v1.40.0 (`FairArb`, `LockIn`,
+  `AxiVldRdy`) in every selection under random requests and `gnt_i`, in
+  Verilator, for 15 inputs (the targets') and 12; a copy of the pick with
+  a broken lock rule fails the check. `make regress` passes and every
+  `run.log` equals round 3b's.
+- 4.3: `dma-timing` on both targets equal on every line to round 3b's
+  (SG2's); `make regress` passes; every other `run.log` equal to round
+  3b's or each difference named; no DMA beat after its cycle's arbitration
+  and no request crossing a superbank line in any program.
+- 4.4: `dma-tcdm`'s predictions in this file before any RTL run.
+- 4.5: `dma-tcdm`'s compared counters equal on the plain RTL and the plain
+  target, and on the sparse RTL and the sparse target; `dma-timing` and
+  the other programs as round 3b on the targets; every prediction marked
+  held or not, every gap named.
 
 ## Decided
 

@@ -2684,3 +2684,20 @@ line now equals SG2 step 7's; `busy` equal to the RTL on every line.
   (no program here does it in a measured window); the effect of the early
   crossbar request of an L1 load after a DRAM load (step 2) on any program
   with a streamer request in that window.
+
+### SG7 round 4, step 1: the plan
+
+- 2026-10-16. `git pull` on main in snax-gvsoc and snax-forge (nothing new;
+  main has no commit the branch lacks), `ry/sg7-sparse` checked out and
+  pulled. Round 4's plan is in `SG7.md`, "Round 4": the RTL's superbank mux
+  and both interconnects' lock on a refusal, read at `9fbf35d` and common_cells
+  v1.40.0; GVSoC's DMA path (`IDmaBeTcdm`, `DmaInterleaver`); the design, a
+  `dma` port on the crossbar; the call order within a cycle.
+- Read, not run: the DMA back-ends' enqueues (`idma_be_tcdm.cpp`,
+  `idma_be_axi.cpp`, `idma_be.cpp`, `idma_me_2d.cpp`): all at delay 1 or
+  more but `IDmaBeTcdm::read_line`'s `enqueue(latency)` with latency 0, for a
+  read line whose destination is not ready; the event it queues sends a TCDM
+  line only if a TCDM write chunk is pending, i.e. in an L1-to-L1 copy.
+  The streamer's commit is queued with delay 0 after its requests and relies
+  on running after the arbitration, so the arbitration cannot simply be
+  moved to the end of the cycle.
