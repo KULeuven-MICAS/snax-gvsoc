@@ -45,10 +45,16 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 
 ```json
 {"block": "ElementwiseTiledSpatial",
- "args": {"lanes": "W", "dataWidth": "dtype_bits(a)", "supportedOps": ["op"]},
- "control": "counted", "csrs": ["loopCount: n"], "wait": "lockstep"}
+ "args": {"lanes": "W", "supportedOps": "op"},
+ "control": "counted",
+ "csrs": [{"field": "loopCount", "value": "n"}],
+ "wait": "lockstep"}
 ```
 
+- Every value in `args` and `csrs` is an expression in snax-forge's
+  `expr.py` grammar.
+- The data width comes from the ports' `dtype`, which all ports of a unit
+  share; a mismatch is an error.
 - A fixed op gives no `opSel` CSR.
 - `control`: `counted` (the block counts), `stream` (the shell counts;
   `Accumulator`).
