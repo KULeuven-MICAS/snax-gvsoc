@@ -3017,3 +3017,15 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Every compared counter is now equal on the sparse RTL and the sparse
   target. Next: planning the single generator (open item 68 in
   snax-forge), then GEN1.
+
+### GEN3: the plan
+
+- 2026-10-17. `docs/plans/GEN3.md` written: a BRM's design point gives a
+  generated accelerator on `SnaxUnit` and `SnaxShell`, steps 0 to 6 in
+  three rounds.
+- It rests on four decisions in snax-forge (branch `ry/gen3-docs`): D127
+  (M14's order, SNAX-GVSoC first), D128 (the two generic components, only
+  Python and headers generated, one fixture here), D129 (the BRM's
+  binding), D130 (GeMMX's shell contract).
+- The facts under "What it models" were read from source (snax-forge's
+  Chisel blocks, snax_cluster at `05615e4`), not run.
