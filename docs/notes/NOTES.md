@@ -3694,3 +3694,53 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   175, `test-sandbox` 77, `test-flow` 78, `test-design` 142 passed,
   `tests/gen` 42 passed and 2 skipped (submodule at the pin); fmt, lint
   clean.
+
+### GEN3 step 7: the lockstep half of the unit cross-check
+
+- 2026-10-18. snax-forge `ry/gen3` (`1bbf7c4`):
+  `hw/chisel/src/test/scala/snax/forge/elementwise/ElementwiseTiledSpatialLockstepSpec.scala`
+  reads the case files of `tests/snax/unit/cases/` from the folder
+  `SNAX_GVSOC_UNIT_CASES` names (canceled without it: CI never fetches this
+  repo) and drives `ElementwiseTiledSpatial` (64 bit, 4 lanes, add) through
+  every `wait lockstep` case, cycle by cycle: a and b valid and out ready as
+  the line gives them, a start poked in the cycle the case offers it. Every
+  cycle it compares fire (both operand transfers), push (`out.fire`) and
+  busy with the case, and each start's answer with the block's state
+  (`taken` idle with a count, `ignored` idle with 0, `refused` busy). Not
+  compared: the `expect run` lines (SnaxUnit's trace); `pipelined_l0` (only
+  `like` lines) and the pipelined cases are left out.
+- Run, in snax-forge's image: `pixi run -e hw chisel-test` works (sbt from
+  the hw environment, the jars from the Coursier cache). With
+  `SNAX_GVSOC_UNIT_CASES=$PWD/gvsoc/snax-gvsoc/tests/snax/unit/cases` (the
+  pin's cases): 50 passed, the four lockstep cases agree; without it: 49
+  passed, 1 canceled. A copy of the cases with busy flipped in cycle 1 of
+  `lockstep_out_not_ready`: FAILED. `chisel-check` clean.
+- First tries: `cases/*.txt` in the Scaladoc opened a nested comment
+  (`unclosed comment`); `pipelined_l0.txt` has no `cycles` line. Both fixed
+  before the commit.
+
+### GEN3 round 3: docs and the full runs
+
+- 2026-10-18. Here: GEN3.md: step 5 ticked; step 6 split into 6a
+  (`elementwise_mul`, done) and 6b (`accumulate`: SnaxUnit's fixed 2 inputs
+  / 1 output, an output rate T, `stream` control and which of n and T the
+  shell counts, the drain cycle, a sum-only kernel; planned first, round
+  4); step 7's row; rounds 3 (steps 5, 6a, 7: done) and 4 (6b); "Where
+  things go" names `forge/<design>/`; the hooks name the manifest's
+  `symbols`; the Open line on the hand-written program closed (it stays
+  until GEN2a). README: a `forge/` section, `GEN3.md` in the layout.
+- snax-forge: STATUS (GEN3's row, the next-up paragraph), D128 amended in
+  place (each design point the regression runs is a fixture in
+  `forge/<design>/`), README section 5 "Refreshing a fixture". CONTRACTS
+  does not describe the manifest: unchanged.
+- Full runs, in snax-forge's image: snax-forge `pixi run -e ci test`: 1700
+  passed, 2 skipped (`tests/gen/test_fixture.py`, the submodule at its pin
+  `dbd7f96` has no `forge/`); `pixi run lint` clean. Here `make regress`:
+  `regression passed`, unit 1, SNAX 40, `snax-shell.snax_tiled_add` 1,
+  `forge-elementwise` 2 (vecadd, vecmul), plain 17, 117 s. The install's
+  `models/` and `lib/` listings (names, sizes, times) equal before and
+  after: nothing compiled, `TARGETS` unchanged.
+- Not verified: CI (not run, in either repo); the fixture test at a pinned
+  submodule (the pointer is never committed in this round, so it skips
+  until the bump); the program at W other than 4 (datagen's `SPATIAL_PAR`);
+  any fixture on RTL (none exists).
