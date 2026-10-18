@@ -3136,3 +3136,61 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   `make run SNAX_GVSOC=../../snax-gvsoc TARGET=alu_probe
   ELF=../../snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf`: the
   `Missing platform_tree library for target 'alu_probe'` error, exit 2.
+
+### GEN3 step 1: SnaxUnit
+
+- 2026-10-18. New files:
+  - `snax/snax_unit.hpp`: the cycle rule (`SnaxUnitRule`) and the op table
+    (`SnaxUnitOp`, `snax_unit_compute`), no GVSoC dependency, as
+    `snax_plain_arb.hpp`. A start is taken only when idle and with count != 0
+    (0: ignored; while busy or a second one in the cycle: refused); busy from
+    s + 1 to the run's last cycle E. `lockstep` (ElementwiseTiledSpatial):
+    fires and pushes when every input has a beat and the output has room.
+    `pipelined` (accel.py without rates and drain): join, L slots stalling as
+    a whole on a full head with no room, one firing per II (counted from the
+    last firing, kept across a stall and across runs, as accel.py's
+    `_last_fire`), L = 0 a firing with no room a stall. Classes in D59's
+    order: stall_out > busy (fired or II gap) > stall_in > idle (pipelined:
+    results in flight after the last firing's gap). `run_line()` gives
+    `run <i>: firings <f> busy <b> stall_in <si> stall_out <so>`.
+  - `snax/snax_unit.cpp` + `snax/snax_unit.py`: `SnaxUnit`, every property
+    read with `get_js_config` and checked (missing, wrong type, bad value: a
+    fatal naming it). Properties and defaults (Python): `inputs`, `outputs`
+    (no default; two and one names, the op table is binary), `lanes`,
+    `data_width`, `op` (no default), `signed` False, `control` `counted`,
+    `wait` `lockstep`, `latency` 0, `ii` 1, `csr_base` 0. Ports: the named
+    io masters, `ctrl` (io slave), `busy` (wire<bool> master).
+  - `tests/snax/unit/`: `tb.cpp`, `run.sh`, `README.md`, `cases/*.txt`.
+- data_width: the streamer's beats are `num_channel * 8` bytes, one 64-bit
+  word per channel, lane 0 first (`reader_req` and `writer_req` in
+  `snax_streamer.cpp` refuse another size). So `lanes * data_width` must be
+  a multiple of 64; the elements are packed `data_width` bits apart, lane 0
+  lowest, as a Chisel `Vec`; `data_width` 8, 16, 32 or 64 (an element never
+  crosses a word). Only `data_width` 64 is run in this round (step 2).
+- Choices: the start's configuration for `control: counted` is one word,
+  the count (no `opSel`: `op` is fixed); a ctrl write of another size is
+  refused (INVALID), a start while busy DENIED after a warning; `busy`
+  syncs true in the cycle a start is taken and false in the run's last
+  cycle (the register's next value); `latency` must be 0 and `ii` 1 with
+  `lockstep`. The trace line is at DEBUG level, as `snax_alu_shell.cpp`'s
+  `Done`. A case line carries push and busy besides fire, and `start` and
+  `expect` header lines; `pipelined_l0` re-runs every lockstep case
+  (`like`) as pipelined L = 0, II 1.
+- Differs from the prompt: the run line leaves out the pipelined idle
+  cycles (accel.py's `idle`), so for `pipelined` busy + stall_in +
+  stall_out is the busy cycles less them (2 in `pipelined_l2_backpressure`,
+  1 in `pipelined_ii2`); for `lockstep` it is all of them.
+- `tests/snax/regress.py`: `unit` first (`run.sh`, pass when exit 0), its
+  log in `build/regress/work/unit/run.log`. README: layout and regression.
+- Run, in snax-forge's image: `tests/snax/unit/run.sh`: `PASS ops: 16
+  vectors`, the six cases and `pipelined_l0` four times, `11 passed, 0
+  failed`. Two broken copies of the header (no freeze at L > 0; no II gap
+  class) fail 2 and 1 cases. `snax_unit.cpp` compiled with the build's own
+  flags (`g++ -O3 -std=gnu++17 -fPIC -D__GVSOC__`, the include dirs of
+  `flags.make`): no error, warnings only from `vp/itf/io.hpp`
+  (`-Wreorder`). `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`:
+  exit 0. `make regress`: `regression passed`, `unit` 1, SNAX 40, plain 17,
+  1 min 47 s. A case edited to a wrong run line: `-k unit` prints `FAIL
+  unit: exit 1` and exits 1 (case restored).
+- Not verified: `SnaxUnit` in a running target (no target uses it before
+  step 2); `data_width` below 64 and `pipelined` in GVSoC; `signed` true.

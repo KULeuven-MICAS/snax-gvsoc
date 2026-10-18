@@ -105,7 +105,7 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 |---|---|---|
 | 0a | SNAX-GVSoC from snax-forge: this repo a submodule at snax-forge `gvsoc/snax-gvsoc`, never fetched by its CI (D128); `gvsoc/Makefile` (`build`, `sw`, `run`) and `gvsoc/targets/` | done |
 | 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`). Found: nothing compiles and properties reach the C++ through the JSON config, but gvrun stops on a target without its platform tree (Open) | done |
-| 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | todo |
+| 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | done |
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test | todo |
 | 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator; `snax_alu.py`'s accelerator argument here | todo |
 | 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template | todo |
@@ -117,8 +117,8 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 - Whether the first vecadd program stays hand-written until GEN2a.
 - A target that no build made (from `--target-dir`, as every generated one)
   has no `libplatform_tree_<target>.so`, and `runner_gvrun2.py` stops on it
-  (`Missing platform_tree library`, lines 290 to 297). The engine runs without a tree
-  (the JSON config path, `top.cpp`): with the stop turned into that fallback
+  (`Missing platform_tree library`, lines 290 to 297). The engine runs
+  without a tree (the JSON config path, `top.cpp`): with the stop turned into that fallback
   in an install's copy, `alu_probe` gave `snax_alu`'s output on its eight
   programs (step 0b). Either that fallback, an upstream change here, or
   each generated target's tree built (a compile per structure, against

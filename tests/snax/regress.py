@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """SNAX-GVSoC's regression (SG5, pass/finish only since SG6): `make regress`.
 
-Builds sw/ (`make -C sw`: the runtime per cluster, the math library and
+First runs SnaxUnit's rule against its hand-worked cases
+(tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0). Then
+builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy, CI1) and the programs
 of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
 (SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
@@ -112,6 +114,24 @@ class Check:
         why = f"did not finish within {TIMEOUT} s" if code is None else f"exit {code}"
         self.fail(name, why, log)
 
+    def run_script(self, name, script):
+        """Runs a test script, its output into the log; it passes when it
+        exits 0."""
+        if not self.selected(name):
+            return
+        self.count += 1
+        log = WORK / name / "run.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(log, "w") as out:
+                p = subprocess.run([str(script)], cwd=ROOT, stdout=out,
+                                   stderr=subprocess.STDOUT, timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.fail(name, f"did not finish within {TIMEOUT} s", log)
+            return
+        if p.returncode != 0:
+            self.fail(name, f"exit {p.returncode}", log)
+
     def fail(self, name, why, log=None):
         self.failed.append(name)
         print(f"  FAIL {name}: {why}")
@@ -130,8 +150,13 @@ def main():
                    help="run only the programs whose name holds SUBSTRING")
     check = Check(p.parse_args().only)
 
+    print("SnaxUnit's rule (tests/snax/unit)")
+    check.run_script("unit", HERE / "unit" / "run.sh")
+    print(f"  {check.count} run")
+
     make(SW)
 
+    count = check.count
     print(f"SNAX programs on {', '.join(SNAX_TARGETS)}")
     for n in SIZES:
         if check.selected_snax(f"snax-alu-{n}"):
@@ -156,7 +181,7 @@ def main():
     for case in DMA_TCDM_CASES:
         check.run_snax(f"dma-tcdm-{case}",
                        BUILD / "apps" / "dma-tcdm" / f"dma-tcdm-{case}.elf")
-    print(f"  {check.count} run")
+    print(f"  {check.count - count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")
     count = check.count

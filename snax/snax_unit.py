@@ -1,0 +1,86 @@
+#
+# Copyright 2026 KU Leuven.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+"""SnaxUnit (snax_unit.cpp): a Chisel block's datapath, every number a property.
+
+The rule (lockstep, pipelined) and the op table are in snax_unit.hpp. The
+C++ checks every property and stops on a bad one, naming it; this class only
+passes them on, so a design point compiles nothing (D128).
+"""
+
+import gvsoc.systree
+
+
+class SnaxUnit(gvsoc.systree.Component):
+    """The datapath: lanes elements per beat, one op, lockstep or pipelined.
+
+    Parameters
+    ----------
+    inputs : list[str]
+        Input port names, in the op's operand order (two).
+    outputs : list[str]
+        Output port names (one).
+    lanes : int
+        Elements per beat.
+    data_width : int
+        Bits per element: 8, 16, 32 or 64, lanes * data_width a multiple of 64.
+    op : int
+        ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3, or 4, xor 5,
+        min 6, max 7.
+    signed : bool
+        Min and max compare as two's complement.
+    control : str
+        counted: the start's configuration word is the trip count.
+    wait : str
+        lockstep or pipelined.
+    latency : int
+        Pipeline stages L (pipelined; 0 for lockstep).
+    ii : int
+        Initiation interval (pipelined; 1 for lockstep).
+    csr_base : int
+        Number of the shell's first CSR, for the trace.
+
+    Ports
+    -----
+    <input>, <output> : io master
+        The streamer's reader_<i> and writer_<j> ports.
+    ctrl : io slave
+        A start: a write of the configuration words in CSR order.
+    busy : wire<bool> master
+        Busy from the next cycle on, driven on every change.
+    """
+
+    def __init__(self, parent: gvsoc.systree.Component, name: str, inputs: list,
+            outputs: list, lanes: int, data_width: int, op: int, signed: bool = False,
+            control: str = 'counted', wait: str = 'lockstep', latency: int = 0, ii: int = 1,
+            csr_base: int = 0):
+        super().__init__(parent, name)
+
+        self.add_sources(['snax_unit.cpp'])
+
+        self.add_properties({
+            'inputs': list(inputs),
+            'outputs': list(outputs),
+            'lanes': lanes,
+            'data_width': data_width,
+            'op': op,
+            'signed': signed,
+            'control': control,
+            'wait': wait,
+            'latency': latency,
+            'ii': ii,
+            'csr_base': csr_base,
+        })
+
+    def i_CTRL(self) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, 'ctrl', signature='io')
+
+    def o_PORT(self, port: str, itf: gvsoc.systree.SlaveItf):
+        """Binds the input or output port named port."""
+        self.itf_bind(port, itf, signature='io')
+
+    def o_BUSY(self, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind('busy', itf, signature='wire<bool>')
