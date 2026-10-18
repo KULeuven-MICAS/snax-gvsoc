@@ -3491,3 +3491,52 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Not verified: a program compiled against the generated headers (step 5);
   more than one dimension against a header the Chisel streamer generated
   (none exists for such a template here); CI (not run).
+
+### GEN3 round 2b: fix-ups after round 2
+
+- 2026-10-18. snax-forge `ry/gen3`, in snax-forge's image with pixi 0.41.4.
+- F1: `pixi.lock` written with 0.41.4, CI's (`ci.yml`, `locked: true`) and
+  the image's. Round 2's was written with pixi 0.46; 0.41.4 then dropped the
+  PyPI `cmake`, `distro`, `scikit-build` and `setuptools`. Why: DaCe 1.0.2
+  is an sdist whose `setup.py` adds `scikit-build` and `cmake` to its
+  requirements only when no cmake >= 3.15 is on PATH while its metadata is
+  built (scikit-build brings the other two). Main's lock was solved on an
+  ESAT host, where Vitis's cmake 3.3.2 leads PATH; the image has
+  `/usr/bin/cmake` 3.28.3. Nothing uses them: neither snax-forge nor the
+  installed DaCe imports them, the build backend is hatchling, DaCe's
+  runtime cmake is the conda `cmake >=3.27` the activation PATH puts first.
+  So 0.41.4's lock as it is: main's plus `hjson-py`, minus the four; a
+  comment in `pixi.toml` says to lock in the image. `pixi install --locked`
+  (default and ci) exit 0, a plain `pixi install` left `pixi.lock`
+  unchanged, `pixi run -e ci lint` clean.
+- F2: `pixi run -e ci test` in full: 1693 passed, nothing failed. C§14's
+  `memory.fit` row now says what the fix gives (past the end the rows or L2
+  size, after "pin it lower" for a pinned layout; below a nonzero start the
+  pin at the memory's first byte). The test, moved beside the other fit
+  tests in `tests/design/test_check.py`: A pinned at 576 in snax_alu's L1
+  and B at 0 in its L2 give two `memory.fit` with
+  `--set memory.A.l1.base=268435456` and `memory.B.l2.base=2147483648`, and
+  following both leaves no problem.
+- F3: the generator names the design point once, by its path from
+  snax-forge's root (`out/design/vecadd/design_point.json`, was
+  `../../design/vecadd/design_point.json` from the out folder in the
+  manifest): the manifest's `design_point` and the header comment of all
+  four generated files. `generate(..., root=None)`; a design point outside
+  the root is refused (`gen.point`), as its absolute path would depend on
+  the host. A test generates one design point into two folders, the second
+  from another working directory with a relative path: the files are
+  byte-identical. Through the command too: from `out/probe` and into
+  `/tmp/gen3`, both equal `out/gvsoc/vecadd`. `pixi run gen-gvsoc` runs
+  from snax-forge's root, so a relative design point is read from there.
+- F4: the install check against round 2's install (`out/snax-gvsoc/install`),
+  no code changed. With a copy of its `targets`, `generators` and `python`:
+  a planted `targets/forge_vecadd.py`, `generators/forge_vecadd_acc.py` or
+  package `targets/forge_vecadd_acc/` each exit 1 with `[gen.install] ...
+  holds '<module>', which comes first on gvrun's path and would shadow the
+  generated module`, nothing written; `generators/snax_unit.py` removed
+  gives `no 'snax_unit' ... build snax-gvsoc`. The real install passes:
+  `snax_streamer`, `snax_shell`, `snax_unit`, `snax_alu` and
+  `interco.router` in its `generators`, `gvsoc.systree` and `gvsoc.runner`
+  in its `python`, no `forge_` module in `targets` or `generators`.
+- After F3: `pixi run -e ci test` 1695 passed (F3's two new tests).
+- Not verified: CI (not run).

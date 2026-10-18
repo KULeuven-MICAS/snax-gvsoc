@@ -83,11 +83,13 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   `targets` or `generators` hold and checks that the modules the files
   import are there (snax-forge D132).
 - One generated design point (vecadd, W = 4) checked in here as the
-  fixture, refreshed by hand, its diff the check.
+  fixture, refreshed by hand, its diff the check. The generator's output
+  names the design point by its path from snax-forge's root and is
+  byte-identical wherever it is written (round 2b F3).
 
 ## Hooks for FLOW3
 
-- `generate(design_point, out_dir, install=None) -> Manifest`, with a thin
+- `generate(design_point, out_dir, install=None, root=None) -> Manifest`, with a thin
   command (`pixi run gen-gvsoc`); the manifest lists the target, the files,
   the `--target-dir`s, the unit's trace path, the CSR layout and each
   accelerator task's beats.
@@ -109,6 +111,7 @@ To be confirmed.
 | 1 | Steps 0a and 0b in snax-forge, 1 and 2 here |
 | 1b | Fix-ups F1 to F4, below |
 | 2 | LNK1 in snax-forge (D131), steps 3 and 4: done |
+| 2b | Fix-ups F1 to F4, below: done |
 | 3 | Steps 5 and 6 |
 
 ## Acceptance
@@ -136,6 +139,15 @@ Round 1b, fix-ups after round 1:
 | F2 | `flush` in the unit's run line: the cycles after the last firing with results still in the pipeline (not frozen), so the four classes add up to the run's busy cycles; the unit test checks that on every case | done |
 | F3 | `snax-shell` without layout constants: it prints its first run's counter and `make regress` checks it against the unit's first run line (`check_counter`, for step 5's programs too) | done |
 | F4 | Docs: the target-name rule; round 1's open edge cases into Open | done |
+
+Round 2b, fix-ups after round 2 (all in snax-forge):
+
+| # | Fix-up | Status |
+|---|---|---|
+| F1 | `pixi.lock` written with pixi 0.41.4 (CI's and the image's): main's lock plus `hjson-py`, without the PyPI `cmake`, `distro`, `scikit-build` and `setuptools` that DaCe's `setup.py` asks for only when no cmake >= 3.15 is on PATH (ESAT's Vitis cmake 3.3.2); nothing uses them | done |
+| F2 | `pixi run -e ci test` in full (1693 passed); `memory.fit`'s C§14 row says what its fix gives, a test pins below snax_alu's L1 and L2 bases and follows the fix | done |
+| F3 | The design point named once, by its path from snax-forge's root, in the manifest and every generated file's header; one design point into two out folders gives byte-identical files; outside the root it is refused (`gen.point`) | done |
+| F4 | The install check against round 2's real install: a `forge_` module planted in a copy is refused (`gen.install`), the real install passes with `snax_streamer`, `snax_shell`, `snax_unit` and `snax_alu` found in its `generators` | done |
 
 ## Open
 
