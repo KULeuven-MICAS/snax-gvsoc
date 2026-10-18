@@ -7,17 +7,18 @@
 // words, on the generated headers only (streamer_csr_addr_map.h and
 // acc_csr.h from forge/<design>/include/). It follows the design point's
 // derived task list (snax-forge snax_forge/lower/derive.py), the bases
-// replaced by the L1 pointers:
+// replaced by the L1 pointers. BEATS (the task's n) and LANES (N / BEATS)
+// come from the fixture's manifest through the Makefile (-D):
 //   - the three streamers, reader 0 = A, reader 1 = B, writer 0 = O: base,
-//     spatial stride 8 (one 64-bit word per lane), temporal bound
-//     DATA_LEN / LANES beats, temporal stride 8 * LANES;
-//   - the unit's loopCount, the task's n: DATA_LEN / LANES beats;
+//     spatial stride 8 (one 64-bit word per lane), temporal bound BEATS,
+//     temporal stride 8 * LANES;
+//   - the unit's loopCount, BEATS;
 //   - the starts in the task list's order, the streamer's movers (one start
 //     CSR for the three) and then the accelerator;
 //   - busy polled, the accelerator's, then the streamer's.
 // Then the shell's counter (busy cycles of the run, at least its beats) and
-// the data against OUT. Returns the error count. LANES is 4: datagen.py's
-// SPATIAL_PAR, so the program fits a design point at W = 4 only.
+// the data against OUT. Returns the error count. Only OUT and the data come
+// from datagen.py (its LOOP_ITER, from SPATIAL_PAR 4, is not used).
 
 #include "snrt.h"
 
@@ -25,9 +26,9 @@
 #include "data.h"
 #include "streamer_csr_addr_map.h"
 
-#define LANES 4
-// One beat is LANES words (DATA_LEN is a uint64_t)
-#define BEATS ((uint32_t)(DATA_LEN / LANES))
+#if !defined(BEATS) || !defined(LANES)
+#error "BEATS and LANES come from the manifest (the Makefile's -DBEATS -DLANES)"
+#endif
 
 int main() {
     int err = 0;

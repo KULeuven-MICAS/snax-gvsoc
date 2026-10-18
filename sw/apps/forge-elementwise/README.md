@@ -11,9 +11,9 @@ It follows the design point's derived task list (snax-forge
 
 1. The DMA core loads A and B into L1 (`load_A`, `load_B`); barrier.
 2. The compute core configures the three streamer tasks, reader 0 = A,
-   reader 1 = B, writer 0 = O: spatial stride 8, temporal bound `DATA_LEN /
-   4` beats, temporal stride 32. Then `ACC_RW_LOOP_COUNT`, the accelerator
-   task's `n` (`DATA_LEN / 4`).
+   reader 1 = B, writer 0 = O: spatial stride 8, temporal bound `BEATS`,
+   temporal stride `8 * LANES`. Then `ACC_RW_LOOP_COUNT`, the accelerator
+   task's `n` (`BEATS`).
 3. The starts in the task list's order: the streamer (one start CSR for its
    three movers), then the accelerator.
 4. Busy polled, the accelerator's, then the streamer's.
@@ -32,7 +32,7 @@ beats. `make regress` checks the counter against the unit's first run line
 It stays hand-written until GEN2a, when snax-forge's lowering writes the
 program from the task list.
 
-## DESIGN, MODE and DATA_LEN
+## DESIGN, MODE, DATA_LEN, BEATS and LANES
 
     make -C sw/apps/forge-elementwise DESIGN=vecadd MODE=0
 
@@ -42,12 +42,16 @@ program from the task list.
   add, 2 mul. It must match the design's op; a change of `MODE` makes
   `data.h` again.
 - `DATA_LEN`: not set by hand, read from the manifest's `symbols.N`
-  (vecadd's 64). `data.h` is `datagen.py` at `MODE` and `DATA_LEN`, NumPy
-  seed 0, as snax-shell's; it depends on the manifest and the Makefile.
+  (vecadd's 64). `data.h` is `datagen.py` at `MODE` and `--length=DATA_LEN`,
+  NumPy seed 0, as snax-shell's; it depends on the manifest and the Makefile.
+- `BEATS`: the manifest's `tasks[0].beats` (vecadd's 16), and `LANES` =
+  `DATA_LEN / BEATS` (4); a make error when `BEATS` does not divide
+  `DATA_LEN`. Both reach the program as `-DBEATS` and `-DLANES`, and the
+  ELF depends on the manifest, so a change of either rebuilds it.
 
-The program's `LANES` is 4, datagen's `SPATIAL_PAR`, which ties it to a
-design point at W = 4: the streamer's bound and stride and the loop count
-assume 4 lanes.
+datagen's `LOOP_ITER` (from its `SPATIAL_PAR` 4) is not used, so the program
+follows the design point's lanes. Every fixture so far is at W = 4; W = 8
+has none, so a run at 8 lanes is not tried.
 
 ## Run
 
@@ -60,4 +64,6 @@ In the container, from snax-gvsoc, with GVSoC built and the program made:
 
 It warns that `forge_vecadd` has no platform tree, prints the unit's line
 `run 0: firings 16 ...`, then `forge-elementwise data: 0 errors (64 words)`,
-the counter and `forge-elementwise errors: 0`, and exits 0.
+the counter (busy + stall_in + stall_out + flush of that line; 19 in GEN3
+round 3b's build, which the core's timing can move) and
+`forge-elementwise errors: 0`, and exits 0.

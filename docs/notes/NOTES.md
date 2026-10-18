@@ -3767,3 +3767,26 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Not verified: snax-forge's `make -C gvsoc run` with `TARGET_DIRS` on the
   submodule's `forge/<design>` does not set the variable, so a hand run
   there would write a `__pycache__` the fixture test would then count.
+
+### GEN3 round 3b F2: BEATS and LANES from the manifest
+
+- 2026-10-18. `sw/apps/forge-elementwise/Makefile`: `BEATS` from the
+  manifest's `tasks[0].beats`, `LANES = N / BEATS` (`expr`; a make error
+  when it does not divide: `N 64 is not a multiple of the 15 beats in
+  .../manifest.json`), passed as `-DBEATS` and `-DLANES`; the ELF depends on
+  the manifest. `data.h` still at `--length=N`. `src/forge-elementwise.c`:
+  the streamer bounds and strides and `ACC_RW_LOOP_COUNT` from them, an
+  `#error` without them; datagen's `LOOP_ITER` and the hard-coded 4 gone.
+  README updated.
+- Run, in snax-forge's image: vecadd and vecmul build with `-DBEATS=16
+  -DLANES=4`; a touched manifest relinks the ELF (`make -n`); beats edited
+  to 15: the make error; to 8: `-DBEATS=8 -DLANES=8`, built (not run);
+  manifest restored. `python3 tests/snax/regress.py -k forge`: `2 run`,
+  `regression passed`; both logs `forge-elementwise data: 0 errors (64
+  words)`, `errors: 0`, as round 3.
+- Differs from round 3: the counter is 19, not 16, on both (`run 0:
+  firings 16 busy 16 stall_in 3 stall_out 0 flush 0`; `check_counter`
+  holds). BEATS was computed at run time from `data.h`'s `uint64_t
+  DATA_LEN`; as an immediate the starts follow the configuration sooner, so
+  the streamer has less of a head start (read from the code, not traced).
+- Not verified: a design point at W = 8 on GVSoC (no fixture at W = 8).
