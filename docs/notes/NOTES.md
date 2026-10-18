@@ -3790,3 +3790,22 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   DATA_LEN`; as an immediate the starts follow the configuration sooner, so
   the streamer has less of a head start (read from the code, not traced).
 - Not verified: a design point at W = 8 on GVSoC (no fixture at W = 8).
+
+### GEN3 round 3b F3: drop gen.symbols (snax-forge)
+
+- 2026-10-18. snax-forge `ry/gen3` (`c817e7e`): the generator's
+  `gen.symbols` rule and its patched test removed, since `DesignPoint.load`
+  already refuses a null symbol; the docstring says so (`graph.symbols`).
+  A test writes a design point with `N` null and checks that `generate`
+  stops at the load with that `DesignError`, writing nothing. Run, in
+  snax-forge's image: `pixi run -e ci test-gen` 42 passed, 2 skipped (the
+  fixture test, submodule at its pin); fmt, lint clean.
+
+### GEN3 round 3b F4: make regress K=
+
+- 2026-10-18. `Makefile`: `make regress K=<substring>` runs
+  `python3 tests/snax/regress.py -k <substring>`, without `K` as before
+  (`make -n`: `... regress.py -k forge`, `... regress.py`). README's
+  Regression section says so. Run, in snax-forge's image: `make regress
+  K=forge`: the two forge entries, `regression passed`; no `__pycache__`
+  under `forge/`.

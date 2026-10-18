@@ -174,8 +174,8 @@ failed or did not finish and exits 1. Each run's output goes to
 `build/regress/work/<name>/run.log`; a failure prints that path and the
 log's last 20 lines. `python3 tests/snax/regress.py -k SUBSTRING` runs only
 the programs whose name holds it, as `-k stream-timing`, `-k sparse`,
-`-k forge` or `-k plain` (`make regress` takes no `-k`: make reads it as its
-own flag).
+`-k forge` or `-k plain`; `make regress K=forge` passes `-k forge` (a bare
+`make regress -k forge` does not: make reads `-k` as its own flag).
 
 ## Continuous integration
 
