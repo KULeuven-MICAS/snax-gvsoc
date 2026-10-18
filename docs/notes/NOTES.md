@@ -3269,3 +3269,45 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   count: by reading, not run), a held start whose write comes in E after the
   fall (the `fall_cycle` path: by reading, not run), the CI workflow (not
   run), the `snax_tiled_add` program on any RTL (none exists).
+
+### GEN3 round 1b F1: a target without its platform tree
+
+- 2026-10-18. `engine/python/gvsoc/runner_gvrun2.py`: when
+  `libplatform_tree_<target>.so` does not exist, one line on stderr,
+  `Warning: target '<target>': no platform tree, using the JSON config
+  (<path> does not exist)`, and no `platform_tree` in the config, as the
+  signature-mismatch path; it no longer stops (`Missing platform_tree
+  library`). An installed target with its tree loads it as before (the
+  signature check unchanged). UPSTREAM.md row.
+- snax-forge `gvsoc/targets/`: `alu_probe` (unchanged, now runs) and
+  `tiled_add_sparse_probe.py` (`TiledAddSparseProbeBoard(SnaxAluSparseBoard)`
+  with `accelerator = SnaxTiledAddAcc`: `snax_tiled_add`'s accelerator on
+  `snax_alu_sparse`'s sparse interconnect, a component tree no built target
+  has). Its README and README.md say how they run.
+- Run, in snax-forge's image:
+  - here, `make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"`
+    exit 0, then `make regress`: every gvrun log byte-identical to round 1's
+    (step 2's, saved before), 58 of 58 (SNAX 40, snax-shell 1, plain 17).
+    `unit` failed in that run, because I was editing `snax_unit.hpp` and
+    `tb.cpp` for F2 while it ran (`'IDLE' is not a member`); with those
+    edits put aside, `tests/snax/unit/run.sh` gives `11 passed, 0 failed`.
+  - snax-forge `gvsoc/`, this checkout as `SNAX_GVSOC=../../snax-gvsoc`:
+    `make build TARGETS="snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0,
+    `make sw APPS="snax-alu stream-timing snax-shell"` exit 0, then
+    `out/f1_probe.sh` (not tracked): `make run` of `snax_alu` and
+    `alu_probe` on snax-alu (100) and the 7 stream-timing cases, and of
+    `snax_tiled_add` and `tiled_add_sparse_probe` on snax-shell, all exit 0.
+  - `alu_probe`: the warning line, then snax_alu's output exactly, on all 8
+    (`Accelerator Done!`, `Accelerator Cycles: 25`, `Number of errors: 0`;
+    e.g. `stream-timing prio_queued: first run counter 5, counter 5, polls
+    2, mcycle 21`).
+  - `tiled_add_sparse_probe`: the warning, then `snax-shell data: 0 errors
+    (128 words)`, counter 16, span 19, loopCount 0: busy 0, counter 0,
+    `snax-shell errors: 0`: the same lines as on `snax_tiled_add`.
+  - The install's `models/` and `lib/` (131 files): timestamps listed
+    before and after the 18 runs, identical. Nothing compiled.
+- Step 0b's open item closed (GEN3.md): the fallback, here.
+- Not verified: a target from `--target-dir` with a component whose `.so`
+  the install does not hold (gvrun would have to compile it; not tried);
+  the submodule's pin (`c911569`, main) still stops, since it predates
+  this; CI (not run).
