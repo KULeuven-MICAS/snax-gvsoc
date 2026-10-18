@@ -82,17 +82,24 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   with `forge_`; with an install, the generator refuses a name its
   `targets` or `generators` hold and checks that the modules the files
   import are there (snax-forge D132).
-- One generated design point (vecadd, W = 4) checked in here as the
-  fixture, refreshed by hand, its diff the check. The generator's output
-  names the design point by its path from snax-forge's root and is
-  byte-identical wherever it is written (round 2b F3).
+- One fixture per design point `make regress` runs, in `forge/<design>/`
+  here (`forge/README.md`): the generator's output, untouched, refreshed by
+  hand, its diff the check (snax-forge D128). vecadd and vecmul at W = 4.
+  The generator's output names the design point by its path from
+  snax-forge's root and is byte-identical wherever it is written (round 2b
+  F3), so snax-forge's `tests/gen/test_fixture.py` generates it again and
+  compares byte for byte when its submodule holds `forge/`. Regress runs a
+  fixture through `--target-dir`, never through `TARGETS`.
 
 ## Hooks for FLOW3
 
 - `generate(design_point, out_dir, install=None, root=None) -> Manifest`, with a thin
-  command (`pixi run gen-gvsoc`); the manifest lists the target, the files,
-  the `--target-dir`s, the unit's trace path, the CSR layout and each
-  accelerator task's beats.
+  command (`pixi run gen-gvsoc`); the manifest lists the bound graph's
+  `symbols` (vecadd's `{"N": 64}`), the target, the files, the
+  `--target-dir`s, the unit's trace path, the CSR layout and each
+  accelerator task's beats. `make regress` reads it with plain json
+  (`FORGE` in `tests/snax/regress.py`), and `forge-elementwise` sizes its
+  data by `symbols.N`.
 - `snax_alu.py` takes its accelerator as a board class attribute
   (`SnaxAluBoard.accelerator`, step 2), as `snax_alu_sparse.py` overrides
   the interconnect.
@@ -104,15 +111,14 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 
 ## The rounds
 
-To be confirmed.
-
 | Round | Content |
 |---|---|
 | 1 | Steps 0a and 0b in snax-forge, 1 and 2 here |
 | 1b | Fix-ups F1 to F4, below |
 | 2 | LNK1 in snax-forge (D131), steps 3 and 4: done |
 | 2b | Fix-ups F1 to F4, below: done |
-| 3 | Steps 5 and 6 |
+| 3 | Steps 5, 6a and 7: done |
+| 4 | Step 6b, planned first |
 
 ## Acceptance
 
@@ -128,8 +134,10 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test (`snax-shell` on the hand-written `snax_tiled_add`) | done |
 | 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2); it refuses a target name the install has. `forge_vecadd` (W = 4 on `platforms/snax_alu.json`) runs snax-shell with `snax_tiled_add`'s program and unit run lines, after the no-platform-tree warning; nothing compiled | done |
 | 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template. In `include/` of the generator's output, listed in the manifest: `streamer_csr_addr_map.h` (the Chisel header's defines, values and order) and `<instance>_csr.h` (`snax-alu-lib.h`'s form; vecadd's `ACC_RW_LOOP_COUNT` 978 to `ACC_RO_PERF_COUNT` 981) | done |
-| 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress` (its counter through `check_counter`); snax-forge reproduces the fixture | todo |
-| 6 | `elementwise_mul`; `accumulate` with `control: stream`, `wait: pipelined` | todo |
+| 5 | A hand-written vecadd program on the generated headers (`sw/apps/forge-elementwise/`, until GEN2a), the fixture `forge/vecadd/`, `make regress` from its manifest (its counter through `check_counter`, the manifest's `symbols` and beats); snax-forge reproduces the fixture byte for byte | done |
+| 6a | `elementwise_mul`: `elementwise_add`'s binding with op mul (2); the test kernel `vecmul` and `recipes/vecmul.json` in snax-forge; the fixture `forge/vecmul/`, run by `forge-elementwise` at `MODE=2` | done |
+| 6b | `accumulate`, `control: stream`, `wait: pipelined`: `SnaxUnit`'s fixed 2 inputs / 1 output, an output rate T (one output per T inputs), what `stream` control configures and which of n and T the shell counts, the drain cycle, a sum-only kernel; planned first | todo |
+| 7 | The lockstep half of the unit cross-check: snax-forge's `ElementwiseTiledSpatialLockstepSpec` drives `ElementwiseTiledSpatial` through every lockstep case of `tests/snax/unit/cases/` (`SNAX_GVSOC_UNIT_CASES`, canceled without it) and checks fire, push and busy per cycle and each start's answer: the four cases agree; a flipped busy bit fails | done |
 
 Round 1b, fix-ups after round 1:
 
@@ -151,11 +159,10 @@ Round 2b, fix-ups after round 2 (all in snax-forge):
 
 ## Open
 
-- Whether the first vecadd program stays hand-written until GEN2a.
 - A start written in the run's last cycle E: `SnaxShell` holds it and
   sends it in E + 1 (the `fall_cycle` path in `csr_req`), read, never run.
 - `csrrw` with a destination register on a held start: the core's pending
   write path (`snax_csr_response`) was run only with rd = x0 (`csrw`).
 - `SnaxUnit` takes exactly 2 inputs and 1 output, and `counted` is one
   configuration word (the count): `accumulate` (one input, `control:
-  stream`) needs more, step 6.
+  stream`) needs more, step 6b.

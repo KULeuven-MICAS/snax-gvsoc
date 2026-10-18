@@ -17,9 +17,10 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
 | `snax/` | SNAX targets and components: the `snax_alu` and `snax_alu_sparse` targets, their streamer, ALU and TCDM crossbar; `SnaxUnit` (a generic Chisel block's datapath) and `SnaxShell` (its CSR manager), and the `snax_tiled_add` target on them (GEN3) |
+| `forge/` | Generated accelerators from snax-forge, one design point per folder, checked in as fixtures (`forge/README.md`) |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
 | `tests/snax/` | The regression (`regress.py`), the phase script (`phases.py`), the arbiters' checks against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
-| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`) |
+| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
@@ -122,6 +123,24 @@ add, 4 lanes of 64 bit). `sw/apps/snax-shell/` runs on it:
 It prints its checks and `snax-shell errors: 0`, and exits 0;
 `--trace=snax_acc0/unit` adds the unit's line per run.
 
+## Generated accelerators (forge/)
+
+`forge/<design>/` holds what snax-forge's GVSoC generator wrote for one
+design point, untouched: the composite on `SnaxShell` and `SnaxUnit`, a
+target `forge_<design>` (`snax_alu` with it in the accelerator slot), the
+headers and `manifest.json` (`forge/README.md`: what is there, how to refresh
+a folder). Nothing in it is built: gvrun reads a folder with `--target-dir`
+and runs it on the installed components (it warns that the target has no
+platform tree). `sw/apps/forge-elementwise/` drives one on its generated
+headers:
+
+    make -C sw/apps/forge-elementwise DESIGN=vecmul MODE=2
+    gvrun --target forge_vecmul --target-dir=$PWD/forge/vecmul --work-dir build/work/forge-vecmul \
+        --param chip/soc/binary=$PWD/build/sw/apps/forge-elementwise/vecmul/forge-elementwise.elf run
+
+It prints `forge-elementwise data: 0 errors (64 words)`, its counter and
+`forge-elementwise errors: 0`, and exits 0.
+
 ## Regression
 
 `make regress` first runs `SnaxUnit`'s rule on its cases (`unit`,
@@ -130,6 +149,8 @@ on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
 case, then `snax-shell` on `snax_tiled_add` with the unit's trace on, then
+`forge-elementwise` on each generated accelerator of `forge/`
+(`forge-elementwise.<design>`, `FORGE` in `tests/snax/regress.py`), then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
@@ -138,8 +159,13 @@ compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
 and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
 must equal its unit's first run line, busy + stall_in + stall_out + flush,
 that run firing its beats (`check_counter` in `tests/snax/regress.py`,
-GEN3). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add`,
-as above, and takes about two minutes.
+GEN3); so must `forge-elementwise`'s. A `forge/` entry is read from its
+`manifest.json` with plain json: the target, run with `--target-dir=` each of
+its `target_dirs` (never built, so gvrun warns that it has no platform tree),
+the unit's trace path and the beats of its one accelerator task; the program
+is built with `DESIGN=<design> MODE=<mode>`. It needs GVSoC built for
+`snitch;snax_alu;snax_alu_sparse;snax_tiled_add`, as above, and takes about
+two minutes.
 
     make regress
 
@@ -147,8 +173,9 @@ It ends with `regression passed` and exit 0, or names each program that
 failed or did not finish and exits 1. Each run's output goes to
 `build/regress/work/<name>/run.log`; a failure prints that path and the
 log's last 20 lines. `python3 tests/snax/regress.py -k SUBSTRING` runs only
-the programs whose name holds it, as `-k stream-timing`, `-k sparse` or
-`-k plain`.
+the programs whose name holds it, as `-k stream-timing`, `-k sparse`,
+`-k forge` or `-k plain`; `make regress K=forge` passes `-k forge` (a bare
+`make regress -k forge` does not: make reads `-k` as its own flag).
 
 ## Continuous integration
 
@@ -158,7 +185,7 @@ request, and by hand (`workflow_dispatch`), in snax-forge's image
 `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (with ccache, kept between runs), runs the unit tests
 (`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
 `make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
-tested; GVSoC's other targets stay out.
+tested (and `forge/` run); GVSoC's other targets stay out.
 
 When a program fails, the job log holds the last 20 lines of its
 `run.log`, the run's summary shows one annotation per failed program, and

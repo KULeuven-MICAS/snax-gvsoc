@@ -3540,3 +3540,272 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   in its `python`, no `forge_` module in `targets` or `generators`.
 - After F3: `pixi run -e ci test` 1695 passed (F3's two new tests).
 - Not verified: CI (not run).
+
+### GEN3 step 5, round 3 step 1: the manifest's symbols
+
+- 2026-10-18. snax-forge `ry/gen3` (`6c94630`): `Manifest.symbols`, the
+  bound graph's symbols (`Graph.symbols`, vecadd's `{"N": 64}`), written
+  after `design_point`; `to_dict` / `from_dict`, the module docstring and
+  `tests/gen` updated. A symbol still null is refused (`gen.symbols`).
+- Differs from the prompt: `DesignPoint.load` already refuses a null symbol
+  in a file (`[graph.symbols] symbol N: is not bound`), so `gen.symbols`
+  holds only for a point whose graph lost a value after it was loaded; its
+  test patches `DesignPoint.load`.
+- Run, in snax-forge's image: `pixi run -e ci pytest tests/gen` 41 passed;
+  `pixi run fmt`, `pixi run lint` clean.
+
+### GEN3 step 5, round 3 step 2: the vecadd fixture
+
+- 2026-10-18. `forge/vecadd/`: the generator's output for vecadd, untouched.
+  In snax-forge's image, from snax-forge at `6c94630`: `pixi run sandbox
+  recipes/vecadd.json` (2 steps, each equal to the input graph), `pixi run
+  design out/sandbox/vecadd/2_bind.snaxdfg --platform
+  platforms/snax_alu.json`, `pixi run gen-gvsoc
+  out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
+  --install out/snax-gvsoc/install`: `target forge_vecadd ..., checked
+  against out/snax-gvsoc/install`, `task add_acc: 16 beats, {'loopCount':
+  16}`, five files written (`forge_vecadd_acc.py`, `forge_vecadd.py`,
+  `include/streamer_csr_addr_map.h`, `include/acc_csr.h`, `manifest.json`).
+  The manifest: `symbols` `{"N": 64}`, CSRs 960 to 977 the streamer's,
+  `loopCount` 978 to the counter 981, trace `snax_acc0/unit`.
+- `forge/README.md`: one design point per folder, refreshed by hand, its
+  diff the check (D128); the refresh commands; gvrun reads a folder with
+  `--target-dir`, never through `TARGETS`. README's layout row.
+- Not verified: the folder run on GVSoC (step 4); snax-forge reproducing it
+  (step 5).
+
+### GEN3 step 5, round 3 step 3: the program forge-elementwise
+
+- 2026-10-18. `sw/apps/forge-elementwise/` (Makefile, README, src):
+  `DESIGN ?= vecadd`, `MODE ?= 0`, `FORGE = forge/$(DESIGN)`, `DATA_LEN`
+  from the manifest's `symbols.N` (a python3 one-liner; empty is a make
+  error), `BUILDDIR = build/sw/apps/forge-elementwise/$(DESIGN)`, `INCDIRS`
+  the build folder and `$(FORGE)/include` before common.mk. No snax-alu
+  library. `data.h` is datagen.py at `--mode=$(MODE) --length=$(DATA_LEN)`,
+  seed 0, depending on datagen.py, the manifest and the Makefile.
+- vecadd's derived task list (snax-forge `derive.task_list` on
+  `out/design/vecadd/design_point.json`): `load_A`, `load_B` (DMA, L2 to
+  L1, 8 x 64 bytes each); `add_acc_a`, `add_acc_b`, `add_acc_out`
+  (streamer: bases `0x1000_0000`, `0x1000_0200`, `0x1000_0400`,
+  `temporal_bounds [16]`, `temporal_strides [32]`, `spatial_strides [8]`);
+  `add_acc` (accel, `n` 16); one `Start` of the three streamer tasks and
+  `add_acc`, in that order; `store_C` (DMA, after `add_acc_out`) and its
+  poll. The program does all but `store_C` (the data is checked in L1), the
+  bases replaced by `snrt_l1_next()` pointers, the starts as the streamer's
+  one start CSR then `ACC_RW_START`, then busy polled (accelerator, then
+  streamer), the counter read.
+- Differs from the prompt: a `mode.$(MODE)` stamp in the build folder, a
+  prerequisite of `data.h`, so a `MODE` change makes `data.h` again (the
+  folder is per design, not per mode). `LANES` 4 in the source gives the
+  bound, stride and loop count from `DATA_LEN`, so W = 4 only.
+- Run, in snax-forge's image: `make -C sw/apps/forge-elementwise` exit 0, no
+  warning; the ELF's `.d` lists `forge/vecadd/include/` for both headers.
+  By hand, `gvrun --target forge_vecadd --target-dir=$PWD/forge/vecadd`:
+  the no-platform-tree warning, `forge-elementwise data: 0 errors (64
+  words)`, `counter: 16`, `errors: 0`, exit 0; with the unit's trace `run
+  0: firings 16 busy 16 stall_in 0 stall_out 0 flush 0`. Built with
+  `MODE=2` (mul data on the add accelerator): `errors: 64`, exit 1; back to
+  `MODE=0`, `data.h` made again.
+
+### GEN3 step 5, round 3 step 4: regress from the manifest
+
+- 2026-10-18. `tests/snax/regress.py`: `FORGE = [("vecadd", 0)]` (design,
+  datagen's mode), run after `OWN_TARGET`. Per entry, `forge/<design>/
+  manifest.json` read with plain json (no snax_forge import): `target`,
+  `target_dirs`, `trace`, `tasks`. Not exactly one task: a failure naming
+  the count and the manifest. Built with `make -C
+  sw/apps/forge-elementwise DESIGN=<design> MODE=<mode>`, run as
+  `forge-elementwise.<design>` with `--target-dir=` each target dir
+  resolved from the manifest's folder and `--trace=<trace>`, checked with
+  `check_counter(program, log, log, tasks[0].beats)`. snax-shell keeps its
+  `OWN_TARGET` entry. Docstring, README (Layout, Regression, CI) and the
+  CI workflow's comment updated.
+- Run, in snax-forge's image: `python3 tests/snax/regress.py -k forge`:
+  `forge-elementwise on forge/: vecadd`, `1 run`, `regression passed`,
+  exit 0. Its log: the no-platform-tree warning, `forge-elementwise data: 0
+  errors (64 words)`, `counter: 16`, `errors: 0`, the unit's `run 0:
+  firings 16 busy 16 stall_in 0 stall_out 0 flush 0` (16 = 16 + 0 + 0 + 0).
+  A manifest with its task doubled (undone after): `FAIL
+  forge-elementwise.vecadd: 2 accelerator tasks in
+  forge/vecadd/manifest.json, not 1`, exit 1. `python3 -m unittest discover
+  -s tests/snax`: OK.
+- Differs from the prompt: `make regress -k forge` does not filter, since
+  make reads `-k` as its own keep-going flag and `forge` as a target (`make
+  -n` prints the full `python3 tests/snax/regress.py` and `Nothing to be
+  done for 'forge'`), so the selection is run as `python3
+  tests/snax/regress.py -k forge`, the form the README gives.
+- Nothing compiled: the target runs from `--target-dir` on the installed
+  components (build of GEN3 round 1b F3, from this checkout's sources).
+
+### GEN3 step 5, round 3 step 5: snax-forge reproduces the fixture
+
+- 2026-10-18. snax-forge `ry/gen3` (`b3a63cf`), `tests/gen/test_fixture.py`:
+  per design, the refresh commands of `forge/README.md` (sandbox, design on
+  `platforms/snax_alu.json`, `generate`) run in a temporary folder standing
+  for the root, so the design point is
+  `out/design/<design>/design_point.json` as in the fixture's header
+  comments; the generated folder must equal `gvsoc/snax-gvsoc/forge/<design>/`
+  byte for byte, file list included. Skipped without the submodule (CI
+  never fetches it), and with a submodule that has no `forge/` (reason:
+  bump the submodule).
+- Run, in snax-forge's image: at the pin (`dbd7f96`): skipped, `the
+  snax-gvsoc submodule has no forge/: bump the submodule`. With the
+  submodule at this repo's `ry/gen3` (`git -C gvsoc/snax-gvsoc fetch
+  ../../../snax-gvsoc ry/gen3`, checkout `FETCH_HEAD`, then `d71707f7`):
+  passed. `ACC_RW_START 979` changed to `970` in the submodule's
+  `forge/vecadd/include/acc_csr.h`: fails on `include/acc_csr.h`, `At index
+  279 diff: b'9' != b'0'`. Restored, `git submodule update
+  gvsoc/snax-gvsoc` back to `dbd7f96`; the pointer never committed.
+
+### GEN3 step 6a: elementwise_mul
+
+- 2026-10-18. snax-forge `ry/gen3` (`c5ed3f0`): `elementwise_mul`'s
+  `chisel_tiled_spatial` has `elementwise_add`'s binding (block
+  `ElementwiseTiledSpatial`, op through `ElementwiseOp`: mul = 2). A test
+  kernel `kernels/polybench/vecmul.py` (C = A * B, int64, as vecadd; there
+  to exercise `elementwise_mul` on its own, since dot binds two instances
+  and snax_alu has one slot), found by the kernel loader as every kernel
+  is; its import is a DFG fixture, `tests/dfg/fixtures/vecmul.snaxdfg`
+  (`mult_map`, `mult`), checked as vecadd's and dot's. `recipes/vecmul.json`:
+  W 4, N 64, `split_map` of `mult_map`, `bind` of `mult` to
+  `elementwise_mul` `chisel_tiled_spatial`, instance `acc`. No test counts
+  kernels. Tests: both elementwise BRMs carry the binding (`test-brm`);
+  vecmul generates vecadd's accelerator with `op` 2, the same template and
+  CSRs, task `mult_acc` of 16 beats, symbols `{"N": 64}` (`tests/gen`); the
+  fixture test over vecadd and vecmul, a design whose folder the submodule
+  lacks skipped; its file list leaves out `__pycache__` (gvrun writes one
+  into a fixture folder it imports from; git ignores it).
+- Here: `forge/vecmul/` generated as vecadd's (`pixi run sandbox
+  recipes/vecmul.json`, `design ... --platform platforms/snax_alu.json`,
+  `gen-gvsoc ... --out ../snax-gvsoc/forge/vecmul --install
+  out/snax-gvsoc/install`: checked against the install, `task mult_acc: 16
+  beats`). Against `forge/vecadd/` it differs only in the names and `op=2`.
+  `FORGE` gains `("vecmul", 2)`; `forge/README.md` its row.
+- Run, in snax-forge's image: `python3 tests/snax/regress.py -k forge`:
+  `forge-elementwise on forge/: vecadd, vecmul`, `2 run`, `regression
+  passed`. vecmul's log: the no-platform-tree warning, the unit's `mul, 4
+  lanes of 64 bits, lockstep, latency 0, ii 1`, `forge-elementwise data: 0
+  errors (64 words)`, `counter: 16`, `errors: 0`, `run 0: firings 16 busy
+  16 stall_in 0 stall_out 0 flush 0`; `data.h` at `MODE = 2`.
+- snax-forge's fixture test, with the submodule at this commit (fetched
+  as in step 5, then back to the pin): vecadd and vecmul passed; `op=2`
+  to `op=3` in `forge/vecmul/forge_vecmul_acc.py` fails vecmul (`At index
+  2949 diff: b'2' != b'3'`), undone. snax-forge: `test-brm` 174, `test-dfg`
+  175, `test-sandbox` 77, `test-flow` 78, `test-design` 142 passed,
+  `tests/gen` 42 passed and 2 skipped (submodule at the pin); fmt, lint
+  clean.
+
+### GEN3 step 7: the lockstep half of the unit cross-check
+
+- 2026-10-18. snax-forge `ry/gen3` (`1bbf7c4`):
+  `hw/chisel/src/test/scala/snax/forge/elementwise/ElementwiseTiledSpatialLockstepSpec.scala`
+  reads the case files of `tests/snax/unit/cases/` from the folder
+  `SNAX_GVSOC_UNIT_CASES` names (canceled without it: CI never fetches this
+  repo) and drives `ElementwiseTiledSpatial` (64 bit, 4 lanes, add) through
+  every `wait lockstep` case, cycle by cycle: a and b valid and out ready as
+  the line gives them, a start poked in the cycle the case offers it. Every
+  cycle it compares fire (both operand transfers), push (`out.fire`) and
+  busy with the case, and each start's answer with the block's state
+  (`taken` idle with a count, `ignored` idle with 0, `refused` busy). Not
+  compared: the `expect run` lines (SnaxUnit's trace); `pipelined_l0` (only
+  `like` lines) and the pipelined cases are left out.
+- Run, in snax-forge's image: `pixi run -e hw chisel-test` works (sbt from
+  the hw environment, the jars from the Coursier cache). With
+  `SNAX_GVSOC_UNIT_CASES=$PWD/gvsoc/snax-gvsoc/tests/snax/unit/cases` (the
+  pin's cases): 50 passed, the four lockstep cases agree; without it: 49
+  passed, 1 canceled. A copy of the cases with busy flipped in cycle 1 of
+  `lockstep_out_not_ready`: FAILED. `chisel-check` clean.
+- First tries: `cases/*.txt` in the Scaladoc opened a nested comment
+  (`unclosed comment`); `pipelined_l0.txt` has no `cycles` line. Both fixed
+  before the commit.
+
+### GEN3 round 3: docs and the full runs
+
+- 2026-10-18. Here: GEN3.md: step 5 ticked; step 6 split into 6a
+  (`elementwise_mul`, done) and 6b (`accumulate`: SnaxUnit's fixed 2 inputs
+  / 1 output, an output rate T, `stream` control and which of n and T the
+  shell counts, the drain cycle, a sum-only kernel; planned first, round
+  4); step 7's row; rounds 3 (steps 5, 6a, 7: done) and 4 (6b); "Where
+  things go" names `forge/<design>/`; the hooks name the manifest's
+  `symbols`; the Open line on the hand-written program closed (it stays
+  until GEN2a). README: a `forge/` section, `GEN3.md` in the layout.
+- snax-forge: STATUS (GEN3's row, the next-up paragraph), D128 amended in
+  place (each design point the regression runs is a fixture in
+  `forge/<design>/`), README section 5 "Refreshing a fixture". CONTRACTS
+  does not describe the manifest: unchanged.
+- Full runs, in snax-forge's image: snax-forge `pixi run -e ci test`: 1700
+  passed, 2 skipped (`tests/gen/test_fixture.py`, the submodule at its pin
+  `dbd7f96` has no `forge/`); `pixi run lint` clean. Here `make regress`:
+  `regression passed`, unit 1, SNAX 40, `snax-shell.snax_tiled_add` 1,
+  `forge-elementwise` 2 (vecadd, vecmul), plain 17, 117 s. The install's
+  `models/` and `lib/` listings (names, sizes, times) equal before and
+  after: nothing compiled, `TARGETS` unchanged.
+- Not verified: CI (not run, in either repo); the fixture test at a pinned
+  submodule (the pointer is never committed in this round, so it skips
+  until the bump); the program at W other than 4 (datagen's `SPATIAL_PAR`);
+  any fixture on RTL (none exists).
+
+### GEN3 round 3b F1: no __pycache__ in forge/
+
+- 2026-10-18. `tests/snax/regress.py`: `gvrun()` sets
+  `PYTHONDONTWRITEBYTECODE=1` in the run's env, so gvrun's import of a
+  fixture's modules writes no `__pycache__` beside them (round 3 found one in
+  `forge/vecadd/` and `forge/vecmul/`). `.gitignore` gains
+  `forge/**/__pycache__/` for hand runs (the global `__pycache__/` already
+  covered it); `forge/README.md` says both. The two old `__pycache__`
+  folders removed by hand.
+- Run, in snax-forge's image: `python3 tests/snax/regress.py -k forge`:
+  `2 run`, `regression passed`; afterwards `find forge -name __pycache__`
+  finds none and `git status -s --ignored forge` lists only this change's
+  `forge/README.md`.
+- snax-forge `ry/gen3` (`0e950d8`): the fixture test's `__pycache__`
+  exclusion removed. With the submodule at this repo's `ry/gen3`
+  (`fd2b2d00`, `forge/` as here; fetched, then back to the pin `dbd7f96`):
+  no `__pycache__` under its `forge/`, vecadd and vecmul passed without
+  the exclusion, so it is not needed. `tests/gen` 42 passed, 2 skipped at
+  the pin; fmt, lint clean.
+- Not verified: snax-forge's `make -C gvsoc run` with `TARGET_DIRS` on the
+  submodule's `forge/<design>` does not set the variable, so a hand run
+  there would write a `__pycache__` the fixture test would then count.
+
+### GEN3 round 3b F2: BEATS and LANES from the manifest
+
+- 2026-10-18. `sw/apps/forge-elementwise/Makefile`: `BEATS` from the
+  manifest's `tasks[0].beats`, `LANES = N / BEATS` (`expr`; a make error
+  when it does not divide: `N 64 is not a multiple of the 15 beats in
+  .../manifest.json`), passed as `-DBEATS` and `-DLANES`; the ELF depends on
+  the manifest. `data.h` still at `--length=N`. `src/forge-elementwise.c`:
+  the streamer bounds and strides and `ACC_RW_LOOP_COUNT` from them, an
+  `#error` without them; datagen's `LOOP_ITER` and the hard-coded 4 gone.
+  README updated.
+- Run, in snax-forge's image: vecadd and vecmul build with `-DBEATS=16
+  -DLANES=4`; a touched manifest relinks the ELF (`make -n`); beats edited
+  to 15: the make error; to 8: `-DBEATS=8 -DLANES=8`, built (not run);
+  manifest restored. `python3 tests/snax/regress.py -k forge`: `2 run`,
+  `regression passed`; both logs `forge-elementwise data: 0 errors (64
+  words)`, `errors: 0`, as round 3.
+- Differs from round 3: the counter is 19, not 16, on both (`run 0:
+  firings 16 busy 16 stall_in 3 stall_out 0 flush 0`; `check_counter`
+  holds). BEATS was computed at run time from `data.h`'s `uint64_t
+  DATA_LEN`; as an immediate the starts follow the configuration sooner, so
+  the streamer has less of a head start (read from the code, not traced).
+- Not verified: a design point at W = 8 on GVSoC (no fixture at W = 8).
+
+### GEN3 round 3b F3: drop gen.symbols (snax-forge)
+
+- 2026-10-18. snax-forge `ry/gen3` (`c817e7e`): the generator's
+  `gen.symbols` rule and its patched test removed, since `DesignPoint.load`
+  already refuses a null symbol; the docstring says so (`graph.symbols`).
+  A test writes a design point with `N` null and checks that `generate`
+  stops at the load with that `DesignError`, writing nothing. Run, in
+  snax-forge's image: `pixi run -e ci test-gen` 42 passed, 2 skipped (the
+  fixture test, submodule at its pin); fmt, lint clean.
+
+### GEN3 round 3b F4: make regress K=
+
+- 2026-10-18. `Makefile`: `make regress K=<substring>` runs
+  `python3 tests/snax/regress.py -k <substring>`, without `K` as before
+  (`make -n`: `... regress.py -k forge`, `... regress.py`). README's
+  Regression section says so. Run, in snax-forge's image: `make regress
+  K=forge`: the two forge entries, `regression passed`; no `__pycache__`
+  under `forge/`.

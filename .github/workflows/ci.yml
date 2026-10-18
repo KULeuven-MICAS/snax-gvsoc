@@ -66,7 +66,7 @@ jobs:
 
       # SnaxUnit's rule on its cases, then sw/ and the programs built, each
       # run to exit 0 (20 SNAX runs on each of snax_alu and snax_alu_sparse,
-      # snax-shell on snax_tiled_add, 17 plain).
+      # snax-shell on snax_tiled_add, forge-elementwise on forge/, 17 plain).
       - name: Regress
         run: make regress
 
