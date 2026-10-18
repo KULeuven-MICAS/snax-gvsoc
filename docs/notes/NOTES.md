@@ -3403,3 +3403,55 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   destination register on a held start (only rd = x0 run); SnaxUnit's fixed
   2 inputs / 1 output and one-word `counted` configuration (step 6).
 - Not verified: anything new in code (none changed).
+
+### GEN3 step 3: the binding and the generator
+
+- 2026-10-18. snax-forge `ry/gen3`, after LNK1 (`platforms/snax_alu.json`
+  read from `sw/cfg/snax_alu_cluster.hjson`, D131: L1 at `0x1000_0000`, a
+  2 GiB L2 at `0x8000_0000`, `fifo_depth` 8, `temporal_dims` 1; the `_old`
+  copy gives the same platform). `elementwise_add`'s `chisel_tiled_spatial`
+  has this plan's binding; the BRM loader checks it (`brm/binding.py`).
+- snax-forge `snax_forge/gen/` (D132): `generate(design_point, out_dir,
+  install=None) -> Manifest`, `pixi run gen-gvsoc DESIGN_POINT [--out DIR]
+  [--install DIR]` (default `out/gvsoc/<design>/`, install
+  `out/snax-gvsoc/install` when it exists). A block registry; the
+  `ElementwiseTiledSpatial` adapter takes counted and lockstep only, latency
+  0 and II 1, `lanes` from `args.lanes`, the op through `ElementwiseOp`'s
+  encoding (a test reads the Chisel table), `data_width` and `signed` from
+  the ports' dtype. The streamer template from the design point's
+  streamers: readers the inputs in port order, writers the outputs,
+  `num_channel` = `n_ports * N / 64`. Out: `forge_<design>_acc.py` (shaped as
+  `snax/snax_tiled_add_acc.py`, every value a literal, imports only
+  `gvsoc.systree`, `interco.router`, `snax_streamer`, `snax_shell`,
+  `snax_unit`), `forge_<design>.py` (a `SnaxAluBoard` subclass setting
+  `accelerator`; imports `gvsoc.runner`, `snax_alu` and the composite) and
+  `manifest.json`. The trace path `snax_acc0/unit`: `snax_alu.py`'s
+  `SNAX_ACC_CORE` 0, named `snax_acc<core>` by `snitch_cluster.py` line 377.
+- vecadd at W = 4: template equal to `snax_alu_streamer_template`'s movers
+  (readers `[[4], [4]]`, 4 channels, `fifo_depth` 8; writer the same), 12
+  TCDM ports, streamer CSRs 960 to 977 (`nb_csrs` 18), `loopCount` 978,
+  start 979, busy 980, counter 981; task `add_acc`, 16 beats, `loopCount`
+  16. `SnaxUnit` and `SnaxShell` as `snax_tiled_add_acc.py`'s but `signed`:
+  True from `int64` (the hand file has False; only min and max read it).
+- snax-forge `gvsoc/Makefile`: `TARGET_DIRS`, passed after `gvsoc/targets`.
+- Run, in snax-forge's image (submodule at `21830e3`): `make -C gvsoc build
+  TARGETS="snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0, `make sw
+  APPS="snax-shell"` exit 0, design and `gen-gvsoc` exit 0, then `make run`
+  of `forge_vecadd` (`TARGET_DIRS=out/gvsoc/vecadd`) and of `snax_tiled_add`
+  on snax-shell's ELF, both `--trace=snax_acc0/unit`, both exit 0.
+  `forge_vecadd`: `Warning: target 'forge_vecadd': no platform tree, using
+  the JSON config`, then the same 30 lines as `snax_tiled_add` with the
+  ports' pointer values masked: `snax-shell data: 0 errors (192 words)`,
+  `counter: 17`, `held start: mcycle span 19`, `loopCount 0: busy 0,
+  counter 0`, `errors: 0`; `run 0: firings 16 busy 16 stall_in 1 stall_out
+  0 flush 0`, `run 1` and `run 2` 16 16 0 0 0. The install's `models/` and
+  `lib/` (131 files): timestamps equal before and after the two runs.
+- vecadd at W = 8 (generated, not run): readers and writer `[[8]]`, 8
+  channels each, 24 TCDM ports; the same CSR layout (the streamer's count
+  does not depend on the lanes); task 8 beats. The cluster sizes its
+  crossbar from the class's `nb_tcdm_ports` (`snitch_cluster.py`), read,
+  not run.
+- Not verified: W = 8 on GVSoC; the order of `spatial_bounds` against
+  snax_cluster's template for more than one spatial dimension; the
+  generator's install check against a real shadowing install (a fake
+  install folder in the tests); CI (not run).
