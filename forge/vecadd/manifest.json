@@ -1,0 +1,17 @@
+{
+ "design": "vecadd",
+ "design_point": "out/design/vecadd/design_point.json",
+ "symbols": {"N": 64},
+ "target": "forge_vecadd",
+ "files": ["forge_vecadd_acc.py", "forge_vecadd.py", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
+ "target_dirs": ["."],
+ "trace": "snax_acc0/unit",
+ "csrs": {
+  "streamer": {"first": 960, "last": 977},
+  "fields": {"loopCount": 978},
+  "start": 979,
+  "busy": 980,
+  "counter": 981
+ },
+ "tasks": [{"name": "add_acc", "beats": 16, "csrs": {"loopCount": 16}}]
+}

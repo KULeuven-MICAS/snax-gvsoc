@@ -3540,3 +3540,36 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   in its `python`, no `forge_` module in `targets` or `generators`.
 - After F3: `pixi run -e ci test` 1695 passed (F3's two new tests).
 - Not verified: CI (not run).
+
+### GEN3 step 5, round 3 step 1: the manifest's symbols
+
+- 2026-10-18. snax-forge `ry/gen3` (`6c94630`): `Manifest.symbols`, the
+  bound graph's symbols (`Graph.symbols`, vecadd's `{"N": 64}`), written
+  after `design_point`; `to_dict` / `from_dict`, the module docstring and
+  `tests/gen` updated. A symbol still null is refused (`gen.symbols`).
+- Differs from the prompt: `DesignPoint.load` already refuses a null symbol
+  in a file (`[graph.symbols] symbol N: is not bound`), so `gen.symbols`
+  holds only for a point whose graph lost a value after it was loaded; its
+  test patches `DesignPoint.load`.
+- Run, in snax-forge's image: `pixi run -e ci pytest tests/gen` 41 passed;
+  `pixi run fmt`, `pixi run lint` clean.
+
+### GEN3 step 5, round 3 step 2: the vecadd fixture
+
+- 2026-10-18. `forge/vecadd/`: the generator's output for vecadd, untouched.
+  In snax-forge's image, from snax-forge at `6c94630`: `pixi run sandbox
+  recipes/vecadd.json` (2 steps, each equal to the input graph), `pixi run
+  design out/sandbox/vecadd/2_bind.snaxdfg --platform
+  platforms/snax_alu.json`, `pixi run gen-gvsoc
+  out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
+  --install out/snax-gvsoc/install`: `target forge_vecadd ..., checked
+  against out/snax-gvsoc/install`, `task add_acc: 16 beats, {'loopCount':
+  16}`, five files written (`forge_vecadd_acc.py`, `forge_vecadd.py`,
+  `include/streamer_csr_addr_map.h`, `include/acc_csr.h`, `manifest.json`).
+  The manifest: `symbols` `{"N": 64}`, CSRs 960 to 977 the streamer's,
+  `loopCount` 978 to the counter 981, trace `snax_acc0/unit`.
+- `forge/README.md`: one design point per folder, refreshed by hand, its
+  diff the check (D128); the refresh commands; gvrun reads a folder with
+  `--target-dir`, never through `TARGETS`. README's layout row.
+- Not verified: the folder run on GVSoC (step 4); snax-forge reproducing it
+  (step 5).
