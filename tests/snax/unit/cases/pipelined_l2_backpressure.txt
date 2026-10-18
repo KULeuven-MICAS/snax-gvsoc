@@ -1,14 +1,14 @@
 # pipelined, L = 2, II 1: firing k is pushed two cycles later; with its head
 # full and no room the pipeline freezes (stall_out), with the head slot empty
-# a missing room does not matter. After the last firing the results in
-# flight are idle cycles, not in the run line (busy 4 + stall_in 1 +
-# stall_out 3 + idle 2 = 10 busy cycles)
+# a missing room does not matter. After the last firing the cycles with
+# results in flight are flush, but a frozen one, which is stall_out (busy 4 +
+# stall_in 1 + stall_out 3 + flush 2 = 10 busy cycles)
 wait pipelined
 latency 2
 ii 1
 inputs 2
 start 0 4 taken
-expect run 0: firings 4 busy 4 stall_in 1 stall_out 3
+expect run 0: firings 4 busy 4 stall_in 1 stall_out 3 flush 2
 cycles
 # a b out  fire push busy
 1 1 1      0 0 0     # 0: start
@@ -19,7 +19,7 @@ cycles
 1 1 1      1 1 1     # 5: push 0, firing 2, slots [2 1]
 0 1 1      0 1 1     # 6: push 1, a missing: stall_in, slots [- 2]
 1 1 1      1 1 1     # 7: push 2, firing 3 (the last), slots [3 -]
-1 1 0      0 0 1     # 8: head slot empty: not frozen; idle, slots [- 3]
+1 1 0      0 0 1     # 8: head slot empty: not frozen; flush, slots [- 3]
 1 1 0      0 0 1     # 9: head 3, no room: frozen
-1 1 1      0 1 1     # 10: push 3, the end (idle)
+1 1 1      0 1 1     # 10: push 3, the end (flush)
 1 1 1      0 0 0     # 11

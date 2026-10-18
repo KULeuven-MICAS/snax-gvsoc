@@ -6,7 +6,9 @@
 // gives the parameters, the starts and, per cycle, each input's valid, the
 // output's ready and the expected fire, push and busy; the tb drives
 // snax_unit.hpp's rule with them and compares every cycle and the trace line
-// at the end of each run. It also checks the op table on fixed vectors.
+// at the end of each run, whose busy, stall_in, stall_out and flush must add
+// up to the run's busy cycles in the case file. It also checks the op table
+// on fixed vectors.
 //
 //   tb CASE...
 //
@@ -151,6 +153,7 @@ static int run(const Case &c)
 
     int errors = 0;
     size_t next_expect = 0;
+    long run_busy = 0;      // busy cycles of the current run, from the case file
     for (size_t t = 0; t < c.cycles.size(); t++)
     {
         int64_t cycle = t;
@@ -161,7 +164,12 @@ static int run(const Case &c)
             {
                 continue;
             }
-            const char *got = start_names[rule.start(cycle, s.count)];
+            SnaxUnitRule::Start answer = rule.start(cycle, s.count);
+            const char *got = start_names[answer];
+            if (answer == SnaxUnitRule::TAKEN)
+            {
+                run_busy = 0;
+            }
             if (s.result != got)
             {
                 printf("%s: cycle %ld: start %u %s, expected %s\n", c.name.c_str(),
@@ -171,7 +179,8 @@ static int run(const Case &c)
         }
 
         int busy = rule.busy(cycle);
-        SnaxUnitRule::Step step = {false, false, SnaxUnitRule::IDLE, false};
+        SnaxUnitRule::Step step = {false, false, SnaxUnitRule::FLUSH, false};
+        run_busy += l.busy;
         if (busy)
         {
             bool inputs = true;
@@ -191,6 +200,21 @@ static int run(const Case &c)
         if (step.end)
         {
             std::string got = rule.run_line();
+            long b, si, so, fl;
+            if (sscanf(got.c_str(), "run %*d: firings %*u busy %ld stall_in %ld stall_out %ld flush %ld",
+                    &b, &si, &so, &fl) != 4)
+            {
+                printf("%s: cycle %ld: cannot read \"%s\"\n", c.name.c_str(), (long)cycle,
+                    got.c_str());
+                errors++;
+            }
+            else if (b + si + so + fl != run_busy)
+            {
+                printf("%s: cycle %ld: busy %ld + stall_in %ld + stall_out %ld + flush %ld = %ld, "
+                    "the run's busy cycles %ld\n", c.name.c_str(), (long)cycle, b, si, so, fl,
+                    b + si + so + fl, run_busy);
+                errors++;
+            }
             if (next_expect >= c.expects.size())
             {
                 printf("%s: cycle %ld: \"%s\", none expected\n", c.name.c_str(),

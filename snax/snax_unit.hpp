@@ -33,10 +33,9 @@
 //
 // Each busy cycle is one class, in D59's order: stall_out (the head, or for
 // L = 0 a firing, has no room) > busy (fired, or in the II gap after a
-// firing) > stall_in (II allows, an input has no beat) > idle (pipelined
+// firing) > stall_in (II allows, an input has no beat) > flush (pipelined
 // only: results in flight after the last firing's II gap, accel.py's idle).
-// So busy + stall_in + stall_out is the busy cycles, E - s, but for those
-// idle cycles.
+// So busy + stall_in + stall_out + flush is the run's busy cycles, E - s.
 
 #pragma once
 
@@ -89,7 +88,7 @@ class SnaxUnitRule
 {
 public:
     enum Wait { LOCKSTEP, PIPELINED };
-    enum Class { BUSY, STALL_IN, STALL_OUT, IDLE, NB_CLASSES };
+    enum Class { BUSY, STALL_IN, STALL_OUT, FLUSH, NB_CLASSES };
     enum Start { TAKEN, IGNORED, REFUSED };
 
     // What one busy cycle does
@@ -166,7 +165,7 @@ public:
     // One busy cycle: inputs, every input has a beat; room, the output has room
     Step step(int64_t cycle, bool inputs, bool room)
     {
-        Step s = {false, false, IDLE, false};
+        Step s = {false, false, FLUSH, false};
         if (this->wait == LOCKSTEP)
         {
             s.fire = s.push = inputs && room;
@@ -196,7 +195,7 @@ public:
                 }
                 bool in_gap = this->has_fired && cycle < this->last_fire + this->ii;
                 bool waits_input = this->firings < this->count && ii_ok && !inputs;
-                s.cls = s.fire || in_gap ? BUSY : waits_input ? STALL_IN : IDLE;
+                s.cls = s.fire || in_gap ? BUSY : waits_input ? STALL_IN : FLUSH;
             }
             if (s.fire)
             {
@@ -220,13 +219,15 @@ public:
     }
 
     // The trace line of the run that ended, run index from 0 (a fixed format,
-    // for FLOW3's converter): idle cycles are not in it
+    // for FLOW3's converter): its classes add up to its busy cycles
     std::string run_line() const
     {
         char line[160];
-        snprintf(line, sizeof(line), "run %d: firings %u busy %ld stall_in %ld stall_out %ld",
+        snprintf(line, sizeof(line),
+            "run %d: firings %u busy %ld stall_in %ld stall_out %ld flush %ld",
             this->runs - 1, this->firings, (long)this->classes[BUSY],
-            (long)this->classes[STALL_IN], (long)this->classes[STALL_OUT]);
+            (long)this->classes[STALL_IN], (long)this->classes[STALL_OUT],
+            (long)this->classes[FLUSH]);
         return line;
     }
 

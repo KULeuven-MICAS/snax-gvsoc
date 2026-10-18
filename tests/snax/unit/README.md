@@ -8,7 +8,8 @@ against hand-worked cases, with g++ only. `make regress` runs it first, as
 - `tb.cpp` drives the rule cycle by cycle from a case file and compares,
   every cycle, whether it fires, pushes and is busy, each start's answer,
   and the trace line at the end of every run (`SnaxUnitRule::run_line`, the
-  line the component prints). It also checks the op table on fixed vectors
+  line the component prints), whose busy, stall_in, stall_out and flush must
+  add up to the run's busy cycles in the case file. It also checks the op table on fixed vectors
   (wrapping at 8 to 64 bits, signed and unsigned min and max).
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/unit`) and runs
   it on every `cases/*.txt`; exit 1 on any difference.
@@ -24,7 +25,7 @@ from cycle 0:
 | `latency L`, `ii N` | pipelined only (defaults 0 and 1) |
 | `inputs N` | input columns (default 2) |
 | `start CYCLE COUNT taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step), and its expected answer |
-| `expect run I: firings F busy B stall_in SI stall_out SO` | the trace line expected at the end of run I, in order |
+| `expect run I: firings F busy B stall_in SI stall_out SO flush FL` | the trace line expected at the end of run I, in order |
 | `like FILE` | run FILE (beside this one) with this file's `wait`, `latency` and `ii` instead of its own; one run per `like` |
 | `cycles` | the cycle lines follow |
 
@@ -39,8 +40,8 @@ hand from the rules in `snax_unit.hpp`; each case says how in its comments.
 | `lockstep_input_missing` | a or b or both missing: stall_in |
 | `lockstep_out_not_ready` | no room: stall_out; no room and an input missing: stall_in |
 | `lockstep_count_zero` | a start with count 0 ignored, busy stays 0 |
-| `pipelined_l2_backpressure` | L = 2: the pipeline freezes on a full head with no room, results in flight after the last firing |
-| `pipelined_ii2` | L = 1, II 2: the II gap is busy, with or without inputs |
+| `pipelined_l2_backpressure` | L = 2: the pipeline freezes on a full head with no room, results in flight after the last firing (flush, but a frozen cycle: stall_out) |
+| `pipelined_ii2` | L = 1, II 2: the II gap is busy, with or without inputs; one flush cycle |
 | `pipelined_l0` | every lockstep case again as pipelined with L = 0, II 1, its expectations unchanged |
 
 ## Running

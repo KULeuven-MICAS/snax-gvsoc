@@ -3311,3 +3311,32 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   the install does not hold (gvrun would have to compile it; not tried);
   the submodule's pin (`c911569`, main) still stops, since it predates
   this; CI (not run).
+
+### GEN3 round 1b F2: flush in the unit's run line
+
+- 2026-10-18. `snax/snax_unit.hpp`: the class `IDLE` is now `FLUSH`, and
+  `run_line()` gives `run <i>: firings <f> busy <b> stall_in <si> stall_out
+  <so> flush <fl>`. Flush is the run's cycles after its last firing (and its
+  II gap) with results still in the pipeline, frozen ones excepted: a frozen
+  cycle stays stall_out (D59's order), so busy + stall_in + stall_out +
+  flush is the run's busy cycles, E - s, the cycles SnaxShell's counter
+  counts. Lockstep (and pipelined with L = 0) has no flush cycle. No change
+  to which cycle gets which class. `snax_unit.cpp`: its header comment.
+- `tests/snax/unit/tb.cpp`: at each run's end it reads busy, stall_in,
+  stall_out and flush back from the printed line and checks they add up to
+  the busy cycles of that run in the case file (the `busy` column, counted
+  from the start taken). The expected lines gain `flush 0` (lockstep cases),
+  `flush 2` (`pipelined_l2_backpressure`: cycles 8 and 10; cycle 9 is
+  frozen, stall_out: 4 + 1 + 3 + 2 = 10) and `flush 1` (`pipelined_ii2`:
+  cycle 8; 5 + 1 + 1 + 1 = 8). README.md updated.
+- Differs from the prompt: "the run's cycles after its last firing while
+  results are still in the pipeline" would also count cycle 9 of
+  `pipelined_l2_backpressure` (frozen, a result in flight), and the sum
+  would be 11, not 10; flush leaves frozen cycles to stall_out, as the
+  identity needs.
+- Run: `tests/snax/unit/run.sh`, on the host and in snax-forge's image:
+  `11 passed, 0 failed`. A copy of the rule that does not count flush
+  cycles: both pipelined cases fail on the sum (`busy 4 + stall_in 1 +
+  stall_out 3 + flush 0 = 8, the run's busy cycles 10`) and on the line.
+- Not verified: the component built with this change (built in F3); a
+  pipelined unit inside GVSoC (no target has one).

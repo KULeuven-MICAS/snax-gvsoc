@@ -46,8 +46,8 @@
 //
 // Its event runs every busy cycle, scheduled as snax_alu_shell.cpp's, so it
 // runs before the streamer's step in a cycle. At the end of each run the trace
-// gives `run <i>: firings <f> busy <b> stall_in <si> stall_out <so>`
-// (SnaxUnitRule::run_line).
+// gives `run <i>: firings <f> busy <b> stall_in <si> stall_out <so> flush <fl>`
+// (SnaxUnitRule::run_line), the classes adding up to the run's busy cycles.
 
 #include <deque>
 #include <string>

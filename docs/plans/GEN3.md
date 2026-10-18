@@ -85,8 +85,10 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 - `snax_alu.py` takes its accelerator as a board class attribute
   (`SnaxAluBoard.accelerator`, step 2), as `snax_alu_sparse.py` overrides
   the interconnect.
-- `SnaxUnit` and `SnaxShell` print firings, busy, `stall_in` and
-  `stall_out` at the end of a run, in a fixed format.
+- `SnaxUnit` prints `run <i>: firings <f> busy <b> stall_in <si> stall_out
+  <so> flush <fl>` at the end of a run (`SnaxUnitRule::run_line`); busy +
+  stall_in + stall_out + flush is the run's busy cycles, which SnaxShell's
+  counter counts (round 1b F2).
 - Not in GEN3: the runner, the converter.
 
 ## The rounds
@@ -122,6 +124,7 @@ Round 1b, fix-ups after round 1:
 | # | Fix-up | Status |
 |---|---|---|
 | F1 | gvrun runs a target without its platform tree on the JSON config path, with a warning; snax-forge's `alu_probe` runs, and `tiled_add_sparse_probe` (a component tree no build made) | done |
+| F2 | `flush` in the unit's run line: the cycles after the last firing with results still in the pipeline (not frozen), so the four classes add up to the run's busy cycles; the unit test checks that on every case | done |
 
 ## Open
 
