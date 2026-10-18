@@ -3573,3 +3573,36 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   `--target-dir`, never through `TARGETS`. README's layout row.
 - Not verified: the folder run on GVSoC (step 4); snax-forge reproducing it
   (step 5).
+
+### GEN3 step 5, round 3 step 3: the program forge-elementwise
+
+- 2026-10-18. `sw/apps/forge-elementwise/` (Makefile, README, src):
+  `DESIGN ?= vecadd`, `MODE ?= 0`, `FORGE = forge/$(DESIGN)`, `DATA_LEN`
+  from the manifest's `symbols.N` (a python3 one-liner; empty is a make
+  error), `BUILDDIR = build/sw/apps/forge-elementwise/$(DESIGN)`, `INCDIRS`
+  the build folder and `$(FORGE)/include` before common.mk. No snax-alu
+  library. `data.h` is datagen.py at `--mode=$(MODE) --length=$(DATA_LEN)`,
+  seed 0, depending on datagen.py, the manifest and the Makefile.
+- vecadd's derived task list (snax-forge `derive.task_list` on
+  `out/design/vecadd/design_point.json`): `load_A`, `load_B` (DMA, L2 to
+  L1, 8 x 64 bytes each); `add_acc_a`, `add_acc_b`, `add_acc_out`
+  (streamer: bases `0x1000_0000`, `0x1000_0200`, `0x1000_0400`,
+  `temporal_bounds [16]`, `temporal_strides [32]`, `spatial_strides [8]`);
+  `add_acc` (accel, `n` 16); one `Start` of the three streamer tasks and
+  `add_acc`, in that order; `store_C` (DMA, after `add_acc_out`) and its
+  poll. The program does all but `store_C` (the data is checked in L1), the
+  bases replaced by `snrt_l1_next()` pointers, the starts as the streamer's
+  one start CSR then `ACC_RW_START`, then busy polled (accelerator, then
+  streamer), the counter read.
+- Differs from the prompt: a `mode.$(MODE)` stamp in the build folder, a
+  prerequisite of `data.h`, so a `MODE` change makes `data.h` again (the
+  folder is per design, not per mode). `LANES` 4 in the source gives the
+  bound, stride and loop count from `DATA_LEN`, so W = 4 only.
+- Run, in snax-forge's image: `make -C sw/apps/forge-elementwise` exit 0, no
+  warning; the ELF's `.d` lists `forge/vecadd/include/` for both headers.
+  By hand, `gvrun --target forge_vecadd --target-dir=$PWD/forge/vecadd`:
+  the no-platform-tree warning, `forge-elementwise data: 0 errors (64
+  words)`, `counter: 16`, `errors: 0`, exit 0; with the unit's trace `run
+  0: firings 16 busy 16 stall_in 0 stall_out 0 flush 0`. Built with
+  `MODE=2` (mul data on the add accelerator): `errors: 64`, exit 1; back to
+  `MODE=0`, `data.h` made again.
