@@ -3079,3 +3079,60 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - A clone of snax-forge `ry/gen3` (local, to the scratch folder) with
   `git submodule update --init gvsoc/snax-gvsoc` checks out `c911569`.
 - Not verified: snax-forge's CI itself (read, not run).
+
+### GEN3 step 0b: the probe
+
+- 2026-10-18. snax-forge `gvsoc/targets/alu_probe.py`: `snax/snax_alu.py`
+  under the name `alu_probe`, with its own copy of `snax_alu_acc.py`'s
+  `STREAMER_TEMPLATE` (`PROBE_STREAMER_TEMPLATE`) and accelerator
+  (`AluProbeAcc`, a subclass of `SnaxAluAcc` with the same `__init__` on that
+  template), so a property can change without editing this repo. Committed
+  with `fifo_depth` 8. Install: snax-forge `out/snax-gvsoc`, built from this
+  checkout (`ry/gen3`) in step 0a; ELFs from this checkout's `build/sw/`.
+- First run (`make run TARGET=alu_probe`, `snax-alu`): gvrun stops,
+  `Input error: Missing platform_tree library for target 'alu_probe':
+  .../install/lib/libplatform_tree_alu_probe.so`. `runner_gvrun2.py` lines 290
+  to 297 want `libplatform_tree_<target>.so`, which the build makes only for
+  `TARGETS`. The engine itself runs without one (`top.cpp`: no
+  `platform_tree`, the JSON config path).
+- Diagnostics, in the install only (generated output), undone after:
+  - `libplatform_tree_snax_alu.so` and its `.sig` copied to
+    `libplatform_tree_alu_probe.so`: `snax-alu` and the seven
+    `stream-timing` cases on `snax_alu` and on `alu_probe` give the same
+    lines (`snax-alu` 25 cycles, 0 errors; `stream-timing` counters 0, 9, 9,
+    10, 12, 5 and 2/5, as the README's plain column), no warning: the tree's
+    signature is the same, since it holds component names, bindings and
+    `.so` names (`build/gvsoc/configs/snax_alu.tree.cpp`), no SNAX
+    property.
+  - `fifo_depth` 4 in the probe (the copied tree still in place): no
+    warning again (the tree does not change with a property); the run's
+    `gvsoc_config.json` has `fifo_depth` 4 for the three movers (8 before).
+    `snax-alu`: 25 cycles, 0 errors, as at 8. `zero_bound`: counter 0, as at
+    8. The other six never finish (exit 124 under `timeout 60`): with the ALU
+    never started, a lane holds at most `fifo_depth` beats, and each of
+    those cases asks a lane for more than 4 (README: "Each lane reads at
+    most `fifo_depth` (8) beats and the reader is done"), so the streamer
+    stays busy and the core polls forever. The counters could not be read;
+    the change in behaviour shows the property reached the C++ without a
+    compile. Restored to 8.
+  - The tree copy removed and `runner_gvrun2.py`'s stop turned into the
+    JSON fallback in the install's copy: `alu_probe` (`fifo_depth` 8) gives
+    `snax_alu`'s lines on all eight programs; no `platform_tree` in its
+    `gvsoc_config.json`. The install's copy restored from the source (the
+    probe stops again, as in the first run).
+- Did anything compile: no. `ls --full-time` of the install's `models/` and
+  `lib/` equal before and after every run, but the tree copies made and
+  removed by hand; gvrun printed no build output. The "installed platform
+  tree ... does not match ... JSON config path" warning: never printed.
+- GEN3.md: step 0b ticked with what it found; "Where things go" takes
+  "SNAX components read every property with `get_js_config`, never from the
+  compiled config struct"; Open takes the missing tree, to decide before
+  step 3. snax-forge: `gvsoc/targets/README.md` lists `alu_probe` and says
+  it stops; README section 5 one sentence.
+- Not verified: a target whose structure differs from every built one on
+  the JSON path (every probe here has `snax_alu`'s structure); the
+  signature-mismatch warning itself.
+- Re-run (in the image, from snax-forge's `gvsoc/`, install from step 0a):
+  `make run SNAX_GVSOC=../../snax-gvsoc TARGET=alu_probe
+  ELF=../../snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf`: the
+  `Missing platform_tree library for target 'alu_probe'` error, exit 2.

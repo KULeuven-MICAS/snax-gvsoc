@@ -64,7 +64,10 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 
 ## Where things go
 
-- C++ in `snax/`: `SnaxUnit` and `SnaxShell` (D128).
+- C++ in `snax/`: `SnaxUnit` and `SnaxShell` (D128). SNAX components read
+  every property with `get_js_config`, never from the compiled config
+  struct: a target's platform tree holds its components and bindings, not
+  SNAX properties, which reach the C++ only through the JSON config (step 0b).
 - The generator in one snax-forge package. Its output in snax-forge
   `out/gvsoc/<design>/`: the composite, a target putting it in
   `snax_alu`'s accelerator slot, two headers, `manifest.json`.
@@ -101,7 +104,7 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | # | Step | Status |
 |---|---|---|
 | 0a | SNAX-GVSoC from snax-forge: this repo a submodule at snax-forge `gvsoc/snax-gvsoc`, never fetched by its CI (D128); `gvsoc/Makefile` (`build`, `sw`, `run`) and `gvsoc/targets/` | done |
-| 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`) | todo |
+| 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`). Found: nothing compiles and properties reach the C++ through the JSON config, but gvrun stops on a target without its platform tree (Open) | done |
 | 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | todo |
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test | todo |
 | 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator; `snax_alu.py`'s accelerator argument here | todo |
@@ -112,3 +115,11 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 ## Open
 
 - Whether the first vecadd program stays hand-written until GEN2a.
+- A target that no build made (from `--target-dir`, as every generated one)
+  has no `libplatform_tree_<target>.so`, and `runner_gvrun2.py` stops on it
+  (`Missing platform_tree library`, lines 290 to 297). The engine runs without a tree
+  (the JSON config path, `top.cpp`): with the stop turned into that fallback
+  in an install's copy, `alu_probe` gave `snax_alu`'s output on its eight
+  programs (step 0b). Either that fallback, an upstream change here, or
+  each generated target's tree built (a compile per structure, against
+  D128). To decide before step 3.
