@@ -11,6 +11,7 @@ byte for byte, so neither repo's CI needs the other.
 | Folder | Design point | Target |
 |---|---|---|
 | `vecadd/` | `recipes/vecadd.json` (W = 4, N = 64) on `platforms/snax_alu.json` | `forge_vecadd` |
+| `vecmul/` | `recipes/vecmul.json` (W = 4, N = 64, `elementwise_mul`) on `platforms/snax_alu.json` | `forge_vecmul` |
 
 Each folder holds the composite (`forge_<design>_acc.py`), the target
 (`forge_<design>.py`: `snax_alu`'s board with the composite in its
@@ -31,6 +32,8 @@ this repo, with snax-gvsoc built and installed at snax-forge's
     pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_alu.json
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd \
         --install out/snax-gvsoc/install
+
+and the same with `vecmul` for `vecadd`.
 
 Then commit the folder as written, and bump snax-forge's submodule so its
 fixture test compares against it.

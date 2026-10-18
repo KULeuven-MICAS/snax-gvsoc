@@ -69,7 +69,7 @@ OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
 # Generated accelerators, forge/<design>/ (forge/README.md), each run by
 # forge-elementwise: (design, datagen.py's mode: 0 add, 2 mul)
 FORGE_DIR = ROOT / "forge"
-FORGE = [("vecadd", 0)]
+FORGE = [("vecadd", 0), ("vecmul", 2)]
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]

@@ -3636,3 +3636,61 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   tests/snax/regress.py -k forge`, the form the README gives.
 - Nothing compiled: the target runs from `--target-dir` on the installed
   components (build of GEN3 round 1b F3, from this checkout's sources).
+
+### GEN3 step 5, round 3 step 5: snax-forge reproduces the fixture
+
+- 2026-10-18. snax-forge `ry/gen3` (`b3a63cf`), `tests/gen/test_fixture.py`:
+  per design, the refresh commands of `forge/README.md` (sandbox, design on
+  `platforms/snax_alu.json`, `generate`) run in a temporary folder standing
+  for the root, so the design point is
+  `out/design/<design>/design_point.json` as in the fixture's header
+  comments; the generated folder must equal `gvsoc/snax-gvsoc/forge/<design>/`
+  byte for byte, file list included. Skipped without the submodule (CI
+  never fetches it), and with a submodule that has no `forge/` (reason:
+  bump the submodule).
+- Run, in snax-forge's image: at the pin (`dbd7f96`): skipped, `the
+  snax-gvsoc submodule has no forge/: bump the submodule`. With the
+  submodule at this repo's `ry/gen3` (`git -C gvsoc/snax-gvsoc fetch
+  ../../../snax-gvsoc ry/gen3`, checkout `FETCH_HEAD`, then `d71707f7`):
+  passed. `ACC_RW_START 979` changed to `970` in the submodule's
+  `forge/vecadd/include/acc_csr.h`: fails on `include/acc_csr.h`, `At index
+  279 diff: b'9' != b'0'`. Restored, `git submodule update
+  gvsoc/snax-gvsoc` back to `dbd7f96`; the pointer never committed.
+
+### GEN3 step 6a: elementwise_mul
+
+- 2026-10-18. snax-forge `ry/gen3` (`c5ed3f0`): `elementwise_mul`'s
+  `chisel_tiled_spatial` has `elementwise_add`'s binding (block
+  `ElementwiseTiledSpatial`, op through `ElementwiseOp`: mul = 2). A test
+  kernel `kernels/polybench/vecmul.py` (C = A * B, int64, as vecadd; there
+  to exercise `elementwise_mul` on its own, since dot binds two instances
+  and snax_alu has one slot), found by the kernel loader as every kernel
+  is; its import is a DFG fixture, `tests/dfg/fixtures/vecmul.snaxdfg`
+  (`mult_map`, `mult`), checked as vecadd's and dot's. `recipes/vecmul.json`:
+  W 4, N 64, `split_map` of `mult_map`, `bind` of `mult` to
+  `elementwise_mul` `chisel_tiled_spatial`, instance `acc`. No test counts
+  kernels. Tests: both elementwise BRMs carry the binding (`test-brm`);
+  vecmul generates vecadd's accelerator with `op` 2, the same template and
+  CSRs, task `mult_acc` of 16 beats, symbols `{"N": 64}` (`tests/gen`); the
+  fixture test over vecadd and vecmul, a design whose folder the submodule
+  lacks skipped; its file list leaves out `__pycache__` (gvrun writes one
+  into a fixture folder it imports from; git ignores it).
+- Here: `forge/vecmul/` generated as vecadd's (`pixi run sandbox
+  recipes/vecmul.json`, `design ... --platform platforms/snax_alu.json`,
+  `gen-gvsoc ... --out ../snax-gvsoc/forge/vecmul --install
+  out/snax-gvsoc/install`: checked against the install, `task mult_acc: 16
+  beats`). Against `forge/vecadd/` it differs only in the names and `op=2`.
+  `FORGE` gains `("vecmul", 2)`; `forge/README.md` its row.
+- Run, in snax-forge's image: `python3 tests/snax/regress.py -k forge`:
+  `forge-elementwise on forge/: vecadd, vecmul`, `2 run`, `regression
+  passed`. vecmul's log: the no-platform-tree warning, the unit's `mul, 4
+  lanes of 64 bits, lockstep, latency 0, ii 1`, `forge-elementwise data: 0
+  errors (64 words)`, `counter: 16`, `errors: 0`, `run 0: firings 16 busy
+  16 stall_in 0 stall_out 0 flush 0`; `data.h` at `MODE = 2`.
+- snax-forge's fixture test, with the submodule at this commit (fetched
+  as in step 5, then back to the pin): vecadd and vecmul passed; `op=2`
+  to `op=3` in `forge/vecmul/forge_vecmul_acc.py` fails vecmul (`At index
+  2949 diff: b'2' != b'3'`), undone. snax-forge: `test-brm` 174, `test-dfg`
+  175, `test-sandbox` 77, `test-flow` 78, `test-design` 142 passed,
+  `tests/gen` 42 passed and 2 skipped (submodule at the pin); fmt, lint
+  clean.
