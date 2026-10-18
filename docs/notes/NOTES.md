@@ -3606,3 +3606,33 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   0: firings 16 busy 16 stall_in 0 stall_out 0 flush 0`. Built with
   `MODE=2` (mul data on the add accelerator): `errors: 64`, exit 1; back to
   `MODE=0`, `data.h` made again.
+
+### GEN3 step 5, round 3 step 4: regress from the manifest
+
+- 2026-10-18. `tests/snax/regress.py`: `FORGE = [("vecadd", 0)]` (design,
+  datagen's mode), run after `OWN_TARGET`. Per entry, `forge/<design>/
+  manifest.json` read with plain json (no snax_forge import): `target`,
+  `target_dirs`, `trace`, `tasks`. Not exactly one task: a failure naming
+  the count and the manifest. Built with `make -C
+  sw/apps/forge-elementwise DESIGN=<design> MODE=<mode>`, run as
+  `forge-elementwise.<design>` with `--target-dir=` each target dir
+  resolved from the manifest's folder and `--trace=<trace>`, checked with
+  `check_counter(program, log, log, tasks[0].beats)`. snax-shell keeps its
+  `OWN_TARGET` entry. Docstring, README (Layout, Regression, CI) and the
+  CI workflow's comment updated.
+- Run, in snax-forge's image: `python3 tests/snax/regress.py -k forge`:
+  `forge-elementwise on forge/: vecadd`, `1 run`, `regression passed`,
+  exit 0. Its log: the no-platform-tree warning, `forge-elementwise data: 0
+  errors (64 words)`, `counter: 16`, `errors: 0`, the unit's `run 0:
+  firings 16 busy 16 stall_in 0 stall_out 0 flush 0` (16 = 16 + 0 + 0 + 0).
+  A manifest with its task doubled (undone after): `FAIL
+  forge-elementwise.vecadd: 2 accelerator tasks in
+  forge/vecadd/manifest.json, not 1`, exit 1. `python3 -m unittest discover
+  -s tests/snax`: OK.
+- Differs from the prompt: `make regress -k forge` does not filter, since
+  make reads `-k` as its own keep-going flag and `forge` as a target (`make
+  -n` prints the full `python3 tests/snax/regress.py` and `Nothing to be
+  done for 'forge'`), so the selection is run as `python3
+  tests/snax/regress.py -k forge`, the form the README gives.
+- Nothing compiled: the target runs from `--target-dir` on the installed
+  components (build of GEN3 round 1b F3, from this checkout's sources).

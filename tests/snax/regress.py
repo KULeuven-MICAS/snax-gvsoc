@@ -15,6 +15,12 @@ named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
 `snax-shell` on `snax_tiled_add` (GEN3 step 2: SnaxShell and SnaxUnit), with
 the unit's trace on and the counter check below; then
+`forge-elementwise` on each generated accelerator of forge/ (FORGE, GEN3
+step 5), named forge-elementwise.<design>: the fixture's manifest.json gives
+the target, its --target-dir folders, the unit's trace path and the one
+accelerator task's beats; the target runs from --target-dir, never built
+(it has no platform tree, so gvrun warns and runs it on the JSON config),
+with the counter check; then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
@@ -27,7 +33,8 @@ The counter check (check_counter, GEN3): a program on SnaxShell and
 SnaxUnit prints the shell's counter after its first unit run as
 `<program> counter: <n>`; it passes when n is busy + stall_in + stall_out +
 flush of the unit's first trace line (`run 0: ...`) and that run fired the
-program's beats.
+program's beats (snax-shell's in OWN_TARGET, a fixture's from its manifest;
+a manifest with other than one accelerator task fails).
 
 Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
 failure prints that path and the log's last lines. Under GitHub Actions
@@ -35,11 +42,13 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (README). Exit code 0 when every
-program passes, 1 otherwise.
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (README); the
+forge/ targets are never in that list. Exit code 0 when every program
+passes, 1 otherwise.
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -57,6 +66,10 @@ SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # unit's trace path, the beats of its first run: snax-shell's RUN_BEATS,
 # DATA_LEN 192 / 4 lanes / 3 runs)
 OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
+# Generated accelerators, forge/<design>/ (forge/README.md), each run by
+# forge-elementwise: (design, datagen.py's mode: 0 add, 2 mul)
+FORGE_DIR = ROOT / "forge"
+FORGE = [("vecadd", 0)]
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]
@@ -232,6 +245,34 @@ def main():
             # Program output and trace share the log
             text = log.read_text(errors="replace")
             why = check_counter(prog, text, text, beats)
+            if why is not None:
+                check.fail(name, why, log)
+    print(f"  {check.count - count} run")
+
+    count = check.count
+    prog = "forge-elementwise"
+    print(f"{prog} on forge/: {', '.join(design for design, _ in FORGE)}")
+    for design, mode in FORGE:
+        name = f"{prog}.{design}"
+        if not check.selected(name):
+            continue
+        folder = FORGE_DIR / design
+        # Plain json: the manifest is snax-forge's, read without it
+        manifest = json.loads((folder / "manifest.json").read_text())
+        tasks = manifest["tasks"]
+        if len(tasks) != 1:
+            check.count += 1
+            check.fail(name, f"{len(tasks)} accelerator tasks in "
+                       f"{(folder / 'manifest.json').relative_to(ROOT)}, not 1")
+            continue
+        make(APPS / prog, f"DESIGN={design}", f"MODE={mode}")
+        dirs = [f"--target-dir={(folder / d).resolve()}" for d in manifest["target_dirs"]]
+        log = check.run(name, manifest["target"],
+                        BUILD / "apps" / prog / design / f"{prog}.elf",
+                        options=[*dirs, f"--trace={manifest['trace']}"])
+        if log is not None:
+            text = log.read_text(errors="replace")
+            why = check_counter(prog, text, text, tasks[0]["beats"])
             if why is not None:
                 check.fail(name, why, log)
     print(f"  {check.count - count} run")
