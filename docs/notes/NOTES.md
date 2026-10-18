@@ -3029,3 +3029,53 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   binding), D130 (GeMMX's shell contract).
 - The facts under "What it models" were read from source (snax-forge's
   Chisel blocks, snax_cluster at `05615e4`), not run.
+
+### GEN3 step 0a: SNAX-GVSoC from snax-forge
+
+- 2026-10-18. snax-forge `ry/gen3`: this repo is a submodule at
+  `gvsoc/snax-gvsoc`, pinned at main `c911569`. snax-forge's CI
+  (`actions/checkout@v4`, no `submodules:` key) does not fetch it; its lint
+  and tests list their folders and `tests/` only, so `gvsoc/` is in neither.
+- snax-forge `gvsoc/targets/README.md`: snax-forge's own targets, Python
+  only, on the install's components.
+- snax-forge `gvsoc/Makefile`, in the container's plain shell. Variables:
+  `SNAX_GVSOC` (`$(CURDIR)/snax-gvsoc`), `GVSOC_WORKDIR` (snax-forge
+  `out/snax-gvsoc`), `TARGETS` (`snax_alu;snax_alu_sparse`), `APPS` (empty),
+  `TARGET`, `ELF`, `WORK_DIR` (`out/snax-gvsoc/work/<target>/<elf name>`),
+  `GVRUN_ARGS` (empty, put before `run`).
+  - `build`: `make -C $(SNAX_GVSOC) build` with `GVSOC_WORKDIR` and `TARGETS`;
+    build/ and install/ land in `out/snax-gvsoc/`. CMake refuses a build
+    folder made from another checkout (`The source ... does not match the
+    source ... used to generate cache`), so `build` keeps the checkout in
+    `out/snax-gvsoc/checkout.txt` and clears build/ and install/ when it
+    changes (a full build, 1 min 7 s with `-j32`).
+  - `sw`: `make -C $(SNAX_GVSOC) sw`, then `make -C sw/apps/<app>` per `APPS`.
+    The output lands in the checkout's own `build/sw/` (sw/Makefile's
+    `BUILD`, not `GVSOC_WORKDIR`); in the submodule that folder is ignored
+    by `.gitignore`, so the submodule stays clean.
+  - `run`: `$(INSTALL)/bin/gvrun --target-dir=<snax-forge>/gvsoc/targets
+    --target T --work-dir W --param chip/soc/binary=<elf> $(GVRUN_ARGS) run`.
+    The install's `gvrun` script (gvrun/bin/gvrun) sets `LD_LIBRARY_PATH`,
+    `PATH`, `PYTHONPATH` to the install, `USE_GVRUN=1`, `USE_GVRUN2=1`, and
+    puts `--target-dir=<install>/targets --target-dir=<install>/generators
+    --model-dir=<install>/models` before these; gvrun prepends the target
+    dirs to `sys.path` in that order (`gvrun/__main__.py`), so a module of
+    the install shadows one of the same name in `gvsoc/targets`.
+- gvrun in the container's plain shell: `python3` is `/opt/venv` 3.12 and
+  runs. From `pixi run` in snax-forge, `python3` is pixi's 3.11 and gvrun
+  stops at `ModuleNotFoundError: No module named 'rich'`; pixi also sets
+  `CC` and `CXX` to conda's gcc.
+- Run, in snax-forge's image: `make build` (submodule), `make sw
+  APPS="snax-alu stream-timing"`, `make run TARGET=snax_alu
+  ELF=snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf`: `Accelerator
+  Done!`, `Accelerator Cycles: 25`, `Number of errors: 0`, exit 0. The same
+  with `SNAX_GVSOC=../../snax-gvsoc` (this checkout, `ry/gen3`), after
+  `build` cleared the submodule's build: the same three lines.
+- snax-forge docs: README section 5 "SNAX-GVSoC from snax-forge" (Tests and
+  lint now 6); STATUS: GEN3's row takes the submodule, FLOW3's drops it;
+  D128's clause; ARCHITECTURE 5.6 one sentence.
+- Here: GEN3.md's step 0 split into 0a and 0b (done in this step so 0a has
+  its row), "Not in GEN3" drops the submodule, round 1's row names 0a and 0b.
+- A clone of snax-forge `ry/gen3` (local, to the scratch folder) with
+  `git submodule update --init gvsoc/snax-gvsoc` checks out `c911569`.
+- Not verified: snax-forge's CI itself (read, not run).

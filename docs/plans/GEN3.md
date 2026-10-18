@@ -80,7 +80,7 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 - `snax_alu.py` takes its accelerator as an argument.
 - `SnaxUnit` and `SnaxShell` print firings, busy, `stall_in` and
   `stall_out` at the end of a run, in a fixed format.
-- Not in GEN3: the submodule, the runner, the converter.
+- Not in GEN3: the runner, the converter.
 
 ## The rounds
 
@@ -88,7 +88,7 @@ To be confirmed.
 
 | Round | Content |
 |---|---|
-| 1 | Steps 0 to 2, here |
+| 1 | Steps 0a and 0b in snax-forge, 1 and 2 here |
 | 2 | LNK1 in snax-forge, steps 3 and 4 |
 | 3 | Steps 5 and 6 |
 
@@ -100,7 +100,8 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 
 | # | Step | Status |
 |---|---|---|
-| 0 | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`) | todo |
+| 0a | SNAX-GVSoC from snax-forge: this repo a submodule at snax-forge `gvsoc/snax-gvsoc`, never fetched by its CI (D128); `gvsoc/Makefile` (`build`, `sw`, `run`) and `gvsoc/targets/` | done |
+| 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`) | todo |
 | 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | todo |
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test | todo |
 | 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator; `snax_alu.py`'s accelerator argument here | todo |
