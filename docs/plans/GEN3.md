@@ -70,7 +70,7 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   SNAX properties, which reach the C++ only through the JSON config (step 0b).
 - The generator in one snax-forge package. Its output in snax-forge
   `out/gvsoc/<design>/`: the composite, a target putting it in
-  `snax_alu`'s accelerator slot, two headers, `manifest.json`.
+  `snax_alu`'s accelerator slot, two headers in `include/`, `manifest.json`.
 - gvrun reads it with `--target-dir`, the install's `targets` and
   `generators` passed too. It has no platform tree (only a build makes one),
   so gvrun warns and runs it on the JSON config path (`runner_gvrun2.py`,
@@ -108,7 +108,7 @@ To be confirmed.
 |---|---|
 | 1 | Steps 0a and 0b in snax-forge, 1 and 2 here |
 | 1b | Fix-ups F1 to F4, below |
-| 2 | LNK1 in snax-forge (D131), steps 3 and 4; done: LNK1, step 3 |
+| 2 | LNK1 in snax-forge (D131), steps 3 and 4: done |
 | 3 | Steps 5 and 6 |
 
 ## Acceptance
@@ -124,7 +124,7 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | done |
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test (`snax-shell` on the hand-written `snax_tiled_add`) | done |
 | 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2); it refuses a target name the install has. `forge_vecadd` (W = 4 on `platforms/snax_alu.json`) runs snax-shell with `snax_tiled_add`'s program and unit run lines, after the no-platform-tree warning; nothing compiled | done |
-| 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template | todo |
+| 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template. In `include/` of the generator's output, listed in the manifest: `streamer_csr_addr_map.h` (the Chisel header's defines, values and order) and `<instance>_csr.h` (`snax-alu-lib.h`'s form; vecadd's `ACC_RW_LOOP_COUNT` 978 to `ACC_RO_PERF_COUNT` 981) | done |
 | 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress` (its counter through `check_counter`); snax-forge reproduces the fixture | todo |
 | 6 | `elementwise_mul`; `accumulate` with `control: stream`, `wait: pipelined` | todo |
 

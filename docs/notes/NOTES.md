@@ -3455,3 +3455,39 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   snax_cluster's template for more than one spatial dimension; the
   generator's install check against a real shadowing install (a fake
   install folder in the tests); CI (not run).
+
+### GEN3 step 4: the headers
+
+- 2026-10-18. snax-forge `snax_forge/gen/headers.py`; `generate` writes
+  both to `out/gvsoc/<design>/include/` and lists them in the manifest.
+  - `streamer_csr_addr_map.h`: per mover, readers then writers
+    (`READER_<i>`, `WRITER_<j>`), `BASE_PTR_<M>_LOW` / `_HIGH`, then for the
+    spatial strides, temporal bounds and temporal strides `<KIND>_BASE_<M>`,
+    `<KIND>_NUM_<M>` and one define per index; then `STREAMER_START_CSR`,
+    `STREAMER_BUSY_CSR`, `STREAMER_PERFORMANCE_COUNTER_CSR`. The order for
+    more dimensions is snax_cluster's `Streamer.scala` (`genCSRMap` and
+    `writeCsrAddrMap`, read at `05615e4`, the pin): a loop per index. Its
+    optional CSRs (address remap, channel and byte enables) and datapath
+    extensions are not in this repo's streamer model and are never written.
+    No include guard, as the Chisel header has none.
+  - `<instance>_csr.h` in `snax-alu-lib.h`'s form: `<INST>_RW_<FIELD>`
+    (camelCase to upper snake, `loopCount` -> `LOOP_COUNT`),
+    `<INST>_RW_START`, `<INST>_RO_BUSY`, `<INST>_RO_PERF_COUNT`.
+- vecadd at W = 4 on `platforms/snax_alu.json`: the streamer header's 36
+  defines equal `sw/generated/snax_alu_cluster_old/streamer_csr_addr_map.h`'s
+  in name, value and order (`BASE_PTR_READER_0_LOW` 960 to
+  `STREAMER_PERFORMANCE_COUNTER_CSR` 977); only the comments differ (the
+  Chisel copy's licence, author and date, its empty "Datapath extension
+  CSRs" and "Other resgiters" sections). `acc_csr.h`: `ACC_RW_LOOP_COUNT`
+  978, `ACC_RW_START` 979, `ACC_RO_BUSY` 980, `ACC_RO_PERF_COUNT` 981, the
+  numbers `snax-shell.c` defines by hand (`SHELL_LOOP_COUNT` to
+  `SHELL_COUNTER`). At W = 8 both headers give the same numbers (the
+  streamer's CSR count does not depend on the lanes).
+- Tests (snax-forge `tests/gen/test_headers.py`): the defines against the
+  `sw/generated` copy and against snax-shell's hand numbers (skipped
+  without the submodule), inline expected numbers for both headers, and a
+  mover with 2 spatial and 3 temporal dimensions against Streamer.scala's
+  loops written out by hand.
+- Not verified: a program compiled against the generated headers (step 5);
+  more than one dimension against a header the Chisel streamer generated
+  (none exists for such a template here); CI (not run).
