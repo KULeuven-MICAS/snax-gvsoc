@@ -3017,3 +3017,389 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Every compared counter is now equal on the sparse RTL and the sparse
   target. Next: planning the single generator (open item 68 in
   snax-forge), then GEN1.
+
+### GEN3: the plan
+
+- 2026-10-17. `docs/plans/GEN3.md` written: a BRM's design point gives a
+  generated accelerator on `SnaxUnit` and `SnaxShell`, steps 0 to 6 in
+  three rounds.
+- It rests on four decisions in snax-forge (branch `ry/gen3-docs`): D127
+  (M14's order, SNAX-GVSoC first), D128 (the two generic components, only
+  Python and headers generated, one fixture here), D129 (the BRM's
+  binding), D130 (GeMMX's shell contract).
+- The facts under "What it models" were read from source (snax-forge's
+  Chisel blocks, snax_cluster at `05615e4`), not run.
+
+### GEN3 step 0a: SNAX-GVSoC from snax-forge
+
+- 2026-10-18. snax-forge `ry/gen3`: this repo is a submodule at
+  `gvsoc/snax-gvsoc`, pinned at main `c911569`. snax-forge's CI
+  (`actions/checkout@v4`, no `submodules:` key) does not fetch it; its lint
+  and tests list their folders and `tests/` only, so `gvsoc/` is in neither.
+- snax-forge `gvsoc/targets/README.md`: snax-forge's own targets, Python
+  only, on the install's components.
+- snax-forge `gvsoc/Makefile`, in the container's plain shell. Variables:
+  `SNAX_GVSOC` (`$(CURDIR)/snax-gvsoc`), `GVSOC_WORKDIR` (snax-forge
+  `out/snax-gvsoc`), `TARGETS` (`snax_alu;snax_alu_sparse`), `APPS` (empty),
+  `TARGET`, `ELF`, `WORK_DIR` (`out/snax-gvsoc/work/<target>/<elf name>`),
+  `GVRUN_ARGS` (empty, put before `run`).
+  - `build`: `make -C $(SNAX_GVSOC) build` with `GVSOC_WORKDIR` and `TARGETS`;
+    build/ and install/ land in `out/snax-gvsoc/`. CMake refuses a build
+    folder made from another checkout (`The source ... does not match the
+    source ... used to generate cache`), so `build` keeps the checkout in
+    `out/snax-gvsoc/checkout.txt` and clears build/ and install/ when it
+    changes (a full build, 1 min 7 s with `-j32`).
+  - `sw`: `make -C $(SNAX_GVSOC) sw`, then `make -C sw/apps/<app>` per `APPS`.
+    The output lands in the checkout's own `build/sw/` (sw/Makefile's
+    `BUILD`, not `GVSOC_WORKDIR`); in the submodule that folder is ignored
+    by `.gitignore`, so the submodule stays clean.
+  - `run`: `$(INSTALL)/bin/gvrun --target-dir=<snax-forge>/gvsoc/targets
+    --target T --work-dir W --param chip/soc/binary=<elf> $(GVRUN_ARGS) run`.
+    The install's `gvrun` script (gvrun/bin/gvrun) sets `LD_LIBRARY_PATH`,
+    `PATH`, `PYTHONPATH` to the install, `USE_GVRUN=1`, `USE_GVRUN2=1`, and
+    puts `--target-dir=<install>/targets --target-dir=<install>/generators
+    --model-dir=<install>/models` before these; gvrun prepends the target
+    dirs to `sys.path` in that order (`gvrun/__main__.py`), so a module of
+    the install shadows one of the same name in `gvsoc/targets`.
+- gvrun in the container's plain shell: `python3` is `/opt/venv` 3.12 and
+  runs. From `pixi run` in snax-forge, `python3` is pixi's 3.11 and gvrun
+  stops at `ModuleNotFoundError: No module named 'rich'`; pixi also sets
+  `CC` and `CXX` to conda's gcc.
+- Run, in snax-forge's image: `make build` (submodule), `make sw
+  APPS="snax-alu stream-timing"`, `make run TARGET=snax_alu
+  ELF=snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf`: `Accelerator
+  Done!`, `Accelerator Cycles: 25`, `Number of errors: 0`, exit 0. The same
+  with `SNAX_GVSOC=../../snax-gvsoc` (this checkout, `ry/gen3`), after
+  `build` cleared the submodule's build: the same three lines.
+- snax-forge docs: README section 5 "SNAX-GVSoC from snax-forge" (Tests and
+  lint now 6); STATUS: GEN3's row takes the submodule, FLOW3's drops it;
+  D128's clause; ARCHITECTURE 5.6 one sentence.
+- Here: GEN3.md's step 0 split into 0a and 0b (done in this step so 0a has
+  its row), "Not in GEN3" drops the submodule, round 1's row names 0a and 0b.
+- A clone of snax-forge `ry/gen3` (local, to the scratch folder) with
+  `git submodule update --init gvsoc/snax-gvsoc` checks out `c911569`.
+- Not verified: snax-forge's CI itself (read, not run).
+
+### GEN3 step 0b: the probe
+
+- 2026-10-18. snax-forge `gvsoc/targets/alu_probe.py`: `snax/snax_alu.py`
+  under the name `alu_probe`, with its own copy of `snax_alu_acc.py`'s
+  `STREAMER_TEMPLATE` (`PROBE_STREAMER_TEMPLATE`) and accelerator
+  (`AluProbeAcc`, a subclass of `SnaxAluAcc` with the same `__init__` on that
+  template), so a property can change without editing this repo. Committed
+  with `fifo_depth` 8. Install: snax-forge `out/snax-gvsoc`, built from this
+  checkout (`ry/gen3`) in step 0a; ELFs from this checkout's `build/sw/`.
+- First run (`make run TARGET=alu_probe`, `snax-alu`): gvrun stops,
+  `Input error: Missing platform_tree library for target 'alu_probe':
+  .../install/lib/libplatform_tree_alu_probe.so`. `runner_gvrun2.py` lines 290
+  to 297 want `libplatform_tree_<target>.so`, which the build makes only for
+  `TARGETS`. The engine itself runs without one (`top.cpp`: no
+  `platform_tree`, the JSON config path).
+- Diagnostics, in the install only (generated output), undone after:
+  - `libplatform_tree_snax_alu.so` and its `.sig` copied to
+    `libplatform_tree_alu_probe.so`: `snax-alu` and the seven
+    `stream-timing` cases on `snax_alu` and on `alu_probe` give the same
+    lines (`snax-alu` 25 cycles, 0 errors; `stream-timing` counters 0, 9, 9,
+    10, 12, 5 and 2/5, as the README's plain column), no warning: the tree's
+    signature is the same, since it holds component names, bindings and
+    `.so` names (`build/gvsoc/configs/snax_alu.tree.cpp`), no SNAX
+    property.
+  - `fifo_depth` 4 in the probe (the copied tree still in place): no
+    warning again (the tree does not change with a property); the run's
+    `gvsoc_config.json` has `fifo_depth` 4 for the three movers (8 before).
+    `snax-alu`: 25 cycles, 0 errors, as at 8. `zero_bound`: counter 0, as at
+    8. The other six never finish (exit 124 under `timeout 60`): with the ALU
+    never started, a lane holds at most `fifo_depth` beats, and each of
+    those cases asks a lane for more than 4 (README: "Each lane reads at
+    most `fifo_depth` (8) beats and the reader is done"), so the streamer
+    stays busy and the core polls forever. The counters could not be read;
+    the change in behaviour shows the property reached the C++ without a
+    compile. Restored to 8.
+  - The tree copy removed and `runner_gvrun2.py`'s stop turned into the
+    JSON fallback in the install's copy: `alu_probe` (`fifo_depth` 8) gives
+    `snax_alu`'s lines on all eight programs; no `platform_tree` in its
+    `gvsoc_config.json`. The install's copy restored from the source (the
+    probe stops again, as in the first run).
+- Did anything compile: no. `ls --full-time` of the install's `models/` and
+  `lib/` equal before and after every run, but the tree copies made and
+  removed by hand; gvrun printed no build output. The "installed platform
+  tree ... does not match ... JSON config path" warning: never printed.
+- GEN3.md: step 0b ticked with what it found; "Where things go" takes
+  "SNAX components read every property with `get_js_config`, never from the
+  compiled config struct"; Open takes the missing tree, to decide before
+  step 3. snax-forge: `gvsoc/targets/README.md` lists `alu_probe` and says
+  it stops; README section 5 one sentence.
+- Not verified: a target whose structure differs from every built one on
+  the JSON path (every probe here has `snax_alu`'s structure); the
+  signature-mismatch warning itself.
+- Re-run (in the image, from snax-forge's `gvsoc/`, install from step 0a):
+  `make run SNAX_GVSOC=../../snax-gvsoc TARGET=alu_probe
+  ELF=../../snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf`: the
+  `Missing platform_tree library for target 'alu_probe'` error, exit 2.
+
+### GEN3 step 1: SnaxUnit
+
+- 2026-10-18. New files:
+  - `snax/snax_unit.hpp`: the cycle rule (`SnaxUnitRule`) and the op table
+    (`SnaxUnitOp`, `snax_unit_compute`), no GVSoC dependency, as
+    `snax_plain_arb.hpp`. A start is taken only when idle and with count != 0
+    (0: ignored; while busy or a second one in the cycle: refused); busy from
+    s + 1 to the run's last cycle E. `lockstep` (ElementwiseTiledSpatial):
+    fires and pushes when every input has a beat and the output has room.
+    `pipelined` (accel.py without rates and drain): join, L slots stalling as
+    a whole on a full head with no room, one firing per II (counted from the
+    last firing, kept across a stall and across runs, as accel.py's
+    `_last_fire`), L = 0 a firing with no room a stall. Classes in D59's
+    order: stall_out > busy (fired or II gap) > stall_in > idle (pipelined:
+    results in flight after the last firing's gap). `run_line()` gives
+    `run <i>: firings <f> busy <b> stall_in <si> stall_out <so>`.
+  - `snax/snax_unit.cpp` + `snax/snax_unit.py`: `SnaxUnit`, every property
+    read with `get_js_config` and checked (missing, wrong type, bad value: a
+    fatal naming it). Properties and defaults (Python): `inputs`, `outputs`
+    (no default; two and one names, the op table is binary), `lanes`,
+    `data_width`, `op` (no default), `signed` False, `control` `counted`,
+    `wait` `lockstep`, `latency` 0, `ii` 1, `csr_base` 0. Ports: the named
+    io masters, `ctrl` (io slave), `busy` (wire<bool> master).
+  - `tests/snax/unit/`: `tb.cpp`, `run.sh`, `README.md`, `cases/*.txt`.
+- data_width: the streamer's beats are `num_channel * 8` bytes, one 64-bit
+  word per channel, lane 0 first (`reader_req` and `writer_req` in
+  `snax_streamer.cpp` refuse another size). So `lanes * data_width` must be
+  a multiple of 64; the elements are packed `data_width` bits apart, lane 0
+  lowest, as a Chisel `Vec`; `data_width` 8, 16, 32 or 64 (an element never
+  crosses a word). Only `data_width` 64 is run in this round (step 2).
+- Choices: the start's configuration for `control: counted` is one word,
+  the count (no `opSel`: `op` is fixed); a ctrl write of another size is
+  refused (INVALID), a start while busy DENIED after a warning; `busy`
+  syncs true in the cycle a start is taken and false in the run's last
+  cycle (the register's next value); `latency` must be 0 and `ii` 1 with
+  `lockstep`. The trace line is at DEBUG level, as `snax_alu_shell.cpp`'s
+  `Done`. A case line carries push and busy besides fire, and `start` and
+  `expect` header lines; `pipelined_l0` re-runs every lockstep case
+  (`like`) as pipelined L = 0, II 1.
+- Differs from the prompt: the run line leaves out the pipelined idle
+  cycles (accel.py's `idle`), so for `pipelined` busy + stall_in +
+  stall_out is the busy cycles less them (2 in `pipelined_l2_backpressure`,
+  1 in `pipelined_ii2`); for `lockstep` it is all of them.
+- `tests/snax/regress.py`: `unit` first (`run.sh`, pass when exit 0), its
+  log in `build/regress/work/unit/run.log`. README: layout and regression.
+- Run, in snax-forge's image: `tests/snax/unit/run.sh`: `PASS ops: 16
+  vectors`, the six cases and `pipelined_l0` four times, `11 passed, 0
+  failed`. Two broken copies of the header (no freeze at L > 0; no II gap
+  class) fail 2 and 1 cases. `snax_unit.cpp` compiled with the build's own
+  flags (`g++ -O3 -std=gnu++17 -fPIC -D__GVSOC__`, the include dirs of
+  `flags.make`): no error, warnings only from `vp/itf/io.hpp`
+  (`-Wreorder`). `make build TARGETS="snitch;snax_alu;snax_alu_sparse"`:
+  exit 0. `make regress`: `regression passed`, `unit` 1, SNAX 40, plain 17,
+  1 min 47 s. A case edited to a wrong run line: `-k unit` prints `FAIL
+  unit: exit 1` and exits 1 (case restored).
+- Not verified: `SnaxUnit` in a running target (no target uses it before
+  step 2); `data_width` below 64 and `pipelined` in GVSoC; `signed` true.
+
+### GEN3 step 2: SnaxShell, the held start, the stand-in target
+
+- 2026-10-18. New files:
+  - `snax/snax_shell.cpp` + `snax/snax_shell.py`: `SnaxShell` on
+    `SnaxCsrBlock`, GeMMX's shell contract (D130) as the ReqRspManager and
+    BlockGemm give it. Properties: `csr_base`, `fields` (non-empty list of
+    names). CSRs: the fields, then start (read-write); busy, then the
+    counter (read-only). A start (bit 0 of start written 1) with the unit
+    idle goes to the unit's `ctrl` as the fields' words, accepted in that
+    cycle, the write answered OK. With the unit busy it answers
+    `IO_REQ_PENDING`, then in E + 1 (the cycle busy falls; also when the
+    write came in E after the fall) sends it and answers. The counter is
+    reset by an accepted start (also one the unit ignores, count 0), counts
+    busy cycles, holds after; busy and the counter are computed from the
+    cycles the unit's `busy` wire rose and fell. Ports: `input`, `ctrl` (io
+    master), `busy` (wire<bool> slave).
+  - `snax/snax_tiled_add_acc.py`: `SnaxTiledAddAcc`, by hand: csr_mux, the
+    streamer with `snax_alu_acc.py`'s `STREAMER_TEMPLATE` (imported),
+    `SnaxShell` (`fields: ['loopCount']`, CSRs 978 to 981), `SnaxUnit`
+    (lanes 4, data_width 64, op 0 add, signed False, counted, lockstep,
+    latency 0, ii 1, inputs a, b, output out). No opSel CSR.
+  - `snax/snax_tiled_add.py`: target `snax_tiled_add`, `SnaxAluBoard` with
+    `accelerator = SnaxTiledAddAcc`.
+  - `sw/apps/snax-shell/` (Makefile, README, src): snax-alu's DMA and
+    streamer setup and `datagen.py` (add, 128 words, seed 0), the shell's
+    CSRs by hand; one streamer run of 32 beats, two unit runs of 16.
+- Changed:
+  - `core/models/cpu/iss/src/snitch/snitch.cpp`, `class.hpp`: a SNAX CSR
+    write answered `IO_REQ_PENDING` calls `exec.insn_stall()`; the response
+    (`snax_csr_response`) does `exec.stalled_dec()` then
+    `exec.insn_terminate()`, as `Lsu::data_response` and `store_resume` do.
+    A pending read stays fatal. The request's data moved from a stack local
+    to the member `snax_csr_data`, since a held write's block may read it
+    after the call returned. UPSTREAM.md row.
+  - `snax/snax_alu.py`: `SnaxAluBoard.accelerator = SnaxAluAcc`; the
+    module's `SNAX_ACC` dict became `SNAX_ACC_CORE = 0` and the dict is made
+    in the board from the attribute, passed to `SnaxAluAttr`.
+  - `tests/snax/regress.py`: `OWN_TARGET`, `snax-shell` on `snax_tiled_add`;
+    TARGETS with `snax_tiled_add` in the Makefile's comment, README (and a
+    section on the target) and `.github/workflows/ci.yml`.
+- The trace lines, read by hand (`--trace=snax_acc0/unit
+  --trace=snax_acc0/shell`, the final ELF): start 1 accepted at 2842; start
+  2 held at 2843; `run 0: firings 16 busy 16 stall_in 0 stall_out 0` at
+  2858 (E - s = 16); start 2 accepted at 2859 (E + 1); `run 1: firings 16
+  busy 16 stall_in 0 stall_out 0` at 2875 (16); the count-0 start accepted
+  and ignored at 8591. The core (`pe0/insn`): `mcycle` at 2841, the start
+  writes issued at 2842 and 2843, the second completed at 2859, `mcycle` at
+  2860. Program: counter 16 (= run 1's 16 + 0 + 0), span 19 >= 16,
+  loopCount 0: busy 0, counter 0, data 0 errors, `snax-shell errors: 0`.
+- Differs from the prompt: the span starts before start 1, not between the
+  writes. In one build a 10-cycle instruction fetch fell between the two
+  writes (`csrrwi` at 0x80000320 done at 2816, `csrrs mcycle` at
+  0x80000324 at 2826), so the span around start 2 alone was 9 against 17
+  busy cycles; a span from before start 1 holds whenever start 2 waits for
+  run 1's end. The first run's busy cycles (the program's run 1, the
+  trace's `run 0`) also follow the core's timing: 17 (`stall_in 1`) in the
+  build where start 1 came right after `start_streamer`, 16 (`stall_in 0`)
+  in the final layout, where a fetch between `start_streamer` and start 1
+  gives the streamer a head start (changing the constant from 17 to 16
+  moved the code by 4 bytes). `RUN0_BUSY_CYCLES` and `RUN1_BUSY_CYCLES`
+  hold this build's 16 and 16; a change to the program can move them.
+- Compared with the core change: every `run.log` of `make regress` on
+  `snax_alu`, `snax_alu_sparse` (40) and `snitch` (17) byte-identical to
+  step 1's (before the change), 57 of 57; e.g. `snax-alu` 100: 25 cycles,
+  0 errors; `alu-timing` sparse: 34, 25, 74, 1, 34.
+- Run, in snax-forge's image: `make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0 (no
+  warning from the new sources); `make regress`: `regression passed`, unit
+  1, SNAX 40, `snax-shell.snax_tiled_add` 1, plain 17, 1 min 51 s.
+- Not verified: a pending read (the fatal path), `csrrw` with rd != x0 on a
+  held write, a field written while busy (taken at once, the run keeps its
+  count: by reading, not run), a held start whose write comes in E after the
+  fall (the `fall_cycle` path: by reading, not run), the CI workflow (not
+  run), the `snax_tiled_add` program on any RTL (none exists).
+
+### GEN3 round 1b F1: a target without its platform tree
+
+- 2026-10-18. `engine/python/gvsoc/runner_gvrun2.py`: when
+  `libplatform_tree_<target>.so` does not exist, one line on stderr,
+  `Warning: target '<target>': no platform tree, using the JSON config
+  (<path> does not exist)`, and no `platform_tree` in the config, as the
+  signature-mismatch path; it no longer stops (`Missing platform_tree
+  library`). An installed target with its tree loads it as before (the
+  signature check unchanged). UPSTREAM.md row.
+- snax-forge `gvsoc/targets/`: `alu_probe` (unchanged, now runs) and
+  `tiled_add_sparse_probe.py` (`TiledAddSparseProbeBoard(SnaxAluSparseBoard)`
+  with `accelerator = SnaxTiledAddAcc`: `snax_tiled_add`'s accelerator on
+  `snax_alu_sparse`'s sparse interconnect, a component tree no built target
+  has). Its README and README.md say how they run.
+- Run, in snax-forge's image:
+  - here, `make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"`
+    exit 0, then `make regress`: every gvrun log byte-identical to round 1's
+    (step 2's, saved before), 58 of 58 (SNAX 40, snax-shell 1, plain 17).
+    `unit` failed in that run, because I was editing `snax_unit.hpp` and
+    `tb.cpp` for F2 while it ran (`'IDLE' is not a member`); with those
+    edits put aside, `tests/snax/unit/run.sh` gives `11 passed, 0 failed`.
+  - snax-forge `gvsoc/`, this checkout as `SNAX_GVSOC=../../snax-gvsoc`:
+    `make build TARGETS="snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0,
+    `make sw APPS="snax-alu stream-timing snax-shell"` exit 0, then
+    `out/f1_probe.sh` (not tracked): `make run` of `snax_alu` and
+    `alu_probe` on snax-alu (100) and the 7 stream-timing cases, and of
+    `snax_tiled_add` and `tiled_add_sparse_probe` on snax-shell, all exit 0.
+  - `alu_probe`: the warning line, then snax_alu's output exactly, on all 8
+    (`Accelerator Done!`, `Accelerator Cycles: 25`, `Number of errors: 0`;
+    e.g. `stream-timing prio_queued: first run counter 5, counter 5, polls
+    2, mcycle 21`).
+  - `tiled_add_sparse_probe`: the warning, then `snax-shell data: 0 errors
+    (128 words)`, counter 16, span 19, loopCount 0: busy 0, counter 0,
+    `snax-shell errors: 0`: the same lines as on `snax_tiled_add`.
+  - The install's `models/` and `lib/` (131 files): timestamps listed
+    before and after the 18 runs, identical. Nothing compiled.
+- Step 0b's open item closed (GEN3.md): the fallback, here.
+- Not verified: a target from `--target-dir` with a component whose `.so`
+  the install does not hold (gvrun would have to compile it; not tried);
+  the submodule's pin (`c911569`, main) still stops, since it predates
+  this; CI (not run).
+
+### GEN3 round 1b F2: flush in the unit's run line
+
+- 2026-10-18. `snax/snax_unit.hpp`: the class `IDLE` is now `FLUSH`, and
+  `run_line()` gives `run <i>: firings <f> busy <b> stall_in <si> stall_out
+  <so> flush <fl>`. Flush is the run's cycles after its last firing (and its
+  II gap) with results still in the pipeline, frozen ones excepted: a frozen
+  cycle stays stall_out (D59's order), so busy + stall_in + stall_out +
+  flush is the run's busy cycles, E - s, the cycles SnaxShell's counter
+  counts. Lockstep (and pipelined with L = 0) has no flush cycle. No change
+  to which cycle gets which class. `snax_unit.cpp`: its header comment.
+- `tests/snax/unit/tb.cpp`: at each run's end it reads busy, stall_in,
+  stall_out and flush back from the printed line and checks they add up to
+  the busy cycles of that run in the case file (the `busy` column, counted
+  from the start taken). The expected lines gain `flush 0` (lockstep cases),
+  `flush 2` (`pipelined_l2_backpressure`: cycles 8 and 10; cycle 9 is
+  frozen, stall_out: 4 + 1 + 3 + 2 = 10) and `flush 1` (`pipelined_ii2`:
+  cycle 8; 5 + 1 + 1 + 1 = 8). README.md updated.
+- Differs from the prompt: "the run's cycles after its last firing while
+  results are still in the pipeline" would also count cycle 9 of
+  `pipelined_l2_backpressure` (frozen, a result in flight), and the sum
+  would be 11, not 10; flush leaves frozen cycles to stall_out, as the
+  identity needs.
+- Run: `tests/snax/unit/run.sh`, on the host and in snax-forge's image:
+  `11 passed, 0 failed`. A copy of the rule that does not count flush
+  cycles: both pipelined cases fail on the sum (`busy 4 + stall_in 1 +
+  stall_out 3 + flush 0 = 8, the run's busy cycles 10`) and on the line.
+- Not verified: the component built with this change (built in F3); a
+  pipelined unit inside GVSoC (no target has one).
+
+### GEN3 round 1b F3: snax-shell without layout constants
+
+- 2026-10-18. `sw/apps/snax-shell/src/snax-shell.c`: `RUN0_BUSY_CYCLES`
+  and `RUN1_BUSY_CYCLES` gone. Three unit runs of `RUN_BEATS` = LOOP_ITER /
+  3 on one streamer run: start 1 alone, then busy polled to 0 and the
+  counter read (`snax-shell counter: <n>`, its own line); then start 2 and
+  start 3 at once, start 3 held. Checks: the data; counter >= RUN_BEATS;
+  the `mcycle` span from before start 2 to after start 3 >= RUN_BEATS;
+  loopCount 0 leaves busy 0 and counter 0. The `%u` arguments are cast to
+  32 bit (`DATA_LEN` and `LOOP_ITER` are `uint64_t` in `data.h`).
+- `sw/apps/snax-shell/Makefile`: DATA_LEN 192 (48 beats, three runs of
+  16), and `data.h` depends on the Makefile: it did not, and a DATA_LEN
+  change kept the old `data.h` (128 words), so RUN_BEATS was 10 and 2 beats
+  stayed in the streamer, which never finished (the program hung in
+  `read_busy_streamer`; killed).
+- `tests/snax/regress.py`: `check_counter(program, output, trace, beats)`
+  returns why the check fails, or None: the `<program> counter: <n>` line
+  of output, the first `run 0: firings F busy B stall_in SI stall_out SO
+  flush FL` of trace, F == beats and n == B + SI + SO + FL. `OWN_TARGET`
+  entries are (program, target, the unit's trace path, beats):
+  (`snax-shell`, `snax_tiled_add`, `snax_acc0/unit`, 16); the run gets
+  `--trace=snax_acc0/unit` (`gvrun()` and `Check.run()` take `options`;
+  `Check.run()` returns the log when the program exited 0) and output and
+  trace are the same log. README (Regression), snax-shell's README updated.
+- Run, in snax-forge's image: `make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0 (F2's
+  `snax_unit.hpp` in); `make regress`: `regression passed`, unit 1, SNAX 40,
+  `snax-shell.snax_tiled_add` 1, plain 17, 1 min 51 s. Every log but
+  snax-shell's byte-identical to round 1's, 58 of 59.
+- snax-shell's run: `run 0: firings 16 busy 16 stall_in 1 stall_out 0
+  flush 0` at 3121, `run 1` and `run 2` 16 16 0 0 0 at 3158 and 3175;
+  `snax-shell data: 0 errors (192 words)`, `counter: 17`, `first run:
+  counter 17, at least 16 beats`, `held start: mcycle span 19, at least 16
+  beats`, `loopCount 0: busy 0, counter 0`, `errors: 0`.
+- `check_counter` on that log altered: counter 16 gives `counter 16, busy +
+  stall_in + stall_out + flush 16 + 1 + 0 + 0 = 17`; beats 15 gives `run 0
+  fired 16 times, not 15`; no counter line and an empty trace are named.
+- Differs from the prompt: three unit runs, not two, and DATA_LEN 192: the
+  counter of the first run can be read only before the next start resets
+  it, and a held start needs the unit busy, so the first run is alone and
+  the held pair comes after. RUN_BEATS for the regress check is a number in
+  `OWN_TARGET`, kept by hand equal to the program's.
+- Not verified: CI (not run); snax-forge's `tiled_add_sparse_probe` with
+  this program (F1 ran the round 1 program).
+
+### GEN3 round 1b F4: the target-name rule, the open edge cases
+
+- 2026-10-18. `docs/plans/GEN3.md`: the rule, in "Where things go": a
+  generated or snax-forge target never takes the name of an installed
+  target (nor a module a target imports), since the install's `targets`
+  shadow `gvsoc/targets`; step 3's generator checks it (its row says so).
+  The same in snax-forge `gvsoc/targets/README.md`.
+- Tried, in snax-forge's image: a `snax_alu.py` that raises `SystemExit` on
+  import, in a folder passed as `--target-dir` to the install's `gvrun
+  --target snax_alu`: the installed `snax_alu` ran (`Accelerator Cycles:
+  25`, `Number of errors: 0`, exit 0), the folder's module never loaded.
+  The folder was removed after.
+- Open (GEN3.md), from round 1's "not verified": a start written in the
+  run's last cycle E (held, sent in E + 1: read, not run); `csrrw` with a
+  destination register on a held start (only rd = x0 run); SnaxUnit's fixed
+  2 inputs / 1 output and one-word `counted` configuration (step 6).
+- Not verified: anything new in code (none changed).

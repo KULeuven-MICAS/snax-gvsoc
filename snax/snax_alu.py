@@ -52,9 +52,10 @@ NB_CORE = 2
 # instructions.
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
 
-# SNAX accelerators per core index: the compute core (hart 0) drives the ALU.
-# Its CSR layout is in snax_alu_acc.py.
-SNAX_ACC = {0: SnaxAluAcc}
+# The core index that drives the board's accelerator (SnaxAluBoard.accelerator,
+# the ALU of snax_alu_acc.py, whose CSR layout is there): the compute core,
+# hart 0.
+SNAX_ACC_CORE = 0
 
 # The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4):
 # one 64 B beat per cycle into L1 (dma_data_width 512), 3 transfers queued
@@ -99,9 +100,9 @@ INTERCONNECT = {'snax_interconnect': 'plain'}
 class SnaxAluAttr(Tree):
     """The address map and cluster of the target, as SnitchAttr gives them."""
 
-    def __init__(self, parent, name, interconnect):
+    def __init__(self, parent, name, interconnect, snax_acc):
         super().__init__(parent, name)
-        self.chip = SnaxAluAttr.Chip(self, 'chip', interconnect)
+        self.chip = SnaxAluAttr.Chip(self, 'chip', interconnect, snax_acc)
         self.hbm = SnaxAluAttr.Hbm(self, 'hbm')
 
     class Hbm(Tree):
@@ -113,13 +114,13 @@ class SnaxAluAttr(Tree):
 
     class Chip(Tree):
 
-        def __init__(self, parent, name, interconnect):
+        def __init__(self, parent, name, interconnect, snax_acc):
             super().__init__(parent, name)
-            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc', interconnect)
+            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc', interconnect, snax_acc)
 
         class Soc(Tree):
 
-            def __init__(self, parent, name, interconnect):
+            def __init__(self, parent, name, interconnect, snax_acc):
                 super().__init__(parent, name)
                 self.bootrom = Area(self, 'rom', 0x0000_1000, 0x0001_0000,
                     description='Bootrom range')
@@ -134,7 +135,7 @@ class SnaxAluAttr(Tree):
                 self.clusters = [
                     ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
                         nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
-                        snax_acc=SNAX_ACC, dma=SNAX_DMA, core=SNAX_CORE,
+                        snax_acc=snax_acc, dma=SNAX_DMA, core=SNAX_CORE,
                         core_latency=CORE_LATENCY, snax_dma_data_width=DMA_DATA_WIDTH,
                         **interconnect)
                 ]
@@ -149,23 +150,27 @@ class SnaxAluAttr(Tree):
 class SnaxAluBoard(gvsoc.systree.Component):
 
     interconnect = INTERCONNECT
+    # The compute core's accelerator; a target puts another one here, as
+    # snax_alu_sparse.py replaces the interconnect
+    accelerator = SnaxAluAcc
 
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
 
         clock = Clock_domain(self, 'clock', frequency=10000000)
+        snax_acc = {SNAX_ACC_CORE: self.accelerator}
 
         if os.environ.get('USE_GVRUN') is None:
             properties = SnitchArchProperties()
             properties.nb_core_per_cluster = NB_CORE
-            properties.snax_acc = SNAX_ACC
+            properties.snax_acc = snax_acc
             properties.dma = SNAX_DMA
             properties.snax_dma_data_width = DMA_DATA_WIDTH
             for key, value in self.interconnect.items():
                 setattr(properties, key, value)
             arch = SnitchArch(self, properties=properties)
         else:
-            arch = SnaxAluAttr(self, 'snax_alu', self.interconnect)
+            arch = SnaxAluAttr(self, 'snax_alu', self.interconnect, snax_acc)
         # Exposed so tools like the build process can query the memory map.
         self.set_attributes(arch)
 

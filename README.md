@@ -16,9 +16,9 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | Path | What |
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `snax/` | SNAX targets and components: the `snax_alu` and `snax_alu_sparse` targets, their streamer, ALU and TCDM crossbar |
+| `snax/` | SNAX targets and components: the `snax_alu` and `snax_alu_sparse` targets, their streamer, ALU and TCDM crossbar; `SnaxUnit` (a generic Chisel block's datapath) and `SnaxShell` (its CSR manager), and the `snax_tiled_add` target on them (GEN3) |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
-| `tests/snax/` | The regression (`regress.py`) and the phase script (`phases.py`) |
+| `tests/snax/` | The regression (`regress.py`), the phase script (`phases.py`), the arbiters' checks against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
 | `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
@@ -88,7 +88,7 @@ Build `sw/` (the runtime for both clusters), GVSoC and the programs in
 `sw/apps/`, each into `build/sw/apps/<name>/`:
 
     make sw
-    make build TARGETS="snitch;snax_alu;snax_alu_sparse"
+    make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"
     make -C sw/apps/snax-csr
     make -C sw/apps/snax-alu
     source sourceme.sh
@@ -106,19 +106,39 @@ README with its own expected output. The same commands with
 `--trace=snax_xbar` prints each bank's grants, marking with `!` a request
 with priority 1.
 
+## The snax_tiled_add target
+
+`snax_tiled_add` (`snax/snax_tiled_add.py`, GEN3) is `snax_alu` with
+another accelerator in the compute core's slot: `snax/snax_tiled_add_acc.py`,
+written by hand in place of the composite snax-forge's generator will write,
+with `snax_alu`'s CSR mux and streamer, `SnaxShell` (GeMMX's shell contract:
+a start waits while busy, busy and a cycle counter) and `SnaxUnit` (a lockstep
+add, 4 lanes of 64 bit). `sw/apps/snax-shell/` runs on it:
+
+    make -C sw/apps/snax-shell
+    gvrun --target snax_tiled_add --work-dir build/work/snax-shell \
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-shell/snax-shell.elf run
+
+It prints its checks and `snax-shell errors: 0`, and exits 0;
+`--trace=snax_acc0/unit` adds the unit's line per run.
+
 ## Regression
 
-`make regress` builds `sw/` and the programs of `sw/apps/`, runs each ELF
+`make regress` first runs `SnaxUnit`'s rule on its cases (`unit`,
+`tests/snax/unit/README.md`), then builds `sw/` and the programs of `sw/apps/`, runs each ELF
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
-case, then
+case, then `snax-shell` on `snax_tiled_add` with the unit's trace on, then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
 plain test missing from `build/sw/tests/` fails. No output or cycle count is
 compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
-and `w` and fails when they move (SG7). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse`,
+and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
+must equal its unit's first run line, busy + stall_in + stall_out + flush,
+that run firing its beats (`check_counter` in `tests/snax/regress.py`,
+GEN3). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add`,
 as above, and takes about two minutes.
 
     make regress
@@ -135,7 +155,7 @@ the programs whose name holds it, as `-k stream-timing`, `-k sparse` or
 `.github/workflows/ci.yml` runs on every push to main, on every pull
 request, and by hand (`workflow_dispatch`), in snax-forge's image
 `ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
-`snitch;snax_alu;snax_alu_sparse` (with ccache, kept between runs), runs the unit tests
+`snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (with ccache, kept between runs), runs the unit tests
 (`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
 `make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
 tested; GVSoC's other targets stay out.

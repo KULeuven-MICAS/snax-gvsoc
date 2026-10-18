@@ -71,7 +71,7 @@ sw:
 
 # SNAX-GVSoC's regression (SG5, tests/snax/regress.py): builds sw/ and the
 # programs of sw/apps/, then every program must exit 0 within its timeout
-# (SG6). Needs GVSoC built for "snitch;snax_alu;snax_alu_sparse".
+# (SG6). Needs GVSoC built for "snitch;snax_alu;snax_alu_sparse;snax_tiled_add".
 regress:
 	python3 tests/snax/regress.py
 

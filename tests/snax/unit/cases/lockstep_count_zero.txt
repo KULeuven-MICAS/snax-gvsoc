@@ -1,0 +1,15 @@
+# lockstep, a start with count 0: ignored, busy stays 0 and no run ends;
+# a later start runs as usual
+wait lockstep
+inputs 2
+start 0 0 ignored
+start 2 2 taken
+expect run 0: firings 2 busy 2 stall_in 0 stall_out 0 flush 0
+cycles
+# a b out  fire push busy
+1 1 1      0 0 0     # 0: start with count 0, ignored
+1 1 1      0 0 0     # 1: still idle
+1 1 1      0 0 0     # 2: start
+1 1 1      1 1 1     # 3
+1 1 1      1 1 1     # 4: the end
+1 1 1      0 0 0     # 5

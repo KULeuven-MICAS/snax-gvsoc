@@ -67,6 +67,7 @@ Iss::Iss(IssWrapper &top)
         snax_csr->register_callback(std::bind(&Iss::snax_csr_access, this, snax_csr,
             std::placeholders::_1, std::placeholders::_2));
     }
+    this->snax_csr_itf.set_resp_meth(&Iss::snax_csr_response);
     this->top.new_master_port("snax_csr", &this->snax_csr_itf, (vp::Block *)this);
 
     this->barrier_ack_itf.set_sync_meth(&Iss::barrier_sync);
@@ -125,7 +126,10 @@ bool Iss::barrier_update(bool is_write, iss_reg_t &value)
 // Sends one access to a SNAX CSR out on the snax_csr port: a 32-bit IO request at byte
 // address 4 * CSR number. The block behind the port answers at once (IO_REQ_OK); its
 // latency is counted as stall cycles. A block refuses an access with IO_REQ_INVALID, after
-// a warning in its own trace. A block that answers later is not supported yet.
+// a warning in its own trace. A write may be held (IO_REQ_PENDING, a start while the
+// accelerator is busy, GEN3): the core stalls until the block's response, as the LSU does
+// for a pending access (Lsu::data_req_aligned, Lsu::data_response). Reads are answered at
+// once; a pending read is not supported.
 bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
 {
     if (!this->snax_csr_itf.is_bound())
@@ -136,13 +140,14 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
         return false;
     }
 
-    uint32_t data = is_write ? (uint32_t)value : 0;
+    // A member, not a local: a pending write's block may read it later
+    this->snax_csr_data = is_write ? (uint32_t)value : 0;
     vp::IoReq *req = &this->snax_csr_req;
     req->init();
     req->set_addr(address * 4);
     req->set_size(4);
     req->set_is_write(is_write);
-    req->set_data((uint8_t *)&data);
+    req->set_data((uint8_t *)&this->snax_csr_data);
 
     int err = this->snax_csr_itf.req(req);
     if (err == vp::IO_REQ_INVALID)
@@ -151,23 +156,46 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
             "see its trace\n", address, is_write);
         return false;
     }
+    if (err == vp::IO_REQ_PENDING && is_write)
+    {
+        this->csr.trace.msg(vp::Trace::LEVEL_TRACE, "SNAX CSR write held by the block (id: 0x%x), "
+            "core stalled\n", address);
+        this->exec.insn_stall();
+        return true;
+    }
     if (err != vp::IO_REQ_OK)
     {
         this->csr.trace.fatal("SNAX CSR access not answered at once (id: 0x%x, is_write: %d, "
-            "status: %d); pending and denied answers are not supported yet\n",
+            "status: %d); pending reads and denied answers are not supported\n",
             address, is_write, err);
         return false;
     }
 
     if (!is_write)
     {
-        value = data;
+        value = this->snax_csr_data;
     }
     if (req->get_latency() > 0)
     {
         this->timing.stall_cycles_account(req->get_latency());
     }
     return true;
+}
+
+
+// The response to a held SNAX CSR write: the core goes on, as after a pending store
+void Iss::snax_csr_response(vp::Block *__this, vp::IoReq *req)
+{
+    Iss *_this = (Iss *)__this;
+    if (req->status == vp::IO_REQ_INVALID)
+    {
+        _this->csr.trace.fatal("Held SNAX CSR write refused by the block (addr: 0x%lx); "
+            "see its trace\n", req->get_addr());
+        return;
+    }
+    _this->csr.trace.msg(vp::Trace::LEVEL_TRACE, "SNAX CSR write answered, core resumed\n");
+    _this->exec.stalled_dec();
+    _this->exec.insn_terminate();
 }
 
 

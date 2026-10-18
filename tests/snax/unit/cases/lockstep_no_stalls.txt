@@ -1,0 +1,20 @@
+# lockstep, no stalls: four firings back to back; a start in the run's last
+# cycle (4) is refused, one in the next cycle starts a run of two
+wait lockstep
+inputs 2
+start 0 4 taken
+start 4 9 refused
+start 5 2 taken
+expect run 0: firings 4 busy 4 stall_in 0 stall_out 0 flush 0
+expect run 1: firings 2 busy 2 stall_in 0 stall_out 0 flush 0
+cycles
+# a b out  fire push busy
+1 1 1      0 0 0     # 0: start, busy from 1
+1 1 1      1 1 1     # 1
+1 1 1      1 1 1     # 2
+1 1 1      1 1 1     # 3
+1 1 1      1 1 1     # 4: fourth firing, the end; a start refused
+1 1 1      0 0 0     # 5: idle, start
+1 1 1      1 1 1     # 6
+1 1 1      1 1 1     # 7: end
+1 1 1      0 0 0     # 8

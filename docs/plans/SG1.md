@@ -49,7 +49,7 @@ written by hand with these values; reading the hjson comes later.
 ## Decided
 
 - The target is written by hand from `snax_alu_cluster_old.hjson` (D119 in
-  snax-forge); reading the hjson comes with LNK2 in snax-forge.
+  snax-forge); reading the hjson comes with LNK2a in snax-forge.
 - The CSR path (D120): the accurate Snitch core sends CSRs 0x3C0 to 0x5FF as
   32-bit IO requests at byte address 4 * CSR on its `snax_csr` port; `csrw`
   sends one write, `csrrw` with `rd` not `x0` a read then a write, `csrrs`

@@ -146,12 +146,15 @@ public:
     iss_reg_t pc;
     bool is_write;
     unsigned int frm;
-    // SNAX CSRs: one object per CSR number, the port and the one request they share.
-    // Returns false when the port is not bound (the CSR is then unsupported, as before).
+    // SNAX CSRs: one object per CSR number, the port and the one request they share, and
+    // its data. Returns false when the port is not bound (the CSR is then unsupported, as
+    // before). A held write stalls the core until snax_csr_response.
     bool snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value);
+    static void snax_csr_response(vp::Block *__this, vp::IoReq *req);
     SnaxCsr snax_csrs[SNAX_CSR_NB];
     vp::IoMaster snax_csr_itf;
     vp::IoReq snax_csr_req;
+    uint32_t snax_csr_data;
 
     // Temporary variable to process RAW caused by SSR and accessing stack pointer,
     // for result is written to memory directly.

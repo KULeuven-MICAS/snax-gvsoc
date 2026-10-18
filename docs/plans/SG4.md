@@ -163,7 +163,7 @@ depend on it; that is the one compared.
   comparing counters (977, 982); no values predicted up front.
 - "Same ELF on both sides" becomes a feature of the whole system (build
   once, run SNAX-GVSoC and RTL, compare); recorded in snax-forge's STATUS in
-  P6, for SG5's regression and FLOW3 and GEN2.
+  P6, for SG5's regression and FLOW3 and GEN2b.
 - The ALU is SNAX's baseline, not the template of the accelerators made
   from BRMs (GEN3 in snax-forge): those may need the interface towards the
   data modelled more generally, and hooks for how an accelerator waits for

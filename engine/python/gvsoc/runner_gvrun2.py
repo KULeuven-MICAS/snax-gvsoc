@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #
 # Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
@@ -287,15 +288,14 @@ class Runner():
             models_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             tree_lib = os.path.join(models_dir, '..', 'lib', f'libplatform_tree_{lib_name}.so')
             tree_lib = os.path.normpath(tree_lib)
+            # A target no build made (e.g. one read from --target-dir) has no
+            # tree: it runs on the JSON config path, as on a signature
+            # mismatch below.
             if not os.path.exists(tree_lib):
-                raise RuntimeError(
-                    f"Missing platform_tree library for target '{target_name}': "
-                    f"{tree_lib}\n"
-                    f"This usually means the build did not produce "
-                    f"libplatform_tree_{lib_name}.so. Re-run cmake/build for "
-                    f"this target, or verify GVSOC_TARGETS includes it."
-                )
-            if self._platform_tree_matches_systree(tree_lib):
+                print(f"Warning: target '{target_name}': no platform tree, using "
+                      f"the JSON config ({tree_lib} does not exist)",
+                      file=sys.stderr)
+            elif self._platform_tree_matches_systree(tree_lib):
                 gvsoc_config.set('platform_tree', tree_lib)
 
         if args.gdbserver:

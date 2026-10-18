@@ -4,20 +4,30 @@
 # SPDX-License-Identifier: Apache-2.0
 """SNAX-GVSoC's regression (SG5, pass/finish only since SG6): `make regress`.
 
-Builds sw/ (`make -C sw`: the runtime per cluster, the math library and
+First runs SnaxUnit's rule against its hand-worked cases
+(tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0). Then
+builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy, CI1) and the programs
 of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
 (SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
-`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then the plain tests on the
-`snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
+`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
+`snax-shell` on `snax_tiled_add` (GEN3 step 2: SnaxShell and SnaxUnit), with
+the unit's trace on and the counter check below; then
+the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
 A program passes when it exits 0 within TIMEOUT seconds: every SNAX program
 returns its error count, but `stream-timing` and the `core-tcdm` cases other
-than `subword`, which return 0. No output or cycle count is compared; the comparison with the RTL is made by
+than `subword`, which return 0. No other output or cycle count is compared; the comparison with the RTL is made by
 hand with phases.py (README, "Comparing with the RTL").
+
+The counter check (check_counter, GEN3): a program on SnaxShell and
+SnaxUnit prints the shell's counter after its first unit run as
+`<program> counter: <n>`; it passes when n is busy + stall_in + stall_out +
+flush of the unit's first trace line (`run 0: ...`) and that run fired the
+program's beats.
 
 Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
 failure prints that path and the log's last lines. Under GitHub Actions
@@ -25,12 +35,13 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse` (README). Exit code 0 when every
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (README). Exit code 0 when every
 program passes, 1 otherwise.
 """
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +53,10 @@ APPS = SW / "apps"
 BUILD = ROOT / "build" / "sw"
 
 SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
+# Programs on one target each, with the counter check: (program, target, the
+# unit's trace path, the beats of its first run: snax-shell's RUN_BEATS,
+# DATA_LEN 192 / 4 lanes / 3 runs)
+OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]
@@ -55,14 +70,14 @@ TAIL = 20  # lines of a failed run's log printed
 ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-def gvrun(target, elf, workdir, log):
-    """Runs one ELF, its output into log; returns its exit code, or None when
-    it does not finish."""
+def gvrun(target, elf, workdir, log, options=()):
+    """Runs one ELF, its output into log, options before the command;
+    returns its exit code, or None when it does not finish."""
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / 'install' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT / 'install' / 'python'}:{env.get('PYTHONPATH', '')}"
     cmd = ["gvrun", "--target", target, "--work-dir", str(workdir),
-           "--param", f"chip/soc/binary={elf}", "run"]
+           "--param", f"chip/soc/binary={elf}", *options, "run"]
     workdir.mkdir(parents=True, exist_ok=True)
     try:
         with open(log, "w") as out:
@@ -71,6 +86,28 @@ def gvrun(target, elf, workdir, log):
     except subprocess.TimeoutExpired:
         return None
     return p.returncode
+
+
+RUN_LINE = re.compile(r"run 0: firings (\d+) busy (\d+) stall_in (\d+) stall_out (\d+) flush (\d+)")
+
+
+def check_counter(program, output, trace, beats):
+    """The counter check: the counter program prints (`<program> counter: <n>`
+    in output) against the unit's first run line in trace. Returns None when
+    it holds, else why not."""
+    counter = re.search(rf"^{re.escape(program)} counter: (\d+)$", output, re.MULTILINE)
+    if counter is None:
+        return f"no `{program} counter:` line"
+    run = RUN_LINE.search(trace)
+    if run is None:
+        return "no `run 0:` line in the unit's trace"
+    firings, *classes = (int(n) for n in run.groups())
+    if firings != beats:
+        return f"run 0 fired {firings} times, not {beats}"
+    if int(counter.group(1)) != sum(classes):
+        return (f"counter {counter.group(1)}, busy + stall_in + stall_out + flush "
+                f"{' + '.join(map(str, classes))} = {sum(classes)}")
+    return None
 
 
 def make(path, *args):
@@ -101,16 +138,36 @@ class Check:
         for target in SNAX_TARGETS:
             self.run(f"{program}.{target}", target, elf)
 
-    def run(self, name, target, elf, work=None):
+    def run(self, name, target, elf, work=None, options=()):
+        """Runs one program; returns its log when it exited 0, else None."""
+        if not self.selected(name):
+            return None
+        self.count += 1
+        log = WORK / (work or name) / "run.log"
+        code = gvrun(target, elf, log.parent, log, options)
+        if code == 0:
+            return log
+        why = f"did not finish within {TIMEOUT} s" if code is None else f"exit {code}"
+        self.fail(name, why, log)
+        return None
+
+    def run_script(self, name, script):
+        """Runs a test script, its output into the log; it passes when it
+        exits 0."""
         if not self.selected(name):
             return
         self.count += 1
-        log = WORK / (work or name) / "run.log"
-        code = gvrun(target, elf, log.parent, log)
-        if code == 0:
+        log = WORK / name / "run.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(log, "w") as out:
+                p = subprocess.run([str(script)], cwd=ROOT, stdout=out,
+                                   stderr=subprocess.STDOUT, timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.fail(name, f"did not finish within {TIMEOUT} s", log)
             return
-        why = f"did not finish within {TIMEOUT} s" if code is None else f"exit {code}"
-        self.fail(name, why, log)
+        if p.returncode != 0:
+            self.fail(name, f"exit {p.returncode}", log)
 
     def fail(self, name, why, log=None):
         self.failed.append(name)
@@ -130,8 +187,13 @@ def main():
                    help="run only the programs whose name holds SUBSTRING")
     check = Check(p.parse_args().only)
 
+    print("SnaxUnit's rule (tests/snax/unit)")
+    check.run_script("unit", HERE / "unit" / "run.sh")
+    print(f"  {check.count} run")
+
     make(SW)
 
+    count = check.count
     print(f"SNAX programs on {', '.join(SNAX_TARGETS)}")
     for n in SIZES:
         if check.selected_snax(f"snax-alu-{n}"):
@@ -156,7 +218,23 @@ def main():
     for case in DMA_TCDM_CASES:
         check.run_snax(f"dma-tcdm-{case}",
                        BUILD / "apps" / "dma-tcdm" / f"dma-tcdm-{case}.elf")
-    print(f"  {check.count} run")
+    print(f"  {check.count - count} run")
+
+    count = check.count
+    print(f"SNAX programs on their own target: {', '.join(entry[1] for entry in OWN_TARGET)}")
+    for prog, target, unit, beats in OWN_TARGET:
+        name = f"{prog}.{target}"
+        if check.selected(name):
+            make(APPS / prog)
+        log = check.run(name, target, BUILD / "apps" / prog / f"{prog}.elf",
+                        options=[f"--trace={unit}"])
+        if log is not None:
+            # Program output and trace share the log
+            text = log.read_text(errors="replace")
+            why = check_counter(prog, text, text, beats)
+            if why is not None:
+                check.fail(name, why, log)
+    print(f"  {check.count - count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")
     count = check.count
