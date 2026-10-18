@@ -5,18 +5,20 @@
 // The shell program of GEN3 step 2, for the snax_tiled_add target: SnaxShell
 // and SnaxUnit (lockstep add, 4 lanes of 64 bit) behind snax-alu's streamer
 // (snax/snax_tiled_add_acc.py). snax-alu's DMA and streamer setup; the
-// shell's CSRs by hand below. One streamer run of LOOP_ITER beats feeds two
+// shell's CSRs by hand below. One streamer run of LOOP_ITER beats feeds three
 // unit runs of RUN_BEATS each:
-//   - start 1, then start 2 at once: start 2 is held until run 1 is done (the
-//     core stalls on the write), so the mcycle span around the two writes is
-//     at least run 1's busy cycles. The span starts before start 1: between
-//     the writes the core may wait for an instruction fetch (10 cycles in one
-//     build), which a span around start 2 alone would leave out;
-//   - the data: O = A + B over both runs;
-//   - the counter after run 2: run 2's busy cycles (reset by its start);
+//   - start 1, alone: once busy is 0, the counter is run 1's busy cycles,
+//     printed (`snax-shell counter: <n>`); regress.py checks it against the
+//     unit's trace line of its first run (busy + stall_in + stall_out +
+//     flush);
+//   - start 2, then start 3 at once: start 3 is held until run 2 is done (the
+//     core stalls on the write), so the mcycle span from before start 2 to
+//     after start 3 is at least run 2's busy cycles, so at least RUN_BEATS;
+//   - the data: O = A + B over the three runs;
 //   - then a start with loopCount 0: busy stays 0, the counter reads 0.
-// The busy cycles are the unit's busy + stall_in + stall_out of its trace
-// lines (docs/notes/NOTES.md, GEN3 step 2). Returns the error count.
+// Each check holds whatever the code layout: a run of RUN_BEATS firings is
+// busy at least RUN_BEATS cycles, and how many more follows the core's and
+// the streamer's timing. Returns the error count.
 
 #include "snrt.h"
 
@@ -31,12 +33,8 @@
 #define SHELL_BUSY 980
 #define SHELL_COUNTER 981
 
-// Two unit runs on one streamer run
-#define RUN_BEATS (LOOP_ITER / 2)
-
-// The busy cycles of the unit's two runs, from its trace lines
-#define RUN0_BUSY_CYCLES 16
-#define RUN1_BUSY_CYCLES 16
+// Three unit runs on one streamer run (LOOP_ITER is a uint64_t)
+#define RUN_BEATS ((uint32_t)(LOOP_ITER / 3))
 
 int main() {
     int err = 0;
@@ -63,10 +61,23 @@ int main() {
         csrw_ss(SHELL_LOOP_COUNT, RUN_BEATS);
 
         start_streamer();
+
+        // Run 1 alone: its counter
+        csrw_ss(SHELL_START, 1);
+        while (csrr_ss(SHELL_BUSY)) {
+        };
+        uint32_t counter = csrr_ss(SHELL_COUNTER);
+        int counter_short = counter < RUN_BEATS;
+        err += counter_short;
+
+        // Runs 2 and 3: start 3 held
         uint32_t t0 = snrt_mcycle();
         csrw_ss(SHELL_START, 1);
         csrw_ss(SHELL_START, 1);
         uint32_t t1 = snrt_mcycle();
+        uint32_t held = t1 - t0;
+        int held_short = held < RUN_BEATS;
+        err += held_short;
 
         while (csrr_ss(SHELL_BUSY)) {
         };
@@ -81,12 +92,6 @@ int main() {
         }
         err += data_errors;
 
-        uint32_t counter = csrr_ss(SHELL_COUNTER);
-        uint32_t held = t1 - t0;
-        int counter_off = counter != RUN1_BUSY_CYCLES;
-        int held_short = held < RUN0_BUSY_CYCLES;
-        err += counter_off + held_short;
-
         // A start with loopCount 0: the unit ignores it, the shell takes it
         csrw_ss(SHELL_LOOP_COUNT, 0);
         csrw_ss(SHELL_START, 1);
@@ -95,11 +100,13 @@ int main() {
         int zero_off = busy_zero != 0 || counter_zero != 0;
         err += zero_off;
 
-        printf("snax-shell data: %d errors (%d words)\n", data_errors, DATA_LEN);
-        printf("snax-shell counter: %u (run 2's busy cycles %u)%s\n", counter,
-               RUN1_BUSY_CYCLES, counter_off ? " OFF" : "");
-        printf("snax-shell held start: mcycle span %u (run 1's busy cycles %u)%s\n",
-               held, RUN0_BUSY_CYCLES, held_short ? " SHORT" : "");
+        printf("snax-shell data: %d errors (%u words)\n", data_errors,
+               (uint32_t)DATA_LEN);
+        printf("snax-shell counter: %u\n", counter);
+        printf("snax-shell first run: counter %u, at least %u beats%s\n", counter,
+               RUN_BEATS, counter_short ? " SHORT" : "");
+        printf("snax-shell held start: mcycle span %u, at least %u beats%s\n", held,
+               RUN_BEATS, held_short ? " SHORT" : "");
         printf("snax-shell loopCount 0: busy %u, counter %u%s\n", busy_zero,
                counter_zero, zero_off ? " OFF" : "");
         printf("snax-shell errors: %d\n", err);

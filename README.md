@@ -129,13 +129,16 @@ It prints its checks and `snax-shell errors: 0`, and exits 0;
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
-case, then `snax-shell` on `snax_tiled_add`, then
+case, then `snax-shell` on `snax_tiled_add` with the unit's trace on, then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
 plain test missing from `build/sw/tests/` fails. No output or cycle count is
 compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
-and `w` and fails when they move (SG7). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add`,
+and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
+must equal its unit's first run line, busy + stall_in + stall_out + flush,
+that run firing its beats (`check_counter` in `tests/snax/regress.py`,
+GEN3). It needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add`,
 as above, and takes about two minutes.
 
     make regress

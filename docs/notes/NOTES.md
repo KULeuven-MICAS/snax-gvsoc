@@ -3340,3 +3340,48 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   stall_out 3 + flush 0 = 8, the run's busy cycles 10`) and on the line.
 - Not verified: the component built with this change (built in F3); a
   pipelined unit inside GVSoC (no target has one).
+
+### GEN3 round 1b F3: snax-shell without layout constants
+
+- 2026-10-18. `sw/apps/snax-shell/src/snax-shell.c`: `RUN0_BUSY_CYCLES`
+  and `RUN1_BUSY_CYCLES` gone. Three unit runs of `RUN_BEATS` = LOOP_ITER /
+  3 on one streamer run: start 1 alone, then busy polled to 0 and the
+  counter read (`snax-shell counter: <n>`, its own line); then start 2 and
+  start 3 at once, start 3 held. Checks: the data; counter >= RUN_BEATS;
+  the `mcycle` span from before start 2 to after start 3 >= RUN_BEATS;
+  loopCount 0 leaves busy 0 and counter 0. The `%u` arguments are cast to
+  32 bit (`DATA_LEN` and `LOOP_ITER` are `uint64_t` in `data.h`).
+- `sw/apps/snax-shell/Makefile`: DATA_LEN 192 (48 beats, three runs of
+  16), and `data.h` depends on the Makefile: it did not, and a DATA_LEN
+  change kept the old `data.h` (128 words), so RUN_BEATS was 10 and 2 beats
+  stayed in the streamer, which never finished (the program hung in
+  `read_busy_streamer`; killed).
+- `tests/snax/regress.py`: `check_counter(program, output, trace, beats)`
+  returns why the check fails, or None: the `<program> counter: <n>` line
+  of output, the first `run 0: firings F busy B stall_in SI stall_out SO
+  flush FL` of trace, F == beats and n == B + SI + SO + FL. `OWN_TARGET`
+  entries are (program, target, the unit's trace path, beats):
+  (`snax-shell`, `snax_tiled_add`, `snax_acc0/unit`, 16); the run gets
+  `--trace=snax_acc0/unit` (`gvrun()` and `Check.run()` take `options`;
+  `Check.run()` returns the log when the program exited 0) and output and
+  trace are the same log. README (Regression), snax-shell's README updated.
+- Run, in snax-forge's image: `make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0 (F2's
+  `snax_unit.hpp` in); `make regress`: `regression passed`, unit 1, SNAX 40,
+  `snax-shell.snax_tiled_add` 1, plain 17, 1 min 51 s. Every log but
+  snax-shell's byte-identical to round 1's, 58 of 59.
+- snax-shell's run: `run 0: firings 16 busy 16 stall_in 1 stall_out 0
+  flush 0` at 3121, `run 1` and `run 2` 16 16 0 0 0 at 3158 and 3175;
+  `snax-shell data: 0 errors (192 words)`, `counter: 17`, `first run:
+  counter 17, at least 16 beats`, `held start: mcycle span 19, at least 16
+  beats`, `loopCount 0: busy 0, counter 0`, `errors: 0`.
+- `check_counter` on that log altered: counter 16 gives `counter 16, busy +
+  stall_in + stall_out + flush 16 + 1 + 0 + 0 = 17`; beats 15 gives `run 0
+  fired 16 times, not 15`; no counter line and an empty trace are named.
+- Differs from the prompt: three unit runs, not two, and DATA_LEN 192: the
+  counter of the first run can be read only before the next start resets
+  it, and a held start needs the unit busy, so the first run is alone and
+  the held pair comes after. RUN_BEATS for the regress check is a number in
+  `OWN_TARGET`, kept by hand equal to the program's.
+- Not verified: CI (not run); snax-forge's `tiled_add_sparse_probe` with
+  this program (F1 ran the round 1 program).

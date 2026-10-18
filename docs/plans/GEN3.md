@@ -116,7 +116,7 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test (`snax-shell` on the hand-written `snax_tiled_add`) | done |
 | 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2) | todo |
 | 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template | todo |
-| 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress`; snax-forge reproduces the fixture | todo |
+| 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress` (its counter through `check_counter`); snax-forge reproduces the fixture | todo |
 | 6 | `elementwise_mul`; `accumulate` with `control: stream`, `wait: pipelined` | todo |
 
 Round 1b, fix-ups after round 1:
@@ -125,6 +125,7 @@ Round 1b, fix-ups after round 1:
 |---|---|---|
 | F1 | gvrun runs a target without its platform tree on the JSON config path, with a warning; snax-forge's `alu_probe` runs, and `tiled_add_sparse_probe` (a component tree no build made) | done |
 | F2 | `flush` in the unit's run line: the cycles after the last firing with results still in the pipeline (not frozen), so the four classes add up to the run's busy cycles; the unit test checks that on every case | done |
+| F3 | `snax-shell` without layout constants: it prints its first run's counter and `make regress` checks it against the unit's first run line (`check_counter`, for step 5's programs too) | done |
 
 ## Open
 
