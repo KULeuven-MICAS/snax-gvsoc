@@ -70,7 +70,7 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   SNAX properties, which reach the C++ only through the JSON config (step 0b).
 - The generator in one snax-forge package. Its output in snax-forge
   `out/gvsoc/<design>/`: the composite, a target putting it in
-  `snax_alu`'s accelerator slot, two headers, `manifest.json`.
+  `snax_alu`'s accelerator slot, two headers in `include/`, `manifest.json`.
 - gvrun reads it with `--target-dir`, the install's `targets` and
   `generators` passed too. It has no platform tree (only a build makes one),
   so gvrun warns and runs it on the JSON config path (`runner_gvrun2.py`,
@@ -78,14 +78,21 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 - A generated or snax-forge target never takes the name of an installed
   target: the install's `targets` come first on gvrun's path and shadow
   `gvsoc/targets` and the generator's output (tried in round 1b F4), as
-  they do for any module a target imports. Step 3's generator checks it.
+  they do for any module a target imports. Every generated module starts
+  with `forge_`; with an install, the generator refuses a name its
+  `targets` or `generators` hold and checks that the modules the files
+  import are there (snax-forge D132).
 - One generated design point (vecadd, W = 4) checked in here as the
-  fixture, refreshed by hand, its diff the check.
+  fixture, refreshed by hand, its diff the check. The generator's output
+  names the design point by its path from snax-forge's root and is
+  byte-identical wherever it is written (round 2b F3).
 
 ## Hooks for FLOW3
 
-- `generate(design_point, out_dir) -> Manifest`, with a thin command; the
-  manifest lists the target, the files and the `--target-dir`s.
+- `generate(design_point, out_dir, install=None, root=None) -> Manifest`, with a thin
+  command (`pixi run gen-gvsoc`); the manifest lists the target, the files,
+  the `--target-dir`s, the unit's trace path, the CSR layout and each
+  accelerator task's beats.
 - `snax_alu.py` takes its accelerator as a board class attribute
   (`SnaxAluBoard.accelerator`, step 2), as `snax_alu_sparse.py` overrides
   the interconnect.
@@ -103,7 +110,8 @@ To be confirmed.
 |---|---|
 | 1 | Steps 0a and 0b in snax-forge, 1 and 2 here |
 | 1b | Fix-ups F1 to F4, below |
-| 2 | LNK1 in snax-forge, steps 3 and 4 |
+| 2 | LNK1 in snax-forge (D131), steps 3 and 4: done |
+| 2b | Fix-ups F1 to F4, below: done |
 | 3 | Steps 5 and 6 |
 
 ## Acceptance
@@ -118,8 +126,8 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`). Found: nothing compiles and properties reach the C++ through the JSON config, but gvrun stopped on a target without its platform tree; since round 1b F1 it warns and runs it on the JSON config path | done |
 | 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | done |
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test (`snax-shell` on the hand-written `snax_tiled_add`) | done |
-| 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2); it refuses a target name the install has | todo |
-| 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template | todo |
+| 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2); it refuses a target name the install has. `forge_vecadd` (W = 4 on `platforms/snax_alu.json`) runs snax-shell with `snax_tiled_add`'s program and unit run lines, after the no-platform-tree warning; nothing compiled | done |
+| 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template. In `include/` of the generator's output, listed in the manifest: `streamer_csr_addr_map.h` (the Chisel header's defines, values and order) and `<instance>_csr.h` (`snax-alu-lib.h`'s form; vecadd's `ACC_RW_LOOP_COUNT` 978 to `ACC_RO_PERF_COUNT` 981) | done |
 | 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress` (its counter through `check_counter`); snax-forge reproduces the fixture | todo |
 | 6 | `elementwise_mul`; `accumulate` with `control: stream`, `wait: pipelined` | todo |
 
@@ -131,6 +139,15 @@ Round 1b, fix-ups after round 1:
 | F2 | `flush` in the unit's run line: the cycles after the last firing with results still in the pipeline (not frozen), so the four classes add up to the run's busy cycles; the unit test checks that on every case | done |
 | F3 | `snax-shell` without layout constants: it prints its first run's counter and `make regress` checks it against the unit's first run line (`check_counter`, for step 5's programs too) | done |
 | F4 | Docs: the target-name rule; round 1's open edge cases into Open | done |
+
+Round 2b, fix-ups after round 2 (all in snax-forge):
+
+| # | Fix-up | Status |
+|---|---|---|
+| F1 | `pixi.lock` written with pixi 0.41.4 (CI's and the image's): main's lock plus `hjson-py`, without the PyPI `cmake`, `distro`, `scikit-build` and `setuptools` that DaCe's `setup.py` asks for only when no cmake >= 3.15 is on PATH (ESAT's Vitis cmake 3.3.2); nothing uses them | done |
+| F2 | `pixi run -e ci test` in full (1693 passed); `memory.fit`'s C§14 row says what its fix gives, a test pins below snax_alu's L1 and L2 bases and follows the fix | done |
+| F3 | The design point named once, by its path from snax-forge's root, in the manifest and every generated file's header; one design point into two out folders gives byte-identical files; outside the root it is refused (`gen.point`) | done |
+| F4 | The install check against round 2's real install: a `forge_` module planted in a copy is refused (`gen.install`), the real install passes with `snax_streamer`, `snax_shell`, `snax_unit` and `snax_alu` found in its `generators` | done |
 
 ## Open
 
