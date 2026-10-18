@@ -12,8 +12,9 @@ of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
 (SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
-`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then the plain tests on the
-`snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
+`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
+`snax-shell` on `snax_tiled_add` (GEN3 step 2: SnaxShell and SnaxUnit); then
+the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
 A program passes when it exits 0 within TIMEOUT seconds: every SNAX program
@@ -27,7 +28,7 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse` (README). Exit code 0 when every
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (README). Exit code 0 when every
 program passes, 1 otherwise.
 """
 
@@ -44,6 +45,8 @@ APPS = SW / "apps"
 BUILD = ROOT / "build" / "sw"
 
 SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
+# Programs on one target each: (program, target)
+OWN_TARGET = [("snax-shell", "snax_tiled_add")]
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]
@@ -181,6 +184,15 @@ def main():
     for case in DMA_TCDM_CASES:
         check.run_snax(f"dma-tcdm-{case}",
                        BUILD / "apps" / "dma-tcdm" / f"dma-tcdm-{case}.elf")
+    print(f"  {check.count - count} run")
+
+    count = check.count
+    print(f"SNAX programs on their own target: {', '.join(t for _, t in OWN_TARGET)}")
+    for prog, target in OWN_TARGET:
+        name = f"{prog}.{target}"
+        if check.selected(name):
+            make(APPS / prog)
+        check.run(name, target, BUILD / "apps" / prog / f"{prog}.elf")
     print(f"  {check.count - count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")

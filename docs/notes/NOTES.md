@@ -3194,3 +3194,78 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   unit: exit 1` and exits 1 (case restored).
 - Not verified: `SnaxUnit` in a running target (no target uses it before
   step 2); `data_width` below 64 and `pipelined` in GVSoC; `signed` true.
+
+### GEN3 step 2: SnaxShell, the held start, the stand-in target
+
+- 2026-10-18. New files:
+  - `snax/snax_shell.cpp` + `snax/snax_shell.py`: `SnaxShell` on
+    `SnaxCsrBlock`, GeMMX's shell contract (D130) as the ReqRspManager and
+    BlockGemm give it. Properties: `csr_base`, `fields` (non-empty list of
+    names). CSRs: the fields, then start (read-write); busy, then the
+    counter (read-only). A start (bit 0 of start written 1) with the unit
+    idle goes to the unit's `ctrl` as the fields' words, accepted in that
+    cycle, the write answered OK. With the unit busy it answers
+    `IO_REQ_PENDING`, then in E + 1 (the cycle busy falls; also when the
+    write came in E after the fall) sends it and answers. The counter is
+    reset by an accepted start (also one the unit ignores, count 0), counts
+    busy cycles, holds after; busy and the counter are computed from the
+    cycles the unit's `busy` wire rose and fell. Ports: `input`, `ctrl` (io
+    master), `busy` (wire<bool> slave).
+  - `snax/snax_tiled_add_acc.py`: `SnaxTiledAddAcc`, by hand: csr_mux, the
+    streamer with `snax_alu_acc.py`'s `STREAMER_TEMPLATE` (imported),
+    `SnaxShell` (`fields: ['loopCount']`, CSRs 978 to 981), `SnaxUnit`
+    (lanes 4, data_width 64, op 0 add, signed False, counted, lockstep,
+    latency 0, ii 1, inputs a, b, output out). No opSel CSR.
+  - `snax/snax_tiled_add.py`: target `snax_tiled_add`, `SnaxAluBoard` with
+    `accelerator = SnaxTiledAddAcc`.
+  - `sw/apps/snax-shell/` (Makefile, README, src): snax-alu's DMA and
+    streamer setup and `datagen.py` (add, 128 words, seed 0), the shell's
+    CSRs by hand; one streamer run of 32 beats, two unit runs of 16.
+- Changed:
+  - `core/models/cpu/iss/src/snitch/snitch.cpp`, `class.hpp`: a SNAX CSR
+    write answered `IO_REQ_PENDING` calls `exec.insn_stall()`; the response
+    (`snax_csr_response`) does `exec.stalled_dec()` then
+    `exec.insn_terminate()`, as `Lsu::data_response` and `store_resume` do.
+    A pending read stays fatal. The request's data moved from a stack local
+    to the member `snax_csr_data`, since a held write's block may read it
+    after the call returned. UPSTREAM.md row.
+  - `snax/snax_alu.py`: `SnaxAluBoard.accelerator = SnaxAluAcc`; the
+    module's `SNAX_ACC` dict became `SNAX_ACC_CORE = 0` and the dict is made
+    in the board from the attribute, passed to `SnaxAluAttr`.
+  - `tests/snax/regress.py`: `OWN_TARGET`, `snax-shell` on `snax_tiled_add`;
+    TARGETS with `snax_tiled_add` in the Makefile's comment, README (and a
+    section on the target) and `.github/workflows/ci.yml`.
+- The trace lines, read by hand (`--trace=snax_acc0/unit
+  --trace=snax_acc0/shell`, the final ELF): start 1 accepted at 2842; start
+  2 held at 2843; `run 0: firings 16 busy 16 stall_in 0 stall_out 0` at
+  2858 (E - s = 16); start 2 accepted at 2859 (E + 1); `run 1: firings 16
+  busy 16 stall_in 0 stall_out 0` at 2875 (16); the count-0 start accepted
+  and ignored at 8591. The core (`pe0/insn`): `mcycle` at 2841, the start
+  writes issued at 2842 and 2843, the second completed at 2859, `mcycle` at
+  2860. Program: counter 16 (= run 1's 16 + 0 + 0), span 19 >= 16,
+  loopCount 0: busy 0, counter 0, data 0 errors, `snax-shell errors: 0`.
+- Differs from the prompt: the span starts before start 1, not between the
+  writes. In one build a 10-cycle instruction fetch fell between the two
+  writes (`csrrwi` at 0x80000320 done at 2816, `csrrs mcycle` at
+  0x80000324 at 2826), so the span around start 2 alone was 9 against 17
+  busy cycles; a span from before start 1 holds whenever start 2 waits for
+  run 1's end. The first run's busy cycles (the program's run 1, the
+  trace's `run 0`) also follow the core's timing: 17 (`stall_in 1`) in the
+  build where start 1 came right after `start_streamer`, 16 (`stall_in 0`)
+  in the final layout, where a fetch between `start_streamer` and start 1
+  gives the streamer a head start (changing the constant from 17 to 16
+  moved the code by 4 bytes). `RUN0_BUSY_CYCLES` and `RUN1_BUSY_CYCLES`
+  hold this build's 16 and 16; a change to the program can move them.
+- Compared with the core change: every `run.log` of `make regress` on
+  `snax_alu`, `snax_alu_sparse` (40) and `snitch` (17) byte-identical to
+  step 1's (before the change), 57 of 57; e.g. `snax-alu` 100: 25 cycles,
+  0 errors; `alu-timing` sparse: 34, 25, 74, 1, 34.
+- Run, in snax-forge's image: `make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"` exit 0 (no
+  warning from the new sources); `make regress`: `regression passed`, unit
+  1, SNAX 40, `snax-shell.snax_tiled_add` 1, plain 17, 1 min 51 s.
+- Not verified: a pending read (the fatal path), `csrrw` with rd != x0 on a
+  held write, a field written while busy (taken at once, the run keeps its
+  count: by reading, not run), a held start whose write comes in E after the
+  fall (the `fall_cycle` path: by reading, not run), the CI workflow (not
+  run), the `snax_tiled_add` program on any RTL (none exists).

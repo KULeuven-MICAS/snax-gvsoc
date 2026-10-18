@@ -80,7 +80,9 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 
 - `generate(design_point, out_dir) -> Manifest`, with a thin command; the
   manifest lists the target, the files and the `--target-dir`s.
-- `snax_alu.py` takes its accelerator as an argument.
+- `snax_alu.py` takes its accelerator as a board class attribute
+  (`SnaxAluBoard.accelerator`, step 2), as `snax_alu_sparse.py` overrides
+  the interconnect.
 - `SnaxUnit` and `SnaxShell` print firings, busy, `stall_in` and
   `stall_out` at the end of a run, in a fixed format.
 - Not in GEN3: the runner, the converter.
@@ -106,8 +108,8 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 0a | SNAX-GVSoC from snax-forge: this repo a submodule at snax-forge `gvsoc/snax-gvsoc`, never fetched by its CI (D128); `gvsoc/Makefile` (`build`, `sw`, `run`) and `gvsoc/targets/` | done |
 | 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`). Found: nothing compiles and properties reach the C++ through the JSON config, but gvrun stops on a target without its platform tree (Open) | done |
 | 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | done |
-| 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test | todo |
-| 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator; `snax_alu.py`'s accelerator argument here | todo |
+| 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test (`snax-shell` on the hand-written `snax_tiled_add`) | done |
+| 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2) | todo |
 | 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template | todo |
 | 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress`; snax-forge reproduces the fixture | todo |
 | 6 | `elementwise_mul`; `accumulate` with `control: stream`, `wait: pipelined` | todo |
