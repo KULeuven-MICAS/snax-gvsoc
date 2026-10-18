@@ -75,6 +75,10 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   `generators` passed too. It has no platform tree (only a build makes one),
   so gvrun warns and runs it on the JSON config path (`runner_gvrun2.py`,
   round 1b F1).
+- A generated or snax-forge target never takes the name of an installed
+  target: the install's `targets` come first on gvrun's path and shadow
+  `gvsoc/targets` and the generator's output (tried in round 1b F4), as
+  they do for any module a target imports. Step 3's generator checks it.
 - One generated design point (vecadd, W = 4) checked in here as the
   fixture, refreshed by hand, its diff the check.
 
@@ -114,7 +118,7 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 0b | Probe: a target from `--target-dir` that reuses built components starts without a rebuild (GVSoC names a component's `.so` by its sources and flags, `get_generated_component` in `engine/python/gvsoc/systree.py`). Found: nothing compiles and properties reach the C++ through the JSON config, but gvrun stopped on a target without its platform tree; since round 1b F1 it warns and runs it on the JSON config path | done |
 | 1 | `SnaxUnit`: `lockstep` and `pipelined`, the op table; standalone tests | done |
 | 2 | `SnaxShell`: the CSR manager's behaviour, a start held while busy, busy, the counter; a CSR test (`snax-shell` on the hand-written `snax_tiled_add`) | done |
-| 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2) | todo |
+| 3 | In snax-forge, after LNK1: the binding in `elementwise_add`, the generator (`snax_alu.py`'s accelerator is a board attribute since step 2); it refuses a target name the install has | todo |
 | 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template | todo |
 | 5 | A hand-written vecadd program on the generated headers, the fixture, `make regress` (its counter through `check_counter`); snax-forge reproduces the fixture | todo |
 | 6 | `elementwise_mul`; `accumulate` with `control: stream`, `wait: pipelined` | todo |
@@ -126,7 +130,15 @@ Round 1b, fix-ups after round 1:
 | F1 | gvrun runs a target without its platform tree on the JSON config path, with a warning; snax-forge's `alu_probe` runs, and `tiled_add_sparse_probe` (a component tree no build made) | done |
 | F2 | `flush` in the unit's run line: the cycles after the last firing with results still in the pipeline (not frozen), so the four classes add up to the run's busy cycles; the unit test checks that on every case | done |
 | F3 | `snax-shell` without layout constants: it prints its first run's counter and `make regress` checks it against the unit's first run line (`check_counter`, for step 5's programs too) | done |
+| F4 | Docs: the target-name rule; round 1's open edge cases into Open | done |
 
 ## Open
 
 - Whether the first vecadd program stays hand-written until GEN2a.
+- A start written in the run's last cycle E: `SnaxShell` holds it and
+  sends it in E + 1 (the `fall_cycle` path in `csr_req`), read, never run.
+- `csrrw` with a destination register on a held start: the core's pending
+  write path (`snax_csr_response`) was run only with rd = x0 (`csrw`).
+- `SnaxUnit` takes exactly 2 inputs and 1 output, and `counted` is one
+  configuration word (the count): `accumulate` (one input, `control:
+  stream`) needs more, step 6.

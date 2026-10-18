@@ -3385,3 +3385,21 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   `OWN_TARGET`, kept by hand equal to the program's.
 - Not verified: CI (not run); snax-forge's `tiled_add_sparse_probe` with
   this program (F1 ran the round 1 program).
+
+### GEN3 round 1b F4: the target-name rule, the open edge cases
+
+- 2026-10-18. `docs/plans/GEN3.md`: the rule, in "Where things go": a
+  generated or snax-forge target never takes the name of an installed
+  target (nor a module a target imports), since the install's `targets`
+  shadow `gvsoc/targets`; step 3's generator checks it (its row says so).
+  The same in snax-forge `gvsoc/targets/README.md`.
+- Tried, in snax-forge's image: a `snax_alu.py` that raises `SystemExit` on
+  import, in a folder passed as `--target-dir` to the install's `gvrun
+  --target snax_alu`: the installed `snax_alu` ran (`Accelerator Cycles:
+  25`, `Number of errors: 0`, exit 0), the folder's module never loaded.
+  The folder was removed after.
+- Open (GEN3.md), from round 1's "not verified": a start written in the
+  run's last cycle E (held, sent in E + 1: read, not run); `csrrw` with a
+  destination register on a held start (only rd = x0 run); SnaxUnit's fixed
+  2 inputs / 1 output and one-word `counted` configuration (step 6).
+- Not verified: anything new in code (none changed).
