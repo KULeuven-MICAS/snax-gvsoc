@@ -3744,3 +3744,26 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   submodule (the pointer is never committed in this round, so it skips
   until the bump); the program at W other than 4 (datagen's `SPATIAL_PAR`);
   any fixture on RTL (none exists).
+
+### GEN3 round 3b F1: no __pycache__ in forge/
+
+- 2026-10-18. `tests/snax/regress.py`: `gvrun()` sets
+  `PYTHONDONTWRITEBYTECODE=1` in the run's env, so gvrun's import of a
+  fixture's modules writes no `__pycache__` beside them (round 3 found one in
+  `forge/vecadd/` and `forge/vecmul/`). `.gitignore` gains
+  `forge/**/__pycache__/` for hand runs (the global `__pycache__/` already
+  covered it); `forge/README.md` says both. The two old `__pycache__`
+  folders removed by hand.
+- Run, in snax-forge's image: `python3 tests/snax/regress.py -k forge`:
+  `2 run`, `regression passed`; afterwards `find forge -name __pycache__`
+  finds none and `git status -s --ignored forge` lists only this change's
+  `forge/README.md`.
+- snax-forge `ry/gen3` (`0e950d8`): the fixture test's `__pycache__`
+  exclusion removed. With the submodule at this repo's `ry/gen3`
+  (`fd2b2d00`, `forge/` as here; fetched, then back to the pin `dbd7f96`):
+  no `__pycache__` under its `forge/`, vecadd and vecmul passed without
+  the exclusion, so it is not needed. `tests/gen` 42 passed, 2 skipped at
+  the pin; fmt, lint clean.
+- Not verified: snax-forge's `make -C gvsoc run` with `TARGET_DIRS` on the
+  submodule's `forge/<design>` does not set the variable, so a hand run
+  there would write a `__pycache__` the fixture test would then count.

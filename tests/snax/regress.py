@@ -36,7 +36,8 @@ flush of the unit's first trace line (`run 0: ...`) and that run fired the
 program's beats (snax-shell's in OWN_TARGET, a fixture's from its manifest;
 a manifest with other than one accelerator task fails).
 
-Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
+gvrun runs with PYTHONDONTWRITEBYTECODE=1, so a fixture folder stays as
+checked in. Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
 failure prints that path and the log's last lines. Under GitHub Actions
 (GITHUB_ACTIONS=true) each failure also prints an `::error` line, an
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
@@ -89,6 +90,8 @@ def gvrun(target, elf, workdir, log, options=()):
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / 'install' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT / 'install' / 'python'}:{env.get('PYTHONPATH', '')}"
+    # No __pycache__ beside the modules gvrun imports, forge/'s fixtures among them
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     cmd = ["gvrun", "--target", target, "--work-dir", str(workdir),
            "--param", f"chip/soc/binary={elf}", *options, "run"]
     workdir.mkdir(parents=True, exist_ok=True)

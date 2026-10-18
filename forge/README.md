@@ -46,3 +46,8 @@ relative to the folder), after the install's own target dirs, and runs the
 generated target on the installed components. The target has no platform
 tree, so gvrun warns `no platform tree, using the JSON config` and runs it
 on the JSON config path.
+
+`make regress` runs gvrun with `PYTHONDONTWRITEBYTECODE=1`, so no
+`__pycache__` lands in a folder and it stays byte for byte what the
+generator wrote; a hand run without it writes one, which `.gitignore` leaves
+out (`forge/**/__pycache__/`).
