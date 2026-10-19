@@ -60,7 +60,7 @@ jobs:
           make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add" CMAKE_FLAGS=-j$(nproc)
           ccache -s
 
-      # phases.py's tests, with the image's Python as is.
+      # phases.py's and snax_cfg.py's tests, with the image's Python as is (hjson in it).
       - name: Unit tests
         run: python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
