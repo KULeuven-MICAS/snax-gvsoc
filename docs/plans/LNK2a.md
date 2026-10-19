@@ -137,7 +137,10 @@ Taken before round 1, not reopened:
 ## Open
 
 - A design whose ports meet on a bank, where plain and sparse differ: none
-  of forge/'s three.
+  of forge/'s three. Plain and sparse differ only on such a design; on
+  forge/'s three they give the same cycles.
+- `make build` rebuilds `cluster_registers` on every run, changed or not
+  (before LNK2a too); not investigated.
 - A cluster file with more than one hive, another `boot_addr` or base, or a
   different L1 size: the reader and the target take them, no run has (the
   last two need a rebuilt `sw/generated/` and ELF).

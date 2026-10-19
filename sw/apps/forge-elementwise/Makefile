@@ -1,12 +1,12 @@
 # Builds the GEN3 step 5 program for a generated elementwise accelerator
-# (forge/$(DESIGN)/, snax-forge's GVSoC generator) from sw/ (../../common.mk)
-# into build/sw/apps/forge-elementwise/$(DESIGN)/. The fixture's include/
-# comes before sw/generated/, so its streamer_csr_addr_map.h is the one
-# used; no snax-alu library. From the manifest: DATA_LEN (symbols.N) and
-# BEATS (tasks[0].beats, the accelerator task's trip count), and LANES =
-# DATA_LEN / BEATS, passed to the program as -DBEATS and -DLANES. data.h is
-# snax-alu's datagen.py at MODE (0 add, 2 mul) and DATA_LEN, NumPy seed 0, as
-# snax-shell's Makefile makes it.
+# (forge/$(DESIGN)/, a design point's hjson and headers from snax-forge) from
+# sw/ (../../common.mk) into build/sw/apps/forge-elementwise/$(DESIGN)/. The
+# fixture's include/ comes before sw/generated/, so its
+# streamer_csr_addr_map.h is the one used; no snax-alu library. From the
+# manifest: DATA_LEN (symbols.N) and BEATS (tasks[0].beats, the accelerator
+# task's trip count), and LANES = DATA_LEN / BEATS, passed to the program as
+# -DBEATS and -DLANES. data.h is snax-alu's datagen.py at MODE (0 add, 2 mul)
+# and DATA_LEN, NumPy seed 0, as snax-shell's Makefile makes it.
 
 APP      = forge-elementwise
 DESIGN  ?= vecadd
