@@ -5,9 +5,10 @@
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-Reads the three cluster files of sw/cfg/, then broken copies of
-snax_alu_cluster.hjson (written as JSON into a temporary folder) and a
-cluster file with its slot's streamer and datapath in an accelerator file.
+Reads the three cluster files of sw/cfg/ and forge/'s fixtures, then
+broken copies of snax_alu_cluster.hjson (written as JSON into a temporary
+folder) and a cluster file with its slot's streamer and datapath in an
+accelerator file.
 """
 
 import copy
@@ -23,6 +24,7 @@ import hjson  # noqa: E402
 import snax_cfg  # noqa: E402
 
 CFG = ROOT / "sw" / "cfg"
+FORGE = ROOT / "forge"
 
 # snax_alu_streamer_template of both snax_alu files, as the hjson has it
 SNAX_ALU_STREAMER = {
@@ -96,6 +98,35 @@ class SwCfg(unittest.TestCase):
         self.assertTrue(all(core.accelerators == [] for core in cfg.cores))
         self.assertEqual(cfg.cores[0].misa, (1 << 30) | sum(1 << (ord(c) - ord("a"))
                                                              for c in "imafd"))
+
+
+class Fixtures(unittest.TestCase):
+    """forge/'s cluster files: snax_alu_cluster.hjson with the slot set for the design."""
+
+    def slot(self, design):
+        cfg = snax_cfg.load(FORGE / design / "snax_alu.hjson")
+        self.assertTrue(cfg.tcdm.sparse_interconnect)
+        (slot,) = cfg.cores[0].accelerators
+        self.assertEqual(slot.name, "snax_alu")
+        return slot
+
+    def test_vecadd_vecmul(self):
+        for design, op in (("vecadd", 0), ("vecmul", 2)):
+            slot = self.slot(design)
+            self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr),
+                             (12, [[12, 1]], 2))
+            self.assertEqual(slot.streamer, {k: v for k, v in SNAX_ALU_STREAMER.items()
+                                             if k != "snax_library_name"})
+            self.assertEqual(slot.datapath, snax_cfg.Datapath(
+                "SnaxUnit", ["a", "b"], ["out"], 4, 64, op, True, "counted", "lockstep", 0, 1,
+                ["count"], ["loopCount"]))
+
+    def test_vsum(self):
+        slot = self.slot("vsum")
+        self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr), (2, [[2, 1]], 3))
+        self.assertEqual(slot.datapath, snax_cfg.Datapath(
+            "SnaxUnit", ["a"], ["out"], 1, 64, 0, True, "counted", "pipelined", 1, 1,
+            ["count", "rate"], ["loopCount", "len"]))
 
 
 class Misa(unittest.TestCase):
@@ -207,7 +238,9 @@ class Broken(unittest.TestCase):
 class AccFile(unittest.TestCase):
     """A slot's streamer and datapath in an accelerator file next to the cluster file."""
 
-    DATAPATH = {"fields": ["loopCount"]}
+    DATAPATH = {"unit": "SnaxUnit", "inputs": ["a", "b"], "outputs": ["out"], "lanes": 4,
+                "data_width": 64, "op": 0, "signed": True, "control": "counted",
+                "wait": "lockstep", "latency": 0, "ii": 1, "fields": ["loopCount"]}
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -220,7 +253,7 @@ class AccFile(unittest.TestCase):
         # The accelerator file's own ref resolves in that file
         self.acc = {"template": copy.deepcopy(SNAX_ALU_STREAMER),
                     "snax_streamer_cfg": {"$ref": "#/template"},
-                    "datapath": dict(self.DATAPATH)}
+                    "datapath": copy.deepcopy(self.DATAPATH)}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -234,7 +267,30 @@ class AccFile(unittest.TestCase):
     def test_resolved(self):
         (slot,) = self.load().cores[0].accelerators
         self.assertEqual(slot.streamer, SNAX_ALU_STREAMER)
-        self.assertEqual(slot.datapath, self.DATAPATH)
+        self.assertEqual(slot.datapath, snax_cfg.Datapath(**self.DATAPATH, config=["count"]))
+
+    def fails(self, error, path_part, why_part=""):
+        with self.assertRaises(error) as ctx:
+            self.load()
+        self.assertIn(path_part, ctx.exception.path)
+        self.assertIn(why_part, ctx.exception.why)
+
+    def test_datapath_ports(self):
+        self.acc["datapath"]["inputs"] = ["a"]
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "2 data_reader_params")
+        self.acc["datapath"]["inputs"] = ["a", "b"]
+        self.acc["datapath"]["outputs"] = ["out", "out2"]
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs", "1 data_writer_params")
+
+    def test_datapath_keys(self):
+        del self.acc["datapath"]["wait"]
+        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.wait", "missing")
+        self.acc["datapath"]["wait"] = "lockstep"
+        self.acc["datapath"]["signed"] = "yes"
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.signed", "a boolean")
+        self.acc["datapath"]["signed"] = True
+        self.acc["datapath"]["fields"] = ["loopCount", 3]
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.fields", "list of strings")
 
     def test_rw_csrs(self):
         self.acc["datapath"]["fields"] = ["loopCount", "len"]

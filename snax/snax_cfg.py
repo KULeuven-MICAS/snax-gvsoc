@@ -44,6 +44,16 @@ snax_wide_tcdm_ports or sparse_interconnect_config, snax_num_rw_csr,
 snax_num_ro_csr, snax_streamer_cfg (the streamer template, as the hjson has
 it) and snax_datapath_cfg (the datapath block, optional; Datapath).
 
+The datapath block: what the standard composite (snax_unit_acc.py) builds
+the slot's unit and shell from, SnaxUnit's arguments by name:
+
+    unit           the unit kind: SnaxUnit
+    inputs         the unit's input ports in order, one per streamer reader
+    outputs        its output ports in order, one per streamer writer
+    lanes, data_width, op, signed, control, wait, latency, ii
+    config         the role of each configuration word (optional; [count])
+    fields         the shell's configuration CSRs in order; start follows
+
 The slot's counts must agree with what its refs give: snax_tcdm_ports is the
 streamer's num_channel summed over its movers, and the narrow and wide ports
 or the sparse config's widths add up to it; with a datapath block,
@@ -53,7 +63,8 @@ snax_num_rw_csr is the shell's fields plus start, and snax_num_ro_csr 2
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
 resolve), CfgKeyError (a key missing), CfgTypeError (a value of the wrong
-type), CfgSlotError (slot counts that disagree with the accelerator file).
+type), CfgSlotError (slot counts that disagree with the accelerator file);
+a target refuses what it cannot model with CfgTargetError.
 """
 
 from dataclasses import dataclass, field
@@ -90,6 +101,10 @@ class CfgTypeError(SnaxCfgError):
 
 class CfgSlotError(SnaxCfgError):
     """An accelerator slot's counts disagree with what its refs give."""
+
+
+class CfgTargetError(SnaxCfgError):
+    """A cluster hjson a target cannot model."""
 
 
 # The movers of a streamer template, in snax_cluster's order
@@ -241,6 +256,25 @@ class Dram:
 
 
 @dataclass(frozen=True)
+class Datapath:
+    """A slot's datapath block; see the module doc."""
+
+    unit: str
+    inputs: list
+    outputs: list
+    lanes: int
+    data_width: int
+    op: int
+    signed: bool
+    control: str
+    wait: str
+    latency: int
+    ii: int
+    config: list
+    fields: list
+
+
+@dataclass(frozen=True)
 class AccSlot:
     """One snax_acc_cfg entry of a core: the slot's keys, the streamer template as the hjson
     has it, and the datapath block when the slot has one (None otherwise)."""
@@ -253,7 +287,7 @@ class AccSlot:
     num_rw_csr: int
     num_ro_csr: int
     streamer: dict
-    datapath: dict
+    datapath: Datapath
     at: str
 
 
@@ -315,6 +349,32 @@ def streamer_channels(template: dict) -> int:
     return sum(sum(template.get(mover, {}).get('num_channel', [])) for mover in MOVERS)
 
 
+def _names(node: _Node, key, default=...) -> list:
+    """A list of strings."""
+    values = node.get(key, list, default)
+    if values is not None and not all(isinstance(v, str) for v in values):
+        raise CfgTypeError(node.file, node.where(key), f'must be a list of strings, got {values!r}')
+    return values
+
+
+def _datapath(node: _Node) -> Datapath:
+    return Datapath(
+        unit=node.get('unit', str),
+        inputs=_names(node, 'inputs'),
+        outputs=_names(node, 'outputs'),
+        lanes=node.get('lanes', int),
+        data_width=node.get('data_width', int),
+        op=node.get('op', int),
+        signed=node.get('signed', bool),
+        control=node.get('control', str),
+        wait=node.get('wait', str),
+        latency=node.get('latency', int),
+        ii=node.get('ii', int),
+        config=_names(node, 'config', ['count']),
+        fields=_names(node, 'fields'),
+    )
+
+
 def _slot(acc: _Node) -> AccSlot:
     ports = acc.get('snax_tcdm_ports', int)
     sparse = acc.get('sparse_interconnect_config', list, None)
@@ -325,7 +385,7 @@ def _slot(acc: _Node) -> AccSlot:
                 raise CfgTypeError(acc.file, f'{acc.where("sparse_interconnect_config")}[{i}]',
                     f'must be [width, granularity], got {entry!r}')
     streamer = acc.get('snax_streamer_cfg', dict, None)
-    datapath = acc.get('snax_datapath_cfg', dict, None)
+    datapath = acc.node('snax_datapath_cfg', None)
     slot = AccSlot(
         name=acc.get('snax_acc_name', str),
         tcdm_ports=ports,
@@ -335,7 +395,7 @@ def _slot(acc: _Node) -> AccSlot:
         num_rw_csr=acc.get('snax_num_rw_csr', int),
         num_ro_csr=acc.get('snax_num_ro_csr', int),
         streamer=streamer,
-        datapath=datapath,
+        datapath=None if datapath is None else _datapath(datapath),
         at=acc.at,
     )
     _check_slot(acc, slot)
@@ -363,7 +423,15 @@ def _check_slot(acc: _Node, slot: AccSlot):
             fail('sparse_interconnect_config', f'widths add up to {widths}, not '
                 f'snax_tcdm_ports {slot.tcdm_ports}')
     if slot.datapath is not None:
-        fields = acc.node('snax_datapath_cfg').get('fields', list)
+        fields = slot.datapath.fields
+        if slot.streamer is None:
+            fail('snax_streamer_cfg', 'missing: a datapath block needs the streamer it is fed by')
+        for ports, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
+            names = getattr(slot.datapath, ports)
+            movers = len(slot.streamer.get(mover, {}).get('num_channel', []))
+            if len(names) != movers:
+                fail(f'snax_datapath_cfg.{ports}', f'{names}, but the streamer has {movers} '
+                    f'{mover}: one port each, in order')
         if slot.num_rw_csr != len(fields) + 1:
             fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but the datapath has '
                 f'{len(fields)} shell fields {fields} and start')

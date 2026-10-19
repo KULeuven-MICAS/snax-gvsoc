@@ -27,9 +27,10 @@ their num_int_outstanding_loads, boot_addr, cluster_base_addr, the TCDM
 dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
 crossbar's interconnect (tcdm.sparse_interconnect and each slot's
 sparse_interconnect_config). Each core's accelerator slot gets the standard
-composite when it has a datapath block (snax_datapath_cfg), or the class
-registered under its snax_acc_name (register_accelerator: snax_alu is
-snax_alu_acc.py's SnaxAluAcc); neither is an error.
+composite (snax_unit_acc.py) when it has a datapath block
+(snax_datapath_cfg), or the class registered under its snax_acc_name
+(register_accelerator: snax_alu is snax_alu_acc.py's SnaxAluAcc); neither
+is an error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
 DMA's read path and write latency and its one cycle per stage (SG2, SG7),
@@ -51,8 +52,9 @@ from gvrun.attribute import Tree, Area
 from pulp.snitch.snitch_cluster.snitch_cluster import ClusterArch
 from pulp.chips.snitch.snitch import Snitch
 import snax_cfg
-from snax_cfg import SnaxCfgError
+from snax_cfg import CfgTargetError
 from snax_alu_acc import SnaxAluAcc
+from snax_unit_acc import SnaxUnitAcc
 
 # GVSoC reads a target twice, see snax_alu.py: the build reuses SnitchArch,
 # the run uses SnaxHjsonAttr below.
@@ -82,10 +84,6 @@ CLOCK_FREQUENCY = 10000000
 BOOTROM = (0x0000_1000, 0x0001_0000)
 
 
-class CfgTargetError(SnaxCfgError):
-    """A cluster hjson this target cannot model."""
-
-
 # Accelerators for a slot without a datapath block, by its snax_acc_name
 ACCELERATORS = {}
 
@@ -110,8 +108,7 @@ def accelerator(cfg, slot):
     """The accelerator class of a slot: the standard composite with a datapath block, else the
     registered one."""
     if slot.datapath is not None:
-        raise CfgTargetError(cfg.path, f'{slot.at}.snax_datapath_cfg',
-            'the standard composite for a datapath block is not there yet')
+        return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
     if slot.name not in ACCELERATORS:
         raise CfgTargetError(cfg.path, f'{slot.at}.snax_acc_name',
             f'{slot.name!r}: no snax_datapath_cfg and no accelerator registered under it '

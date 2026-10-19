@@ -1,0 +1,44 @@
+// Copyright 2026 KU Leuven.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+
+// Written by hand in LNK2a round 1; snax-forge's writer replaces it in round 2.
+// The accelerator of design vsum (out/design/vsum/design_point.json in
+// snax-forge): instance acc, BRM accumulate, implementation chisel_accumulator,
+// block Accumulator, in snax_alu.hjson's slot (snax_acc_name snax_alu).
+// From GEN3's forge_vsum_acc.py: the streamer template (readers the input
+// ports in the BRM's port order, writers the output ports) and the datapath
+// block SNAX-GVSoC's standard composite takes (snax/snax_cfg.py,
+// snax/snax_unit_acc.py).
+{
+    snax_streamer_cfg: {
+        data_reader_params: {
+            spatial_bounds: [[1]],
+            temporal_dim: [1],
+            num_channel: [1],
+            fifo_depth: [8],
+        },
+        data_writer_params: {
+            spatial_bounds: [[1]],
+            temporal_dim: [1],
+            num_channel: [1],
+            fifo_depth: [8],
+        },
+    },
+
+    datapath: {
+        unit: "SnaxUnit",
+        inputs: ["a"],
+        outputs: ["out"],
+        lanes: 1,
+        data_width: 64,
+        op: 0,
+        signed: true,
+        control: "counted",
+        config: ["count", "rate"],
+        wait: "pipelined",
+        latency: 1,
+        ii: 1,
+        fields: ["loopCount", "len"],
+    },
+}

@@ -129,22 +129,25 @@ It prints its checks and `snax-shell errors: 0`, and exits 0;
 
 ## Generated accelerators (forge/)
 
-`forge/<design>/` holds what snax-forge's GVSoC generator wrote for one
-design point, untouched: the composite on `SnaxShell` and `SnaxUnit`, a
-target `forge_<design>` (`snax_alu` with it in the accelerator slot), the
-headers and `manifest.json` (`forge/README.md`: what is there, how to refresh
-a folder). Nothing in it is built: gvrun reads a folder with `--target-dir`
-and runs it on the installed components (it warns that the target has no
-platform tree). `sw/apps/forge-elementwise/` drives an elementwise one on
-its generated headers, `sw/apps/forge-reduce/` a fold (`forge/vsum/`):
+`forge/<design>/` holds one design point as SNAX-GVSoC reads it (LNK2a):
+the cluster file `snax_alu.hjson` (`sw/cfg/snax_alu_cluster.hjson` with the
+accelerator slot set for the design), the accelerator file
+`snax_alu_acc.hjson` (the slot's streamer template and datapath block), the
+headers a program drives it with and `manifest.json` (`forge/README.md`).
+Nothing in it is built: `snax_hjson` reads the cluster file and puts the
+standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and
+`SnaxUnit`) in the slot, on the installed components (gvrun warns that the
+platform tree does not match). `sw/apps/forge-elementwise/` drives an
+elementwise one on its headers, `sw/apps/forge-reduce/` a fold
+(`forge/vsum/`):
 
     make -C sw/apps/forge-elementwise DESIGN=vecmul MODE=2
-    gvrun --target forge_vecmul --target-dir=$PWD/forge/vecmul --work-dir build/work/forge-vecmul \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecmul/snax_alu.hjson --work-dir build/work/forge-vecmul \
         --param chip/soc/binary=$PWD/build/sw/apps/forge-elementwise/vecmul/forge-elementwise.elf run
 
 It prints `forge-elementwise data: 0 errors (64 words)`, its counter and
 `forge-elementwise errors: 0`, and exits 0. `make -C sw/apps/forge-reduce
-DESIGN=vsum` and `forge_vsum` the same way print `forge-reduce data: 0
+DESIGN=vsum` and `forge/vsum/snax_alu.hjson` the same way print `forge-reduce data: 0
 errors (1 sums)`.
 
 ## Regression
@@ -168,8 +171,8 @@ and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
 must equal its unit's first run line, busy + stall_in + stall_out + flush,
 that run firing its beats (`check_counter` in `tests/snax/regress.py`,
 GEN3); so must `forge-elementwise`'s and `forge-reduce`'s. A `forge/` entry is read from its
-`manifest.json` with plain json: the target, run with `--target-dir=` each of
-its `target_dirs` (never built, so gvrun warns that it has no platform tree),
+`manifest.json` with plain json: its cluster file, run on `snax_hjson`
+with `--param hjson=` (gvrun warns that the platform tree does not match),
 the unit's trace path and the beats of its one accelerator task; the program
 is built with `DESIGN=<design>`, and `MODE=<mode>` for forge-elementwise. It needs GVSoC built for
 `snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson`, as above, and takes about

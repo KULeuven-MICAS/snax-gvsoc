@@ -2,9 +2,9 @@
  "design": "vecmul",
  "design_point": "out/design/vecmul/design_point.json",
  "symbols": {"N": 64},
- "target": "forge_vecmul",
- "files": ["forge_vecmul_acc.py", "forge_vecmul.py", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
- "target_dirs": ["."],
+ "note": "edited by hand in LNK2a round 1 (target and target_dirs dropped, cluster added); snax-forge's writer replaces it in round 2",
+ "cluster": "snax_alu.hjson",
+ "files": ["snax_alu.hjson", "snax_alu_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
  "trace": "snax_acc0/unit",
  "csrs": {
   "streamer": {"first": 960, "last": 977},

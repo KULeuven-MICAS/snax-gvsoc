@@ -1,6 +1,4 @@
 __pycache__/
-# gvrun run by hand on forge/'s fixtures (regress.py sets PYTHONDONTWRITEBYTECODE)
-forge/**/__pycache__/
 docs/developer/_build/
 build/
 /install/
