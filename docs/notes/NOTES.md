@@ -4026,3 +4026,11 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   counter 67.
 - Not verified: other overrides (only 16 run); the full `make regress`
   (only `-k forge`).
+
+### GEN3 round 4b, F2: snax-forge's STATUS (snax-forge)
+
+- 2026-10-19. snax-forge only (`docs/STATUS.md`); noted here in its own
+  commit, since no snax-gvsoc fix-up follows. M14's row `todo` to `wip`;
+  the next-up paragraph says GEN3 is done (after LNK1) and LNK2a is next,
+  and names round 4b's `forge-reduce.vsum-r16`. fmt and lint clean (no
+  code changed).
