@@ -58,11 +58,12 @@ has none, so a run at 8 lanes is not tried.
 In the container, from snax-gvsoc, with GVSoC built and the program made:
 
     source sourceme.sh
-    gvrun --target forge_vecadd --target-dir=$PWD/forge/vecadd \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
         --work-dir build/work/forge-elementwise --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge-elementwise/vecadd/forge-elementwise.elf run
 
-It warns that `forge_vecadd` has no platform tree, prints the unit's line
+It warns that the platform tree does not match (LNK2a: the cluster file's
+components are not `snax_hjson`'s default's), prints the unit's line
 `run 0: firings 16 ...`, then `forge-elementwise data: 0 errors (64 words)`,
 the counter (busy + stall_in + stall_out + flush of that line; 19 in GEN3
 round 3b's build, which the core's timing can move) and

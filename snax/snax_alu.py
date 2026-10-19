@@ -5,182 +5,28 @@
 #
 
 """The snax_alu target: snax_cluster's cfg/snax_alu_cluster_old.hjson at b2672f8,
-unchanged up to the pin, 9fbf35d.
+unchanged up to the pin, 9fbf35d (sw/cfg/), read by the generic target
+(snax_hjson.py, LNK2a): written by hand from it until then.
 
 One cluster with a compute core (hart 0, the one that drives the accelerator)
 and a DMA core (hart 1), both rv32ima, 128 KiB TCDM in 32 banks and the plain
-interconnect. The compute core's accelerator CSRs go to snax_alu_acc.py,
-which splits them between the streamer and the ALU. The SNAX ports, the cores',
-AXI's and the DMA's TCDM ports go through one crossbar into the banks, the DMA
-taking a superbank per beat. The values are written here by hand; everything else is the Snitch
-chip of pulp/pulp/chips/snitch/snitch.py, whose own arch tree fixes the core
-count at 9.
+interconnect. The compute core's slot, snax_alu, is snax_alu_acc.py (the
+registered accelerator of that name). The file is fixed: the target takes no
+hjson option. SnaxAluBoard.accelerator replaces the slot's accelerator
+(snax_tiled_add.py).
 
     gvrun --target snax_alu --work-dir build/work/<name> \
         --param chip/soc/binary=<elf> run
 """
 
-import os
-
 import gvsoc.runner
-import gvsoc.systree
-import memory.memory
-from vp.clock_domain import Clock_domain
-from gvrun.attribute import Tree, Area
-from pulp.snitch.snitch_cluster.snitch_cluster import ClusterArch
-from pulp.chips.snitch.snitch import Snitch
-from snax_alu_acc import SnaxAluAcc
-
-# GVSoC reads a target twice: `make build` lists its components through gapy
-# without USE_GVRUN, and gvrun runs it with USE_GVRUN set. Each pulp module
-# defines different arch classes for the two, so this target does too: the
-# build reuses SnitchArch with the core count changed, the run uses
-# SnaxAluAttr below. Only the run needs misa, a value read at run time; both
-# need the accelerators and the interconnect, since the build compiles their
-# sources and checks the crossbar's configuration.
-if os.environ.get('USE_GVRUN') is None:
-    from pulp.chips.snitch.snitch import SnitchArch, SnitchArchProperties
+from snax_hjson import SnaxHjsonBoard
 
 
-# Cores per cluster in the hjson's hive: the compute core, then the DMA core
-# (GVSoC's Snitch cluster takes its last core as the DMA core).
-NB_CORE = 2
+class SnaxAluBoard(SnaxHjsonBoard):
 
-# misa of an rv32ima core: MXL = 1 (32 bit), extensions A (bit 0), I (bit 8)
-# and M (bit 12). snax_cluster's start-up code reads it to skip the FP
-# registers. Only the CSR value changes: the model still executes FP
-# instructions.
-MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
-
-# The core index that drives the board's accelerator (SnaxAluBoard.accelerator,
-# the ALU of snax_alu_acc.py, whose CSR layout is there): the compute core,
-# hart 0.
-SNAX_ACC_CORE = 0
-
-# The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4):
-# one 64 B beat per cycle into L1 (dma_data_width 512), 3 transfers queued
-# (dma_req_fifo_depth) and 3 bursts in flight (dma_axi_req_fifo_depth). A DMA
-# read's first beat comes 5 cycles after its request from L1 and 11 from DRAM:
-# the 5 common to both are the DMA's own read path (read_latency), the other 6
-# are the DRAM's. From the SG7 round 4 follow-up (docs/plans/SG7.md): a beat
-# reaches L1 2 cycles after the DMA sends it, the wide crossbar's cut and
-# axi_to_mem_interleaved, and the DMA is done at the send
-# (tcdm_write_latency); the DMA's midend, backend and AXI read each take a
-# cycle, whatever else the DMA is doing (one_cycle_per_stage).
-SNAX_DMA = {'tcdm_width': 64, 'transfer_queue_size': 3, 'burst_queue_size': 3,
-    'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage': True}
-DRAM_LATENCY = 6
-# The hjson's dma_data_width in bits: a DMA beat takes a superbank of
-# dma_data_width / data_width banks (data_width 64, the TCDM's 8 B bank), 8,
-# in the SNAX crossbar (SG7 round 4)
-DMA_DATA_WIDTH = 512
-
-# The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
-# in snax-alu's check loop. One integer load in flight, as the hjson's
-# num_int_outstanding_loads: 1: a load issues only once the previous load's
-# data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
-# the core's data path gets the cycles GVSoC lacks for that (core_latency), on
-# its TCDM port and on its way out of the cluster (narrow_axi). Instruction
-# fetches keep their own path. On the TCDM port the SNAX crossbar answers a
-# core's read one cycle after its grant plus these cycles; the core goes on
-# meanwhile, and the next load or an instruction on the loaded register runs in
-# the cycle after: 4 from one L1 load to the next with tcdm 2, as before the
-# cores went through the crossbar (SG7 rounds 3 and 3b).
-# GVSoC's host reads tohost every 1000 cycles; the RTL's host does not use the
-# bus, so the poll reads DRAM through the zero-time debug backdoor (SG7 round 3b).
-SNAX_CORE = {'int_loads_in_flight': 1, 'htif_poll_backdoor': True}
-CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
-DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
-
-# The SNAX ports' interconnect, ClusterArch arguments: the hjson's plain one
-# (tcdm.sparse_interconnect false). snax_alu_sparse.py replaces it.
-INTERCONNECT = {'snax_interconnect': 'plain'}
-
-
-class SnaxAluAttr(Tree):
-    """The address map and cluster of the target, as SnitchAttr gives them."""
-
-    def __init__(self, parent, name, interconnect, snax_acc):
-        super().__init__(parent, name)
-        self.chip = SnaxAluAttr.Chip(self, 'chip', interconnect, snax_acc)
-        self.hbm = SnaxAluAttr.Hbm(self, 'hbm')
-
-    class Hbm(Tree):
-
-        def __init__(self, parent, name):
-            super().__init__(parent, name)
-            self.type = 'simple'
-            self.size = 0x8000_0000
-
-    class Chip(Tree):
-
-        def __init__(self, parent, name, interconnect, snax_acc):
-            super().__init__(parent, name)
-            self.soc = SnaxAluAttr.Chip.Soc(self, 'soc', interconnect, snax_acc)
-
-        class Soc(Tree):
-
-            def __init__(self, parent, name, interconnect, snax_acc):
-                super().__init__(parent, name)
-                self.bootrom = Area(self, 'rom', 0x0000_1000, 0x0001_0000,
-                    description='Bootrom range')
-                self.hbm = Area(self, 'hbm', 0x8000_0000, 0x8000_0000,
-                    description='DRAM range')
-                self.cluster = Area(self, 'cluster', 0x1000_0000, 0x0004_0000,
-                    description='Cluster range')
-                self.hbm_latency = DRAM_LATENCY
-                self.floonoc = False
-                self.use_spatz = False
-                self.nb_cluster = 1
-                self.clusters = [
-                    ClusterArch(self, 'cluster', self.get_cluster_base(0), 0,
-                        nb_core_per_cluster=NB_CORE, misa=MISA_RV32IMA,
-                        snax_acc=snax_acc, dma=SNAX_DMA, core=SNAX_CORE,
-                        core_latency=CORE_LATENCY, snax_dma_data_width=DMA_DATA_WIDTH,
-                        **interconnect)
-                ]
-
-            def get_cluster_base(self, id: int):
-                return self.cluster.base + id * self.cluster.size
-
-            def get_cluster(self, id: int):
-                return self.clusters[id]
-
-
-class SnaxAluBoard(gvsoc.systree.Component):
-
-    interconnect = INTERCONNECT
-    # The compute core's accelerator; a target puts another one here, as
-    # snax_alu_sparse.py replaces the interconnect
-    accelerator = SnaxAluAcc
-
-    def __init__(self, parent, name: str, parser, options):
-        super().__init__(parent, name, options=options)
-
-        clock = Clock_domain(self, 'clock', frequency=10000000)
-        snax_acc = {SNAX_ACC_CORE: self.accelerator}
-
-        if os.environ.get('USE_GVRUN') is None:
-            properties = SnitchArchProperties()
-            properties.nb_core_per_cluster = NB_CORE
-            properties.snax_acc = snax_acc
-            properties.dma = SNAX_DMA
-            properties.snax_dma_data_width = DMA_DATA_WIDTH
-            for key, value in self.interconnect.items():
-                setattr(properties, key, value)
-            arch = SnitchArch(self, properties=properties)
-        else:
-            arch = SnaxAluAttr(self, 'snax_alu', self.interconnect, snax_acc)
-        # Exposed so tools like the build process can query the memory map.
-        self.set_attributes(arch)
-
-        chip = Snitch(self, 'chip', parser, arch.chip, None, [])
-        mem = memory.memory.Memory(self, 'mem', size=arch.hbm.size, atomics=True,
-            width_log2=DRAM_WIDTH_LOG2)
-
-        self.bind(clock, 'out', chip, 'clock')
-        self.bind(clock, 'out', mem, 'clock')
-        self.bind(chip, 'hbm', mem, 'input')
+    cluster_file = 'snax_alu_cluster_old.hjson'
+    hjson_option = False
 
 
 class Target(gvsoc.runner.Target):

@@ -37,8 +37,10 @@ DMA's read path and write latency and its one cycle per stage (SG2, SG7),
 the DRAM's latency and width (SG2), the cores' added latency (SG5, SG7), the
 HTIF poll backdoor (SG7), the 10 MHz clock and the bootrom's range.
 
-Everything else is the Snitch chip of pulp/pulp/chips/snitch/snitch.py, as
-for snax_alu.py, whose structure this follows (SnaxAluAttr, SnaxAluBoard).
+Everything else is the Snitch chip of pulp/pulp/chips/snitch/snitch.py,
+whose own arch tree fixes the core count at 9; this follows the structure of
+the hand-written snax_alu.py it replaces (SnaxAluAttr, SnaxAluBoard), and
+snax_alu.py and snax_alu_sparse.py are this board on their sw/cfg/ file.
 """
 
 import os
@@ -56,8 +58,13 @@ from snax_cfg import CfgTargetError
 from snax_alu_acc import SnaxAluAcc
 from snax_unit_acc import SnaxUnitAcc
 
-# GVSoC reads a target twice, see snax_alu.py: the build reuses SnitchArch,
-# the run uses SnaxHjsonAttr below.
+# GVSoC reads a target twice: `make build` lists its components through gapy
+# without USE_GVRUN, and gvrun runs it with USE_GVRUN set. Each pulp module
+# defines different arch classes for the two, so this target does too: the
+# build reuses SnitchArch with the core count and the cluster's values
+# changed, the run uses SnaxHjsonAttr below. Only the run needs misa, a value
+# read at run time; both need the accelerators and the interconnect, since the
+# build compiles their sources and checks the crossbar's configuration.
 if os.environ.get('USE_GVRUN') is None:
     from pulp.chips.snitch.snitch import SnitchArch, SnitchArchProperties
 
@@ -69,15 +76,33 @@ HERE = Path(__file__).resolve().parent
 CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg')
 DEFAULT_HJSON = 'snax_alu_cluster.hjson'
 
-# The DMA, DRAM and cores measured on the RTL (snax_alu.py has the detail):
-# SG2's read path and SG7 round 4's write latency and one cycle per stage;
-# the DRAM's 6 cycles and 64 B per cycle; the cores' added latency on their
-# TCDM and narrow paths (SG5, SG7 rounds 3 and 3b), and the tohost poll
-# through the debug backdoor (SG7 round 3b)
+# The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4),
+# with the hjson's snax_alu cluster: one beat of dma_data_width per cycle into
+# L1, the DMA's queues the hjson's. A DMA read's first beat comes 5 cycles after
+# its request from L1 and 11 from DRAM: the 5 common to both are the DMA's own
+# read path (read_latency), the other 6 are the DRAM's. From the SG7 round 4
+# follow-up (docs/plans/SG7.md): a beat reaches L1 2 cycles after the DMA sends
+# it, the wide crossbar's cut and axi_to_mem_interleaved, and the DMA is done at
+# the send (tcdm_write_latency); the DMA's midend, backend and AXI read each
+# take a cycle, whatever else the DMA is doing (one_cycle_per_stage).
 DMA_TIMING = {'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage': True}
 DRAM_LATENCY = 6
-DRAM_WIDTH_LOG2 = 6
+DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
+
+# The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
+# in snax-alu's check loop, with one integer load in flight (the hjson's
+# num_int_outstanding_loads: 1): a load issues only once the previous load's
+# data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
+# the core's data path gets the cycles GVSoC lacks for that (core_latency), on
+# its TCDM port and on its way out of the cluster (narrow_axi). Instruction
+# fetches keep their own path. On the TCDM port the SNAX crossbar answers a
+# core's read one cycle after its grant plus these cycles; the core goes on
+# meanwhile, and the next load or an instruction on the loaded register runs in
+# the cycle after: 4 from one L1 load to the next with tcdm 2, as before the
+# cores went through the crossbar (SG7 rounds 3 and 3b).
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
+# GVSoC's host reads tohost every 1000 cycles; the RTL's host does not use the
+# bus, so the poll reads DRAM through the zero-time debug backdoor (SG7 round 3b).
 HTIF_POLL_BACKDOOR = True
 CLOCK_FREQUENCY = 10000000
 # The bootrom's range, as the Snitch chip's
@@ -144,6 +169,9 @@ class SnaxHjson:
                 f'xdma on cores {dma_cores}; the model takes the last core, '
                 f'{len(cores) - 1}, as the one DMA core')
         self.nb_core = len(cores)
+        # misa as the ISA string gives it (MXL and the base letters); snax_cluster's
+        # start-up code reads it to skip the FP registers. Only the CSR value
+        # changes: the model still executes FP instructions.
         self.misa = _one(cfg, {i: core.misa for i, core in enumerate(cores)}, 'isa')
         loads = _one(cfg, {i: core.num_int_outstanding_loads for i, core in enumerate(cores)},
             'num_int_outstanding_loads')
@@ -236,6 +264,9 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
 
     # The cluster file when the hjson option is not given, a name in CFG_DIRS
     cluster_file = DEFAULT_HJSON
+    # Whether the hjson option is declared; a target fixed to its cluster file
+    # (snax_alu.py) has none
+    hjson_option = True
     # An accelerator class that replaces the one slot's (snax_tiled_add.py);
     # None takes it from the hjson
     accelerator = None
@@ -243,8 +274,10 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
 
-        path = self.declare_user_property(name='hjson', value=str(cfg_file(self.cluster_file)),
-            description='the cluster hjson (snax_cfg.py)')
+        path = str(cfg_file(self.cluster_file))
+        if self.hjson_option:
+            path = self.declare_user_property(name='hjson', value=path,
+                description='the cluster hjson (snax_cfg.py)')
         arch = SnaxHjson(snax_cfg.load(path), self.accelerator)
 
         clock = Clock_domain(self, 'clock', frequency=CLOCK_FREQUENCY)
