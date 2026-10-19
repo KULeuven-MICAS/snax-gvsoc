@@ -186,8 +186,11 @@ class Broken(unittest.TestCase):
         d = sparse()
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "#/snax_alu_streamer_template", "x": 1}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "is not")
+        # A key without #/ is a whole file's name since round 2: no such file
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "snax_alu_streamer_template"}
-        self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "is not")
+        self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "no file")
+        self.slot(d)["snax_streamer_cfg"] = {"$ref": "#snax_alu_streamer_template"}
+        self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "must start with /")
 
     def test_ref_cycle(self):
         d = sparse()
@@ -310,6 +313,27 @@ class AccFile(unittest.TestCase):
         with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
             self.load()
         self.assertIn("10 channels", ctx.exception.why)
+
+    def test_whole_files(self):
+        """snax-forge's writer: the streamer file and the accelerator file, each the whole
+        file, with or without a trailing #."""
+        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot["snax_streamer_cfg"] = {"$ref": "acc/snax_alu_streamer.hjson"}
+        slot["snax_datapath_cfg"] = {"$ref": "acc/snax_alu_acc.hjson#"}
+        (self.dir / "acc").mkdir(exist_ok=True)
+        (self.dir / "acc" / "snax_alu_streamer.hjson").write_text(json.dumps(SNAX_ALU_STREAMER))
+        self.acc = self.DATAPATH
+        (slot_cfg,) = self.load().cores[0].accelerators
+        self.assertEqual(slot_cfg.streamer, SNAX_ALU_STREAMER)
+        self.assertEqual(slot_cfg.datapath, snax_cfg.Datapath(**self.DATAPATH, config=["count"]))
+
+    def test_bad_whole_file_refs(self):
+        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        for ref, why in (("acc/none.hjson", "no file"), ("#", "is not"), ("", "is not")):
+            slot["snax_datapath_cfg"] = {"$ref": ref}
+            with self.assertRaises(snax_cfg.CfgRefError) as ctx:
+                self.load()
+            self.assertIn(why, ctx.exception.why)
 
     def test_bad_pointer(self):
         self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]["snax_datapath_cfg"] = \

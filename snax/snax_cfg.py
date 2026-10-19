@@ -9,15 +9,17 @@
     load(path) -> ClusterCfg
 
 The hjson is the contract: snax_cluster's clustergen and snaxgen read the
-same file. A design is two files: the cluster file, named after its base
-platform (snax_alu.hjson), and the accelerator file, named after its slot
-(snax_alu_acc.hjson). The cluster's snax_acc_cfg entry (the slot) keeps the
-slot keys; its snax_streamer_cfg and snax_datapath_cfg are $refs into the
-accelerator file.
+same file. A design is three files: the cluster file, named after its base
+platform (snax_alu.hjson), the streamer file and the accelerator file, named
+after its slot (snax_alu_streamer.hjson, the streamer template, and
+snax_alu_acc.hjson, the datapath block). The cluster's snax_acc_cfg entry
+(the slot) keeps the slot keys; its snax_streamer_cfg and snax_datapath_cfg
+are $refs to the other two, each the whole file.
 
 $ref: {$ref: "#/a/b"} is the value at /a/b of the file it is in;
 {$ref: "other.hjson#/a/b"} the value at /a/b of other.hjson, a path relative
-to the file that holds the ref, whose own refs are resolved in that file.
+to the file that holds the ref, whose own refs are resolved in that file;
+{$ref: "other.hjson"} (or "other.hjson#") the whole of other.hjson.
 snax_cluster's clustergen and snaxgen resolve only the first form so far
 (JsonRef.replace_refs without a base_uri).
 
@@ -151,11 +153,13 @@ class _Resolver:
 
     def ref(self, node: dict, file: Path, at: str, seen):
         ref = node['$ref']
-        if len(node) != 1 or not isinstance(ref, str) or '#' not in ref:
-            raise CfgRefError(file, at, f'{dict(node)!r} is not {{$ref: "[file]#/<pointer>"}}')
-        name, pointer = ref.split('#', 1)
+        if len(node) != 1 or not isinstance(ref, str) or not ref or ref == '#':
+            raise CfgRefError(file, at,
+                f'{dict(node)!r} is not {{$ref: "[file]#/<pointer>"}} or {{$ref: "<file>"}}')
+        # A file without a pointer is the whole file
+        name, _, pointer = ref.partition('#')
         target = (file.parent / name).resolve() if name else file.resolve()
-        if not pointer.startswith('/'):
+        if pointer and not pointer.startswith('/'):
             raise CfgRefError(file, at, f'{ref!r}: the pointer must start with /')
         key = (target, pointer)
         if key in seen:
@@ -163,7 +167,7 @@ class _Resolver:
         if not target.is_file():
             raise CfgRefError(file, at, f'{ref!r}: no file {target}')
         value = self.top(target)
-        for part in pointer[1:].split('/'):
+        for part in pointer[1:].split('/') if pointer else []:
             part = part.replace('~1', '/').replace('~0', '~')
             if isinstance(value, dict) and part in value:
                 value = value[part]
