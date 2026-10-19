@@ -45,7 +45,7 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (README); the
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson` (README); the
 forge/ targets are never in that list. Exit code 0 when every program
 passes, 1 otherwise.
 """

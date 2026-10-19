@@ -85,11 +85,15 @@ priority bit first, then round robin from the last pick (SG7,
 DMA beat takes the whole superbank (8 banks) it writes or reads in its cycle,
 and a narrow request there is refused and keeps its turn. The two clusters
 build the same ELF (`sw/README.md`).
+`snax_hjson` (`snax/snax_hjson.py`, LNK2a) is any such cluster read from
+its hjson (`snax/snax_cfg.py`), the file given with `--param hjson=<path>`
+(`sw/cfg/snax_alu_cluster.hjson` by default); on either `sw/cfg/` file it
+gives the logs and `gvsoc_config.json` of the matching hand-written target.
 Build `sw/` (the runtime for both clusters), GVSoC and the programs in
 `sw/apps/`, each into `build/sw/apps/<name>/`:
 
     make sw
-    make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"
+    make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson"
     make -C sw/apps/snax-csr
     make -C sw/apps/snax-alu
     source sourceme.sh
@@ -168,7 +172,7 @@ GEN3); so must `forge-elementwise`'s and `forge-reduce`'s. A `forge/` entry is r
 its `target_dirs` (never built, so gvrun warns that it has no platform tree),
 the unit's trace path and the beats of its one accelerator task; the program
 is built with `DESIGN=<design>`, and `MODE=<mode>` for forge-elementwise. It needs GVSoC built for
-`snitch;snax_alu;snax_alu_sparse;snax_tiled_add`, as above, and takes about
+`snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson`, as above, and takes about
 two minutes.
 
     make regress
@@ -186,7 +190,7 @@ the programs whose name holds it, as `-k stream-timing`, `-k sparse`,
 `.github/workflows/ci.yml` runs on every push to main, on every pull
 request, and by hand (`workflow_dispatch`), in snax-forge's image
 `ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
-`snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (with ccache, kept between runs), runs the unit tests
+`snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson` (with ccache, kept between runs), runs the unit tests
 (`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
 `make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
 tested (and `forge/` run); GVSoC's other targets stay out.
