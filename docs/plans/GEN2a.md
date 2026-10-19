@@ -55,17 +55,17 @@ snax-forge's D135 and `snax_forge/lower/c.py` hold them; in short:
 
 | # | Step | Status |
 |---|---|---|
-| 1 | snax-forge: docs only. D113 rewritten (integers first), PAPER §6.1's tier table, STATUS's M7, GEN2a, FLOW3 and M13 rows, open items 79 to 81 | |
-| 2 | snax-forge: `gen/data.py` writes `data.h`: inputs from `make_inputs`, outputs zeroed with goldens from the reference executor, padded to whole beats and aligned to one | |
-| 3 | snax-forge: the design check `memory.runtime`, an L1 layout kept below snRuntime's stacks (core count x 1 KiB plus a declared 256 B) | |
-| 4 | snax-forge: the C backend `lower/c.py` (D135): task list, cluster file and CSR layout to `main.c` | |
-| 5 | snax-forge: `gen-gvsoc` writes `main.c` and `data.h`; the manifest's `program` | |
-| 6 | snax-forge: D135, ARCHITECTURE, C§9, STATUS | |
-| 7 | This file | |
-| 8 | The generic app `sw/apps/forge/`: `forge/$(DESIGN)/main.c` with the fixture's `include/` and `data.h` | |
-| 9 | forge/'s fixtures refreshed; regress runs every folder with the generic app, the counter check per accelerator task; `forge-elementwise` removed, `forge-reduce` kept for `vsum-r16` | |
-| 10 | vecadd's marks: every `forge_*` label in the ELF's symbols and its pc in GVSoC's instruction trace; `__cdata`, `__cbss`, `__tdata` against step 3's margin | |
-| 11 | The notes, `forge/README.md`, the apps' READMEs, this file; full `make regress` | |
+| 1 | snax-forge: docs only. D113 rewritten (integers first), PAPER §6.1's tier table, STATUS's M7, GEN2a, FLOW3 and M13 rows, open items 79 to 81 | done |
+| 2 | snax-forge: `gen/data.py` writes `data.h`: inputs from `make_inputs`, outputs zeroed with goldens from the reference executor, padded to whole beats and aligned to one | done |
+| 3 | snax-forge: the design check `memory.runtime`, an L1 layout kept below snRuntime's stacks (core count x 1 KiB plus a declared 256 B) | done |
+| 4 | snax-forge: the C backend `lower/c.py` (D135): task list, cluster file and CSR layout to `main.c` | done |
+| 5 | snax-forge: `gen-gvsoc` writes `main.c` and `data.h`; the manifest's `program` | done |
+| 6 | snax-forge: D135, ARCHITECTURE, C§9, STATUS | done |
+| 7 | This file | done |
+| 8 | The generic app `sw/apps/forge/`: `forge/$(DESIGN)/main.c` with the fixture's `include/` and `data.h` | done |
+| 9 | forge/'s fixtures refreshed; regress runs every folder with the generic app, the counter check per accelerator task; `forge-elementwise` removed, `forge-reduce` kept for `vsum-r16` | done |
+| 10 | vecadd's marks: every `forge_*` label in the ELF's symbols and its pc in GVSoC's instruction trace; `__cdata`, `__cbss`, `__tdata` against step 3's margin | done |
+| 11 | The notes, `forge/README.md`, the apps' READMEs, this file; full `make regress` | done |
 | 12 | snax-forge: its submodule at this branch's head; `test_fixture.py` reproduces every fixture, `main.c` and `data.h` included | snax-forge |
 | 13 | snax-forge: STATUS (round 1 done); tag `gen2a-r1` in both repos | snax-forge |
 
@@ -88,4 +88,46 @@ its submodule points at; they are logged in snax-forge's STATUS.
   of the declared 256 B (`memory.runtime`, snax-forge C§14). The TLS (8 B
   per hart) sits inside each hart's stack.
 
+- **The image has clang, not GCC (step 4).** snax-forge's compile test
+  uses the image's clang (snax_cluster's toolchain, clang 21.1.6) with
+  `sw/toolchain.mk`'s flags against `sw/`'s headers, vecadd's and vsum's
+  `main.c` with `-Werror`; it skips without that clang or the submodule.
+- **A constant core index copies shared code (step 8).** With
+  `const uint32_t core`, clang threads the `if (core == k)` blocks into one
+  path per core and copies the code every core passes onto each: vsum's
+  `forge_main_exit` was defined twice and did not assemble (vecadd did).
+  `main.c` keeps the index in a `volatile`, read at each branch; snax-forge's
+  compile test covers vsum since.
+- **The waits are the lowering's, not the hardware's (step 4).** snax-forge's
+  lowering puts a `wait dma` before `load_B`'s start (SNAX-MODEL's rule: no
+  start while busy, D36 there); snRuntime's DMA queues transfers, as the
+  hand-written apps used. So the generated program loads A, then B, where
+  `forge-elementwise` started both and waited once. The accelerator's
+  counter does not see it; the cycles before the start do.
+- **The start mark moves each counter by one cycle (step 9).** The
+  generated counters are one below the hand-written apps': vecadd 18
+  against 19, vecmul 18 against 19, vsum 66 against 67 (`vsum-r16` stays
+  67, still hand-written). The L1 addresses are the same: the memory plan
+  puts A, B and O at `0x1000_0000`, `+0x200`, `+0x400`, where the
+  `snrt_l1_next()` chain put them, and the readers hit the same banks with
+  the same single conflict (readers 0 and 1 on banks 0 to 3 in the first
+  cycle, reader 0 granted). The difference is `forge_<acc>_start` between
+  the two start CSRs: the streamer starts two cycles before the accelerator
+  instead of one (vecadd: cycles 2922 and 2924 against 2419 and 2420;
+  vsum: 2336 and 2338 against 2244 and 2245), so its first beats arrive a
+  cycle earlier against the start the counter counts from, and the unit
+  sees one stall_in cycle fewer. Nothing was tuned.
+
 ## Open
+
+- The DMA wait between the loads: from snax-forge's lowering, which keeps
+  SNAX-MODEL's rule until RET1 (D45 there); whether the task list should
+  let the DMA queue is decided with FLOW3, which reads the cycles.
+- The marks cost a cycle each and the start mark shifts the counter by one
+  (above); FLOW3 decides whether the start marks go before the streamer's
+  start CSR.
+- One accelerator per program, two or more cores: one core driving the DMA
+  and the accelerator (snax-forge open item 80) and several accelerators on
+  one core (open item 79) were never run; a read step, a `signal` wait and
+  a 2-D DMA are refused or never made.
+- Round 2: the adder tree, `vsum` at W = 4.
