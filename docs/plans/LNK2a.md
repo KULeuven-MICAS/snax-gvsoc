@@ -1,9 +1,10 @@
 # LNK2a plan: SNAX-GVSoC's target read from the cluster hjson
 
-LNK2a is a task of M14 in snax-forge (D119, D111 there): the cluster hjson
-from the design point, and SNAX-GVSoC's target read from it, so GEN3's runs
-run on the read target. The hjson is the contract: snax_cluster's clustergen
-and snaxgen read the same file (LNK2b).
+LNK2a is a task of M14 in snax-forge (D119, D111, D134 there): the cluster
+hjson from the design point, and SNAX-GVSoC's target read from it, so GEN3's
+runs run on the read target. The hjson is the contract: snax_cluster's
+clustergen and snaxgen read the same files (LNK2b). Done: rounds 1 and 2,
+tags `lnk2a-r1` and `lnk2a-r2`.
 
 This file is the checklist; `docs/notes/NOTES.md` is the log. A step is
 ticked here when its entry is in the notes.
@@ -12,8 +13,8 @@ ticked here when its entry is in the notes.
 
 - On the MICAS server, by Claude Code, in snax-forge's image
   (`ghcr.io/kuleuven-micas/snax-forge:main`), as GEN3.
-- One commit per step on `ry/lnk2a`, here and in snax-forge, never pushed;
-  each round tagged (`lnk2a-r1`).
+- One commit per step on `ry/lnk2a`, here and in snax-forge; each round
+  tagged (`lnk2a-r1`, `lnk2a-r2`).
 - Anything not verified is said so.
 
 ## The rounds
@@ -21,11 +22,11 @@ ticked here when its entry is in the notes.
 | Round | Content |
 |---|---|
 | 1 | SNAX-GVSoC reads the hjson: the TCDM from arguments, the reader, the generic target, the standard composite, forge/'s fixtures as hjson written by hand, the hand-written targets on the generic one (steps 1 to 5 here); snax-forge's docs (step 6) |
-| 2 | snax-forge's writer: the two hjson files and the manifest from a design point, in place of round 1's hand-written fixtures, compared byte for byte again |
+| 2 | snax-forge's writer: three hjson files (cluster, streamer, accelerator) and the manifest from a design point, in place of round 1's hand-written fixtures, compared byte for byte again; the schemas (steps 0 to 5 of round 2) |
 
 ## Decisions
 
-Taken before round 1, not reopened:
+Taken before round 1, not reopened (round 2's below):
 
 - The hjson is the contract. Two files per design: the cluster file, named
   after the base platform (`snax_alu.hjson`), and the accelerator file,
@@ -58,6 +59,23 @@ Taken before round 1, not reopened:
   `sparse_interconnect` and `sparse_interconnect_config` or the narrow and
   wide ports.
 
+Taken before round 2, not reopened:
+
+- Three hjson files per design, each changing for its own reason: the
+  cluster (`snax_alu.hjson`, the platform's source with its values written
+  back and the slot set), the streamer (`snax_alu_streamer.hjson`, the
+  template as the hjson has it) and the accelerator (`snax_alu_acc.hjson`,
+  the datapath block). The slot's `snax_streamer_cfg` and
+  `snax_datapath_cfg` are `$ref`s to the whole files; the reader resolves a
+  ref without `#`.
+- The streamer is lowered per design, as GEN3's generator lowered it: lanes
+  and `num_channel` from the BRM ports, `temporal_dim` and `fifo_depth` from
+  the platform's streamer knobs. A standalone streamer input, a frozen
+  streamer file and `temporal_dim` from the DFG are snax-forge open item 78.
+- The slot's name comes from the platform's `accelerator_slot` (from the
+  source's `snax_acc_name`).
+- snax-forge generates no Python: no composite, no target, no install check.
+
 ## What round 1 gives
 
 - `snax/snax_cfg.py`: the reader (`load(path) -> ClusterCfg`); its module
@@ -77,6 +95,20 @@ Taken before round 1, not reopened:
 - `forge/<design>/`: `snax_alu.hjson`, `snax_alu_acc.hjson`, GEN3's
   `include/` and the manifest (`cluster` in place of `target` and
   `target_dirs`), run by `make regress` on `snax_hjson`.
+
+## What round 2 gives
+
+- snax-forge: `platforms/snax_alu.hjson` (a verbatim copy of
+  `sw/cfg/snax_alu_cluster.hjson`); a platform's `hjson` and
+  `accelerator_slot`; `snax_forge/gen/gvsoc.py` writes the three hjson files,
+  `include/` and the manifest (no `note`), refusing `gen.source`,
+  `gen.slot` and `gen.platform`; schemas for the streamer and accelerator
+  files (`snax_forge/gen/schema/`, `jsonschema`).
+- Here: `snax_cfg.py` resolves whole-file refs; `sw/sync.py` copies
+  snax_cluster's `docs/schema/snitch_cluster.schema.json` (its `"items:"`
+  typo as it is); forge/'s fixtures are the writer's output, parsed equal to
+  round 1's (the streamer and datapath split into two files, the manifest's
+  `files` with the streamer file, no `note`).
 
 ## Findings
 
@@ -122,17 +154,27 @@ Taken before round 1, not reopened:
 | 4 | The datapath block, `SnaxUnitAcc`, forge/'s three fixtures as hand-written hjson, regress on `snax_hjson`; `make regress` passes on vecadd, vecmul, vsum and vsum-r16; on a plain copy each gives main's logs | done |
 | 5 | `snax_alu.py` and `snax_alu_sparse.py` on the generic target; this file and the notes; full `make regress` | done |
 | 6 | snax-forge's docs: STATUS (LNK2a `wip`, open items 51 and 68) | done |
+| R2.0 | Round 1's leftovers: the forge app Makefiles' comments, this file's Open; snax-forge's `gvsoc/Makefile` TARGETS with `snax_hjson`; its `alu_probe` and `tiled_add_sparse_probe` still run (no fix needed) | done |
+| R2.1 | snax-forge: `platforms/snax_alu.hjson`, the platform's `hjson` and `accelerator_slot`, `design from-hjson` fills them | done |
+| R2.2 | snax-forge's writer (three hjson files, headers, manifest), the composite and target writers and the install check removed; here, whole-file refs in `snax_cfg.py` | done |
+| R2.3 | Schemas: snax_cluster's in `sw/sync.py`'s copied files; snax-forge's for the streamer and accelerator files | done |
+| R2.4 | forge/'s fixtures from the writer; snax-forge's submodule at this branch; full `make regress`, snax-forge's `pixi run test` | done |
+| R2.5 | Docs: snax-forge D134 (D84, D87, D111, D128, D131 amended, D132 retired), C§13 and C§16, ARCHITECTURE, STATUS (LNK2a done, open items 51, 68, 77 closed, 78); here this file, the notes, `forge/README.md` | done |
 
-## Round 2 needs
+## Round 2 findings
 
-- A writer in snax-forge for the cluster file (a copy of the base
-  platform's hjson with the slot's counts and the two refs) and the
-  accelerator file (the streamer template and the datapath block, the fields
-  of `snax/snax_cfg.py`'s module doc), and the manifest with `cluster`, no
-  `target` or `target_dirs`; the fixture test byte for byte again.
-- The manifest's `note` key and the hjson headers say round 1 wrote them by
-  hand; the writer's output replaces them.
-- snax-forge's `gvsoc/Makefile` TARGETS default lacks `snax_hjson`.
+- **The fixtures are round 1's, parsed.** The writer's cluster file equals
+  round 1's hand-written one but for the two refs; its streamer and
+  accelerator files equal round 1's `snax_streamer_cfg` and `datapath`;
+  `include/` is byte-identical; the forge runs give main's logs (pointers
+  masked, the platform-tree warning aside), so the cycles are round 1's.
+- **The written cluster file is JSON.** It is the source parsed, so its
+  comments go; the key order stays. The source's own streamer template, a
+  top-level key only the slot referred to, is dropped, as round 1 did by
+  hand.
+- **What the hjson cannot hold is refused.** The writer reads its cluster
+  file back through snax-forge's `hjson_platform.py`; an L1 or L2 field that
+  does not come back (an L1 not whole KiB, a latency) is `gen.platform`.
 
 ## Open
 
@@ -141,6 +183,10 @@ Taken before round 1, not reopened:
   forge/'s three they give the same cycles.
 - `make build` rebuilds `cluster_registers` on every run, changed or not
   (before LNK2a too); not investigated.
+- snax_cluster's clustergen and snaxgen on the three files: they resolve
+  neither a cross-file nor a whole-file `$ref` yet (LNK2b, snax-forge open
+  item 51); round 2 checks the cluster file against snax_cluster's schema
+  with snax-forge's own resolution.
 - A cluster file with more than one hive, another `boot_addr` or base, or a
   different L1 size: the reader and the target take them, no run has (the
   last two need a rebuilt `sw/generated/` and ELF).

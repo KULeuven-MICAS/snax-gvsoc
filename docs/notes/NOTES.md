@@ -4096,3 +4096,35 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   snaxgen.py) and the schema's `"items:"`; open item 68 notes that the L1's
   size and base reach the program through `sw/generated/`. No submodule
   bump, no code; snax-forge's lint clean.
+
+### LNK2a round 2: snax-forge's writer, three hjson files
+
+- 2026-10-19. Plan and findings in `docs/plans/LNK2a.md` (steps R2.0 to
+  R2.5); snax-forge's side in its D134 and C§16.
+- Step 0: the forge app Makefiles' comments; LNK2a.md's Open. snax-forge's
+  `alu_probe` (snax-alu 100: `Accelerator Cycles: 25`, 0 errors) and
+  `tiled_add_sparse_probe` (`snax-shell errors: 0`) run on round 1's install
+  as they are; its `gvsoc/Makefile` TARGETS gains `snax_hjson`.
+- Step 1 (snax-forge): `platforms/snax_alu.hjson`, the platform's `hjson`
+  and `accelerator_slot`; `platforms/snax_alu.json` written again by
+  `design from-hjson` (two lines more).
+- Step 2: `snax_cfg.py` resolves `{$ref: "file.hjson"}` and
+  `"file.hjson#"` as the whole file (34 unit tests). snax-forge's
+  `gen/gvsoc.py` writes the three files; the composite and target writers
+  and the install check are gone.
+- Step 3: `sw/sync.py` copies `docs/schema/snitch_cluster.schema.json`;
+  `make sync-snax-cluster SNAX_CLUSTER=../snax_cluster` in the image at the
+  pin: exit 0, the schema the only new file, no mirrored build file changed,
+  the streamer header equal. snax-forge's schemas for the streamer and
+  accelerator files, `jsonschema` in its pixi.lock (pixi 0.41.4).
+- Step 4: forge/'s fixtures written by snax-forge's writer; parsed equal to
+  round 1's but for the refs, the split and the manifest's `files` and
+  `note`; `include/` byte-identical. `make build` (five targets) exit 0;
+  `make regress` passed (unit 1, SNAX 40, tiled_add 1, forge 4, plain 17);
+  the forge logs equal main's with pointers masked and the warning line
+  dropped (vecadd start 2420, counter 19; vecmul 2414, 19; vsum 2245, 67;
+  vsum-r16 2280, 67). snax-forge with its submodule here: `pixi run test`
+  1762 passed, `tests/gen` 94 with none skipped.
+- Step 5: these docs; snax-forge's DECISIONS, CONTRACTS, ARCHITECTURE and
+  STATUS (LNK2a done).
+

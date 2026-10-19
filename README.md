@@ -115,8 +115,8 @@ with priority 1.
 
 `snax_tiled_add` (`snax/snax_tiled_add.py`, GEN3) is `snax_alu` with
 another accelerator in the compute core's slot: `snax/snax_tiled_add_acc.py`,
-written by hand in place of the composite snax-forge's generator will write,
-with `snax_alu`'s CSR mux and streamer, `SnaxShell` (GeMMX's shell contract:
+written by hand (`snax/snax_unit_acc.py` builds its kind from a datapath
+block), with `snax_alu`'s CSR mux and streamer, `SnaxShell` (GeMMX's shell contract:
 a start waits while busy, busy and a cycle counter) and `SnaxUnit` (a lockstep
 add, 4 lanes of 64 bit). `sw/apps/snax-shell/` runs on it:
 
@@ -130,10 +130,12 @@ It prints its checks and `snax-shell errors: 0`, and exits 0;
 ## Generated accelerators (forge/)
 
 `forge/<design>/` holds one design point as SNAX-GVSoC reads it (LNK2a):
-the cluster file `snax_alu.hjson` (`sw/cfg/snax_alu_cluster.hjson` with the
-accelerator slot set for the design), the accelerator file
-`snax_alu_acc.hjson` (the slot's streamer template and datapath block), the
-headers a program drives it with and `manifest.json` (`forge/README.md`).
+snax-forge's generator's three hjson files, the cluster file
+`snax_alu.hjson` (`sw/cfg/snax_alu_cluster.hjson` with the accelerator slot
+set for the design), the streamer file `snax_alu_streamer.hjson` (the slot's
+streamer template) and the accelerator file `snax_alu_acc.hjson` (its
+datapath block), the headers a program drives it with and `manifest.json`
+(`forge/README.md`).
 Nothing in it is built: `snax_hjson` reads the cluster file and puts the
 standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and
 `SnaxUnit`) in the slot, on the installed components (gvrun warns that the
