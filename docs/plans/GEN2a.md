@@ -74,4 +74,18 @@ its submodule points at; they are logged in snax-forge's STATUS.
 
 ## Findings
 
+- **The marks are where the program runs them (step 10).** vecadd's ELF
+  has 23 global text symbols `forge_*` (7 tasks x configure, start and
+  wait, and main's entry and exit), each once; the pc of each is in
+  GVSoC's instruction trace of the run (`--trace=pe0/insn`, `pe1/insn`):
+  the DMA's tasks on core 1, the accelerator's and its streamer's on core
+  0, each once, and `forge_main_entry` / `forge_main_exit` on both cores.
+  FLOW3 reads their cycles; nothing reads them yet.
+- **The runtime's top of L1 fits snax-forge's margin (step 10).** In
+  vecadd's ELF, `.cdata` is 0 B, `.cbss` 16 B (`_cls`), `.tdata` 0 B and
+  `.tbss` 8 B. Below the two 1 KiB stacks, `start.S` keeps CLS (16 B), main's
+  return word (8 B) and the stacks' misalignment (8 B per hart, 16 B): 40 B
+  of the declared 256 B (`memory.runtime`, snax-forge C§14). The TLS (8 B
+  per hart) sits inside each hart's stack.
+
 ## Open
