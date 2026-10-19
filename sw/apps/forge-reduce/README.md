@@ -1,5 +1,14 @@
 # forge-reduce
 
+Kept only for `forge-reduce.vsum-r16` in `make regress`. Since GEN2a,
+`forge/vsum/` itself runs snax-forge's generated program with the generic
+app (`sw/apps/forge/`). `vsum-r16` overrides the derived task list by hand
+(`RATE_OVERRIDE=16`: one run, four sums of 16-element chunks), the only run
+with more than one sum per run (T < n): no kernel gives one yet. The 1-D
+form `out[i // 16] += A[i]` has a non-affine index; making it affine splits
+i into two temporal loops, ND1's split-and-tag transform (snax-forge open
+item 81). It retires once ND1 or tier A gives a real T < n.
+
 GEN3 step 6b (`docs/plans/GEN3.md`): the program for a generated one-lane
 reduction, a fixture in `forge/<design>/` (`forge/README.md`) whose unit is
 a fold (SnaxUnit with one input and a `rate`, snax-forge's Accumulator). It
@@ -32,8 +41,6 @@ and returns `err`: the data errors, plus 1 when the counter is below the
 beats. `make regress` checks the counter against the unit's first run line
 (`check_counter`, the manifest's beats).
 
-It stays hand-written until GEN2a, when snax-forge's lowering writes the
-program from the task list.
 
 ## DESIGN, N, BEATS, RATE and RATE_OVERRIDE
 

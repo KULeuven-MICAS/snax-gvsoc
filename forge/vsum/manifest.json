@@ -3,7 +3,8 @@
  "design_point": "out/design/vsum/design_point.json",
  "symbols": {"N": 64},
  "cluster": "snax_alu.hjson",
- "files": ["snax_alu.hjson", "snax_alu_streamer.hjson", "snax_alu_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
+ "files": ["snax_alu.hjson", "snax_alu_streamer.hjson", "snax_alu_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "data.h", "main.c", "manifest.json"],
+ "program": "main.c",
  "trace": "snax_acc0/unit",
  "csrs": {
   "streamer": {"first": 960, "last": 972},
