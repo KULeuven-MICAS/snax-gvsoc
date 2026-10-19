@@ -163,6 +163,3 @@ Round 2b, fix-ups after round 2 (all in snax-forge):
   sends it in E + 1 (the `fall_cycle` path in `csr_req`), read, never run.
 - `csrrw` with a destination register on a held start: the core's pending
   write path (`snax_csr_response`) was run only with rd = x0 (`csrw`).
-- `SnaxUnit` takes exactly 2 inputs and 1 output, and `counted` is one
-  configuration word (the count): `accumulate` (one input, `control:
-  stream`) needs more, step 6b.

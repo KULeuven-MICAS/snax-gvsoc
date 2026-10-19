@@ -3809,3 +3809,77 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   Regression section says so. Run, in snax-forge's image: `make regress
   K=forge`: the two forge entries, `regression passed`; no `__pycache__`
   under `forge/`.
+
+### GEN3 round 4, step 1: the Accumulator with start, busy and no drain cycle
+
+- 2026-10-19. snax-forge `ry/gen3r4` (`c4ea4c2`):
+  `hw/chisel/.../samples/Accumulator.scala` rewritten. ElementwiseTiledSpatial's
+  control (`start`, `busy`, `done`) with `loopCount` (n, input beats) and
+  `len` (T, inputs per output), both latched at a start taken while idle; a
+  start with either 0 is ignored. One register `acc`: on `in.fire` it adds
+  the input, or loads it when `out` fires in the same cycle; on `out.fire`
+  alone it is cleared. `out.valid` rises the cycle after a sum's T-th input
+  and holds until `out` fires; `busy` falls after the last output fires,
+  `done` is high in that cycle. So T cycles per sum with `out` always ready,
+  no drain cycle. snax-forge D133.
+- Differs from the prompt: `in.ready = busy && !allIn && (!out.valid ||
+  out.ready)`. Without `!allIn` the block takes the next run's first beat in
+  the cycle its last sum leaves (`busy` and `out.ready` both high); the
+  back-to-back test fails that way. n not a multiple of T: the last sum ends
+  at the n-th input (n mod T inputs), so the run ends rather than hangs.
+- `AccumulatorSpec` rewritten on a per-cycle driver: T = 4, n = 8 (inputs
+  in cycles 0 to 7, sums 10 and 26 in cycles 4 and 8, busy to 8, done in
+  8); back-pressure; `len` 1; a start ignored at `loopCount` 0 and `len` 0;
+  no input before a start; two runs back to back with both runs' beats
+  offered without a break; n not a multiple of T; bubbles, wrap and
+  `accWidth` headroom kept. The old tests' content is in these; none
+  dropped. `pixi run -e hw chisel-test`: 53 passed, 1 canceled (the
+  lockstep spec, `SNAX_GVSOC_UNIT_CASES` unset); `chisel-gen` 9 modules;
+  `chisel-check`, fmt, lint clean. Without `!allIn`: two tests fail.
+
+### GEN3 round 4, step 2: SnaxUnit for one-input reductions
+
+- 2026-10-19. `snax/snax_unit.hpp`: `start(cycle, count, rate = 1)`, count
+  or rate 0 ignored; a pipelined firing gives a result (`Step::result`) on
+  every rate-th firing of the run only, and only a result enters the
+  pipeline (L = 0: only a result needs room). Rate 1 is the old rule.
+  Pipelined L = 1, II 1 already lets a firing into slot 0 in the cycle the
+  head is pushed, so the next input is taken as a result leaves: no drain
+  property (the header says so).
+- `snax/snax_unit.cpp`, `snax_unit.py`: `inputs` one or two names; one is a
+  fold, the output's value op(acc, x) over the firings of one output, acc
+  the first input's beat (`SnaxUnit::fold`), with `lanes` 1 only (refused
+  otherwise: no Chisel block folds lanes). New property `config`, the roles
+  of the start's 32-bit words in order, `count` (once, required) and `rate`
+  (at most once); Python default `['count']`, today's one word. `rate`
+  needs a fold and `pipelined` (refused otherwise). A start with count not a
+  multiple of rate: a fatal naming both. The constructor's trace line says
+  `<op> fold` for a fold; a start's line adds `rate` when there is one; the
+  lines of a two-input unit are unchanged.
+- `tests/snax/unit/`: a `config` header line and start lines with one word
+  per role (`tb.cpp`, README). New cases, the Chisel tests of step 1:
+  `pipelined_rate_t4` (L 1, II 1, rate 4, count 8: results pushed in cycles
+  5 and 9, `firings 8 busy 8 stall_in 0 stall_out 0 flush 1`; a start in
+  cycle 9 refused, a run of 4 from cycle 10), `pipelined_rate_backpressure`
+  (`busy 8 stall_out 4 flush 1`), `pipelined_rate_one` (rate 1, a result
+  every cycle), `pipelined_rate_count_zero`, `pipelined_rate_zero`. Every
+  old case unchanged: `16 passed, 0 failed`. With only a result-less rule
+  (`slots[0] = s.fire`) four of the five fail.
+- Run, in snax-forge's image: main's logs first (`make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"`, `make regress`,
+  61 logs saved). Then this step: `make build` with the same TARGETS, exit
+  0, no warning; `make regress`: `regression passed`, unit 1, SNAX 40,
+  `snax-shell.snax_tiled_add` 1, `forge-elementwise` 2, plain 17. Against
+  main's: 57 byte-identical; `unit` differs by its five new cases; the
+  three runs with `--trace=snax_acc0/unit` (`forge-elementwise.vecadd`,
+  `.vecmul`, `snax-shell.snax_tiled_add`) differ only in the port pointers
+  of the trace's `New ... port` lines, which differ between two runs of one
+  build too (address randomisation); with them masked all three equal
+  main's.
+- Differs from the prompt: the three pointer-bearing logs cannot be
+  byte-identical to any other run, so they were compared masked.
+- GEN3.md: the Open line on 2 inputs / 1 output and one-word `counted`
+  closed.
+- Not verified: a fold inside GVSoC (no target has one before step 4); the
+  fatal on count not a multiple of rate, and the property refusals (read,
+  not run).

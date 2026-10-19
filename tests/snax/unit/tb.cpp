@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // SnaxUnit's cycle rule against hand-worked cases (README.md): each case file
-// gives the parameters, the starts and, per cycle, each input's valid, the
+// gives the parameters, the starts (their configuration words in the order
+// the case's config gives) and, per cycle, each input's valid, the
 // output's ready and the expected fire, push and busy; the tb drives
 // snax_unit.hpp's rule with them and compares every cycle and the trace line
 // at the end of each run, whose busy, stall_in, stall_out and flush must add
@@ -27,8 +28,8 @@
 struct StartLine
 {
     int64_t cycle;
-    uint32_t count;
-    std::string result;     // taken, ignored or refused
+    std::vector<uint32_t> words;    // in the case's config order
+    std::string result;             // taken, ignored or refused
 };
 
 struct CycleLine
@@ -44,6 +45,7 @@ struct Case
     int latency = 0;
     int ii = 1;
     int inputs = 2;
+    std::vector<std::string> config = {"count"};    // the start words' roles
     std::vector<StartLine> starts;
     std::vector<std::string> expects;   // run lines, in order
     std::vector<CycleLine> cycles;
@@ -104,10 +106,37 @@ static bool parse(const std::string &path, Case &c)
         else if (key == "latency") { ok = (bool)(ss >> c.latency); c.has_latency = true; }
         else if (key == "ii") { ok = (bool)(ss >> c.ii); c.has_ii = true; }
         else if (key == "inputs") { ok = (bool)(ss >> c.inputs); }
+        else if (key == "config")
+        {
+            c.config.clear();
+            std::string role;
+            while (ss >> role)
+            {
+                ok = ok && (role == "count" || role == "rate");
+                c.config.push_back(role);
+            }
+            ok = ok && !c.config.empty();
+        }
         else if (key == "start")
         {
+            // start CYCLE WORD... RESULT, one word per config role
             StartLine s;
-            ok = (bool)(ss >> s.cycle >> s.count >> s.result);
+            std::vector<std::string> tokens;
+            std::string token;
+            ok = (bool)(ss >> s.cycle);
+            while (ss >> token)
+            {
+                tokens.push_back(token);
+            }
+            ok = ok && tokens.size() == c.config.size() + 1;
+            for (size_t i = 0; ok && i + 1 < tokens.size(); i++)
+            {
+                s.words.push_back(std::stoul(tokens[i]));
+            }
+            if (ok)
+            {
+                s.result = tokens.back();
+            }
             c.starts.push_back(s);
         }
         else if (key == "expect")
@@ -164,7 +193,20 @@ static int run(const Case &c)
             {
                 continue;
             }
-            SnaxUnitRule::Start answer = rule.start(cycle, s.count);
+            uint32_t count = 0, rate = 1;
+            for (size_t w = 0; w < c.config.size(); w++)
+            {
+                (c.config[w] == "count" ? count : rate) = s.words[w];
+            }
+            if (count != 0 && rate != 0 && count % rate != 0)
+            {
+                // The component stops there (a fatal error): not a case
+                printf("%s: cycle %ld: count %u is not a multiple of rate %u\n", c.name.c_str(),
+                    (long)cycle, count, rate);
+                errors++;
+                continue;
+            }
+            SnaxUnitRule::Start answer = rule.start(cycle, count, rate);
             const char *got = start_names[answer];
             if (answer == SnaxUnitRule::TAKEN)
             {
@@ -173,13 +215,13 @@ static int run(const Case &c)
             if (s.result != got)
             {
                 printf("%s: cycle %ld: start %u %s, expected %s\n", c.name.c_str(),
-                    (long)cycle, s.count, got, s.result.c_str());
+                    (long)cycle, count, got, s.result.c_str());
                 errors++;
             }
         }
 
         int busy = rule.busy(cycle);
-        SnaxUnitRule::Step step = {false, false, SnaxUnitRule::FLUSH, false};
+        SnaxUnitRule::Step step = {false, false, false, SnaxUnitRule::FLUSH, false};
         run_busy += l.busy;
         if (busy)
         {

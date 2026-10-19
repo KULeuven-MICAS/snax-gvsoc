@@ -1,0 +1,19 @@
+# pipelined fold, L = 1, II 1, rate 1 (the Accumulator at len = 1): every
+# firing gives a result, pushed the cycle after while the next input is taken
+# (busy 4 + flush 1 = 5)
+wait pipelined
+latency 1
+ii 1
+inputs 1
+config count rate
+start 0 4 1 taken
+expect run 0: firings 4 busy 4 stall_in 0 stall_out 0 flush 1
+cycles
+# in out  fire push busy
+1 1       0 0 0     # 0: start
+1 1       1 0 1     # 1: firing 0, gives result 0
+1 1       1 1 1     # 2: push 0, firing 1
+1 1       1 1 1     # 3
+1 1       1 1 1     # 4: firing 3 (the last)
+1 1       0 1 1     # 5: push 3, the end (flush)
+1 1       0 0 0     # 6

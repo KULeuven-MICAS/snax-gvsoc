@@ -11,9 +11,12 @@
 //
 // Properties (a missing one, a wrong type or a bad value is a fatal error
 // naming it):
-//   inputs, outputs  port names (lists of strings); the op table is binary,
-//                    so two inputs and one output
-//   lanes            elements per beat (> 0)
+//   inputs, outputs  port names (lists of strings): one output, and two
+//                    inputs (the op on each pair of beats) or one (a fold:
+//                    the output's value is op(acc, x) over the firings of one
+//                    output, acc starting from the first input)
+//   lanes            elements per beat (> 0); 1 for a fold (an adder tree
+//                    has no Chisel block yet)
 //   data_width       bits per element: 8, 16, 32 or 64, and lanes *
 //                    data_width a multiple of 64. The streamer's beats are
 //                    whole 64-bit channel words, lane 0 first
@@ -24,8 +27,13 @@
 //                    or 4, xor 5, min 6, max 7; integers, wrapping to
 //                    data_width
 //   signed           min and max compare as two's complement (bool)
-//   control          counted: the unit counts its firings; the start's
-//                    configuration is one 32-bit word, the trip count
+//   control          counted: the unit counts its firings
+//   config           the role of each 32-bit configuration word the shell
+//                    sends, in order: count (the firings of the run, once)
+//                    and rate (firings per output, at most once; 1 without
+//                    it). A start with count or rate 0 is ignored; a count
+//                    not a multiple of the rate is a fatal error. rate needs
+//                    a fold and pipelined
 //   wait             lockstep or pipelined (snax_unit.hpp)
 //   latency, ii      pipelined: L >= 0 and II >= 1; lockstep: 0 and 1
 //   csr_base         the shell's first CSR, for the trace
@@ -37,8 +45,8 @@
 //                      rule says so
 //   ctrl               io slave: a write of the configuration words in CSR
 //                      order starts a run in that cycle; refused (DENIED, after
-//                      a warning) while busy. A count of 0 is answered and
-//                      ignored
+//                      a warning) while busy. A count or rate of 0 is answered
+//                      and ignored
 //   busy               wire<bool> master, driven on every change, in the cycle
 //                      the change is decided: true in the cycle a start is
 //                      taken (busy from the next), false in the run's last
@@ -75,6 +83,7 @@ private:
     bool probe(vp::IoMaster &port, bool is_write);
     void move(vp::IoMaster &port, bool is_write, uint64_t *beat);
     void compute(std::vector<uint64_t> &out);
+    void fold(bool first);
 
     vp::Trace trace;
     vp::IoSlave ctrl_itf;
@@ -88,12 +97,16 @@ private:
     int data_width;
     int op;
     bool is_signed;
+    bool is_fold;               // one input
     int beat_words;             // 64-bit words per beat
     int nb_config_words;        // the ctrl write's words
+    int count_word;             // the count's word in it
+    int rate_word;              // the rate's, -1 without one
     uint32_t csr_base;
     SnaxUnitRule rule;
 
     std::vector<std::vector<uint64_t>> beat_in;   // per input, the beat taken
+    std::vector<uint64_t> acc;                    // a fold's output so far
     std::deque<std::vector<uint64_t>> results;    // computed, not pushed yet
 };
 
@@ -106,11 +119,12 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
 
     std::vector<std::string> inputs = this->names_prop("inputs");
     std::vector<std::string> outputs = this->names_prop("outputs");
-    if (inputs.size() != 2)
+    if (inputs.size() != 1 && inputs.size() != 2)
     {
-        this->trace.fatal("Property inputs: %ld names, the op table takes two inputs\n",
+        this->trace.fatal("Property inputs: %ld names, one (a fold) or two (the op table)\n",
             inputs.size());
     }
+    this->is_fold = inputs.size() == 1;
     if (outputs.size() != 1)
     {
         this->trace.fatal("Property outputs: %ld names, the op table gives one output\n",
@@ -134,6 +148,11 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
             "streamer's 64-bit channel words\n", this->lanes, this->data_width);
     }
     this->beat_words = this->lanes * this->data_width / 64;
+    if (this->is_fold && this->lanes != 1)
+    {
+        this->trace.fatal("Property lanes: %d, a fold (one input) has one lane: no Chisel block "
+            "folds lanes yet\n", this->lanes);
+    }
 
     this->op = this->int_prop("op");
     if (this->op < 0 || this->op >= UNIT_NB_OPS)
@@ -153,7 +172,28 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     {
         this->trace.fatal("Property control: unknown kind \"%s\" (counted)\n", control.c_str());
     }
-    this->nb_config_words = 1;
+    std::vector<std::string> roles = this->names_prop("config");
+    this->nb_config_words = roles.size();
+    this->count_word = this->rate_word = -1;
+    for (size_t i = 0; i < roles.size(); i++)
+    {
+        int *word = roles[i] == "count" ? &this->count_word :
+            roles[i] == "rate" ? &this->rate_word : nullptr;
+        if (word == nullptr)
+        {
+            this->trace.fatal("Property config: unknown role \"%s\" (count, rate)\n",
+                roles[i].c_str());
+        }
+        if (*word != -1)
+        {
+            this->trace.fatal("Property config: \"%s\" twice\n", roles[i].c_str());
+        }
+        *word = i;
+    }
+    if (this->count_word == -1)
+    {
+        this->trace.fatal("Property config: no \"count\"\n");
+    }
 
     std::string wait = this->str_prop("wait");
     int latency = this->int_prop("latency");
@@ -187,9 +227,15 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
         this->trace.fatal("Property wait: unknown kind \"%s\" (lockstep, pipelined)\n",
             wait.c_str());
     }
+    if (this->rate_word != -1 && (!this->is_fold || wait != "pipelined"))
+    {
+        this->trace.fatal("Property config: \"rate\" needs a fold (one input) and wait "
+            "pipelined\n");
+    }
     this->csr_base = this->int_prop("csr_base");
 
     this->beat_in.assign(inputs.size(), std::vector<uint64_t>(this->beat_words));
+    this->acc.assign(this->beat_words, 0);
 
     // Sized once, before any port is registered: never resized after
     this->in_itf.resize(inputs.size());
@@ -202,8 +248,9 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     this->new_slave_port("ctrl", &this->ctrl_itf);
     this->new_master_port("busy", &this->busy_itf);
 
-    this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s, %d lanes of %d bits, %s, latency %d, ii %d\n",
-        snax_unit_op_names[this->op], this->lanes, this->data_width, wait.c_str(), latency, ii);
+    this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s%s, %d lanes of %d bits, %s, latency %d, ii %d\n",
+        snax_unit_op_names[this->op], this->is_fold ? " fold" : "", this->lanes,
+        this->data_width, wait.c_str(), latency, ii);
 }
 
 
@@ -283,9 +330,16 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
             _this->nb_config_words);
         return vp::IO_REQ_INVALID;
     }
-    uint32_t count = ((uint32_t *)req->get_data())[0];
+    uint32_t *words = (uint32_t *)req->get_data();
+    uint32_t count = words[_this->count_word];
+    uint32_t rate = _this->rate_word == -1 ? 1 : words[_this->rate_word];
+    if (count != 0 && rate != 0 && count % rate != 0)
+    {
+        _this->trace.fatal("Start at cycle %ld: count %u is not a multiple of rate %u\n", cycle,
+            count, rate);
+    }
 
-    switch (_this->rule.start(cycle, count))
+    switch (_this->rule.start(cycle, count, rate))
     {
         case SnaxUnitRule::REFUSED:
             _this->trace.force_warning("Start (shell CSRs from %d) refused at cycle %ld: busy\n",
@@ -294,12 +348,21 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
 
         case SnaxUnitRule::IGNORED:
             _this->trace.msg(vp::Trace::LEVEL_DEBUG,
-                "Start at cycle %ld with count 0: ignored, not busy\n", cycle);
+                "Start at cycle %ld with %s 0: ignored, not busy\n", cycle,
+                count == 0 ? "count" : "rate");
             return vp::IO_REQ_OK;
 
         default:
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: count %u\n", cycle,
-                count);
+            if (_this->rate_word == -1)
+            {
+                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: count %u\n", cycle,
+                    count);
+            }
+            else
+            {
+                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: count %u, rate %u\n",
+                    cycle, count, rate);
+            }
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(true);
@@ -352,6 +415,24 @@ void SnaxUnit::compute(std::vector<uint64_t> &out)
 }
 
 
+// A fold's firing: the beat taken starts the output's value or is folded
+// into it, lane by lane
+void SnaxUnit::fold(bool first)
+{
+    int w = this->data_width;
+    uint64_t mask = w == 64 ? ~(uint64_t)0 : ((uint64_t)1 << w) - 1;
+    for (int lane = 0; lane < this->lanes; lane++)
+    {
+        int word = lane * w / 64;
+        int shift = lane * w % 64;
+        uint64_t a = (this->acc[word] >> shift) & mask;
+        uint64_t x = (this->beat_in[0][word] >> shift) & mask;
+        uint64_t r = first ? x : snax_unit_compute(this->op, this->is_signed, w, a, x);
+        this->acc[word] = (this->acc[word] & ~(mask << shift)) | (r << shift);
+    }
+}
+
+
 // One busy cycle: probe every port, step the rule, move what it says
 void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
 {
@@ -374,8 +455,19 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             {
                 _this->move(_this->in_itf[i], false, _this->beat_in[i].data());
             }
-            _this->results.emplace_back();
-            _this->compute(_this->results.back());
+            if (_this->is_fold)
+            {
+                _this->fold((_this->rule.firings - 1) % _this->rule.rate == 0);
+                if (step.result)
+                {
+                    _this->results.push_back(_this->acc);
+                }
+            }
+            else
+            {
+                _this->results.emplace_back();
+                _this->compute(_this->results.back());
+            }
             _this->trace.msg(vp::Trace::LEVEL_TRACE, "Fire %u\n", _this->rule.firings - 1);
         }
         if (step.push)
