@@ -121,7 +121,7 @@ Taken before round 1, not reopened:
 | 3 | The `snax_hjson` target, `--param hjson=` (`declare_user_property`), the accelerator registry, in TARGETS. On both `sw/cfg/` files every SNAX regress program gives `snax_alu`'s and `snax_alu_sparse`'s logs and `gvsoc_config.json` (20 of 20 each) | done |
 | 4 | The datapath block, `SnaxUnitAcc`, forge/'s three fixtures as hand-written hjson, regress on `snax_hjson`; `make regress` passes on vecadd, vecmul, vsum and vsum-r16; on a plain copy each gives main's logs | done |
 | 5 | `snax_alu.py` and `snax_alu_sparse.py` on the generic target; this file and the notes; full `make regress` | done |
-| 6 | snax-forge's docs: STATUS (LNK2a `wip`, open items 51 and 68) | todo |
+| 6 | snax-forge's docs: STATUS (LNK2a `wip`, open items 51 and 68) | done |
 
 ## Round 2 needs
 

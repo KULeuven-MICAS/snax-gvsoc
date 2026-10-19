@@ -4086,3 +4086,13 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   rebuilt), more than one hive, a design whose ports meet on a bank so that
   plain and sparse differ, snax-forge's fixture test against the new
   `forge/` (round 2).
+
+### LNK2a round 1, step 6: snax-forge's STATUS (snax-forge)
+
+- 2026-10-19. snax-forge only (`docs/STATUS.md`); noted here in its own
+  commit, as GEN3 round 4b F2. LNK2a's row `todo` to `wip`, with a pointer to
+  `LNK2a.md`; the next-up paragraph says what round 1 gives and that round 2
+  is the writer; open item 51 gains the cross-file `$ref` fix (clustergen.py,
+  snaxgen.py) and the schema's `"items:"`; open item 68 notes that the L1's
+  size and base reach the program through `sw/generated/`. No submodule
+  bump, no code; snax-forge's lint clean.
