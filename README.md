@@ -153,7 +153,8 @@ cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
 case, then `snax-shell` on `snax_tiled_add` with the unit's trace on, then
 each generated accelerator of `forge/` with its program, `forge-elementwise`
 or `forge-reduce` (`<program>.<design>`, `FORGE` in
-`tests/snax/regress.py`), then
+`tests/snax/regress.py`; `forge-reduce.vsum-r16` runs vsum with its len
+overridden to 16, four sums), then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a

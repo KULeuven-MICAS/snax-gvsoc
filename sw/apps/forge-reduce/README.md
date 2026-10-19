@@ -35,7 +35,7 @@ beats. `make regress` checks the counter against the unit's first run line
 It stays hand-written until GEN2a, when snax-forge's lowering writes the
 program from the task list.
 
-## DESIGN, N, BEATS and RATE
+## DESIGN, N, BEATS, RATE and RATE_OVERRIDE
 
     make -C sw/apps/forge-reduce DESIGN=vsum
 
@@ -46,9 +46,17 @@ program from the task list.
   it is not `N` (one lane).
 - `RATE`: the manifest's `tasks[0].csrs.len`, inputs per sum (vsum's 64,
   T = N: one sum); a make error when it does not divide `BEATS`.
+- `RATE_OVERRIDE` (default unset): replaces the manifest's len, so the
+  golden, the writer's bound and the unit's `len` follow it (still a
+  divisor of `BEATS`); the ELF goes to
+  `build/sw/apps/forge-reduce/$(DESIGN)-r$(RATE_OVERRIDE)/`. It overrides
+  the derived task list by hand, to run more than one sum per run until a
+  kernel gives T < N: `make regress` runs vsum with 16
+  (`forge-reduce.vsum-r16`, 4 sums).
 
-None is set by hand. `BEATS` and `RATE` reach the program as `-DBEATS` and
-`-DRATE`, and the ELF depends on the manifest, so a change rebuilds it.
+None of the first four is set by hand. `BEATS` and `RATE` reach the
+program as `-DBEATS` and `-DRATE`, and the ELF depends on the manifest, so a
+change rebuilds it.
 `data.h` is `data/datagen.py` at `--length=N --rate=RATE --seed=0`: A int64
 in [-1000, 1000) from NumPy's `default_rng(0)`, as snax-forge's `vsum.py`
 draws it, and `OUT` the sums; it depends on the manifest and the Makefile.

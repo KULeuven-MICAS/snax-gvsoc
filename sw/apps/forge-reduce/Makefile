@@ -5,7 +5,11 @@
 # snax-alu library. From the manifest: N (symbols.N), BEATS (tasks[0].beats,
 # the accelerator task's trip count, N for one lane) and RATE
 # (tasks[0].csrs.len, inputs per sum), passed to the program as -DBEATS and
-# -DRATE. data.h is data/datagen.py at N and RATE, seed 0.
+# -DRATE. data.h is data/datagen.py at N and RATE, seed 0. RATE_OVERRIDE,
+# when set, replaces the manifest's len (the golden, the writer's bound and
+# the unit's len follow it) and the build goes to
+# $(DESIGN)-r$(RATE_OVERRIDE)/: the derived task list overridden by hand, to
+# run more than one sum per run.
 
 APP      = forge-reduce
 DESIGN  ?= vsum
@@ -26,13 +30,16 @@ endif
 ifeq ($(RATE),)
 $(error no tasks[0].csrs.len in $(MANIFEST))
 endif
+ifneq ($(RATE_OVERRIDE),)
+RATE     := $(RATE_OVERRIDE)
+endif
 ifneq ($(N),$(BEATS))
 $(error N $(N) is not the $(BEATS) beats in $(MANIFEST): forge-reduce runs one lane)
 endif
 ifneq ($(shell expr $(BEATS) % $(RATE)),0)
 $(error the $(BEATS) beats are not a multiple of rate $(RATE) in $(MANIFEST))
 endif
-BUILDDIR = $(SW_BUILD)/apps/$(APP)/$(DESIGN)
+BUILDDIR = $(SW_BUILD)/apps/$(APP)/$(DESIGN)$(if $(RATE_OVERRIDE),-r$(RATE_OVERRIDE))
 INCDIRS  = $(BUILDDIR)
 INCDIRS += $(FORGE)/include
 include ../../common.mk

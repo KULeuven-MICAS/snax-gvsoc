@@ -4002,3 +4002,27 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Not verified: vsum's fixture test at a bumped pin (needs this branch
   merged and the submodule bumped); a build from scratch (step 2's build
   reused); the RTL side of the Accumulator beyond chiseltest.
+
+### GEN3 round 4b, F1: more than one sum per run
+
+- 2026-10-19. `sw/apps/forge-reduce/Makefile`: an optional
+  `RATE_OVERRIDE` replaces the manifest's len (BEATS % RATE checked as
+  before), so the golden (`datagen.py --rate`), the writer's bound
+  (BEATS / RATE) and the unit's `len` follow it; its build goes to
+  `vsum-r<RATE>/`, so it never overwrites the derived run's ELF or
+  `data.h`. Unset by default: `forge-reduce.vsum` is built and run as
+  before.
+- `tests/snax/regress.py`: FORGE entries carry a fourth field, the
+  override; one new entry, `forge-reduce.vsum-r16` (vsum, len 16), with a
+  comment that it overrides the derived task list by hand to run the
+  multi-output path until a kernel gives T < N. README, forge-reduce's
+  README and GEN3.md's Open line updated.
+- `python3 tests/snax/regress.py -k forge`: 4 run, passed.
+  `forge-reduce.vsum-r16`: `Start at cycle 2280: count 64, rate 16`,
+  `run 0: firings 64 busy 64 stall_in 2 stall_out 0 flush 1`,
+  `forge-reduce data: 0 errors (4 sums)` (golden 132, 1580, -5582, 5095,
+  which add up to vsum's 1225), counter 67 = 64 + 2 + 0 + 1, errors 0.
+  `forge-reduce.vsum` unchanged: rate 64, the same run line, 1 sum,
+  counter 67.
+- Not verified: other overrides (only 16 run); the full `make regress`
+  (only `-k forge`).

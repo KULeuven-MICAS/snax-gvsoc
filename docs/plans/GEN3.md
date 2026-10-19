@@ -181,8 +181,10 @@ Round 2b, fix-ups after round 2 (all in snax-forge):
   sends it in E + 1 (the `fall_cycle` path in `csr_req`), read, never run.
 - `csrrw` with a destination register on a held start: the core's pending
   write path (`snax_csr_response`) was run only with rd = x0 (`csrw`).
-- A fold with more than one sum per run (T < n) runs only in the unit cases
-  and `AccumulatorRateSpec`: `forge/vsum/` is T = N, one sum.
+- No kernel gives a fold with more than one sum per run (T < n):
+  `forge/vsum/` is T = N, one sum. `make regress` runs it with the derived
+  task list overridden by hand (`forge-reduce.vsum-r16`, len 16, four sums;
+  round 4b F1), besides the unit cases and `AccumulatorRateSpec`.
 - n not a multiple of T: `SnaxUnit` stops (fatal), the Chisel Accumulator
   ends the last sum at the n-th input; the BRM's rates make n a multiple of
   T (D25), so neither is run.
