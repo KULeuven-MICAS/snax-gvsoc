@@ -15,14 +15,15 @@ named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
 `snax-shell` on `snax_tiled_add` (GEN3 step 2: SnaxShell and SnaxUnit), with
 the unit's trace on and the counter check below; then
-each generated accelerator of forge/ (FORGE) with its program,
-`forge-elementwise` (GEN3 step 5) or `forge-reduce` (step 6b), named
-<program>.<design> (forge-reduce.vsum-r16 runs vsum with its len overridden
-to 16, four sums): the fixture's manifest.json gives its cluster file, the
-unit's trace path and the one accelerator task's beats; it runs on
-`snax_hjson` with `--param hjson=<cluster file>` (LNK2a: its components are
-not the default file's, so gvrun warns and runs it on the JSON config), with
-the counter check; then
+every folder of forge/ (FORGE_DIR) with the generic app `forge` (GEN2a:
+snax-forge's generated main.c and data.h), named forge.<design>, and
+`forge-reduce.vsum-r16` (FORGE_REDUCE: vsum with its len overridden to 16 by
+hand, four sums, until a kernel gives T < n, snax-forge open item 81): the
+fixture's manifest.json gives its cluster file, the unit's trace path and
+each accelerator task's beats; it runs on `snax_hjson` with
+`--param hjson=<cluster file>` (LNK2a: its components are not the default
+file's, so gvrun warns and runs it on the JSON config), with the counter
+checks; then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
@@ -32,11 +33,14 @@ than `subword`, which return 0. No other output or cycle count is compared; the 
 hand with phases.py (README, "Comparing with the RTL").
 
 The counter check (check_counter, GEN3): a program on SnaxShell and
-SnaxUnit prints the shell's counter after its first unit run as
-`<program> counter: <n>`; it passes when n is busy + stall_in + stall_out +
-flush of the unit's first trace line (`run 0: ...`) and that run fired the
-program's beats (snax-shell's in OWN_TARGET, a fixture's from its manifest;
-a manifest with other than one accelerator task fails).
+SnaxUnit prints the shell's counter after a unit run; it passes when the
+counter is busy + stall_in + stall_out + flush of the unit's trace line for
+that run (`run <k>: ...`) and that run fired the task's beats. A
+hand-written program (snax-shell, forge-reduce) prints
+`<program> counter: <n>` for run 0, its beats snax-shell's in OWN_TARGET or
+the fixture's first task's; a generated one (check_counters) prints
+`forge counter <task>: <n>` per accelerator task of its manifest, the k-th
+task matched to run k.
 
 gvrun runs with PYTHONDONTWRITEBYTECODE=1, so no __pycache__ lands beside
 the modules it imports. Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
@@ -69,17 +73,15 @@ SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # unit's trace path, the beats of its first run: snax-shell's RUN_BEATS,
 # DATA_LEN 192 / 4 lanes / 3 runs)
 OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
-# Generated accelerators, forge/<design>/ (forge/README.md), each run on
-# snax_hjson from its cluster file by its program: (design, program, forge-elementwise's datagen.py mode: 0 add, 2 mul;
-# None for a program without one, forge-reduce's RATE_OVERRIDE or None)
+# Generated accelerators, forge/<design>/ (forge/README.md): every folder, run
+# on snax_hjson from its cluster file by the generic app (GEN2a)
 FORGE_DIR = ROOT / "forge"
 FORGE_TARGET = "snax_hjson"
-FORGE = [("vecadd", "forge-elementwise", 0, None), ("vecmul", "forge-elementwise", 2, None),
-         ("vsum", "forge-reduce", None, None),
-         # The derived task list overridden by hand (len 16 for vsum's T = N
-         # = 64): 4 sums per run, the multi-output path, until a kernel gives
-         # T < N
-         ("vsum", "forge-reduce", None, 16)]
+FORGE_APP = "forge"
+# The hand-written forge-reduce on a fixture with its len overridden: (design,
+# RATE_OVERRIDE). len 16 for vsum's T = N = 64, 4 sums per run, the
+# multi-output path, until a kernel gives T < n (snax-forge open item 81)
+FORGE_REDUCE = [("vsum", 16)]
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]
@@ -113,25 +115,48 @@ def gvrun(target, elf, workdir, log, options=()):
     return p.returncode
 
 
-RUN_LINE = re.compile(r"run 0: firings (\d+) busy (\d+) stall_in (\d+) stall_out (\d+) flush (\d+)")
+RUN_LINE = re.compile(
+    r"run (\d+): firings (\d+) busy (\d+) stall_in (\d+) stall_out (\d+) flush (\d+)")
+
+
+def check_run(counter, trace, run, beats):
+    """A counter against the unit's line for run `run` in trace, which must have
+    fired beats times. Returns None when it holds, else why not."""
+    lines = {int(m.group(1)): [int(n) for n in m.groups()[1:]] for m in RUN_LINE.finditer(trace)}
+    if run not in lines:
+        return f"no `run {run}:` line in the unit's trace"
+    firings, *classes = lines[run]
+    if firings != beats:
+        return f"run {run} fired {firings} times, not {beats}"
+    if counter != sum(classes):
+        return (f"counter {counter}, run {run}'s busy + stall_in + stall_out + flush "
+                f"{' + '.join(map(str, classes))} = {sum(classes)}")
+    return None
 
 
 def check_counter(program, output, trace, beats):
-    """The counter check: the counter program prints (`<program> counter: <n>`
-    in output) against the unit's first run line in trace. Returns None when
-    it holds, else why not."""
+    """The counter check of a hand-written program: `<program> counter: <n>`
+    in output against run 0. Returns None when it holds, else why not."""
     counter = re.search(rf"^{re.escape(program)} counter: (\d+)$", output, re.MULTILINE)
     if counter is None:
         return f"no `{program} counter:` line"
-    run = RUN_LINE.search(trace)
-    if run is None:
-        return "no `run 0:` line in the unit's trace"
-    firings, *classes = (int(n) for n in run.groups())
-    if firings != beats:
-        return f"run 0 fired {firings} times, not {beats}"
-    if int(counter.group(1)) != sum(classes):
-        return (f"counter {counter.group(1)}, busy + stall_in + stall_out + flush "
-                f"{' + '.join(map(str, classes))} = {sum(classes)}")
+    return check_run(int(counter.group(1)), trace, 0, beats)
+
+
+def check_counters(output, trace, tasks):
+    """The counter checks of a generated program: per accelerator task of the
+    manifest, in order, `forge counter <task>: <n>` against run k. Returns
+    None when they hold, else why not."""
+    if not tasks:
+        return "no accelerator task in the manifest"
+    for k, task in enumerate(tasks):
+        counter = re.search(rf"^forge counter {re.escape(task['name'])}: (\d+)$", output,
+                            re.MULTILINE)
+        if counter is None:
+            return f"no `forge counter {task['name']}:` line"
+        why = check_run(int(counter.group(1)), trace, k, task["beats"])
+        if why is not None:
+            return f"{task['name']}: {why}"
     return None
 
 
@@ -262,34 +287,41 @@ def main():
     print(f"  {check.count - count} run")
 
     count = check.count
-    def variant(design, rate):
-        """The design's name in the run's name and the build folder."""
-        return design if rate is None else f"{design}-r{rate}"
-
-    print(f"forge/'s accelerators: "
-          f"{', '.join(f'{prog}.{variant(design, rate)}' for design, prog, _, rate in FORGE)}")
-    for design, prog, mode, rate in FORGE:
-        name = f"{prog}.{variant(design, rate)}"
+    designs = sorted(d.name for d in FORGE_DIR.iterdir() if (d / "manifest.json").is_file())
+    names = [f"{FORGE_APP}.{d}" for d in designs]
+    names += [f"forge-reduce.{d}-r{r}" for d, r in FORGE_REDUCE]
+    print(f"forge/'s accelerators: {', '.join(names)}")
+    for design in designs:
+        name = f"{FORGE_APP}.{design}"
         if not check.selected(name):
             continue
         folder = FORGE_DIR / design
         # Plain json: the manifest is snax-forge's, read without it
         manifest = json.loads((folder / "manifest.json").read_text())
-        tasks = manifest["tasks"]
-        if len(tasks) != 1:
-            check.count += 1
-            check.fail(name, f"{len(tasks)} accelerator tasks in "
-                       f"{(folder / 'manifest.json').relative_to(ROOT)}, not 1")
-            continue
-        make(APPS / prog, f"DESIGN={design}", *([f"MODE={mode}"] if mode is not None else []),
-             *([f"RATE_OVERRIDE={rate}"] if rate is not None else []))
-        cluster = (folder / manifest["cluster"]).resolve()
+        make(APPS / FORGE_APP, f"DESIGN={design}")
         log = check.run(name, FORGE_TARGET,
-                        BUILD / "apps" / prog / variant(design, rate) / f"{prog}.elf",
-                        options=["--param", f"hjson={cluster}", f"--trace={manifest['trace']}"])
+                        BUILD / "apps" / FORGE_APP / design / f"{FORGE_APP}.elf",
+                        options=["--param", f"hjson={(folder / manifest['cluster']).resolve()}",
+                                 f"--trace={manifest['trace']}"])
         if log is not None:
             text = log.read_text(errors="replace")
-            why = check_counter(prog, text, text, tasks[0]["beats"])
+            why = check_counters(text, text, manifest["tasks"])
+            if why is not None:
+                check.fail(name, why, log)
+    for design, rate in FORGE_REDUCE:
+        prog, variant = "forge-reduce", f"{design}-r{rate}"
+        name = f"{prog}.{variant}"
+        if not check.selected(name):
+            continue
+        folder = FORGE_DIR / design
+        manifest = json.loads((folder / "manifest.json").read_text())
+        make(APPS / prog, f"DESIGN={design}", f"RATE_OVERRIDE={rate}")
+        log = check.run(name, FORGE_TARGET, BUILD / "apps" / prog / variant / f"{prog}.elf",
+                        options=["--param", f"hjson={(folder / manifest['cluster']).resolve()}",
+                                 f"--trace={manifest['trace']}"])
+        if log is not None:
+            text = log.read_text(errors="replace")
+            why = check_counter(prog, text, text, manifest["tasks"][0]["beats"])
             if why is not None:
                 check.fail(name, why, log)
     print(f"  {check.count - count} run")

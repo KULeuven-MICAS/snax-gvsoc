@@ -34,12 +34,22 @@ Each folder holds:
   `snax/snax_unit_acc.py` builds it).
 - `include/`: the headers a program drives it with
   (`streamer_csr_addr_map.h` and `<instance>_csr.h`).
+- `main.c` (GEN2a, snax-forge D135): the program, the design point's task
+  list on snRuntime: each step on the core that owns its component, a
+  barrier where another core goes on, a mark `forge_<task>_<event>` per
+  task event, then the self-check, every output against its golden and one
+  `forge counter <task>:` line per accelerator task; it returns the error
+  count. The generic app `sw/apps/forge/` builds it.
+- `data.h`: its data, from snax-forge's datagen: the inputs from the
+  kernel's `make_inputs` (seed 0), each output zeroed with its
+  `<name>_golden` from the reference executor, each array padded to whole
+  DMA beats and aligned to one.
 - `manifest.json`: the design, the design point, the bound graph's symbols,
-  the cluster file (`cluster`), the files, the unit's trace path, the CSR
-  layout and each accelerator task's beats.
+  the cluster file (`cluster`), the files, the program (`main.c`), the
+  unit's trace path, the CSR layout and each accelerator task's beats.
 
-Every hjson file starts with a comment naming the design point; the rest is
-JSON, which hjson reads.
+Every hjson and C file starts with a comment naming the design point; the
+rest of an hjson file is JSON, which hjson reads.
 
 ## Refreshing a folder
 
@@ -51,14 +61,18 @@ a fixture"), the folder cleared first:
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
 (the same with `vecmul` or `vsum`), then commit the folder as written and
-bump snax-forge's submodule so its test compares against it.
+bump snax-forge's submodule so its test compares against it. `make regress`
+runs every folder with the generic app, so a new folder needs nothing else.
 
 ## How it runs
 
-Never through `TARGETS`: nothing here is compiled (D128). gvrun runs the
-installed `snax_hjson` on the cluster file:
+Never through `TARGETS`: no model is compiled (D128). The program is built
+by the generic app, and gvrun runs the installed `snax_hjson` on the cluster
+file:
 
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson ...
+    make -C sw/apps/forge DESIGN=vecadd
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
 The reader resolves the `$ref`s (relative to the cluster file), the slot's
 datapath block gets the standard composite on the installed components, and

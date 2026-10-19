@@ -4128,3 +4128,83 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Step 5: these docs; snax-forge's DECISIONS, CONTRACTS, ARCHITECTURE and
   STATUS (LNK2a done).
 
+### GEN2a round 1, steps 1 to 6: the program from the task list (snax-forge)
+
+- 2026-10-19. Plan and findings in `docs/plans/GEN2a.md`; snax-forge's side
+  in its D135, C§9, C§14 and C§16. Branch `ry/gen2a` in both repos.
+- Step 1, docs only: D113 rewritten (the dtype a parameter, integers first:
+  int64 exact through tier C, int8 in and int32 out from tier P on, float a
+  second pass), PAPER §6.1's tier table, STATUS's M7, GEN2a, FLOW3 and M13
+  rows, open items 79 (several accelerators on one core), 80 (one core
+  driving the DMA and the accelerator) and 81 (no kernel gives T < n).
+- Step 2: `gen/data.py` writes `data.h`: per container the DMA moves, the
+  input from `make_inputs` (seed 0, the flow's path) or the output zeroed
+  with `<name>_golden` from the reference executor; every array the
+  container's dtype, padded to whole beats as its L2 layout (vsum's one
+  `out` is 8 words) and aligned to 64 B.
+- Step 3: the design check `memory.runtime`: an L1 layout must stay below
+  snRuntime's top of L1, the hjson's cores x 1 KiB of stacks plus a declared
+  256 B for CLS and the rest.
+- Step 4: the C backend `lower/c.py`: the task list, the cluster file's
+  cores and the CSR layout to `main.c` (D135). It takes the waits the
+  lowering places (`placed_waits`, the command list unchanged). Its compile
+  test uses the image's clang: the image has no RISC-V GCC (asked, clang
+  chosen).
+- Step 5: `gen-gvsoc` also writes `main.c` and `data.h`; the manifest's
+  `program`. Step 6: D135, ARCHITECTURE, C§9, STATUS.
+- snax-forge: `test-gen`, `test-lower`, `test-design`, `test-dfg` passed at
+  each step (the fixture test skipped until the bump), lint clean.
+
+### GEN2a round 1, steps 7 to 9: the plan, the generic app and regress
+
+- 2026-10-19. Step 7: `docs/plans/GEN2a.md`.
+- Step 8: `sw/apps/forge/` builds `forge/$(DESIGN)/main.c` with the fixture's
+  folder and `include/` before `sw/generated/`, no datagen; `FORGE=` names
+  another folder of the same form. Built from snax-forge's `out/gvsoc/`
+  first: vecadd built, vsum did not assemble (`forge_main_exit` defined
+  twice: clang had threaded the `core ==` branches into a path per core,
+  copying the exit onto each). snax-forge's step 4 now keeps the core index
+  in a `volatile`; its compile test covers vsum.
+- Step 9: forge/'s three folders written again by snax-forge (cleared
+  first): `main.c` and `data.h` new, the manifests with `program`, the hjson
+  files and headers byte-identical. regress runs every folder of `forge/`
+  with the generic app (`forge.<design>`) and keeps `forge-reduce.vsum-r16`
+  (`FORGE_REDUCE`; open item 81 in snax-forge); `forge-elementwise` removed.
+  `check_counters` matches `forge counter <task>:` to `run k:` for the k-th
+  accelerator task of the manifest (one per design so far).
+- `regress.py -k forge`: 4 run, passed. vecadd: `forge data: 0 errors (64
+  words)`, `forge counter add_acc: 18` (`busy 16 stall_in 2`, start at
+  2924); vecmul 0 errors, 18 (2925); vsum `0 errors (1 words)`, 66 (`busy 64
+  stall_in 1 flush 1`, 2338); forge-reduce.vsum-r16 0 errors (4 sums), 67.
+  On main the hand-written apps gave 19, 19, 67 and 67: same addresses and
+  banks, one conflict (readers 0 and 1, banks 0 to 3, first cycle); the
+  start mark between the streamer's and the accelerator's start CSRs gives
+  the streamer one cycle more (`--trace=snax_xbar`, `pe0/insn`: vecadd's
+  start CSRs at 2922 and 2924 against 2419 and 2420), so one stall_in cycle
+  fewer. The generated program also waits for `load_A` before `load_B`
+  (the lowering's DMA wait), so its accelerator starts later (2924 against
+  2420).
+
+### GEN2a round 1, step 10: the marks and the runtime margin
+
+- 2026-10-19. vecadd's ELF: 23 `forge_*` global text symbols (`llvm-nm`),
+  7 tasks x 3 events and main's entry and exit. Run with
+  `--trace=pe0/insn:pe0.txt --trace=pe1/insn:pe1.txt`: every label's pc is
+  in the trace, the DMA's tasks on core 1 and the accelerator's on core 0
+  once each, entry and exit on both cores (first at cycles 2788 and 3022).
+- `.cdata` 0 B, `.cbss` 16 B (`_cls`), `.tdata` 0 B, `.tbss` 8 B. Below the
+  stacks start.S keeps 40 B (CLS 16, main's return word 8, misalignment 16)
+  of snax-forge's 256 B margin; the TLS is inside each stack.
+
+### GEN2a round 1, step 11: docs and the full regress
+
+- 2026-10-19. `forge/README.md` (`main.c`, `data.h`, the generic app),
+  `README.md`'s forge and regression sections, `sw/apps/forge/README.md`,
+  `sw/apps/forge-reduce/README.md` (why it stays), `GEN2a.md`'s ticks,
+  findings and open items.
+- Full `make regress` in the image: `regression passed`; unit 1, SNAX 40,
+  `snax-shell.snax_tiled_add` 1, forge 4 (`forge.vecadd`, `forge.vecmul`,
+  `forge.vsum`, `forge-reduce.vsum-r16`), plain 17. `tests/snax` unit tests
+  (CI's `unittest discover`) passed.
+- Not verified: the same ELFs on snax_cluster's RTL (GEN2b); a design with
+  more than one accelerator task, so `check_counters` past run 0.

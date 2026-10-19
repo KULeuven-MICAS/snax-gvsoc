@@ -134,23 +134,22 @@ snax-forge's generator's three hjson files, the cluster file
 `snax_alu.hjson` (`sw/cfg/snax_alu_cluster.hjson` with the accelerator slot
 set for the design), the streamer file `snax_alu_streamer.hjson` (the slot's
 streamer template) and the accelerator file `snax_alu_acc.hjson` (its
-datapath block), the headers a program drives it with and `manifest.json`
-(`forge/README.md`).
-Nothing in it is built: `snax_hjson` reads the cluster file and puts the
+datapath block), the headers a program drives it with, the program itself,
+`main.c` with its `data.h` (GEN2a), and `manifest.json` (`forge/README.md`).
+No model is built: `snax_hjson` reads the cluster file and puts the
 standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and
 `SnaxUnit`) in the slot, on the installed components (gvrun warns that the
-platform tree does not match). `sw/apps/forge-elementwise/` drives an
-elementwise one on its headers, `sw/apps/forge-reduce/` a fold
-(`forge/vsum/`):
+platform tree does not match). The generic app `sw/apps/forge/` builds the
+fixture's `main.c`:
 
-    make -C sw/apps/forge-elementwise DESIGN=vecmul MODE=2
+    make -C sw/apps/forge DESIGN=vecmul
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecmul/snax_alu.hjson --work-dir build/work/forge-vecmul \
-        --param chip/soc/binary=$PWD/build/sw/apps/forge-elementwise/vecmul/forge-elementwise.elf run
+        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecmul/forge.elf run
 
-It prints `forge-elementwise data: 0 errors (64 words)`, its counter and
-`forge-elementwise errors: 0`, and exits 0. `make -C sw/apps/forge-reduce
-DESIGN=vsum` and `forge/vsum/snax_alu.hjson` the same way print `forge-reduce data: 0
-errors (1 sums)`.
+It prints `forge data: 0 errors (64 words)`, one `forge counter <task>:`
+line per accelerator task and `forge errors: 0`, and exits 0.
+`sw/apps/forge-reduce/` stays for `vsum` with its len overridden by hand
+(`RATE_OVERRIDE=16`, four sums per run).
 
 ## Regression
 
@@ -160,10 +159,9 @@ on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
 case, then `snax-shell` on `snax_tiled_add` with the unit's trace on, then
-each generated accelerator of `forge/` with its program, `forge-elementwise`
-or `forge-reduce` (`<program>.<design>`, `FORGE` in
-`tests/snax/regress.py`; `forge-reduce.vsum-r16` runs vsum with its len
-overridden to 16, four sums), then
+every folder of `forge/` with the generic app (`forge.<design>`) and
+`forge-reduce.vsum-r16` (vsum with its len overridden to 16, four sums;
+`FORGE_REDUCE` in `tests/snax/regress.py`), then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
@@ -172,11 +170,13 @@ compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
 and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
 must equal its unit's first run line, busy + stall_in + stall_out + flush,
 that run firing its beats (`check_counter` in `tests/snax/regress.py`,
-GEN3); so must `forge-elementwise`'s and `forge-reduce`'s. A `forge/` entry is read from its
+GEN3); so must `forge-reduce`'s, and a generated program's
+`forge counter <task>:` line per accelerator task, matched to the unit's
+run line for that run (`check_counters`). A `forge/` entry is read from its
 `manifest.json` with plain json: its cluster file, run on `snax_hjson`
 with `--param hjson=` (gvrun warns that the platform tree does not match),
-the unit's trace path and the beats of its one accelerator task; the program
-is built with `DESIGN=<design>`, and `MODE=<mode>` for forge-elementwise. It needs GVSoC built for
+the unit's trace path and each accelerator task's beats; the program is
+built with `DESIGN=<design>`. It needs GVSoC built for
 `snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson`, as above, and takes about
 two minutes.
 
