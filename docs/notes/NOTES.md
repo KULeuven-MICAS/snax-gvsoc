@@ -4208,3 +4208,36 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   (CI's `unittest discover`) passed.
 - Not verified: the same ELFs on snax_cluster's RTL (GEN2b); a design with
   more than one accelerator task, so `check_counters` past run 0.
+
+### GEN2a round 1b: the start marks, the DMA waits, one function per core
+
+- 2026-10-20. Fix-ups to snax-forge's `lower/c.py` (its F1 to F4; D135
+  amended), forge/ written again from them (F5). Plan and findings in
+  `docs/plans/GEN2a.md`.
+- F1: a start step's marks all come before its first write, so
+  `STREAMER_START_CSR` and the accelerator's start are back to back. The
+  counters go from round 1's 18, 18, 66 (vecadd, vecmul, vsum) to 19, 19,
+  67, the hand-written apps' (`stall_in` 3, 3, 2): the mark between the two
+  writes had given the streamer a cycle's lead.
+- F2: the DMA is waited for on dependences and syncs only, not for being
+  busy (the iDMA queues; SNAX-MODEL's command list keeps D36's wait).
+  vecadd's `load_B` starts 21 cycles after `load_A` with no wait between
+  (round 1: after `load_A_wait`); one wait ends both. With F2's layout an
+  L0 line began at the streamer's start CSR (`0x8000_0340`), the refill put
+  the accelerator's start 10 cycles later (2898, 2908) and vecadd and vecmul
+  read 16 (`stall_in 0`); vsum stayed 67.
+- F3: one `noinline` function per core, a straight line each, `main` calling
+  its core's through a table (no branch, no `volatile`). Counters 19, 19, 67
+  again; the accelerator starts at 2922 (vecadd), 2923 (vecmul), 2324
+  (vsum); round 1 2924, 2925, 2338; the hand-written apps 2420, 2414, 2245.
+  About 470 of vecadd's 500 cycles come before main: snRuntime zeroes
+  `.bss` (544 B against 24 B, `data.h`'s output C in L2; 139 stores by core
+  1, 2173 to 2752 in F2's run). From main's entry to the start: 155 cycles
+  against 136.
+- F5: `make regress` passed; unit 1, SNAX 40, `snax-shell.snax_tiled_add` 1,
+  forge 4, plain 17; vsum-r16 67, start 2280, as before. vecadd's marks
+  check again: 23 mark labels, each once in the ELF (`llvm-nm`), each pc in
+  the instruction trace, the tasks' on their core once, entry and exit on
+  both (2767, 3015); besides them `forge_core_0`, `forge_core_1` and the
+  table `forge_cores`. `.cdata` 0 B, `.cbss` 16 B, `.tdata` 0 B, `.tbss`
+  8 B, as in step 10.

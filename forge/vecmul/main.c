@@ -2,8 +2,9 @@
 // design point out/design/vecmul/design_point.json. Do not edit: run
 // `pixi run gen-gvsoc out/design/vecmul/design_point.json` again.
 // The task list vecmul on snRuntime: core 1 runs the DMA,
-// core 0 the accelerator acc; the waits as the lowering places
-// them (D64), a barrier where another core goes on; a mark per task event.
+// core 0 the accelerator acc; the SNAX waits as the lowering
+// places them (D64), the DMA's on dependences only (D135), a barrier where another
+// core goes on; a mark per task event. One function per core, a straight line.
 
 #include "snrt.h"
 
@@ -15,92 +16,90 @@
 #define FORGE_MARK(label) \
     asm volatile(".globl " #label "\n" #label ":\n\tcsrr zero, mcycle" ::: "memory")
 
-int main() {
-    // volatile: read at each branch, so the code every core passes stays one copy
-    volatile uint32_t core = snrt_cluster_core_idx();
+// Core 0: the accelerator acc
+static __attribute__((noinline)) int forge_core_0(void) {
     int err = 0;
     uint32_t counter_mult_acc = 0;
+    FORGE_MARK(forge_mult_acc_a_configure);
+    csrw_ss(BASE_PTR_READER_0_LOW, 0x10000000);
+    csrw_ss(BASE_PTR_READER_0_HIGH, 0);
+    csrw_ss(S_STRIDE_READER_0_0, 8);
+    csrw_ss(T_BOUND_READER_0_0, 16);
+    csrw_ss(T_STRIDE_READER_0_0, 32);
+    FORGE_MARK(forge_mult_acc_b_configure);
+    csrw_ss(BASE_PTR_READER_1_LOW, 0x10000200);
+    csrw_ss(BASE_PTR_READER_1_HIGH, 0);
+    csrw_ss(S_STRIDE_READER_1_0, 8);
+    csrw_ss(T_BOUND_READER_1_0, 16);
+    csrw_ss(T_STRIDE_READER_1_0, 32);
+    FORGE_MARK(forge_mult_acc_out_configure);
+    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10000400);
+    csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
+    csrw_ss(S_STRIDE_WRITER_0_0, 8);
+    csrw_ss(T_BOUND_WRITER_0_0, 16);
+    csrw_ss(T_STRIDE_WRITER_0_0, 32);
+    FORGE_MARK(forge_mult_acc_configure);
+    csrw_ss(ACC_RW_LOOP_COUNT, 16);
+    snrt_cluster_hw_barrier();
+    FORGE_MARK(forge_mult_acc_a_start);
+    FORGE_MARK(forge_mult_acc_b_start);
+    FORGE_MARK(forge_mult_acc_out_start);
+    FORGE_MARK(forge_mult_acc_start);
+    csrw_ss(STREAMER_START_CSR, 1);
+    csrw_ss(ACC_RW_START, 1);
+    while (csrr_ss(ACC_RO_BUSY)) {
+    }
+    while (csrr_ss(STREAMER_BUSY_CSR)) {
+    }
+    FORGE_MARK(forge_mult_acc_a_wait);
+    FORGE_MARK(forge_mult_acc_b_wait);
+    FORGE_MARK(forge_mult_acc_out_wait);
+    FORGE_MARK(forge_mult_acc_wait);
+    counter_mult_acc = csrr_ss(ACC_RO_PERF_COUNT);
+    snrt_cluster_hw_barrier();
+    snrt_cluster_hw_barrier();
+    int data_errors = 0;
+    for (uint32_t i = 0; i < 64; i++) {
+        if (((volatile int64_t *)C)[i] != C_golden[i]) {
+            data_errors++;
+        }
+    }
+    err += data_errors;
+    printf("forge data: %d errors (%u words)\n", data_errors, 64u);
+    printf("forge counter mult_acc: %u\n", counter_mult_acc);
+    err += counter_mult_acc < 16;
+    printf("forge errors: %d\n", err);
+    return err;
+}
+
+// Core 1: the DMA
+static __attribute__((noinline)) int forge_core_1(void) {
+    FORGE_MARK(forge_load_A_configure);
+    FORGE_MARK(forge_load_A_start);
+    snrt_dma_start_1d((void *)0x10000000, A, 512);
+    FORGE_MARK(forge_load_B_configure);
+    FORGE_MARK(forge_load_B_start);
+    snrt_dma_start_1d((void *)0x10000200, B, 512);
+    snrt_dma_wait_all();
+    FORGE_MARK(forge_load_A_wait);
+    FORGE_MARK(forge_load_B_wait);
+    snrt_cluster_hw_barrier();
+    FORGE_MARK(forge_store_C_configure);
+    snrt_cluster_hw_barrier();
+    FORGE_MARK(forge_store_C_start);
+    snrt_dma_start_1d(C, (void *)0x10000400, 512);
+    snrt_dma_wait_all();
+    FORGE_MARK(forge_store_C_wait);
+    snrt_cluster_hw_barrier();
+    return 0;
+}
+
+// Each core's function, by snrt_cluster_core_idx()
+static int (*const forge_cores[2])(void) = {forge_core_0, forge_core_1};
+
+int main() {
     FORGE_MARK(forge_main_entry);
-    if (core == 1) {
-        FORGE_MARK(forge_load_A_configure);
-        FORGE_MARK(forge_load_A_start);
-        snrt_dma_start_1d((void *)0x10000000, A, 512);
-        FORGE_MARK(forge_load_B_configure);
-        snrt_dma_wait_all();
-        FORGE_MARK(forge_load_A_wait);
-        FORGE_MARK(forge_load_B_start);
-        snrt_dma_start_1d((void *)0x10000200, B, 512);
-    }
-    if (core == 0) {
-        FORGE_MARK(forge_mult_acc_a_configure);
-        csrw_ss(BASE_PTR_READER_0_LOW, 0x10000000);
-        csrw_ss(BASE_PTR_READER_0_HIGH, 0);
-        csrw_ss(S_STRIDE_READER_0_0, 8);
-        csrw_ss(T_BOUND_READER_0_0, 16);
-        csrw_ss(T_STRIDE_READER_0_0, 32);
-        FORGE_MARK(forge_mult_acc_b_configure);
-        csrw_ss(BASE_PTR_READER_1_LOW, 0x10000200);
-        csrw_ss(BASE_PTR_READER_1_HIGH, 0);
-        csrw_ss(S_STRIDE_READER_1_0, 8);
-        csrw_ss(T_BOUND_READER_1_0, 16);
-        csrw_ss(T_STRIDE_READER_1_0, 32);
-        FORGE_MARK(forge_mult_acc_out_configure);
-        csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10000400);
-        csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
-        csrw_ss(S_STRIDE_WRITER_0_0, 8);
-        csrw_ss(T_BOUND_WRITER_0_0, 16);
-        csrw_ss(T_STRIDE_WRITER_0_0, 32);
-        FORGE_MARK(forge_mult_acc_configure);
-        csrw_ss(ACC_RW_LOOP_COUNT, 16);
-    }
-    if (core == 1) {
-        snrt_dma_wait_all();
-        FORGE_MARK(forge_load_B_wait);
-    }
-    snrt_cluster_hw_barrier();
-    if (core == 0) {
-        FORGE_MARK(forge_mult_acc_a_start);
-        FORGE_MARK(forge_mult_acc_b_start);
-        FORGE_MARK(forge_mult_acc_out_start);
-        csrw_ss(STREAMER_START_CSR, 1);
-        FORGE_MARK(forge_mult_acc_start);
-        csrw_ss(ACC_RW_START, 1);
-    }
-    if (core == 1) {
-        FORGE_MARK(forge_store_C_configure);
-    }
-    if (core == 0) {
-        while (csrr_ss(ACC_RO_BUSY)) {
-        }
-        while (csrr_ss(STREAMER_BUSY_CSR)) {
-        }
-        FORGE_MARK(forge_mult_acc_a_wait);
-        FORGE_MARK(forge_mult_acc_b_wait);
-        FORGE_MARK(forge_mult_acc_out_wait);
-        FORGE_MARK(forge_mult_acc_wait);
-        counter_mult_acc = csrr_ss(ACC_RO_PERF_COUNT);
-    }
-    snrt_cluster_hw_barrier();
-    if (core == 1) {
-        FORGE_MARK(forge_store_C_start);
-        snrt_dma_start_1d(C, (void *)0x10000400, 512);
-        snrt_dma_wait_all();
-        FORGE_MARK(forge_store_C_wait);
-    }
-    snrt_cluster_hw_barrier();
-    if (core == 0) {
-        int data_errors = 0;
-        for (uint32_t i = 0; i < 64; i++) {
-            if (((volatile int64_t *)C)[i] != C_golden[i]) {
-                data_errors++;
-            }
-        }
-        err += data_errors;
-        printf("forge data: %d errors (%u words)\n", data_errors, 64u);
-        printf("forge counter mult_acc: %u\n", counter_mult_acc);
-        err += counter_mult_acc < 16;
-        printf("forge errors: %d\n", err);
-    }
+    int err = forge_cores[snrt_cluster_core_idx()]();
     FORGE_MARK(forge_main_exit);
     return err;
 }

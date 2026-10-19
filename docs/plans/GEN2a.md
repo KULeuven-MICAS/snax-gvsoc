@@ -29,6 +29,7 @@ its data errors 0 and each counter what the unit's run line gives.
 | Round | Content |
 |---|---|
 | 1 | snax-forge: `data.h` from a datagen, a design check for snRuntime's top of L1, the C backend (`lower/c.py`, D135), the generator writing `main.c` and `data.h`. Here: the generic app `sw/apps/forge/`, the fixtures refreshed, regress over every folder of `forge/`, the marks checked |
+| 1b | Fix-ups (snax-forge `lower/c.py`): start marks before a start group's writes, DMA waits from dependences only (D135 amended), one function per core; forge/ refreshed |
 | 2 | The adder tree: `vsum` at W = 4 |
 
 ## The C backend's rules
@@ -36,14 +37,19 @@ its data errors 0 and each counter what the unit's run line gives.
 snax-forge's D135 and `snax_forge/lower/c.py` hold them; in short:
 
 - Each step runs on the core that owns its component in the cluster file
-  (the DMA's core has `xdma`, the accelerator's holds the slot), branching
-  on `snrt_cluster_core_idx()`.
+  (the DMA's core has `xdma`, the accelerator's holds the slot): one
+  function per core, a straight line, which `main` calls by
+  `snrt_cluster_core_idx()` through a table; a core with no task takes part
+  in the barriers only.
 - A streamer or accelerator task is `csrw_ss` on the fixture's header
   names; a DMA task is `snrt_dma_start_1d` (or `_2d`) at its start. One
-  `STREAMER_START_CSR` for all of an accelerator's movers, then its start.
-- The waits are the ones snax-forge's lowering places (D64): the
-  accelerator's busy then the streamer's polled, or `snrt_dma_wait_all()`;
-  a hardware barrier on every core where another core goes on.
+  `STREAMER_START_CSR` for all of an accelerator's movers, then its start,
+  back to back: a start step's marks all come first.
+- The waits on SNAX components are the ones snax-forge's lowering places
+  (D64): the accelerator's busy then the streamer's polled. The DMA queues
+  its transfers, so `snrt_dma_wait_all()` comes only from an `after`
+  dependence or a sync. A hardware barrier on every core where another core
+  goes on.
 - A mark per task event, `csrr zero, mcycle` at a global label
   `forge_<task>_<event>` (configure, start, wait), and `forge_main_entry`,
   `forge_main_exit`.
@@ -72,15 +78,28 @@ snax-forge's D135 and `snax_forge/lower/c.py` hold them; in short:
 Steps 12 and 13 land in snax-forge after this branch's last commit, which
 its submodule points at; they are logged in snax-forge's STATUS.
 
+Round 1b, fix-ups on the same branches (tag `gen2a-r1b`):
+
+| # | Step | Status |
+|---|---|---|
+| F1 | snax-forge: a start step's marks before its first write | done |
+| F2 | snax-forge: DMA waits from dependences only; D135 amended | done |
+| F3 | snax-forge: one `noinline` function per core, `main` through a table, no `volatile` index; the compile test over vecadd, vecmul and vsum, each label once | done |
+| F4 | snax-forge: STATUS's RET1 row, ARCHITECTURE, C§16 | done |
+| F5 | forge/ refreshed, full `make regress`, the marks check again, this file and the notes | done |
+| F6 | snax-forge: submodule at this branch's head, fixtures reproduced | snax-forge |
+
 ## Findings
 
-- **The marks are where the program runs them (step 10).** vecadd's ELF
-  has 23 global text symbols `forge_*` (7 tasks x configure, start and
+- **The marks are where the program runs them (step 10, F5).** vecadd's ELF
+  has 23 global text symbols for the marks (7 tasks x configure, start and
   wait, and main's entry and exit), each once; the pc of each is in
   GVSoC's instruction trace of the run (`--trace=pe0/insn`, `pe1/insn`):
   the DMA's tasks on core 1, the accelerator's and its streamer's on core
   0, each once, and `forge_main_entry` / `forge_main_exit` on both cores.
-  FLOW3 reads their cycles; nothing reads them yet.
+  Since F3 the ELF also has `forge_core_0`, `forge_core_1` (the functions)
+  and `forge_cores` (their table), not marks. FLOW3 reads the marks'
+  cycles; nothing reads them yet.
 - **The runtime's top of L1 fits snax-forge's margin (step 10).** In
   vecadd's ELF, `.cdata` is 0 B, `.cbss` 16 B (`_cls`), `.tdata` 0 B and
   `.tbss` 8 B. Below the two 1 KiB stacks, `start.S` keeps CLS (16 B), main's
@@ -90,42 +109,57 @@ its submodule points at; they are logged in snax-forge's STATUS.
 
 - **The image has clang, not GCC (step 4).** snax-forge's compile test
   uses the image's clang (snax_cluster's toolchain, clang 21.1.6) with
-  `sw/toolchain.mk`'s flags against `sw/`'s headers, vecadd's and vsum's
-  `main.c` with `-Werror`; it skips without that clang or the submodule.
-- **A constant core index copies shared code (step 8).** With
-  `const uint32_t core`, clang threads the `if (core == k)` blocks into one
-  path per core and copies the code every core passes onto each: vsum's
-  `forge_main_exit` was defined twice and did not assemble (vecadd did).
-  `main.c` keeps the index in a `volatile`, read at each branch; snax-forge's
-  compile test covers vsum since.
-- **The waits are the lowering's, not the hardware's (step 4).** snax-forge's
-  lowering puts a `wait dma` before `load_B`'s start (SNAX-MODEL's rule: no
-  start while busy, D36 there); snRuntime's DMA queues transfers, as the
-  hand-written apps used. So the generated program loads A, then B, where
-  `forge-elementwise` started both and waited once. The accelerator's
-  counter does not see it; the cycles before the start do.
-- **The start mark moves each counter by one cycle (step 9).** The
-  generated counters are one below the hand-written apps': vecadd 18
-  against 19, vecmul 18 against 19, vsum 66 against 67 (`vsum-r16` stays
-  67, still hand-written). The L1 addresses are the same: the memory plan
-  puts A, B and O at `0x1000_0000`, `+0x200`, `+0x400`, where the
-  `snrt_l1_next()` chain put them, and the readers hit the same banks with
-  the same single conflict (readers 0 and 1 on banks 0 to 3 in the first
-  cycle, reader 0 granted). The difference is `forge_<acc>_start` between
-  the two start CSRs: the streamer starts two cycles before the accelerator
-  instead of one (vecadd: cycles 2922 and 2924 against 2419 and 2420;
-  vsum: 2336 and 2338 against 2244 and 2245), so its first beats arrive a
-  cycle earlier against the start the counter counts from, and the unit
-  sees one stall_in cycle fewer. Nothing was tuned.
+  `sw/toolchain.mk`'s flags against `sw/`'s headers, vecadd's, vecmul's
+  and vsum's `main.c` with `-Werror`, and `llvm-nm` on the object for each
+  label defined once; it skips without that clang or the submodule.
+- **Branches per core let clang copy a mark (step 8, fixed in F3).** With
+  `const uint32_t core` and an `if (core == k)` block per step, clang
+  threaded the blocks into one path per core and copied the code every core
+  passes onto each: vsum's `forge_main_exit` was defined twice and did not
+  assemble (vecadd did). Round 1 kept the index in a `volatile`; since F3
+  each core runs a straight-line function of its own and `main` has no
+  branch, so there is nothing to copy.
+- **The DMA waited for itself (step 4, fixed in F2).** Round 1 took every
+  wait the lowering places, including SNAX-MODEL's no-start-while-busy
+  wait on the DMA (D36 there): the program loaded A, waited, then loaded B,
+  where the hand-written app queued both. Since F2 a DMA wait comes only
+  from a dependence or a sync. vecadd's marks, round 1 against F3:
+  `load_B_start` 1 cycle after `load_A_wait` (2863) against 21 cycles
+  after `load_A_start` (2848), with no wait between; both loads end in one
+  wait (2896, 2897).
+- **A mark between the start writes cost a stall cycle (step 9, fixed in
+  F1).** Round 1's counters were one below the hand-written apps': vecadd
+  18, vecmul 18, vsum 66 against 19, 19, 67. The L1 addresses and the banks
+  the readers hit are the same (A, B, O at `0x1000_0000`, `+0x200`,
+  `+0x400`, as the `snrt_l1_next()` chain put them; one conflict, readers 0
+  and 1 on banks 0 to 3 in the first cycle, reader 0 granted). The
+  difference was `forge_<acc>_start` between `STREAMER_START_CSR` and the
+  accelerator's start: the streamer started two cycles ahead instead of
+  one (vecadd 2922 and 2924 against 2419 and 2420), so the unit saw one
+  stall_in cycle fewer. Since F1 a start step's marks all come before its
+  writes: 19, 19, 67, the hand-written apps' (`stall_in` 3, 3, 2).
+- **An I-cache line can split the start writes (F2).** With F2's layout an
+  L0 line began at the `STREAMER_START_CSR` instruction (`0x8000_0340`): the
+  refill put the accelerator's start 10 cycles after it (2898, 2908), the
+  streamer ran ahead and the unit saw no stall (vecadd and vecmul 16,
+  `stall_in 0`). F3's layout does not split them (19). The RTL's L0
+  prefetches the next line (snax-forge open item 65), so it would likely not
+  miss there; nothing was tuned.
+- **Where the accelerator starts (F2, F3).** vecadd's accelerator starts at
+  cycle 2924 in round 1 and after F1, 2908 after F2, 2922 after F3; the
+  hand-written app's at 2420. main starts at 2767 (F3) against 2284: about
+  470 cycles go to snRuntime zeroing `.bss` before main, 544 B against 24 B,
+  since `data.h`'s output C (512 B) is zero-initialised in L2 (139 stores by
+  core 1, cycles 2173 to 2752 in F2's run); the hand-written app kept its
+  output in L1. From main to the start: 155 cycles (F3) against 136.
 
 ## Open
 
-- The DMA wait between the loads: from snax-forge's lowering, which keeps
-  SNAX-MODEL's rule until RET1 (D45 there); whether the task list should
-  let the DMA queue is decided with FLOW3, which reads the cycles.
-- The marks cost a cycle each and the start mark shifts the counter by one
-  (above); FLOW3 decides whether the start marks go before the streamer's
-  start CSR.
+- The marks cost a cycle each; between configures and around waits they
+  move the core's timing, not the counters. FLOW3 reads them.
+- The outputs' `.bss` zeroing before main (about 470 cycles for vecadd's
+  512 B): FLOW3 decides whether the program's phases start at
+  `forge_main_entry`, or the outputs move.
 - One accelerator per program, two or more cores: one core driving the DMA
   and the accelerator (snax-forge open item 80) and several accelerators on
   one core (open item 79) were never run; a read step, a `signal` wait and

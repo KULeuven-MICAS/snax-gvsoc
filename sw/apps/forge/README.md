@@ -20,10 +20,11 @@ every file of the fixture, so a refreshed fixture rebuilds it.
 
 ## What the program does
 
-The design point's task list on snRuntime (snax-forge `lower/c.py`): each
-step on the core that owns its component in the cluster file (the DMA on
-the core with `xdma`, the accelerator on the one holding the slot), a
-barrier where another core goes on, and a mark per task event
+The design point's task list on snRuntime (snax-forge `lower/c.py`): one
+function per core, `main` calling its core's through a table, each step on
+the core that owns its component in the cluster file (the DMA on the core
+with `xdma`, the accelerator on the one holding the slot), a barrier where
+another core goes on, and a mark per task event
 (`forge_<task>_configure`, `_start`, `_wait`, and `forge_main_entry`,
 `forge_main_exit`: `csrr zero, mcycle` at a global label). It ends with
 
@@ -45,6 +46,6 @@ In the container, from snax-gvsoc, with GVSoC built and the program made:
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
 It warns that the platform tree does not match (LNK2a), prints the unit's
-`run 0: firings 16 busy 16 stall_in 2 stall_out 0 flush 0`, then
-`forge data: 0 errors (64 words)`, `forge counter add_acc: 18` (busy +
+`run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0`, then
+`forge data: 0 errors (64 words)`, `forge counter add_acc: 19` (busy +
 stall_in + stall_out + flush of that line) and `forge errors: 0`, and exits 0.
