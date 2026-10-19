@@ -1,0 +1,17 @@
+{
+ "design": "vsum",
+ "design_point": "out/design/vsum/design_point.json",
+ "symbols": {"N": 64},
+ "target": "forge_vsum",
+ "files": ["forge_vsum_acc.py", "forge_vsum.py", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
+ "target_dirs": ["."],
+ "trace": "snax_acc0/unit",
+ "csrs": {
+  "streamer": {"first": 960, "last": 972},
+  "fields": {"loopCount": 973, "len": 974},
+  "start": 975,
+  "busy": 976,
+  "counter": 977
+ },
+ "tasks": [{"name": "sum_acc", "beats": 64, "csrs": {"loopCount": 64, "len": 64}}]
+}

@@ -3883,3 +3883,59 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
 - Not verified: a fold inside GVSoC (no target has one before step 4); the
   fatal on count not a multiple of rate, and the property refusals (read,
   not run).
+
+### GEN3 round 4, step 3: the Accumulator's binding, its adapter and vsum (snax-forge)
+
+- 2026-10-19. snax-forge only (`ff79dfa`); noted here as the next
+  snax-gvsoc commit. `accumulate.json`'s `chisel_accumulator`: drain 1 to
+  0 (D133, D103 amended), binding `Accumulator`, args `{}`, `counted`,
+  csrs `loopCount = n` then `len = T`, `pipelined`; `chisel_adder_tree`
+  stays null. D129 amended: `counted` the only control (`stream`
+  unregistered), csrs one field or more.
+- The drain change moved no cycle count: dot and dot_serial on small16 run
+  as on HEAD (`run.md`, profile, trace, data identical); only the declared
+  value moves, in `cluster.json` and `run.json` (`"drain": 1` gone) and the
+  design report's Drain column. Moved, old -> new: `test_library`
+  (L, II, drain) (1, 1, 1) -> (1, 1, 0); `test_dot` cluster params lose
+  `"drain": 1`, design drain 1 -> 0; `test_dot_example` drains
+  `{"dot": 0, "dot_serial": 1}` -> both 0; the CONTRACTS snippet of
+  `accumulate.json`; `examples/dot/README.md`'s design table, Drain 1 -> 0
+  (reported first, as the prompt asks, and approved), its two drain
+  sentences rewritten or dropped.
+- `gen/blocks.py`: the `Accumulator` adapter (one input of rate 1, one
+  output of a named rate, one lane, 64-bit, op add, `counted`, `pipelined`,
+  L 1, II 1, drain 0, fields `loopCount` and `len`, `config
+  ['count', 'rate']`); `Unit.config`, emitted only when not `['count']`, so
+  the vecadd and vecmul fixtures stay byte-identical.
+- `kernels/polybench/vsum.py` (`out[0] = np.sum(A)`, int64), its DFG
+  fixture and import test; `recipes/vsum.json` (W 1, N 64, `sum_map` split
+  by W, bound to `chisel_accumulator`, instance `acc`). Generated on
+  `platforms/snax_alu.json`: one reader and one writer of one lane
+  (`spatial_bounds [[1]]`, `temporal_dim [1]`, `num_channel [1]`,
+  `fifo_depth [8]`); CSRs streamer 960 to 972, `loopCount` 973, `len` 974,
+  start 975, busy 976, counter 977; task `sum_acc` 64 beats, csrs
+  `{loopCount: 64, len: 64}`.
+- Tests: fmt, lint clean; brm, dfg, gen, flow, model and sandbox tests
+  1347 passed.
+
+### GEN3 round 4, step 4: the vsum fixture and forge-reduce
+
+- 2026-10-19. `forge/vsum/`: snax-forge's generator output for
+  `recipes/vsum.json` on `platforms/snax_alu.json`, by `forge/README.md`'s
+  refresh commands (install check against snax-forge's
+  `out/snax-gvsoc/install`); listed in `forge/README.md`.
+- `sw/apps/forge-reduce/`: `data/datagen.py` (A int64 in [-1000, 1000)
+  from `default_rng(0)`, OUT the sums of every RATE), a Makefile reading N,
+  BEATS and RATE (`tasks[0].csrs.len`) from the manifest (make errors: N
+  not BEATS, RATE not dividing BEATS), the program (reader A, writer O of
+  BEATS / RATE beats, loopCount then len, the starts, busy, counter, sums)
+  and its README.
+- `tests/snax/regress.py`: FORGE entries are `(design, program, mode)`,
+  mode None for forge-reduce (no `MODE=`), named `<program>.<design>`;
+  `vsum` runs `forge-reduce`. CI's comment updated.
+- `python3 tests/snax/regress.py -k forge`: 3 run, passed.
+  `forge-reduce.vsum`: `run 0: firings 64 busy 64 stall_in 2 stall_out 0
+  flush 1`, `forge-reduce data: 0 errors (1 sums)`, counter 67, errors 0.
+  The two forge-elementwise logs equal main's with pointers masked.
+- Not verified: a vsum run with more than one sum (T < N): no fixture has
+  one; the unit cases cover rate 4 and 1.
