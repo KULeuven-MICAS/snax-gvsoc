@@ -131,15 +131,17 @@ target `forge_<design>` (`snax_alu` with it in the accelerator slot), the
 headers and `manifest.json` (`forge/README.md`: what is there, how to refresh
 a folder). Nothing in it is built: gvrun reads a folder with `--target-dir`
 and runs it on the installed components (it warns that the target has no
-platform tree). `sw/apps/forge-elementwise/` drives one on its generated
-headers:
+platform tree). `sw/apps/forge-elementwise/` drives an elementwise one on
+its generated headers, `sw/apps/forge-reduce/` a fold (`forge/vsum/`):
 
     make -C sw/apps/forge-elementwise DESIGN=vecmul MODE=2
     gvrun --target forge_vecmul --target-dir=$PWD/forge/vecmul --work-dir build/work/forge-vecmul \
         --param chip/soc/binary=$PWD/build/sw/apps/forge-elementwise/vecmul/forge-elementwise.elf run
 
 It prints `forge-elementwise data: 0 errors (64 words)`, its counter and
-`forge-elementwise errors: 0`, and exits 0.
+`forge-elementwise errors: 0`, and exits 0. `make -C sw/apps/forge-reduce
+DESIGN=vsum` and `forge_vsum` the same way print `forge-reduce data: 0
+errors (1 sums)`.
 
 ## Regression
 
@@ -149,8 +151,9 @@ on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
 case, then `snax-shell` on `snax_tiled_add` with the unit's trace on, then
-`forge-elementwise` on each generated accelerator of `forge/`
-(`forge-elementwise.<design>`, `FORGE` in `tests/snax/regress.py`), then
+each generated accelerator of `forge/` with its program, `forge-elementwise`
+or `forge-reduce` (`<program>.<design>`, `FORGE` in
+`tests/snax/regress.py`), then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
@@ -159,11 +162,11 @@ compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
 and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
 must equal its unit's first run line, busy + stall_in + stall_out + flush,
 that run firing its beats (`check_counter` in `tests/snax/regress.py`,
-GEN3); so must `forge-elementwise`'s. A `forge/` entry is read from its
+GEN3); so must `forge-elementwise`'s and `forge-reduce`'s. A `forge/` entry is read from its
 `manifest.json` with plain json: the target, run with `--target-dir=` each of
 its `target_dirs` (never built, so gvrun warns that it has no platform tree),
 the unit's trace path and the beats of its one accelerator task; the program
-is built with `DESIGN=<design> MODE=<mode>`. It needs GVSoC built for
+is built with `DESIGN=<design>`, and `MODE=<mode>` for forge-elementwise. It needs GVSoC built for
 `snitch;snax_alu;snax_alu_sparse;snax_tiled_add`, as above, and takes about
 two minutes.
 

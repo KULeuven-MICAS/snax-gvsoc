@@ -3939,3 +3939,66 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   The two forge-elementwise logs equal main's with pointers masked.
 - Not verified: a vsum run with more than one sum (T < N): no fixture has
   one; the unit cases cover rate 4 and 1.
+
+### GEN3 round 4, step 5: the fixture test over vecadd, vecmul and vsum (snax-forge)
+
+- 2026-10-19. snax-forge only (`99a4023`). `tests/gen/test_fixture.py`'s
+  `DESIGNS` holds vsum; a design whose folder the submodule's pin lacks is
+  skipped, as before. At the pin (`7e1898cc`): 2 passed, vsum skipped. With
+  the submodule on this repo's `ry/gen3r4` (`b8fc3082`, fetched from the
+  sibling checkout): 3 passed. One byte of `forge/vsum/forge_vsum_acc.py`
+  changed (`latency=1` to `latency=2`): vsum fails on that file, the other
+  two pass. Restored, and the submodule back on its pin; the pointer never
+  staged.
+
+### GEN3 round 4, step 6: the Accumulator against SnaxUnit's rate cases (snax-forge)
+
+- 2026-10-19. snax-forge only (`8df0aa7`). `SnaxUnitCases` (test helper):
+  round 3's case parser, shared, now reading `latency`, `ii`, `config`,
+  start lines with one word per role and the `expect run` lines, and
+  refusing an unknown header line. `ElementwiseTiledSpatialLockstepSpec`
+  uses it, unchanged otherwise. New `AccumulatorRateSpec`: every pipelined
+  fold case with a rate (the five `pipelined_rate_*`) drives the
+  Accumulator (L 1, II 1, `loopCount` the count, `len` the rate) and
+  compares fire, push and busy per cycle, each start's answer, each pushed
+  sum against its inputs, and the `expect run` lines, every busy cycle
+  classed by D59's order from what the block shows (`out.valid` with no
+  room stall_out, an input taken busy, no input with inputs left stall_in,
+  else flush).
+- `chisel-test` with `SNAX_GVSOC_UNIT_CASES` on this repo's cases: 55
+  passed, 0 canceled; on the submodule's pinned cases: 54 passed, the rate
+  spec canceled (no fold case: the pin predates this round's step 2);
+  without the variable both cross-check specs canceled. `chisel-check`, fmt, lint
+  clean. Bites: with `in.ready` low while a result waits (the old drain
+  cycle) it fails at `pipelined_rate_backpressure` cycle 8 (fire); with
+  one `expect run` flush changed in a copy of the cases it fails on the
+  run line of `pipelined_rate_zero`, the last case read.
+
+### GEN3 round 4, step 7: docs and full runs
+
+- 2026-10-19. GEN3.md: 6b done; What it models (the new Accumulator);
+  The binding (`counted` the only control, the Accumulator's binding,
+  `config`); fixtures and programs; rounds table; Open (a fold with T < n
+  only in the unit cases and the rate spec; n not a multiple of T; the
+  Accumulator's combinational `in.ready`; `chisel_adder_tree` unbound).
+  README: `forge-reduce` and regress's programs. snax-forge: STATUS
+  (GEN3 `done`, next LNK2a, open item 68), README section 5 (vsum's
+  fixture); DECISIONS and CONTRACTS as of step 3.
+- Full `make regress` (step 2's build, no C++ change since): `regression
+  passed`; unit 1, SNAX 40, `snax-shell.snax_tiled_add` 1, forge 3
+  (`forge-elementwise.vecadd`, `.vecmul`, `forge-reduce.vsum`), plain 17.
+  Against main's 61 logs: 57 byte-identical; the three with
+  `--trace=snax_acc0/unit` equal with pointers masked; `unit` differs only
+  by its five new cases (`16 passed, 0 failed`). `forge-reduce.vsum` is
+  new: `run 0: firings 64 busy 64 stall_in 2 stall_out 0 flush 1`, counter
+  67, 0 errors.
+- Full `pixi run -e ci test` in snax-forge: 1721 passed, 1 skipped (vsum's
+  fixture: the submodule's pin predates `forge/vsum/`); fmt and lint clean.
+- GEN3's acceptance (snax-forge STATUS): vecadd, vecmul and vsum run on
+  their generated accelerators with correct data and the counter
+  `check_counter` predicts, `make regress` passes on the fixtures, and
+  snax-forge reproduces all three byte for byte (vsum with the submodule on
+  `ry/gen3r4`, step 5).
+- Not verified: vsum's fixture test at a bumped pin (needs this branch
+  merged and the submodule bumped); a build from scratch (step 2's build
+  reused); the RTL side of the Accumulator beyond chiseltest.
