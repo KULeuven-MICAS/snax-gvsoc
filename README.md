@@ -20,7 +20,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `forge/` | Generated accelerators from snax-forge, one design point per folder, checked in as fixtures (`forge/README.md`) |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
 | `tests/snax/` | The regression (`regress.py`), the phase script (`phases.py`), the arbiters' checks against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
-| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`) |
+| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
@@ -85,11 +85,15 @@ priority bit first, then round robin from the last pick (SG7,
 DMA beat takes the whole superbank (8 banks) it writes or reads in its cycle,
 and a narrow request there is refused and keeps its turn. The two clusters
 build the same ELF (`sw/README.md`).
+`snax_hjson` (`snax/snax_hjson.py`, LNK2a) is any such cluster read from
+its hjson (`snax/snax_cfg.py`), the file given with `--param hjson=<path>`
+(`sw/cfg/snax_alu_cluster.hjson` by default); on either `sw/cfg/` file it
+gives the logs and `gvsoc_config.json` of the matching hand-written target.
 Build `sw/` (the runtime for both clusters), GVSoC and the programs in
 `sw/apps/`, each into `build/sw/apps/<name>/`:
 
     make sw
-    make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"
+    make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson"
     make -C sw/apps/snax-csr
     make -C sw/apps/snax-alu
     source sourceme.sh
@@ -111,8 +115,8 @@ with priority 1.
 
 `snax_tiled_add` (`snax/snax_tiled_add.py`, GEN3) is `snax_alu` with
 another accelerator in the compute core's slot: `snax/snax_tiled_add_acc.py`,
-written by hand in place of the composite snax-forge's generator will write,
-with `snax_alu`'s CSR mux and streamer, `SnaxShell` (GeMMX's shell contract:
+written by hand (`snax/snax_unit_acc.py` builds its kind from a datapath
+block), with `snax_alu`'s CSR mux and streamer, `SnaxShell` (GeMMX's shell contract:
 a start waits while busy, busy and a cycle counter) and `SnaxUnit` (a lockstep
 add, 4 lanes of 64 bit). `sw/apps/snax-shell/` runs on it:
 
@@ -125,22 +129,27 @@ It prints its checks and `snax-shell errors: 0`, and exits 0;
 
 ## Generated accelerators (forge/)
 
-`forge/<design>/` holds what snax-forge's GVSoC generator wrote for one
-design point, untouched: the composite on `SnaxShell` and `SnaxUnit`, a
-target `forge_<design>` (`snax_alu` with it in the accelerator slot), the
-headers and `manifest.json` (`forge/README.md`: what is there, how to refresh
-a folder). Nothing in it is built: gvrun reads a folder with `--target-dir`
-and runs it on the installed components (it warns that the target has no
-platform tree). `sw/apps/forge-elementwise/` drives an elementwise one on
-its generated headers, `sw/apps/forge-reduce/` a fold (`forge/vsum/`):
+`forge/<design>/` holds one design point as SNAX-GVSoC reads it (LNK2a):
+snax-forge's generator's three hjson files, the cluster file
+`snax_alu.hjson` (`sw/cfg/snax_alu_cluster.hjson` with the accelerator slot
+set for the design), the streamer file `snax_alu_streamer.hjson` (the slot's
+streamer template) and the accelerator file `snax_alu_acc.hjson` (its
+datapath block), the headers a program drives it with and `manifest.json`
+(`forge/README.md`).
+Nothing in it is built: `snax_hjson` reads the cluster file and puts the
+standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and
+`SnaxUnit`) in the slot, on the installed components (gvrun warns that the
+platform tree does not match). `sw/apps/forge-elementwise/` drives an
+elementwise one on its headers, `sw/apps/forge-reduce/` a fold
+(`forge/vsum/`):
 
     make -C sw/apps/forge-elementwise DESIGN=vecmul MODE=2
-    gvrun --target forge_vecmul --target-dir=$PWD/forge/vecmul --work-dir build/work/forge-vecmul \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecmul/snax_alu.hjson --work-dir build/work/forge-vecmul \
         --param chip/soc/binary=$PWD/build/sw/apps/forge-elementwise/vecmul/forge-elementwise.elf run
 
 It prints `forge-elementwise data: 0 errors (64 words)`, its counter and
 `forge-elementwise errors: 0`, and exits 0. `make -C sw/apps/forge-reduce
-DESIGN=vsum` and `forge_vsum` the same way print `forge-reduce data: 0
+DESIGN=vsum` and `forge/vsum/snax_alu.hjson` the same way print `forge-reduce data: 0
 errors (1 sums)`.
 
 ## Regression
@@ -164,11 +173,11 @@ and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
 must equal its unit's first run line, busy + stall_in + stall_out + flush,
 that run firing its beats (`check_counter` in `tests/snax/regress.py`,
 GEN3); so must `forge-elementwise`'s and `forge-reduce`'s. A `forge/` entry is read from its
-`manifest.json` with plain json: the target, run with `--target-dir=` each of
-its `target_dirs` (never built, so gvrun warns that it has no platform tree),
+`manifest.json` with plain json: its cluster file, run on `snax_hjson`
+with `--param hjson=` (gvrun warns that the platform tree does not match),
 the unit's trace path and the beats of its one accelerator task; the program
 is built with `DESIGN=<design>`, and `MODE=<mode>` for forge-elementwise. It needs GVSoC built for
-`snitch;snax_alu;snax_alu_sparse;snax_tiled_add`, as above, and takes about
+`snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson`, as above, and takes about
 two minutes.
 
     make regress
@@ -186,7 +195,7 @@ the programs whose name holds it, as `-k stream-timing`, `-k sparse`,
 `.github/workflows/ci.yml` runs on every push to main, on every pull
 request, and by hand (`workflow_dispatch`), in snax-forge's image
 `ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
-`snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (with ccache, kept between runs), runs the unit tests
+`snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson` (with ccache, kept between runs), runs the unit tests
 (`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
 `make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
 tested (and `forge/` run); GVSoC's other targets stay out.

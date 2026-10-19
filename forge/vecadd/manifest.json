@@ -2,9 +2,8 @@
  "design": "vecadd",
  "design_point": "out/design/vecadd/design_point.json",
  "symbols": {"N": 64},
- "target": "forge_vecadd",
- "files": ["forge_vecadd_acc.py", "forge_vecadd.py", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
- "target_dirs": ["."],
+ "cluster": "snax_alu.hjson",
+ "files": ["snax_alu.hjson", "snax_alu_streamer.hjson", "snax_alu_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "manifest.json"],
  "trace": "snax_acc0/unit",
  "csrs": {
   "streamer": {"first": 960, "last": 977},

@@ -4034,3 +4034,97 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   the next-up paragraph says GEN3 is done (after LNK1) and LNK2a is next,
   and names round 4b's `forge-reduce.vsum-r16`. fmt and lint clean (no
   code changed).
+
+### LNK2a round 1, steps 1 to 5: the target read from the hjson
+
+- 2026-10-19. Plan and findings in `docs/plans/LNK2a.md`.
+- Step 1: `ClusterArch.Tcdm` (both arch paths) takes size, banks and bank
+  width, the peripherals and the zero memory after it by size (UPSTREAM.md).
+  A scratch `probe_banks16` (snax_alu with 16 banks, `--target-dir`, not
+  committed): `snax-alu` at 128 (`Accelerator Cycles: 32`, 0 errors) and the
+  three `core-tcdm` cases exit 0 (`core_vs_reader`'s first run 18 against
+  17 on 32 banks); `gvsoc_config.json` 16 banks of 8 KiB, `snax_xbar`
+  `nb_banks 16`, `superbank_banks 8`; all 133 install `.so` mtimes the same
+  before and after the probe runs. The defaults give main's
+  `gvsoc_config.json` and log for `snax-alu-128` on both SNAX targets. `make
+  build` recompiles `cluster_registers` on every run, a change or not (not
+  looked into).
+- Step 2: `snax/snax_cfg.py` and `tests/snax/test_snax_cfg.py`; `import
+  hjson` under gvrun's Python (`/opt/venv`, 3.12.3, hjson 3.1.0). With the
+  channel and cycle checks disabled, 3 tests fail.
+- Step 3: `snax/snax_hjson.py` (`--param hjson=`, `declare_user_property`;
+  the qualifier `snax_hjson:hjson=` works too), the cluster files installed
+  as `install/generators/cfg/`, `snax_hjson` in TARGETS. Every SNAX regress
+  program on `snax_hjson` against `snax_alu` (`snax_alu_cluster_old.hjson`)
+  and `snax_alu_sparse` (`snax_alu_cluster.hjson`, and with no option): 20 of
+  20 each with equal logs (names and paths masked) and equal
+  `gvsoc_config.json` (1171 and 1179 keys; `platform_tree` apart). The
+  script stayed out of the repo (`build/lnk2a/compare_targets.py`): after
+  step 5 both sides are one code path.
+- Step 4: the datapath block (`snax_cfg.Datapath`), `snax/snax_unit_acc.py`,
+  forge/'s fixtures as `snax_alu.hjson` and `snax_alu_acc.hjson` written by
+  hand, the manifests without `target` and `target_dirs` and with
+  `cluster`, the `forge_*.py` deleted; regress runs them on `snax_hjson`.
+  `regress.py -k forge`: 4 run, passed; the ELFs byte-identical to main's.
+  On plain copies of the three cluster files all four give main's logs
+  (pointers masked). Cycles, main (plain, `forge_*`) and now (sparse): the
+  same, vecadd start 2420, counter 19, `busy 16 stall_in 3 stall_out 0 flush
+  0`; vecmul start 2414, counter 19; vsum start 2245, counter 67, `busy 64
+  stall_in 2 stall_out 0 flush 1`; vsum-r16 start 2280, counter 67. The one
+  bank conflict in each window (vecadd cycle 2421, readers 0 and 1 on banks 0
+  to 3) goes to reader 0 under both arbiters; vsum has none.
+- Step 5: `snax_alu.py` and `snax_alu_sparse.py` are `SnaxHjsonBoard` on their
+  fixed `sw/cfg/` file (`hjson_option = False`); the timing constants and
+  their notes moved to `snax_hjson.py`. `make build` (all five targets):
+  nothing compiled but `cluster_registers`. Unit tests: 32 passed. Full `make
+  regress`: `regression passed`; unit 1, SNAX 40, `snax-shell.snax_tiled_add`
+  1, forge 4, plain 17. Against main's 63 logs: 58 byte-identical;
+  `snax-shell.snax_tiled_add` equal with pointers masked (its
+  `gvsoc_config.json` identical); the four forge runs differ only in the
+  warning line (`platform tree ... does not match`, where main had none).
+- Not verified: another L1 size or base (needs `sw/generated/` and the ELF
+  rebuilt), more than one hive, a design whose ports meet on a bank so that
+  plain and sparse differ, snax-forge's fixture test against the new
+  `forge/` (round 2).
+
+### LNK2a round 1, step 6: snax-forge's STATUS (snax-forge)
+
+- 2026-10-19. snax-forge only (`docs/STATUS.md`); noted here in its own
+  commit, as GEN3 round 4b F2. LNK2a's row `todo` to `wip`, with a pointer to
+  `LNK2a.md`; the next-up paragraph says what round 1 gives and that round 2
+  is the writer; open item 51 gains the cross-file `$ref` fix (clustergen.py,
+  snaxgen.py) and the schema's `"items:"`; open item 68 notes that the L1's
+  size and base reach the program through `sw/generated/`. No submodule
+  bump, no code; snax-forge's lint clean.
+
+### LNK2a round 2: snax-forge's writer, three hjson files
+
+- 2026-10-19. Plan and findings in `docs/plans/LNK2a.md` (steps R2.0 to
+  R2.5); snax-forge's side in its D134 and C§16.
+- Step 0: the forge app Makefiles' comments; LNK2a.md's Open. snax-forge's
+  `alu_probe` (snax-alu 100: `Accelerator Cycles: 25`, 0 errors) and
+  `tiled_add_sparse_probe` (`snax-shell errors: 0`) run on round 1's install
+  as they are; its `gvsoc/Makefile` TARGETS gains `snax_hjson`.
+- Step 1 (snax-forge): `platforms/snax_alu.hjson`, the platform's `hjson`
+  and `accelerator_slot`; `platforms/snax_alu.json` written again by
+  `design from-hjson` (two lines more).
+- Step 2: `snax_cfg.py` resolves `{$ref: "file.hjson"}` and
+  `"file.hjson#"` as the whole file (34 unit tests). snax-forge's
+  `gen/gvsoc.py` writes the three files; the composite and target writers
+  and the install check are gone.
+- Step 3: `sw/sync.py` copies `docs/schema/snitch_cluster.schema.json`;
+  `make sync-snax-cluster SNAX_CLUSTER=../snax_cluster` in the image at the
+  pin: exit 0, the schema the only new file, no mirrored build file changed,
+  the streamer header equal. snax-forge's schemas for the streamer and
+  accelerator files, `jsonschema` in its pixi.lock (pixi 0.41.4).
+- Step 4: forge/'s fixtures written by snax-forge's writer; parsed equal to
+  round 1's but for the refs, the split and the manifest's `files` and
+  `note`; `include/` byte-identical. `make build` (five targets) exit 0;
+  `make regress` passed (unit 1, SNAX 40, tiled_add 1, forge 4, plain 17);
+  the forge logs equal main's with pointers masked and the warning line
+  dropped (vecadd start 2420, counter 19; vecmul 2414, 19; vsum 2245, 67;
+  vsum-r16 2280, 67). snax-forge with its submodule here: `pixi run test`
+  1762 passed, `tests/gen` 94 with none skipped.
+- Step 5: these docs; snax-forge's DECISIONS, CONTRACTS, ARCHITECTURE and
+  STATUS (LNK2a done).
+

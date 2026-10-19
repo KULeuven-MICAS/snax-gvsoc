@@ -3,7 +3,8 @@
 The software snax-gvsoc's programs are built from: a pinned copy of the
 files of [snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)
 a build reads (the Snitch runtime, the math library, the 17 plain tests,
-the `snax-alu` app and library, three cluster configurations), the headers
+the `snax-alu` app and library, three cluster configurations and the
+schema clustergen checks a cluster configuration against), the headers
 generated from them, and our own programs in `apps/` (CI1, D126 in
 snax-forge). No snax_cluster checkout is needed to build or run them; one
 is needed only for the RTL and to refresh this copy.
@@ -46,6 +47,7 @@ every relative include in the copied files (`../../deps/...`,
 | `target/snitch_cluster/cfg/X` | `sw/cfg/X` |
 | `util/sim/X` | `sw/util/X` |
 | `LICENSE` | `sw/LICENSE` |
+| `docs/schema/X` | `sw/docs/schema/X` |
 
 ## Licences
 

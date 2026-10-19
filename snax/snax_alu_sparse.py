@@ -5,29 +5,28 @@
 #
 
 """The snax_alu_sparse target: snax_cluster's cfg/snax_alu_cluster.hjson at the
-pin, 9fbf35d, which is snax_alu_cluster_old.hjson with the sparse
-interconnect (SG7).
+pin, 9fbf35d (sw/cfg/), which is snax_alu_cluster_old.hjson with the sparse
+interconnect (SG7), read by the generic target (snax_hjson.py, LNK2a).
 
 The snax_alu target (snax_alu.py) with its SNAX crossbar sparse: priority
 first, then round robin from the last pick (snax_tcdm_xbar.cpp). The
-accelerator's ports, then the two cores' and AXI's, [1, 1] each, as snaxgen
-lists them; the DMA's beats take their superbank as on the plain target.
+accelerator's ports (its sparse_interconnect_config, [[12, 1]]), then the two
+cores' and AXI's, [1, 1] each, as snaxgen lists them; the DMA's beats take
+their superbank as on the plain target. The file is fixed: the target takes
+no hjson option.
 
     gvrun --target snax_alu_sparse --work-dir build/work/<name> \
         --param chip/soc/binary=<elf> run
 """
 
 import gvsoc.runner
-from snax_alu import SnaxAluBoard
-
-# The accelerator's sparse_interconnect_config in the hjson, by core: the
-# compute core's ALU, 12 TCDM ports of granularity 1
-SPARSE_CONFIG = {0: [[12, 1]]}
+from snax_hjson import SnaxHjsonBoard
 
 
-class SnaxAluSparseBoard(SnaxAluBoard):
+class SnaxAluSparseBoard(SnaxHjsonBoard):
 
-    interconnect = {'snax_interconnect': 'sparse', 'snax_sparse_config': SPARSE_CONFIG}
+    cluster_file = 'snax_alu_cluster.hjson'
+    hjson_option = False
 
 
 class Target(gvsoc.runner.Target):

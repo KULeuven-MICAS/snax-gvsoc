@@ -49,6 +49,13 @@ if os.environ.get('USE_GVRUN') is None:
     class ClusterArch:
         def __init__(self, properties, base, first_hartid, auto_fetch=False, boot_addr=0x0000_1000,
                 alias_base=None):
+            # SNAX: the TCDM's size, bank count and bank width, and the sizes of the
+            # peripherals and the zero memory placed after it (the run-time ClusterArch below)
+            tcdm_size = getattr(properties, 'tcdm_size', 0x0002_0000)
+            tcdm_banks = getattr(properties, 'tcdm_banks', 32)
+            tcdm_bank_width = getattr(properties, 'tcdm_bank_width', 8)
+            periph_size = getattr(properties, 'periph_size', 0x0001_0000)
+            zero_mem_size = getattr(properties, 'zero_mem_size', 0x0001_0000)
             self.nb_core = properties.nb_core_per_cluster
             self.base = base
             self.first_hartid = first_hartid
@@ -60,17 +67,18 @@ if os.environ.get('USE_GVRUN') is None:
             nb_masters = self.nb_core
             if properties.use_spatz:
                 nb_masters += self.nb_core * properties.spatz_nb_lanes
-            self.tcdm          = ClusterArch.Tcdm(base, nb_masters)
-            self.peripheral    = Area( base + 0x0002_0000, 0x0001_0000)
-            self.zero_mem      = Area( base + 0x0003_0000, 0x0001_0000)
+            self.tcdm          = ClusterArch.Tcdm(base, nb_masters, tcdm_size, tcdm_banks,
+                tcdm_bank_width)
+            self.peripheral    = Area( base + tcdm_size, periph_size)
+            self.zero_mem      = Area( base + tcdm_size + periph_size, zero_mem_size)
             # Optional alias region (AliasRegionEnable/AliasRegionBase in snitch_cluster.sv):
             # the cluster-local TCDM, peripherals and zero memory are also reachable at a
             # fixed cluster-independent address, so that the same code can run on any cluster.
             self.alias_base = alias_base
             if alias_base is not None:
-                self.tcdm_alias       = Area( alias_base + 0x0000_0000, 0x0002_0000)
-                self.peripheral_alias = Area( alias_base + 0x0002_0000, 0x0001_0000)
-                self.zero_mem_alias   = Area( alias_base + 0x0003_0000, 0x0001_0000)
+                self.tcdm_alias       = Area( alias_base + 0x0000_0000, tcdm_size)
+                self.peripheral_alias = Area( alias_base + tcdm_size, periph_size)
+                self.zero_mem_alias   = Area( alias_base + tcdm_size + periph_size, zero_mem_size)
             self.core_type = properties.core_type
             self.use_spatz = properties.use_spatz
             self.spatz_nb_lanes = properties.spatz_nb_lanes
@@ -84,12 +92,11 @@ if os.environ.get('USE_GVRUN') is None:
             self.snax_dma_data_width = getattr(properties, 'snax_dma_data_width', None)
 
         class Tcdm:
-            def __init__(self, base, nb_masters):
-                self.area = Area( base + 0x0000_0000, 0x0002_0000)
-                self.nb_banks_per_superbank = 8
-                self.bank_width = 8
-                self.nb_superbanks = 4
-                self.bank_size = self.area.size / self.nb_superbanks / self.nb_banks_per_superbank
+            def __init__(self, base, nb_masters, size=0x0002_0000, nb_banks=32, bank_width=8):
+                self.area = Area( base + 0x0000_0000, size)
+                self.nb_banks = nb_banks
+                self.bank_width = bank_width
+                self.bank_size = self.area.size / self.nb_banks
                 self.nb_masters = nb_masters
 
 else:
@@ -99,7 +106,9 @@ else:
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
                 core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None,
                 dma=None, core=None, core_latency=None, snax_interconnect='plain',
-                snax_sparse_config=None, snax_dma_data_width=None):
+                snax_sparse_config=None, snax_dma_data_width=None, tcdm_size=0x0002_0000,
+                tcdm_banks=32, tcdm_bank_width=8, periph_size=0x0001_0000,
+                zero_mem_size=0x0001_0000):
             super().__init__(parent, name)
 
             if nb_core_per_cluster is None:
@@ -119,17 +128,22 @@ else:
             nb_masters = self.nb_core
             if spatz:
                 nb_masters += self.nb_core * spatz_nb_lanes
-            self.tcdm          = ClusterArch.Tcdm(self, 'tcdm', base, nb_masters)
-            self.peripheral    = Area( self, 'peripheral', base + 0x0002_0000, 0x0001_0000, 'peripheral range')
-            self.zero_mem      = Area( self, 'zero_mem', base + 0x0003_0000, 0x0001_0000, 'zero mem range')
+            # SNAX: the TCDM's size in bytes, bank count and bank width in bytes (the hjson's
+            # tcdm.size, tcdm.banks and data_width / 8); the peripherals and the zero memory
+            # follow it, cluster_periph_size and zero_mem_size bytes. A DMA beat's superbank
+            # comes from snax_dma_data_width.
+            self.tcdm          = ClusterArch.Tcdm(self, 'tcdm', base, nb_masters, tcdm_size,
+                tcdm_banks, tcdm_bank_width)
+            self.peripheral    = Area( self, 'peripheral', base + tcdm_size, periph_size, 'peripheral range')
+            self.zero_mem      = Area( self, 'zero_mem', base + tcdm_size + periph_size, zero_mem_size, 'zero mem range')
             # Optional alias region (AliasRegionEnable/AliasRegionBase in snitch_cluster.sv):
             # the cluster-local TCDM, peripherals and zero memory are also reachable at a
             # fixed cluster-independent address, so that the same code can run on any cluster.
             self.alias_base = alias_base
             if alias_base is not None:
-                self.tcdm_alias       = Area( self, 'tcdm_alias', alias_base + 0x0000_0000, 0x0002_0000, 'TCDM alias range')
-                self.peripheral_alias = Area( self, 'peripheral_alias', alias_base + 0x0002_0000, 0x0001_0000, 'peripheral alias range')
-                self.zero_mem_alias   = Area( self, 'zero_mem_alias', alias_base + 0x0003_0000, 0x0001_0000, 'zero mem alias range')
+                self.tcdm_alias       = Area( self, 'tcdm_alias', alias_base + 0x0000_0000, tcdm_size, 'TCDM alias range')
+                self.peripheral_alias = Area( self, 'peripheral_alias', alias_base + tcdm_size, periph_size, 'peripheral alias range')
+                self.zero_mem_alias   = Area( self, 'zero_mem_alias', alias_base + tcdm_size + periph_size, zero_mem_size, 'zero mem alias range')
             self.core_type = core_type
             self.use_spatz = spatz
             self.spatz_nb_lanes = spatz_nb_lanes
@@ -167,13 +181,13 @@ else:
             self.snax_dma_data_width = snax_dma_data_width
 
         class Tcdm(Tree):
-            def __init__(self, parent, name, base, nb_masters):
+            def __init__(self, parent, name, base, nb_masters, size=0x0002_0000, nb_banks=32,
+                    bank_width=8):
                 super().__init__(parent, name)
-                self.area = Area( self, 'tcdm', base + 0x0000_0000, 0x0002_0000, 'TCDM range')
-                self.nb_banks_per_superbank = 8
-                self.bank_width = 8
-                self.nb_superbanks = 4
-                self.bank_size = self.area.size / self.nb_superbanks / self.nb_banks_per_superbank
+                self.area = Area( self, 'tcdm', base + 0x0000_0000, size, 'TCDM range')
+                self.nb_banks = nb_banks
+                self.bank_width = bank_width
+                self.bank_size = self.area.size / self.nb_banks
                 self.nb_masters = nb_masters
 
 
@@ -191,7 +205,7 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
         super().__init__(parent, name)
 
         banks = []
-        nb_banks = arch.nb_superbanks * arch.nb_banks_per_superbank
+        nb_banks = arch.nb_banks
         for i in range(0, nb_banks):
             banks.append(memory.Memory(self, f'bank_{i}', size=arch.bank_size, atomics=True,
                 width_log2=int(math.log2(arch.bank_width)), latency=0))

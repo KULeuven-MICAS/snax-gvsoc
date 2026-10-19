@@ -18,11 +18,11 @@ the unit's trace on and the counter check below; then
 each generated accelerator of forge/ (FORGE) with its program,
 `forge-elementwise` (GEN3 step 5) or `forge-reduce` (step 6b), named
 <program>.<design> (forge-reduce.vsum-r16 runs vsum with its len overridden
-to 16, four sums): the fixture's manifest.json gives the target, its
---target-dir folders, the unit's trace path and the one accelerator task's
-beats; the target runs from --target-dir, never built (it has no platform
-tree, so gvrun warns and runs it on the JSON config), with the counter
-check; then
+to 16, four sums): the fixture's manifest.json gives its cluster file, the
+unit's trace path and the one accelerator task's beats; it runs on
+`snax_hjson` with `--param hjson=<cluster file>` (LNK2a: its components are
+not the default file's, so gvrun warns and runs it on the JSON config), with
+the counter check; then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
@@ -38,15 +38,15 @@ flush of the unit's first trace line (`run 0: ...`) and that run fired the
 program's beats (snax-shell's in OWN_TARGET, a fixture's from its manifest;
 a manifest with other than one accelerator task fails).
 
-gvrun runs with PYTHONDONTWRITEBYTECODE=1, so a fixture folder stays as
-checked in. Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
+gvrun runs with PYTHONDONTWRITEBYTECODE=1, so no __pycache__ lands beside
+the modules it imports. Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
 failure prints that path and the log's last lines. Under GitHub Actions
 (GITHUB_ACTIONS=true) each failure also prints an `::error` line, an
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add` (README); the
-forge/ targets are never in that list. Exit code 0 when every program
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson`
+(README). Exit code 0 when every program
 passes, 1 otherwise.
 """
 
@@ -69,10 +69,11 @@ SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # unit's trace path, the beats of its first run: snax-shell's RUN_BEATS,
 # DATA_LEN 192 / 4 lanes / 3 runs)
 OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
-# Generated accelerators, forge/<design>/ (forge/README.md), each run by its
-# program: (design, program, forge-elementwise's datagen.py mode: 0 add, 2 mul;
+# Generated accelerators, forge/<design>/ (forge/README.md), each run on
+# snax_hjson from its cluster file by its program: (design, program, forge-elementwise's datagen.py mode: 0 add, 2 mul;
 # None for a program without one, forge-reduce's RATE_OVERRIDE or None)
 FORGE_DIR = ROOT / "forge"
+FORGE_TARGET = "snax_hjson"
 FORGE = [("vecadd", "forge-elementwise", 0, None), ("vecmul", "forge-elementwise", 2, None),
          ("vsum", "forge-reduce", None, None),
          # The derived task list overridden by hand (len 16 for vsum's T = N
@@ -98,7 +99,7 @@ def gvrun(target, elf, workdir, log, options=()):
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / 'install' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT / 'install' / 'python'}:{env.get('PYTHONPATH', '')}"
-    # No __pycache__ beside the modules gvrun imports, forge/'s fixtures among them
+    # No __pycache__ beside the modules gvrun imports
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     cmd = ["gvrun", "--target", target, "--work-dir", str(workdir),
            "--param", f"chip/soc/binary={elf}", *options, "run"]
@@ -282,10 +283,10 @@ def main():
             continue
         make(APPS / prog, f"DESIGN={design}", *([f"MODE={mode}"] if mode is not None else []),
              *([f"RATE_OVERRIDE={rate}"] if rate is not None else []))
-        dirs = [f"--target-dir={(folder / d).resolve()}" for d in manifest["target_dirs"]]
-        log = check.run(name, manifest["target"],
+        cluster = (folder / manifest["cluster"]).resolve()
+        log = check.run(name, FORGE_TARGET,
                         BUILD / "apps" / prog / variant(design, rate) / f"{prog}.elf",
-                        options=[*dirs, f"--trace={manifest['trace']}"])
+                        options=["--param", f"hjson={cluster}", f"--trace={manifest['trace']}"])
         if log is not None:
             text = log.read_text(errors="replace")
             why = check_counter(prog, text, text, tasks[0]["beats"])

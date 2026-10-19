@@ -27,7 +27,7 @@ SNAX_CLUSTER=<path>` (CI1, sw/README.md).
 
 Paths: sw/X -> sw/X, target/snitch_cluster/sw/X -> sw/X,
 target/snitch_cluster/cfg/X -> sw/cfg/X, util/sim/X -> sw/util/X,
-LICENSE -> sw/LICENSE. Run it in snax-forge's image (clustergen, regtool,
+LICENSE -> sw/LICENSE, docs/schema/X -> sw/docs/schema/X. Run it in snax-forge's image (clustergen, regtool,
 clang-format, bender).
 """
 
@@ -85,6 +85,8 @@ COPIED = [
     "target/snitch_cluster/cfg/snax_alu_cluster.hjson",
     "target/snitch_cluster/cfg/snax_alu_cluster_old.hjson",
     "target/snitch_cluster/cfg/snitch_cluster.hjson",
+    # The cluster hjson's schema, clustergen's check of it (LNK2a round 2)
+    "docs/schema/snitch_cluster.schema.json",
     "util/sim/data_utils.py",
 ]
 # sw/math/ whole, but for these (paths relative to sw/math/)
@@ -106,7 +108,7 @@ STREAMER_COPY = SW / "generated/snax_alu_cluster_old/streamer_csr_addr_map.h"
 SUBMODULES = ["sw/deps/printf", "sw/deps/riscv-opcodes"]
 # Upstream paths sync reads: a tracked change there is refused.
 CHECKED = ["LICENSE", "sw/snRuntime", "sw/math", "sw/deps", "sw/tests", "target/common",
-           "target/snitch_cluster", "util", "hw/snitch_cluster"]
+           "target/snitch_cluster", "util", "hw/snitch_cluster", "docs/schema"]
 # Upstream build files that sw/Makefile, sw/common.mk and the app Makefiles mirror
 MIRRORED = [
     f"{TSW}/Makefile", f"{TSW}/runtime/common/common.mk", f"{TSW}/runtime/rtl-generic/Makefile",

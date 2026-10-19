@@ -1,15 +1,15 @@
 # Builds the GEN3 step 6b program for a generated one-lane reduction
-# (forge/$(DESIGN)/, snax-forge's GVSoC generator) from sw/ (../../common.mk)
-# into build/sw/apps/forge-reduce/$(DESIGN)/. The fixture's include/ comes
-# before sw/generated/, so its streamer_csr_addr_map.h is the one used; no
-# snax-alu library. From the manifest: N (symbols.N), BEATS (tasks[0].beats,
-# the accelerator task's trip count, N for one lane) and RATE
-# (tasks[0].csrs.len, inputs per sum), passed to the program as -DBEATS and
-# -DRATE. data.h is data/datagen.py at N and RATE, seed 0. RATE_OVERRIDE,
-# when set, replaces the manifest's len (the golden, the writer's bound and
-# the unit's len follow it) and the build goes to
-# $(DESIGN)-r$(RATE_OVERRIDE)/: the derived task list overridden by hand, to
-# run more than one sum per run.
+# (forge/$(DESIGN)/, a design point's hjson and headers from snax-forge) from
+# sw/ (../../common.mk) into build/sw/apps/forge-reduce/$(DESIGN)/. The
+# fixture's include/ comes before sw/generated/, so its
+# streamer_csr_addr_map.h is the one used; no snax-alu library. From the
+# manifest: N (symbols.N), BEATS (tasks[0].beats, the accelerator task's trip
+# count, N for one lane) and RATE (tasks[0].csrs.len, inputs per sum), passed
+# to the program as -DBEATS and -DRATE. data.h is data/datagen.py at N and
+# RATE, seed 0. RATE_OVERRIDE, when set, replaces the manifest's len (the
+# golden, the writer's bound and the unit's len follow it) and the build goes
+# to $(DESIGN)-r$(RATE_OVERRIDE)/: the derived task list overridden by hand,
+# to run more than one sum per run.
 
 APP      = forge-reduce
 DESIGN  ?= vsum
