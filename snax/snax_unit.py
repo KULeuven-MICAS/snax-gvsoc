@@ -15,12 +15,15 @@ import gvsoc.systree
 
 
 class SnaxUnit(gvsoc.systree.Component):
-    """The datapath: lanes elements per beat, one op, lockstep or pipelined.
+    """The datapath: lanes elements per beat, one op, lockstep or pipelined;
+    with one input a fold, one result every rate firings.
 
     Parameters
     ----------
     inputs : list[str]
-        Input port names, in the op's operand order (two).
+        Input port names, in the op's operand order: two, or one for a fold
+        (the output's value is op(acc, x) over the firings of one output, acc
+        starting from the first input; one lane).
     outputs : list[str]
         Output port names (one).
     lanes : int
@@ -33,7 +36,11 @@ class SnaxUnit(gvsoc.systree.Component):
     signed : bool
         Min and max compare as two's complement.
     control : str
-        counted: the start's configuration word is the trip count.
+        counted: the unit counts its firings.
+    config : list[str]
+        The role of each configuration word the shell sends, in order:
+        count (the run's firings) and rate (firings per output; a fold,
+        pipelined). Default ['count'].
     wait : str
         lockstep or pipelined.
     latency : int
@@ -56,7 +63,7 @@ class SnaxUnit(gvsoc.systree.Component):
     def __init__(self, parent: gvsoc.systree.Component, name: str, inputs: list,
             outputs: list, lanes: int, data_width: int, op: int, signed: bool = False,
             control: str = 'counted', wait: str = 'lockstep', latency: int = 0, ii: int = 1,
-            csr_base: int = 0):
+            csr_base: int = 0, config: list = None):
         super().__init__(parent, name)
 
         self.add_sources(['snax_unit.cpp'])
@@ -69,6 +76,7 @@ class SnaxUnit(gvsoc.systree.Component):
             'op': op,
             'signed': signed,
             'control': control,
+            'config': list(config) if config is not None else ['count'],
             'wait': wait,
             'latency': latency,
             'ii': ii,

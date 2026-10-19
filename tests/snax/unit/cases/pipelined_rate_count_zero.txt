@@ -1,0 +1,21 @@
+# pipelined fold, a start with count 0: ignored, busy stays 0; a later start
+# runs as usual (busy 4 + flush 1 = 5)
+wait pipelined
+latency 1
+ii 1
+inputs 1
+config count rate
+start 0 0 4 ignored
+start 2 4 2 taken
+expect run 0: firings 4 busy 4 stall_in 0 stall_out 0 flush 1
+cycles
+# in out  fire push busy
+1 1       0 0 0     # 0: start with count 0, ignored
+1 1       0 0 0     # 1: still idle
+1 1       0 0 0     # 2: start
+1 1       1 0 1     # 3
+1 1       1 0 1     # 4: gives result 0
+1 1       1 1 1     # 5: push 0
+1 1       1 0 1     # 6: the last firing
+1 1       0 1 1     # 7: push 1, the end (flush)
+1 1       0 0 0     # 8

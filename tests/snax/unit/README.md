@@ -23,8 +23,9 @@ from cycle 0:
 |---|---|
 | `wait lockstep\|pipelined` | the rule (default lockstep) |
 | `latency L`, `ii N` | pipelined only (defaults 0 and 1) |
-| `inputs N` | input columns (default 2) |
-| `start CYCLE COUNT taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step), and its expected answer |
+| `inputs N` | input columns (default 2; 1 for a fold) |
+| `config ROLE...` | the roles of a start's words, `count` and `rate` (default `count`), as SnaxUnit's `config` |
+| `start CYCLE WORD... taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step), its words in `config`'s order, and its expected answer |
 | `expect run I: firings F busy B stall_in SI stall_out SO flush FL` | the trace line expected at the end of run I, in order |
 | `like FILE` | run FILE (beside this one) with this file's `wait`, `latency` and `ii` instead of its own; one run per `like` |
 | `cycles` | the cycle lines follow |
@@ -43,6 +44,10 @@ hand from the rules in `snax_unit.hpp`; each case says how in its comments.
 | `pipelined_l2_backpressure` | L = 2: the pipeline freezes on a full head with no room, results in flight after the last firing (flush, but a frozen cycle: stall_out) |
 | `pipelined_ii2` | L = 1, II 2: the II gap is busy, with or without inputs; one flush cycle |
 | `pipelined_l0` | every lockstep case again as pipelined with L = 0, II 1, its expectations unchanged |
+| `pipelined_rate_t4` | a fold at L = 1, II 1, rate 4, count 8 (snax-forge's Accumulator at T = 4, n = 8): a result every fourth firing, the next input taken as it leaves; a start in the last cycle refused, the next run in the cycle after |
+| `pipelined_rate_backpressure` | the same with no room: a waiting result freezes the pipeline (stall_out), an empty head needs no room |
+| `pipelined_rate_one` | rate 1 (len = 1): every firing a result, pushed while the next input is taken |
+| `pipelined_rate_count_zero`, `pipelined_rate_zero` | a start with count 0, or with rate 0, ignored |
 
 ## Running
 
@@ -50,4 +55,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/unit/run.sh
 
-It prints `PASS` per case (and `ops`) and ends with `11 passed, 0 failed`.
+It prints `PASS` per case (and `ops`) and ends with `16 passed, 0 failed`.

@@ -15,12 +15,14 @@ named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
 `snax-shell` on `snax_tiled_add` (GEN3 step 2: SnaxShell and SnaxUnit), with
 the unit's trace on and the counter check below; then
-`forge-elementwise` on each generated accelerator of forge/ (FORGE, GEN3
-step 5), named forge-elementwise.<design>: the fixture's manifest.json gives
-the target, its --target-dir folders, the unit's trace path and the one
-accelerator task's beats; the target runs from --target-dir, never built
-(it has no platform tree, so gvrun warns and runs it on the JSON config),
-with the counter check; then
+each generated accelerator of forge/ (FORGE) with its program,
+`forge-elementwise` (GEN3 step 5) or `forge-reduce` (step 6b), named
+<program>.<design> (forge-reduce.vsum-r16 runs vsum with its len overridden
+to 16, four sums): the fixture's manifest.json gives the target, its
+--target-dir folders, the unit's trace path and the one accelerator task's
+beats; the target runs from --target-dir, never built (it has no platform
+tree, so gvrun warns and runs it on the JSON config), with the counter
+check; then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
@@ -67,10 +69,16 @@ SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # unit's trace path, the beats of its first run: snax-shell's RUN_BEATS,
 # DATA_LEN 192 / 4 lanes / 3 runs)
 OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
-# Generated accelerators, forge/<design>/ (forge/README.md), each run by
-# forge-elementwise: (design, datagen.py's mode: 0 add, 2 mul)
+# Generated accelerators, forge/<design>/ (forge/README.md), each run by its
+# program: (design, program, forge-elementwise's datagen.py mode: 0 add, 2 mul;
+# None for a program without one, forge-reduce's RATE_OVERRIDE or None)
 FORGE_DIR = ROOT / "forge"
-FORGE = [("vecadd", 0), ("vecmul", 2)]
+FORGE = [("vecadd", "forge-elementwise", 0, None), ("vecmul", "forge-elementwise", 2, None),
+         ("vsum", "forge-reduce", None, None),
+         # The derived task list overridden by hand (len 16 for vsum's T = N
+         # = 64): 4 sums per run, the multi-output path, until a kernel gives
+         # T < N
+         ("vsum", "forge-reduce", None, 16)]
 SIZES = [4, 100, 128, 1024, 4096]
 STREAM_CASES = ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                 "prio_queued", "idle_restart"]
@@ -253,10 +261,14 @@ def main():
     print(f"  {check.count - count} run")
 
     count = check.count
-    prog = "forge-elementwise"
-    print(f"{prog} on forge/: {', '.join(design for design, _ in FORGE)}")
-    for design, mode in FORGE:
-        name = f"{prog}.{design}"
+    def variant(design, rate):
+        """The design's name in the run's name and the build folder."""
+        return design if rate is None else f"{design}-r{rate}"
+
+    print(f"forge/'s accelerators: "
+          f"{', '.join(f'{prog}.{variant(design, rate)}' for design, prog, _, rate in FORGE)}")
+    for design, prog, mode, rate in FORGE:
+        name = f"{prog}.{variant(design, rate)}"
         if not check.selected(name):
             continue
         folder = FORGE_DIR / design
@@ -268,10 +280,11 @@ def main():
             check.fail(name, f"{len(tasks)} accelerator tasks in "
                        f"{(folder / 'manifest.json').relative_to(ROOT)}, not 1")
             continue
-        make(APPS / prog, f"DESIGN={design}", f"MODE={mode}")
+        make(APPS / prog, f"DESIGN={design}", *([f"MODE={mode}"] if mode is not None else []),
+             *([f"RATE_OVERRIDE={rate}"] if rate is not None else []))
         dirs = [f"--target-dir={(folder / d).resolve()}" for d in manifest["target_dirs"]]
         log = check.run(name, manifest["target"],
-                        BUILD / "apps" / prog / design / f"{prog}.elf",
+                        BUILD / "apps" / prog / variant(design, rate) / f"{prog}.elf",
                         options=[*dirs, f"--trace={manifest['trace']}"])
         if log is not None:
             text = log.read_text(errors="replace")

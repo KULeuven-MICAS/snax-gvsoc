@@ -1,0 +1,34 @@
+# pipelined fold, L = 1, II 1, rate 4 (snax-forge's Accumulator, T = 4, n = 8):
+# a result on every fourth firing, pushed the cycle after it; the fifth input
+# is taken in the cycle the first result leaves (no drain cycle). The final
+# result's push is the run's last cycle, flush (busy 8 + flush 1 = 9 busy
+# cycles). A start in that cycle is refused, one in the next cycle runs again
+wait pipelined
+latency 1
+ii 1
+inputs 1
+config count rate
+start 0 8 4 taken
+start 9 8 4 refused
+start 10 4 4 taken
+expect run 0: firings 8 busy 8 stall_in 0 stall_out 0 flush 1
+expect run 1: firings 4 busy 4 stall_in 0 stall_out 0 flush 1
+cycles
+# in out  fire push busy
+1 1       0 0 0     # 0: start
+1 1       1 0 1     # 1: firing 0
+1 1       1 0 1     # 2
+1 1       1 0 1     # 3
+1 1       1 0 1     # 4: firing 3, gives result 0
+1 1       1 1 1     # 5: push 0, firing 4
+1 1       1 0 1     # 6
+1 1       1 0 1     # 7
+1 1       1 0 1     # 8: firing 7 (the last), gives result 1
+1 1       0 1 1     # 9: push 1, the end (flush); a start refused
+1 1       0 0 0     # 10: idle, start
+1 1       1 0 1     # 11
+1 1       1 0 1     # 12
+1 1       1 0 1     # 13
+1 1       1 0 1     # 14: firing 3 (the last)
+1 1       0 1 1     # 15: push, the end (flush)
+1 1       0 0 0     # 16

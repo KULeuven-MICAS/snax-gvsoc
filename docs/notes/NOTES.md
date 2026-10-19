@@ -3809,3 +3809,228 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   Regression section says so. Run, in snax-forge's image: `make regress
   K=forge`: the two forge entries, `regression passed`; no `__pycache__`
   under `forge/`.
+
+### GEN3 round 4, step 1: the Accumulator with start, busy and no drain cycle
+
+- 2026-10-19. snax-forge `ry/gen3r4` (`c4ea4c2`):
+  `hw/chisel/.../samples/Accumulator.scala` rewritten. ElementwiseTiledSpatial's
+  control (`start`, `busy`, `done`) with `loopCount` (n, input beats) and
+  `len` (T, inputs per output), both latched at a start taken while idle; a
+  start with either 0 is ignored. One register `acc`: on `in.fire` it adds
+  the input, or loads it when `out` fires in the same cycle; on `out.fire`
+  alone it is cleared. `out.valid` rises the cycle after a sum's T-th input
+  and holds until `out` fires; `busy` falls after the last output fires,
+  `done` is high in that cycle. So T cycles per sum with `out` always ready,
+  no drain cycle. snax-forge D133.
+- Differs from the prompt: `in.ready = busy && !allIn && (!out.valid ||
+  out.ready)`. Without `!allIn` the block takes the next run's first beat in
+  the cycle its last sum leaves (`busy` and `out.ready` both high); the
+  back-to-back test fails that way. n not a multiple of T: the last sum ends
+  at the n-th input (n mod T inputs), so the run ends rather than hangs.
+- `AccumulatorSpec` rewritten on a per-cycle driver: T = 4, n = 8 (inputs
+  in cycles 0 to 7, sums 10 and 26 in cycles 4 and 8, busy to 8, done in
+  8); back-pressure; `len` 1; a start ignored at `loopCount` 0 and `len` 0;
+  no input before a start; two runs back to back with both runs' beats
+  offered without a break; n not a multiple of T; bubbles, wrap and
+  `accWidth` headroom kept. The old tests' content is in these; none
+  dropped. `pixi run -e hw chisel-test`: 53 passed, 1 canceled (the
+  lockstep spec, `SNAX_GVSOC_UNIT_CASES` unset); `chisel-gen` 9 modules;
+  `chisel-check`, fmt, lint clean. Without `!allIn`: two tests fail.
+
+### GEN3 round 4, step 2: SnaxUnit for one-input reductions
+
+- 2026-10-19. `snax/snax_unit.hpp`: `start(cycle, count, rate = 1)`, count
+  or rate 0 ignored; a pipelined firing gives a result (`Step::result`) on
+  every rate-th firing of the run only, and only a result enters the
+  pipeline (L = 0: only a result needs room). Rate 1 is the old rule.
+  Pipelined L = 1, II 1 already lets a firing into slot 0 in the cycle the
+  head is pushed, so the next input is taken as a result leaves: no drain
+  property (the header says so).
+- `snax/snax_unit.cpp`, `snax_unit.py`: `inputs` one or two names; one is a
+  fold, the output's value op(acc, x) over the firings of one output, acc
+  the first input's beat (`SnaxUnit::fold`), with `lanes` 1 only (refused
+  otherwise: no Chisel block folds lanes). New property `config`, the roles
+  of the start's 32-bit words in order, `count` (once, required) and `rate`
+  (at most once); Python default `['count']`, today's one word. `rate`
+  needs a fold and `pipelined` (refused otherwise). A start with count not a
+  multiple of rate: a fatal naming both. The constructor's trace line says
+  `<op> fold` for a fold; a start's line adds `rate` when there is one; the
+  lines of a two-input unit are unchanged.
+- `tests/snax/unit/`: a `config` header line and start lines with one word
+  per role (`tb.cpp`, README). New cases, the Chisel tests of step 1:
+  `pipelined_rate_t4` (L 1, II 1, rate 4, count 8: results pushed in cycles
+  5 and 9, `firings 8 busy 8 stall_in 0 stall_out 0 flush 1`; a start in
+  cycle 9 refused, a run of 4 from cycle 10), `pipelined_rate_backpressure`
+  (`busy 8 stall_out 4 flush 1`), `pipelined_rate_one` (rate 1, a result
+  every cycle), `pipelined_rate_count_zero`, `pipelined_rate_zero`. Every
+  old case unchanged: `16 passed, 0 failed`. With only a result-less rule
+  (`slots[0] = s.fire`) four of the five fail.
+- Run, in snax-forge's image: main's logs first (`make build
+  TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add"`, `make regress`,
+  61 logs saved). Then this step: `make build` with the same TARGETS, exit
+  0, no warning; `make regress`: `regression passed`, unit 1, SNAX 40,
+  `snax-shell.snax_tiled_add` 1, `forge-elementwise` 2, plain 17. Against
+  main's: 57 byte-identical; `unit` differs by its five new cases; the
+  three runs with `--trace=snax_acc0/unit` (`forge-elementwise.vecadd`,
+  `.vecmul`, `snax-shell.snax_tiled_add`) differ only in the port pointers
+  of the trace's `New ... port` lines, which differ between two runs of one
+  build too (address randomisation); with them masked all three equal
+  main's.
+- Differs from the prompt: the three pointer-bearing logs cannot be
+  byte-identical to any other run, so they were compared masked.
+- GEN3.md: the Open line on 2 inputs / 1 output and one-word `counted`
+  closed.
+- Not verified: a fold inside GVSoC (no target has one before step 4); the
+  fatal on count not a multiple of rate, and the property refusals (read,
+  not run).
+
+### GEN3 round 4, step 3: the Accumulator's binding, its adapter and vsum (snax-forge)
+
+- 2026-10-19. snax-forge only (`ff79dfa`); noted here as the next
+  snax-gvsoc commit. `accumulate.json`'s `chisel_accumulator`: drain 1 to
+  0 (D133, D103 amended), binding `Accumulator`, args `{}`, `counted`,
+  csrs `loopCount = n` then `len = T`, `pipelined`; `chisel_adder_tree`
+  stays null. D129 amended: `counted` the only control (`stream`
+  unregistered), csrs one field or more.
+- The drain change moved no cycle count: dot and dot_serial on small16 run
+  as on HEAD (`run.md`, profile, trace, data identical); only the declared
+  value moves, in `cluster.json` and `run.json` (`"drain": 1` gone) and the
+  design report's Drain column. Moved, old -> new: `test_library`
+  (L, II, drain) (1, 1, 1) -> (1, 1, 0); `test_dot` cluster params lose
+  `"drain": 1`, design drain 1 -> 0; `test_dot_example` drains
+  `{"dot": 0, "dot_serial": 1}` -> both 0; the CONTRACTS snippet of
+  `accumulate.json`; `examples/dot/README.md`'s design table, Drain 1 -> 0
+  (reported first, as the prompt asks, and approved), its two drain
+  sentences rewritten or dropped.
+- `gen/blocks.py`: the `Accumulator` adapter (one input of rate 1, one
+  output of a named rate, one lane, 64-bit, op add, `counted`, `pipelined`,
+  L 1, II 1, drain 0, fields `loopCount` and `len`, `config
+  ['count', 'rate']`); `Unit.config`, emitted only when not `['count']`, so
+  the vecadd and vecmul fixtures stay byte-identical.
+- `kernels/polybench/vsum.py` (`out[0] = np.sum(A)`, int64), its DFG
+  fixture and import test; `recipes/vsum.json` (W 1, N 64, `sum_map` split
+  by W, bound to `chisel_accumulator`, instance `acc`). Generated on
+  `platforms/snax_alu.json`: one reader and one writer of one lane
+  (`spatial_bounds [[1]]`, `temporal_dim [1]`, `num_channel [1]`,
+  `fifo_depth [8]`); CSRs streamer 960 to 972, `loopCount` 973, `len` 974,
+  start 975, busy 976, counter 977; task `sum_acc` 64 beats, csrs
+  `{loopCount: 64, len: 64}`.
+- Tests: fmt, lint clean; brm, dfg, gen, flow, model and sandbox tests
+  1347 passed.
+
+### GEN3 round 4, step 4: the vsum fixture and forge-reduce
+
+- 2026-10-19. `forge/vsum/`: snax-forge's generator output for
+  `recipes/vsum.json` on `platforms/snax_alu.json`, by `forge/README.md`'s
+  refresh commands (install check against snax-forge's
+  `out/snax-gvsoc/install`); listed in `forge/README.md`.
+- `sw/apps/forge-reduce/`: `data/datagen.py` (A int64 in [-1000, 1000)
+  from `default_rng(0)`, OUT the sums of every RATE), a Makefile reading N,
+  BEATS and RATE (`tasks[0].csrs.len`) from the manifest (make errors: N
+  not BEATS, RATE not dividing BEATS), the program (reader A, writer O of
+  BEATS / RATE beats, loopCount then len, the starts, busy, counter, sums)
+  and its README.
+- `tests/snax/regress.py`: FORGE entries are `(design, program, mode)`,
+  mode None for forge-reduce (no `MODE=`), named `<program>.<design>`;
+  `vsum` runs `forge-reduce`. CI's comment updated.
+- `python3 tests/snax/regress.py -k forge`: 3 run, passed.
+  `forge-reduce.vsum`: `run 0: firings 64 busy 64 stall_in 2 stall_out 0
+  flush 1`, `forge-reduce data: 0 errors (1 sums)`, counter 67, errors 0.
+  The two forge-elementwise logs equal main's with pointers masked.
+- Not verified: a vsum run with more than one sum (T < N): no fixture has
+  one; the unit cases cover rate 4 and 1.
+
+### GEN3 round 4, step 5: the fixture test over vecadd, vecmul and vsum (snax-forge)
+
+- 2026-10-19. snax-forge only (`99a4023`). `tests/gen/test_fixture.py`'s
+  `DESIGNS` holds vsum; a design whose folder the submodule's pin lacks is
+  skipped, as before. At the pin (`7e1898cc`): 2 passed, vsum skipped. With
+  the submodule on this repo's `ry/gen3r4` (`b8fc3082`, fetched from the
+  sibling checkout): 3 passed. One byte of `forge/vsum/forge_vsum_acc.py`
+  changed (`latency=1` to `latency=2`): vsum fails on that file, the other
+  two pass. Restored, and the submodule back on its pin; the pointer never
+  staged.
+
+### GEN3 round 4, step 6: the Accumulator against SnaxUnit's rate cases (snax-forge)
+
+- 2026-10-19. snax-forge only (`8df0aa7`). `SnaxUnitCases` (test helper):
+  round 3's case parser, shared, now reading `latency`, `ii`, `config`,
+  start lines with one word per role and the `expect run` lines, and
+  refusing an unknown header line. `ElementwiseTiledSpatialLockstepSpec`
+  uses it, unchanged otherwise. New `AccumulatorRateSpec`: every pipelined
+  fold case with a rate (the five `pipelined_rate_*`) drives the
+  Accumulator (L 1, II 1, `loopCount` the count, `len` the rate) and
+  compares fire, push and busy per cycle, each start's answer, each pushed
+  sum against its inputs, and the `expect run` lines, every busy cycle
+  classed by D59's order from what the block shows (`out.valid` with no
+  room stall_out, an input taken busy, no input with inputs left stall_in,
+  else flush).
+- `chisel-test` with `SNAX_GVSOC_UNIT_CASES` on this repo's cases: 55
+  passed, 0 canceled; on the submodule's pinned cases: 54 passed, the rate
+  spec canceled (no fold case: the pin predates this round's step 2);
+  without the variable both cross-check specs canceled. `chisel-check`, fmt, lint
+  clean. Bites: with `in.ready` low while a result waits (the old drain
+  cycle) it fails at `pipelined_rate_backpressure` cycle 8 (fire); with
+  one `expect run` flush changed in a copy of the cases it fails on the
+  run line of `pipelined_rate_zero`, the last case read.
+
+### GEN3 round 4, step 7: docs and full runs
+
+- 2026-10-19. GEN3.md: 6b done; What it models (the new Accumulator);
+  The binding (`counted` the only control, the Accumulator's binding,
+  `config`); fixtures and programs; rounds table; Open (a fold with T < n
+  only in the unit cases and the rate spec; n not a multiple of T; the
+  Accumulator's combinational `in.ready`; `chisel_adder_tree` unbound).
+  README: `forge-reduce` and regress's programs. snax-forge: STATUS
+  (GEN3 `done`, next LNK2a, open item 68), README section 5 (vsum's
+  fixture); DECISIONS and CONTRACTS as of step 3.
+- Full `make regress` (step 2's build, no C++ change since): `regression
+  passed`; unit 1, SNAX 40, `snax-shell.snax_tiled_add` 1, forge 3
+  (`forge-elementwise.vecadd`, `.vecmul`, `forge-reduce.vsum`), plain 17.
+  Against main's 61 logs: 57 byte-identical; the three with
+  `--trace=snax_acc0/unit` equal with pointers masked; `unit` differs only
+  by its five new cases (`16 passed, 0 failed`). `forge-reduce.vsum` is
+  new: `run 0: firings 64 busy 64 stall_in 2 stall_out 0 flush 1`, counter
+  67, 0 errors.
+- Full `pixi run -e ci test` in snax-forge: 1721 passed, 1 skipped (vsum's
+  fixture: the submodule's pin predates `forge/vsum/`); fmt and lint clean.
+- GEN3's acceptance (snax-forge STATUS): vecadd, vecmul and vsum run on
+  their generated accelerators with correct data and the counter
+  `check_counter` predicts, `make regress` passes on the fixtures, and
+  snax-forge reproduces all three byte for byte (vsum with the submodule on
+  `ry/gen3r4`, step 5).
+- Not verified: vsum's fixture test at a bumped pin (needs this branch
+  merged and the submodule bumped); a build from scratch (step 2's build
+  reused); the RTL side of the Accumulator beyond chiseltest.
+
+### GEN3 round 4b, F1: more than one sum per run
+
+- 2026-10-19. `sw/apps/forge-reduce/Makefile`: an optional
+  `RATE_OVERRIDE` replaces the manifest's len (BEATS % RATE checked as
+  before), so the golden (`datagen.py --rate`), the writer's bound
+  (BEATS / RATE) and the unit's `len` follow it; its build goes to
+  `vsum-r<RATE>/`, so it never overwrites the derived run's ELF or
+  `data.h`. Unset by default: `forge-reduce.vsum` is built and run as
+  before.
+- `tests/snax/regress.py`: FORGE entries carry a fourth field, the
+  override; one new entry, `forge-reduce.vsum-r16` (vsum, len 16), with a
+  comment that it overrides the derived task list by hand to run the
+  multi-output path until a kernel gives T < N. README, forge-reduce's
+  README and GEN3.md's Open line updated.
+- `python3 tests/snax/regress.py -k forge`: 4 run, passed.
+  `forge-reduce.vsum-r16`: `Start at cycle 2280: count 64, rate 16`,
+  `run 0: firings 64 busy 64 stall_in 2 stall_out 0 flush 1`,
+  `forge-reduce data: 0 errors (4 sums)` (golden 132, 1580, -5582, 5095,
+  which add up to vsum's 1225), counter 67 = 64 + 2 + 0 + 1, errors 0.
+  `forge-reduce.vsum` unchanged: rate 64, the same run line, 1 sum,
+  counter 67.
+- Not verified: other overrides (only 16 run); the full `make regress`
+  (only `-k forge`).
+
+### GEN3 round 4b, F2: snax-forge's STATUS (snax-forge)
+
+- 2026-10-19. snax-forge only (`docs/STATUS.md`); noted here in its own
+  commit, since no snax-gvsoc fix-up follows. M14's row `todo` to `wip`;
+  the next-up paragraph says GEN3 is done (after LNK1) and LNK2a is next,
+  and names round 4b's `forge-reduce.vsum-r16`. fmt and lint clean (no
+  code changed).

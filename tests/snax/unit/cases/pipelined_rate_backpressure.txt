@@ -1,0 +1,27 @@
+# pipelined fold, L = 1, II 1, rate 4, out not ready: a result waiting with no
+# room freezes the pipeline, so no input is taken (stall_out); with the head
+# empty a missing room does not matter (busy 8 + stall_out 4 + flush 1 = 13)
+wait pipelined
+latency 1
+ii 1
+inputs 1
+config count rate
+start 0 8 4 taken
+expect run 0: firings 8 busy 8 stall_in 0 stall_out 4 flush 1
+cycles
+# in out  fire push busy
+1 1       0 0 0     # 0: start
+1 1       1 0 1     # 1: firing 0
+1 1       1 0 1     # 2
+1 1       1 0 1     # 3
+1 1       1 0 1     # 4: firing 3, gives result 0
+1 0       0 0 1     # 5: head 0, no room: frozen
+1 0       0 0 1     # 6: frozen
+1 0       0 0 1     # 7: frozen
+1 1       1 1 1     # 8: push 0, firing 4
+1 1       1 0 1     # 9
+1 0       1 0 1     # 10: head empty: no room needed
+1 1       1 0 1     # 11: firing 7 (the last), gives result 1
+1 0       0 0 1     # 12: head 1, no room: frozen
+1 1       0 1 1     # 13: push 1, the end (flush)
+1 1       0 0 0     # 14

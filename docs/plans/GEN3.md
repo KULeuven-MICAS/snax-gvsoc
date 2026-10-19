@@ -24,8 +24,13 @@ From source; snax_cluster at the pin of `sw/README.md` (`05615e4`).
   refused), start, busy, done; Decoupled `a`, `b`, `out`.
   `a.ready = b.ready = busy && out.ready`; `out` is valid when both inputs
   fire. Latency 0, II 1.
-- snax-forge `hw/chisel/.../samples/Accumulator.scala`: `len`, no start or
-  busy, `in.ready = !draining`, one output per `len` inputs.
+- snax-forge `hw/chisel/.../samples/Accumulator.scala` (round 4, D133
+  there): `loopCount` (n) and `len` (T), start, busy, done as
+  `ElementwiseTiledSpatial`'s (0 in either ignored); Decoupled `in`, `out`;
+  one output per `len` inputs, the last at the n-th. One register holds the
+  sum and the result: `in.ready = busy && !allIn && (!valid || out.ready)`,
+  the next input loaded as a result leaves, so no drain cycle. Latency 1,
+  II 1.
 - snax_cluster `hw/chisel_acc/.../gemmx/BlockGemmRescaleSIMD.scala`: the
   `ctrl` bundle, and the generator writing
   `snax_streamer_gemmX_shell_wrapper.sv`: `csr_reg_set_i` to the
@@ -56,8 +61,20 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 - The data width comes from the ports' `dtype`, which all ports of a unit
   share; a mismatch is an error.
 - A fixed op gives no `opSel` CSR.
-- `control`: `counted` (the block counts), `stream` (the shell counts;
-  `Accumulator`).
+- `control`: `counted` (the block counts its firings), the only kind; the
+  start's configuration holds the count. `csrs` may hold more than one
+  field: `accumulate`'s `chisel_accumulator` (round 4):
+
+  ```json
+  {"block": "Accumulator",
+   "args": {},
+   "control": "counted",
+   "csrs": [{"field": "loopCount", "value": "n"}, {"field": "len", "value": "T"}],
+   "wait": "pipelined"}
+  ```
+
+  `SnaxUnit`'s `config` names each configuration word's role, `count` or
+  `rate` (`["count", "rate"]` here; `["count"]` by default, not written).
 - `wait`: `lockstep` (all inputs and room on `out` in one cycle),
   `pipelined` (an L-stage pipeline or output register; D35's rule),
   `buffered` later.
@@ -84,7 +101,8 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   import are there (snax-forge D132).
 - One fixture per design point `make regress` runs, in `forge/<design>/`
   here (`forge/README.md`): the generator's output, untouched, refreshed by
-  hand, its diff the check (snax-forge D128). vecadd and vecmul at W = 4.
+  hand, its diff the check (snax-forge D128). vecadd and vecmul at W = 4,
+  vsum at W = 1.
   The generator's output names the design point by its path from
   snax-forge's root and is byte-identical wherever it is written (round 2b
   F3), so snax-forge's `tests/gen/test_fixture.py` generates it again and
@@ -98,8 +116,8 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
   `symbols` (vecadd's `{"N": 64}`), the target, the files, the
   `--target-dir`s, the unit's trace path, the CSR layout and each
   accelerator task's beats. `make regress` reads it with plain json
-  (`FORGE` in `tests/snax/regress.py`), and `forge-elementwise` sizes its
-  data by `symbols.N`.
+  (`FORGE` in `tests/snax/regress.py`), and `forge-elementwise` and
+  `forge-reduce` size their data by `symbols.N`.
 - `snax_alu.py` takes its accelerator as a board class attribute
   (`SnaxAluBoard.accelerator`, step 2), as `snax_alu_sparse.py` overrides
   the interconnect.
@@ -118,7 +136,7 @@ An implementation's `binding` in a BRM (D129), for `elementwise_add`:
 | 2 | LNK1 in snax-forge (D131), steps 3 and 4: done |
 | 2b | Fix-ups F1 to F4, below: done |
 | 3 | Steps 5, 6a and 7: done |
-| 4 | Step 6b, planned first |
+| 4 | Step 6b, in seven steps across both repos: done |
 
 ## Acceptance
 
@@ -136,7 +154,7 @@ As GEN3's row in snax-forge `docs/STATUS.md`.
 | 4 | The headers: the accelerator's CSRs and the streamer's map, equal to `sw/`'s copy for `snax_alu`'s template. In `include/` of the generator's output, listed in the manifest: `streamer_csr_addr_map.h` (the Chisel header's defines, values and order) and `<instance>_csr.h` (`snax-alu-lib.h`'s form; vecadd's `ACC_RW_LOOP_COUNT` 978 to `ACC_RO_PERF_COUNT` 981) | done |
 | 5 | A hand-written vecadd program on the generated headers (`sw/apps/forge-elementwise/`, until GEN2a), the fixture `forge/vecadd/`, `make regress` from its manifest (its counter through `check_counter`, the manifest's `symbols` and beats); snax-forge reproduces the fixture byte for byte | done |
 | 6a | `elementwise_mul`: `elementwise_add`'s binding with op mul (2); the test kernel `vecmul` and `recipes/vecmul.json` in snax-forge; the fixture `forge/vecmul/`, run by `forge-elementwise` at `MODE=2` | done |
-| 6b | `accumulate`, `control: stream`, `wait: pipelined`: `SnaxUnit`'s fixed 2 inputs / 1 output, an output rate T (one output per T inputs), what `stream` control configures and which of n and T the shell counts, the drain cycle, a sum-only kernel; planned first | todo |
+| 6b | `accumulate`, `control: counted`, `wait: pipelined`: the Chisel Accumulator rewritten with start, busy and no drain cycle (snax-forge D133); `SnaxUnit` folds one input with a runtime rate (`config` `count`, `rate`), five rate cases; the binding (`loopCount` = n, `len` = T) and its adapter; the test kernel `vsum` (`recipes/vsum.json`, W 1, N 64); the fixture `forge/vsum/`, run by `forge-reduce`; snax-forge reproduces it, and `AccumulatorRateSpec` drives the Chisel block through the rate cases, run lines included | done |
 | 7 | The lockstep half of the unit cross-check: snax-forge's `ElementwiseTiledSpatialLockstepSpec` drives `ElementwiseTiledSpatial` through every lockstep case of `tests/snax/unit/cases/` (`SNAX_GVSOC_UNIT_CASES`, canceled without it) and checks fire, push and busy per cycle and each start's answer: the four cases agree; a flipped busy bit fails | done |
 
 Round 1b, fix-ups after round 1:
@@ -163,6 +181,13 @@ Round 2b, fix-ups after round 2 (all in snax-forge):
   sends it in E + 1 (the `fall_cycle` path in `csr_req`), read, never run.
 - `csrrw` with a destination register on a held start: the core's pending
   write path (`snax_csr_response`) was run only with rd = x0 (`csrw`).
-- `SnaxUnit` takes exactly 2 inputs and 1 output, and `counted` is one
-  configuration word (the count): `accumulate` (one input, `control:
-  stream`) needs more, step 6b.
+- No kernel gives a fold with more than one sum per run (T < n):
+  `forge/vsum/` is T = N, one sum. `make regress` runs it with the derived
+  task list overridden by hand (`forge-reduce.vsum-r16`, len 16, four sums;
+  round 4b F1), besides the unit cases and `AccumulatorRateSpec`.
+- n not a multiple of T: `SnaxUnit` stops (fatal), the Chisel Accumulator
+  ends the last sum at the n-th input; the BRM's rates make n a multiple of
+  T (D25), so neither is run.
+- The Accumulator's `in.ready` depends on `out.ready` combinationally, for
+  GEN1 to keep in mind behind the streamer; `chisel_adder_tree` has no
+  binding.

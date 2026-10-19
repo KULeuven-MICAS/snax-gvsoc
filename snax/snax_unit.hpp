@@ -11,8 +11,11 @@
 // code, as snax_plain_arb.hpp.
 //
 // A run: a start offered in cycle s is taken only when the unit is idle in s
-// and its count is not 0 (a count of 0 is ignored: busy stays 0); a start
-// while busy, or a second one in s, is refused. The unit is busy from s + 1
+// and its count and rate are not 0 (a count or rate of 0 is ignored: busy
+// stays 0); a start while busy, or a second one in s, is refused. A run of
+// count firings gives a result on every rate-th firing only (count / rate
+// results; rate 1, every firing); the component refuses a count that is not
+// a multiple of the rate before it starts. The unit is busy from s + 1
 // to the run's last cycle E. step() is called once per busy cycle, in order,
 // with whether every input has a beat and whether the output has room (the
 // component probes all ports first); it says whether the unit fires (takes a
@@ -20,21 +23,26 @@
 //
 // lockstep, as snax-forge's ElementwiseTiledSpatial: it fires when every
 // input has a beat and the output has room, and pushes the result in the
-// same cycle (latency 0, II 1); E is the firing that reaches count.
+// same cycle (latency 0, II 1, rate 1); E is the firing that reaches count.
 //
-// pipelined, as snax-forge's snax_model/accel.py (D35) without rates and
-// drain: a join on the inputs, an L-stage pipeline that stalls as a whole
-// when its head cannot be pushed, at most one firing per II. A firing in t
-// is pushed in t + L when nothing stalls. II counts cycles from the last
-// firing; a stall does not restart it, and it carries over to the next run.
-// With L = 0 the result is pushed in its firing cycle, and a firing with no
-// room on the output is a stall: lockstep's rule. E is the push of the last
-// result.
+// pipelined, as snax-forge's snax_model/accel.py (D35) without its drain: a
+// join on the inputs, an L-stage pipeline that stalls as a whole when its
+// head cannot be pushed, at most one firing per II. A firing that gives a
+// result (every rate-th) puts it into the pipeline; the others put nothing.
+// A result from a firing in t is pushed in t + L when nothing stalls. II
+// counts cycles from the last firing; a stall does not restart it, and it
+// carries over to the next run. With L = 0 the result is pushed in its
+// firing cycle, and a firing that gives a result with no room on the output
+// is a stall: lockstep's rule. E is the push of the last result. A firing
+// enters slot 0 in the cycle the head is pushed, so with L = 1 and II 1 the
+// next input is taken in the cycle a result leaves: no drain cycle (snax-forge
+// D133, the Chisel Accumulator).
 //
 // Each busy cycle is one class, in D59's order: stall_out (the head, or for
-// L = 0 a firing, has no room) > busy (fired, or in the II gap after a
-// firing) > stall_in (II allows, an input has no beat) > flush (pipelined
-// only: results in flight after the last firing's II gap, accel.py's idle).
+// L = 0 a firing that gives a result, has no room) > busy (fired, or in the
+// II gap after a firing) > stall_in (II allows, an input has no beat) > flush
+// (pipelined only: results in flight after the last firing's II gap,
+// accel.py's idle).
 // So busy + stall_in + stall_out + flush is the run's busy cycles, E - s.
 
 #pragma once
@@ -95,6 +103,7 @@ public:
     struct Step
     {
         bool fire;      // a beat taken from every input
+        bool result;    // the firing gives a result (every rate-th firing)
         bool push;      // a beat given to the output
         Class cls;
         bool end;       // the run's last cycle: idle from the next one
@@ -115,6 +124,7 @@ public:
         this->start_cycle = 0;
         this->end_cycle = -1;
         this->count = 0;
+        this->rate = 1;
         this->firings = 0;
         this->has_fired = false;
         this->last_fire = 0;
@@ -139,14 +149,14 @@ public:
             (this->end_cycle == -1 || cycle <= this->end_cycle);
     }
 
-    // A start of count firings offered in cycle
-    Start start(int64_t cycle, uint32_t count)
+    // A start of count firings, a result every rate firings, offered in cycle
+    Start start(int64_t cycle, uint32_t count, uint32_t rate = 1)
     {
         if (!this->idle(cycle))
         {
             return REFUSED;
         }
-        if (count == 0)
+        if (count == 0 || rate == 0)
         {
             return IGNORED;
         }
@@ -154,6 +164,7 @@ public:
         this->start_cycle = cycle;
         this->end_cycle = -1;
         this->count = count;
+        this->rate = rate;
         this->firings = 0;
         for (int c = 0; c < NB_CLASSES; c++)
         {
@@ -165,18 +176,19 @@ public:
     // One busy cycle: inputs, every input has a beat; room, the output has room
     Step step(int64_t cycle, bool inputs, bool room)
     {
-        Step s = {false, false, FLUSH, false};
+        Step s = {false, false, false, FLUSH, false};
         if (this->wait == LOCKSTEP)
         {
-            s.fire = s.push = inputs && room;
+            s.fire = s.result = s.push = inputs && room;
             s.cls = s.fire ? BUSY : inputs ? STALL_OUT : STALL_IN;
         }
         else
         {
             bool ii_ok = !this->has_fired || cycle >= this->last_fire + this->ii;
             bool can_fire = this->firings < this->count && ii_ok && inputs;
+            bool gives = can_fire && (this->firings + 1) % this->rate == 0;
             bool head = this->latency > 0 && this->slots[this->latency - 1];
-            bool frozen = this->latency > 0 ? head && !room : can_fire && !room;
+            bool frozen = this->latency > 0 ? head && !room : gives && !room;
             if (frozen)
             {
                 s.cls = STALL_OUT;
@@ -184,14 +196,15 @@ public:
             else
             {
                 s.fire = can_fire;
-                s.push = this->latency > 0 ? head : can_fire;
+                s.result = gives;
+                s.push = this->latency > 0 ? head : gives;
                 for (int i = this->latency - 1; i > 0; i--)
                 {
                     this->slots[i] = this->slots[i - 1];
                 }
                 if (this->latency > 0)
                 {
-                    this->slots[0] = s.fire;
+                    this->slots[0] = s.result;
                 }
                 bool in_gap = this->has_fired && cycle < this->last_fire + this->ii;
                 bool waits_input = this->firings < this->count && ii_ok && !inputs;
@@ -232,10 +245,12 @@ public:
     }
 
     // The current or last run: its start s, its last cycle E (-1 while busy),
-    // its count, its firings and its cycles per class; runs ended so far
+    // its count, its rate, its firings and its cycles per class; runs ended
+    // so far
     int64_t start_cycle;
     int64_t end_cycle;
     uint32_t count;
+    uint32_t rate;
     uint32_t firings;
     int64_t classes[NB_CLASSES];
     int runs;
