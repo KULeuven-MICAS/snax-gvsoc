@@ -163,7 +163,7 @@ moved, to be reviewed and committed with the new pin.
 
 Cycles are compared with the RTL by hand, on demand, from fresh runs of one
 ELF on both sides (only `dma-timing` checks its DMA counters itself), against SG5's target (`docs/plans/SG5.md`, "The target";
-D124 in snax-forge). Only the RTL needs a snax_cluster checkout: clone it
+D123 in snax-forge). Only the RTL needs a snax_cluster checkout: clone it
 next to this repo at the pin in `sw/README.md`, with its submodules:
 
     PIN=$(sed -n 's/^| `snax_cluster` | `\([0-9a-f]*\)`.*/\1/p' sw/README.md)

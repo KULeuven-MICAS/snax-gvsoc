@@ -1,4 +1,4 @@
-# SNAX-GVSoC's CI (D124 in snax-forge): in snax-forge's development
+# SNAX-GVSoC's CI (D123 in snax-forge): in snax-forge's development
 # image, GVSoC built for the Makefile's SNAX_TARGETS only, the unit tests of
 # tests/snax/, then `make regress` (every program in sw/ built from the
 # pinned copy and run to exit 0). Only snax/, sw/ and tests/snax/ are built
