@@ -13,7 +13,8 @@ This file is the checklist; a step is ticked here when it is committed.
   (`ghcr.io/kuleuven-micas/snax-forge:main`).
 - One commit per step on `ry/flow3`, here and in snax-forge; from step 2 on,
   snax-forge's submodule points at this branch's head. Round 1a is tagged
-  `flow3-r1a` in both.
+  `flow3-r1a` in both. Round 1b the same on `ry/flow3-2`, tagged
+  `flow3-r1b`.
 - Acceptance is pass/fail; anything not verified is said so.
 
 ## Acceptance
@@ -22,6 +23,13 @@ Round 1a: `pixi run flow recipes/vecadd.json --platform
 platforms/snax_alu.json`, and the same for `recipes/vsum.json`, end in a
 checked SNAX-GVSoC run (passed, exit 0), in the container and in snax-forge
 CI's `gvsoc` job.
+
+Round 1b: the same two flows at `--trace task` pass, the converter's
+invariants hold, and they write `report/design.md` and `report/run.md`; at
+`--trace off` the profile comes from the `summary` lines alone; `pixi run
+view` opens the two task-level runs on the profile page; `make regress`
+here and snax-forge's `pixi run test` pass in the container, and CI on both
+branches.
 
 ## The rounds
 
@@ -44,7 +52,24 @@ CI's `gvsoc` job.
 | 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | written, rehearsed on a fresh clone; its GitHub run waits for a dispatch on `ry/flow3` |
 | 5 | Acceptance in the container and in CI; tag `flow3-r1a` | container: done; CI: waits for step 4's run |
 
-## Findings
+## Round 1b steps
+
+The grammar is `docs/EVENTS.md`.
+
+| # | Step | Status |
+|---|---|---|
+| 0 | Docs in both: snax-forge D137 amended, C§7 for its `run/` (and its contract test), STATUS; this table, `docs/EVENTS.md` | done |
+| 1 | Probe, no code kept: (a) one `--trace` file collects several components' traces in simulation order; (b) `func` names resolve on a plain `snax_hjson` run; (c) the barrier wait is an `insn_stall` | todo |
+| 2 | Unit, streamer and crossbar: the three traces, their lines, the crossbar's counters; `make regress` | todo |
+| 3 | Core and iDMA hooks; `make regress`; one fixture's `events.log` at task level | todo |
+| 4 | snax-forge `run/`: profile, trace, cluster, events, outputs, and their tests | todo |
+| 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | todo |
+| 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | todo |
+| 7 | Acceptance in both; CI's `gvsoc` job runs the two flows at `--trace task`; tag `flow3-r1b` | todo |
+
+## Round 1b findings
+
+## Findings (round 1a)
 
 - **What pixi's environment changes (step 1).** `env` under `pixi run`
   against the image's plain shell: pixi puts its env's `bin/` first on
