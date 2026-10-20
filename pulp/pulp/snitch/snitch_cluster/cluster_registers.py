@@ -14,6 +14,10 @@
 # limitations under the License.
 #
 
+import os
+import tempfile
+from pathlib import Path
+
 import gvsoc.systree
 import regmap.regmap
 import regmap.regmap_hjson
@@ -36,8 +40,17 @@ class ClusterRegisters(gvsoc.systree.Component):
         regmap_path = f'{comp_path}/snitch_cluster_peripheral_reg.hjson'
         regmap_instance = regmap.regmap.Regmap('cluster_periph')
         regmap.regmap_hjson.import_hjson(regmap_instance, self.get_file_path(regmap_path))
-        regmap.regmap_c_header.dump_to_header(regmap=regmap_instance, name='cluster_periph',
-            header_path=f'{builddir}/{comp_path}/cluster_periph', headers=['regfields', 'gvsoc'])
+        # SNAX: the headers are written beside the old ones and replace them only when
+        # they differ, so a build with nothing changed does not recompile this component
+        out = Path(builddir) / comp_path
+        out.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=out) as tmp:
+            regmap.regmap_c_header.dump_to_header(regmap=regmap_instance, name='cluster_periph',
+                header_path=f'{tmp}/cluster_periph', headers=['regfields', 'gvsoc'])
+            for new in Path(tmp).iterdir():
+                old = out / new.name
+                if not old.is_file() or old.read_bytes() != new.read_bytes():
+                    os.replace(new, old)
 
     def o_EXTERNAL_IRQ(self, core: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'external_irq_{core}', itf, signature='wire<bool>')
