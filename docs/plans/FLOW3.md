@@ -41,8 +41,8 @@ CI's `gvsoc` job.
 | 1 | Tools: snax-forge's `gvsoc/Makefile` names Python, CMake and the host compilers and unexports what pixi sets; every `cmake` in this Makefile is `$(CMAKE)`; `gvrun` ends in `exec "${GVRUN_PYTHON:-python3}"`. Checked by hand: no rebuild from pixi after a plain-shell build, the same ELF and stdout from both | done |
 | 2 | snax-forge `lower/c.py`: the marks out; each counter in `forge_counter[]`; `forge_check(t0)` prints `forge cycles:` then the self-check; forge/ refreshed; `make regress` | done |
 | 3 | snax-forge: the flow's stages after design are lower, gen, build, sw, gvsoc, check; `run.json` | done |
-| 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | todo |
-| 5 | Acceptance in the container and in CI; tag `flow3-r1a` | todo |
+| 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | written, rehearsed on a fresh clone; its GitHub run waits for a dispatch on `ry/flow3` |
+| 5 | Acceptance in the container and in CI; tag `flow3-r1a` | container: done; CI: waits for step 4's run |
 
 ## Findings
 
@@ -93,3 +93,17 @@ CI's `gvsoc` job.
   program with two goldens changed by hand prints `forge errors: 2` and the
   run exits 1 (`make: *** [Makefile:110: run] Error 1`), so the flow reads
   the counts from the printed lines and only pass or fail from the exit.
+- **Acceptance in the container (step 5).** `pixi run flow` on
+  `recipes/vecadd.json` and `recipes/vsum.json` with
+  `platforms/snax_alu.json`: passed, exit 0, both. snax-forge's `pixi run
+  test`: 1733 passed, 6 skipped (the reports, the memory and movement
+  views, loop1, dot twice).
+- **The `gvsoc` job, rehearsed (step 4).** Its steps on a fresh shallow
+  clone of snax-forge's `ry/flow3` with the submodule, in the image, with
+  `-j4` and no ccache: the build 314 s, `pixi install -e ci` 18 s, the two
+  flows passed (20 s and 6 s, the build found up to date), the two tests
+  marked `gvsoc` passed; both trees clean after. The job's timeout is 45
+  minutes. The python job, rehearsed on a clone without the submodule:
+  lint clean, 1711 passed, 28 skipped. The workflow runs on pushes to main,
+  pull requests and dispatch only, so its run on `ry/flow3` is a dispatch
+  from GitHub.
