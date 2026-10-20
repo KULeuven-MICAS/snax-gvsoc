@@ -4,7 +4,8 @@
 # (../../common.mk) into build/sw/apps/forge/$(DESIGN)/. No datagen: the data is the fixture's
 # data.h. The ELF depends on every file of the fixture, so a refreshed
 # fixture rebuilds it. FORGE, when set, names another folder of the same
-# form (snax-forge's out/gvsoc/<design>/).
+# form (snax-forge's out/gvsoc/<design>/), and FORGE_BUILD the ELF's folder
+# for it, so its ELF never shares a path with a fixture's.
 
 APP      = forge
 DESIGN  ?= vecadd
@@ -12,7 +13,8 @@ FORGE   ?= $(abspath $(CURDIR)/../../../forge/$(DESIGN))
 ifeq ($(wildcard $(FORGE)/main.c),)
 $(error no main.c in $(FORGE): refresh the fixture from snax-forge (forge/README.md))
 endif
-BUILDDIR = $(SW_BUILD)/apps/$(APP)/$(DESIGN)
+FORGE_BUILD ?= $(SW_BUILD)/apps/$(APP)/$(DESIGN)
+BUILDDIR = $(FORGE_BUILD)
 INCDIRS  = $(FORGE)
 INCDIRS += $(FORGE)/include
 include ../../common.mk
