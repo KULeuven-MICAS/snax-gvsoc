@@ -43,6 +43,7 @@ void IssWrapper::stop()
 {
     this->iss.insn_cache.stop();
     this->iss.gdbserver.stop();
+    this->iss.snax_events_stop();
 }
 
 

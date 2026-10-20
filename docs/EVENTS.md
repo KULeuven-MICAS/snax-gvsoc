@@ -78,6 +78,10 @@ accesses are in their own `input` lines.
 
 ### Core (`pe<i>`, `core/models/cpu/iss/src/snitch/snitch.cpp`)
 
+The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in
+`pulp/pulp/snitch/snitch_core.py`); `state` comes from `Exec::busy_enter` and
+`busy_exit`, `func` from `Exec::insn_exec_profiling`, in the shared exec code.
+
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
 | `events` | `csr` | the access | `pc`, `csr`, `op` (`r`, `w`), `value`; `held`, the cycles the block held a write |
@@ -90,13 +94,19 @@ accesses are in their own `input` lines.
 `csr` and `poll` are the SNAX CSR accesses: consecutive reads of one CSR that
 return one value are one `poll`, written when the next access differs; a
 single read is a `csr` with `op=r`. A barrier stalls the core without leaving
-`run`, so its own line says when it waits. `sleep` is `wfi`. `func` is
-written when the PC enters another function, by the ELF's symbols.
+`run`, so its own line says when it waits; one reached at once has `first`
+equal to `last`. `sleep` is `wfi`. `func` is written when the PC enters
+another function, by the ELF's symbols (`-` where none covers the PC); a
+core only writes it while its `events` trace is on.
 
-### iDMA (`idma/fe`)
+### iDMA (`idma/fe`, `pulp/pulp/idma/fe/idma_fe_xdma.cpp`)
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
-| `events` | `issue` | the cycle the core's copy is taken | `id`, `src`, `dst`, `size`, `src_stride`, `dst_stride`, `reps` |
-| `events` | `done` | the cycle the copy completes | `id` |
-| `summary` | `dma` | the end of the simulation | `transfers`, `busy` (cycles its busy signal is high, what `DMA_BUSY` counts), `r_beats`, `w_beats`, `bytes_to_l1`, `bytes_from_l1` |
+| `events` | `issue` | the cycle the core's copy is taken (`enqueue_copy`) | `id`, `src`, `dst`, `size`, `src_stride`, `dst_stride`, `reps` (its rows, 1 for a 1D copy) |
+| `events` | `done` | the cycle the copy completes (`ack_transfer`) | `id` |
+| `summary` | `dma` | the end of the simulation | `transfers`, `busy` (cycles its busy signal is high, what `DMA_BUSY` counts), `r_beats`, `w_beats` (what the beat wires carry), `bytes_to_l1`, `bytes_from_l1` |
+
+A copy's bytes are `size` times its rows; they go to L1 when its `dst` is in
+the iDMA's local area (`loc_base`, `loc_size`: the cluster's L1), and come
+from L1 when its `src` is.

@@ -61,7 +61,7 @@ The grammar is `docs/EVENTS.md`.
 | 0 | Docs in both: snax-forge D137 amended, C§7 for its `run/` (and its contract test), STATUS; this table, `docs/EVENTS.md` | done |
 | 1 | Probe, no code kept: (a) one `--trace` file collects several components' traces in simulation order; (b) `func` names resolve on a plain `snax_hjson` run; (c) the barrier wait is an `insn_stall` | done |
 | 2 | Unit, streamer and crossbar: the three traces, their lines, the crossbar's counters; `make regress` | done |
-| 3 | Core and iDMA hooks; `make regress`; one fixture's `events.log` at task level | todo |
+| 3 | Core and iDMA hooks (`pulp/pulp/idma/fe/idma_fe_xdma.cpp`, the front end the SNAX targets build); `make regress`; one fixture's `events.log` at task level | done |
 | 4 | snax-forge `run/`: profile, trace, cluster, events, outputs, and their tests | todo |
 | 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | todo |
 | 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | todo |
@@ -112,6 +112,24 @@ The grammar is `docs/EVENTS.md`.
   `bank` lines, each bank 6 reads and 6 writes (the streamer's 192 words and
   the DMA's 192, over 32 banks). The run's output is unchanged (226 cycles,
   counter 19). `make regress` on a fresh build passes.
+- **Core and iDMA (step 3).** The iDMA the SNAX targets build is
+  `pulp/pulp/idma/` (`pulp.idma.snitch_dma`), whose front end has SG2's busy
+  wire and the beat wires; `pulp/models/ips/pulp/idma_v2/` is a copy no SNAX
+  target compiles, left as it is. `issue` is written in `enqueue_copy`, where
+  the copy gets its ID, `done` in `ack_transfer`; the busy cycles follow
+  `update_busy`'s edges as `DMA_BUSY` counts them, the beats `send_beats`.
+  The core's `state` and `func` come from the exec code every core shares,
+  so they are behind `CONFIG_GVSOC_ISS_SNAX_EVENTS`, set for the `snitch`
+  core only. forge/vecadd at task level (`--trace='/summary$:F'
+  --trace='/events$:F'`), `build/work/forge-vecadd-task/events.log`, 362
+  lines: on core 0 `func main` at 2799 and `func forge_check` at 3010; the
+  busy CSR's reads fold into `poll ... first=2933 last=2951 count=10`, then
+  one read of 0 at 2953; the barrier before the start waits from 2912 to
+  2930; the DMA's three copies (IDs 2 to 4) issued at 2887, 2905 and 2974
+  and done at 2909, 2926 and 2989; its summary `transfers=3 busy=54
+  r_beats=24 w_beats=24 bytes_to_l1=1024 bytes_from_l1=512`; core 0 wrote
+  18 SNAX CSRs and read 13. Boot shows too: `func` lines from 1713, two
+  barriers per core before `main`. `make regress` on a fresh build passes.
 
 ## Findings (round 1a)
 

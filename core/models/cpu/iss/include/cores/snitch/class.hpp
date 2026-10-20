@@ -156,6 +156,17 @@ public:
     vp::IoReq snax_csr_req;
     uint32_t snax_csr_data;
 
+    // FLOW3's events (snax-gvsoc docs/EVENTS.md): the summary, events and beats traces,
+    // the SNAX CSR accesses (reads of one CSR with one value folded into a poll), the
+    // barrier waits, the state (run or sleep, from Exec::busy_enter and busy_exit) and the
+    // function the PC is in (from Exec::insn_exec_profiling); the counts at stop
+    vp::Trace snax_summary;
+    vp::Trace snax_events;
+    vp::Trace snax_beats;
+    void snax_state(bool run);
+    void snax_func(iss_reg_t pc);
+    void snax_events_stop();
+
     // Temporary variable to process RAW caused by SSR and accessing stack pointer,
     // for result is written to memory directly.
     iss_addr_t mem_map;
@@ -176,6 +187,28 @@ private:
 
     vp::Trace trace_iss;
     CsrReg csr_ssr;
+
+    // FLOW3's events: the open run of reads, a held write, an open barrier, the state and
+    // the function written last, the SNAX CSR counts
+    void snax_read(iss_reg_t pc, uint32_t csr, uint32_t value);
+    void snax_reads_flush();
+    bool snax_reads_open = false;
+    iss_reg_t snax_reads_pc;
+    uint32_t snax_reads_csr;
+    uint32_t snax_reads_value;
+    int64_t snax_reads_first;
+    int64_t snax_reads_last;
+    int64_t snax_reads_count;
+    int64_t snax_held_cycle;
+    iss_reg_t snax_held_pc;
+    uint32_t snax_held_csr;
+    uint32_t snax_held_value;
+    int64_t snax_barrier_first = -1;
+    bool snax_barrier_stalled = false;
+    int snax_state_last = -1;
+    std::string snax_func_last;
+    int64_t snax_csr_writes = 0;
+    int64_t snax_csr_reads = 0;
 
     // snax_cluster's cluster CSRs 0xBC1 to 0xBC3 (hw/snitch/src/snitch_pkg.sv)
     CsrReg snax_base_addr_l;

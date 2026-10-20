@@ -54,6 +54,17 @@ IDmaFeXdma::IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me)
     js::Config *beat_size = idma->get_js_config()->get("beat_size");
     this->beat_size = beat_size ? beat_size->get_int() : 64;
     this->busy = false;
+
+    // SNAX, FLOW3's events
+    this->idma = idma;
+    this->traces.new_trace("summary", &this->ev_summary, vp::INFO);
+    this->traces.new_trace("events", &this->ev_events, vp::INFO);
+    this->traces.new_trace("beats", &this->ev_beats, vp::INFO);
+    this->loc_base = idma->get_js_config()->get_child_int("loc_base");
+    this->loc_size = idma->get_js_config()->get_child_int("loc_size");
+    this->transfers = this->busy_cycles = this->busy_since = 0;
+    this->r_beats_total = this->w_beats_total = 0;
+    this->bytes_to_l1 = this->bytes_from_l1 = 0;
 }
 
 
@@ -158,6 +169,23 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
         transfer_id, transfer->src, transfer->dst, transfer->size, transfer->src_stride,
         transfer->dst_stride, transfer->reps, transfer->config);
 
+    // SNAX, FLOW3's events: the copy as the core issued it, its rows 1 for a 1D copy
+    uint64_t rows = (transfer->config >> 1) & 1 ? transfer->reps : 1;
+    this->transfers++;
+    if (this->is_local(transfer->dst))
+    {
+        this->bytes_to_l1 += rows * transfer->size;
+    }
+    if (this->is_local(transfer->src))
+    {
+        this->bytes_from_l1 += rows * transfer->size;
+    }
+    this->ev_events.msg(vp::Trace::LEVEL_INFO, "%ld issue id=%u src=0x%lx dst=0x%lx size=%lu "
+        "src_stride=%lu dst_stride=%lu reps=%lu\n", (long)this->idma->clock.get_cycles(),
+        transfer_id, (unsigned long)transfer->src, (unsigned long)transfer->dst,
+        (unsigned long)transfer->size, (unsigned long)transfer->src_stride,
+        (unsigned long)transfer->dst_stride, (unsigned long)rows);
+
     this->send_beats(transfer);
 
     // In case size is 0 or reps is 0 with 2d transfer, directly terminate the transfer.
@@ -193,6 +221,9 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
 // Called by middle-end when a transfer is done
 void IDmaFeXdma::ack_transfer(IdmaTransfer *transfer)
 {
+    // Copies complete in order: this one's ID is the next after the last completed
+    this->ev_events.msg(vp::Trace::LEVEL_INFO, "%ld done id=%u\n",
+        (long)this->idma->clock.get_cycles(), this->completed_id.get() + 1);
     this->completed_id.inc(1);
     this->update_busy();
     delete transfer;
@@ -203,6 +234,16 @@ void IDmaFeXdma::update_busy()
     bool busy = this->next_transfer_id.get() - this->completed_id.get() != 1;
     if (busy != this->busy)
     {
+        // SNAX, FLOW3's events: the busy cycles, as DMA_BUSY counts them
+        int64_t cycle = this->idma->clock.get_cycles();
+        if (busy)
+        {
+            this->busy_since = cycle;
+        }
+        else
+        {
+            this->busy_cycles += cycle - this->busy_since;
+        }
         this->busy = busy;
         if (this->busy_itf.is_bound())
         {
@@ -232,6 +273,8 @@ void IDmaFeXdma::send_beats(IdmaTransfer *transfer)
         r_beats += this->beats(transfer->src + i * transfer->src_stride, transfer->size);
         w_beats += this->beats(transfer->dst + i * transfer->dst_stride, transfer->size);
     }
+    this->r_beats_total += r_beats;
+    this->w_beats_total += w_beats;
     if (r_beats > 0 && this->r_beats_itf.is_bound())
     {
         this->r_beats_itf.sync((int)r_beats);
@@ -273,4 +316,26 @@ void IDmaFeXdma::reset(bool active)
     {
         this->busy = false;
     }
+}
+
+
+
+// SNAX: whether addr is in the cluster's local area (its L1)
+bool IDmaFeXdma::is_local(uint64_t addr)
+{
+    return addr >= this->loc_base && addr < this->loc_base + this->loc_size;
+}
+
+
+
+// SNAX, FLOW3's events: the counts at the end of the simulation, a copy still running
+// counted up to now
+void IDmaFeXdma::stop()
+{
+    int64_t cycle = this->idma->clock.get_cycles();
+    int64_t busy = this->busy_cycles + (this->busy ? cycle - this->busy_since : 0);
+    this->ev_summary.msg(vp::Trace::LEVEL_INFO, "%ld dma transfers=%ld busy=%ld r_beats=%ld "
+        "w_beats=%ld bytes_to_l1=%ld bytes_from_l1=%ld\n", (long)cycle, (long)this->transfers,
+        (long)busy, (long)this->r_beats_total, (long)this->w_beats_total,
+        (long)this->bytes_to_l1, (long)this->bytes_from_l1);
 }
