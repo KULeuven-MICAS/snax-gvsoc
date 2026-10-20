@@ -24,10 +24,12 @@ The design point's task list on snRuntime (snax-forge `lower/c.py`): one
 function per core, `main` calling its core's through a table, each step on
 the core that owns its component in the cluster file (the DMA on the core
 with `xdma`, the accelerator on the one holding the slot), a barrier where
-another core goes on, and a mark per task event
-(`forge_<task>_configure`, `_start`, `_wait`, and `forge_main_entry`,
-`forge_main_exit`: `csrr zero, mcycle` at a global label). It ends with
+another core goes on, and each accelerator task's counter stored after its
+wait; no task marks. `main` reads `mcycle` first, and on the accelerator's
+core calls `forge_check()` after its function, which reads `mcycle` first
+and prints the window between the two, then checks:
 
+    forge cycles: <n>
     forge data: <e> errors (<words> words)
     forge counter <task>: <c>          (one per accelerator task)
     forge errors: <err>

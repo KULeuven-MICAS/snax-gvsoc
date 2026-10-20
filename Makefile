@@ -103,14 +103,14 @@ gvrun.build:
 	$(CMAKE) -S gvrun -B $(BUILDDIR)/gvrun -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DCMAKE_INSTALL_PREFIX=$(INSTALLDIR)
 
-	cmake --build $(BUILDDIR)/gvrun $(CMAKE_FLAGS)
-	cmake --install $(BUILDDIR)/gvrun
+	$(CMAKE) --build $(BUILDDIR)/gvrun $(CMAKE_FLAGS)
+	$(CMAKE) --install $(BUILDDIR)/gvrun
 
 	$(CMAKE) -S config_tree -B $(BUILDDIR)/config_tree -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DCMAKE_INSTALL_PREFIX=$(INSTALLDIR)
 
-	cmake --build $(BUILDDIR)/config_tree $(CMAKE_FLAGS)
-	cmake --install $(BUILDDIR)/config_tree
+	$(CMAKE) --build $(BUILDDIR)/config_tree $(CMAKE_FLAGS)
+	$(CMAKE) --install $(BUILDDIR)/config_tree
 
 build: gvrun.build
 	# Change directory to curdir to avoid issue with symbolic links.

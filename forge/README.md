@@ -35,12 +35,15 @@ Each folder holds:
   `snax/snax_unit_acc.py` builds it).
 - `include/`: the headers a program drives it with
   (`streamer_csr_addr_map.h` and `<instance>_csr.h`).
-- `main.c` (GEN2a, snax-forge D135): the program, the design point's task
-  list on snRuntime: each step on the core that owns its component, a
-  barrier where another core goes on, a mark `forge_<task>_<event>` per
-  task event, then the self-check, every output against its golden and one
-  `forge counter <task>:` line per accelerator task; it returns the error
-  count. The generic app `sw/apps/forge/` builds it.
+- `main.c` (GEN2a, FLOW3, snax-forge D135): the program, the design point's
+  task list on snRuntime: `mcycle` read at main's entry, each step on the
+  core that owns its component, a barrier where another core goes on, each
+  accelerator task's counter stored after its wait, then `forge_check()` on
+  the accelerator's core: `mcycle` read first and `forge cycles:` printed
+  (the program's window), then the self-check, every output against its
+  golden and one `forge counter <task>:` line per accelerator task; main
+  returns the error count. No task marks. The generic app `sw/apps/forge/`
+  builds it.
 - `data.h`: its data, from snax-forge's datagen: the inputs from the
   kernel's `make_inputs` (seed 0), each output zeroed with its
   `<name>_golden` from the reference executor, each array padded to whole

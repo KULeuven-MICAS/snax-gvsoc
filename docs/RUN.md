@@ -1,6 +1,19 @@
 # Running SNAX-GVSoC
 
-From a clone to a checked run: the container, the build, a program on a
+The main path to a run of a generated design point is snax-forge's flow
+(snax-forge D136): with this repo as its submodule, it generates the design
+point, builds GVSoC when needed and the program, runs it on `snax_hjson`
+and takes the program's own check. From snax-forge, in the container:
+
+    pixi run flow recipes/vecadd.json --platform platforms/snax_alu.json
+
+    ...
+      gvsoc     snax_hjson, exit 0 -> run/
+      check     passed: 226 cycles (main to forge_check); data 0 errors (64 words); counters add_acc 19 (16 beats)
+      report    none in FLOW3 round 1a; the reports come back in FLOW3 round 1b
+
+snax-forge's `docs/RUN.md` walks it. This file runs this repo by hand, from
+a clone to a checked run: the container, the build, a program on a
 hand-written target, a generated accelerator, what it prints, the
 regression and the unit tests. Each block is the command as typed, then
 what it printed in a fresh clone (long outputs cut to their last lines,
@@ -92,28 +105,13 @@ slot; `--trace=snax_acc0/unit` turns on the unit's trace:
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
     Warning: installed platform tree $ROOT/snax-gvsoc/install/lib/libplatform_tree_snax_hjson.so does not match the live system tree, falling back to the JSON config path (rebuild the target to regenerate the tree).
+    forge cycles: 226
     forge data: 0 errors (64 words)
     forge counter add_acc: 19
     forge errors: 0
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] New slave port (name: clock, port: 0x555e9a869f18)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] New slave port (name: reset, port: 0x555e9a869d20)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New slave port (name: power_supply, port: 0x555e9a869dc8)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New slave port (name: voltage, port: 0x555e9a869e70)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New master port (name: a, port: 0x555e9a86d920)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New master port (name: b, port: 0x555e9a86d9f8)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New master port (name: out, port: 0x555e9a86a258)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New slave port (name: ctrl, port: 0x555e9a86a0a0)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] New master port (name: busy, port: 0x555e9a86a158)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] add, 4 lanes of 64 bits, lockstep, latency 0, ii 1
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Creating final bindings
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Creating final binding (/chip/soc/cluster_0/snax_acc0/unit:busy -> /chip/soc/cluster_0/snax_acc0/shell:busy)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Creating final binding (/chip/soc/cluster_0/snax_acc0/unit:out -> /chip/soc/cluster_0/snax_acc0/streamer:writer_0)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Creating final binding (/chip/soc/cluster_0/snax_acc0/unit:b -> /chip/soc/cluster_0/snax_acc0/streamer:reader_1)
-    0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Creating final binding (/chip/soc/cluster_0/snax_acc0/unit:a -> /chip/soc/cluster_0/snax_acc0/streamer:reader_0)
-    0: 0: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Reset (active: 1)
-    0: 0: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Reset (active: 0)
-    292200000: 2922: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] Start at cycle 2922: count 16
-    294100000: 2941: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0
+    ...
+    293200000: 2932: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] Start at cycle 2932: count 16
+    295100000: 2951: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0
 
     echo "exit $?"
 
@@ -128,6 +126,9 @@ compiled for a design point.
 
 ## 5. Reading the output
 
+- `forge cycles: 226`: the program's window, `mcycle` at `forge_check()`'s
+  entry minus `mcycle` at main's entry (snax-forge D135), which snax-forge's
+  flow takes as the run's total cycles.
 - `forge data: 0 errors (64 words)`: every output word against its golden
   in `data.h` (the reference executor's result); 64 words is vecadd's `O`.
 - `forge counter add_acc: 19`: the shell's cycle counter, read after the
@@ -143,8 +144,9 @@ compiled for a design point.
 - `forge errors: 0`: the data errors plus one per counter below its beats;
   `main` returns it, so the run's exit code is 0.
 
-The other trace lines are the unit's ports being created and bound at
-start-up, and its start (`Start at cycle 2922: count 16`).
+The trace lines cut at `...` are the unit's ports being created and bound
+at start-up; the last but one is its start (`Start at cycle 2932: count
+16`).
 
 ## 6. The regression
 
