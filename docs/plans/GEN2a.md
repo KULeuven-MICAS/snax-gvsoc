@@ -14,8 +14,8 @@ ticked here when its entry is in the notes.
 
 - On the MICAS server, by Claude Code, in snax-forge's image
   (`ghcr.io/kuleuven-micas/snax-forge:main`), as LNK2a.
-- One commit per step on `ry/gen2a`, here and in snax-forge; each round
-  tagged (`gen2a-r1`).
+- One commit per step on `ry/gen2a` (round 2: `ry/gen2a-2`), here and in
+  snax-forge; each round tagged (`gen2a-r1`, `gen2a-r1b`, `gen2a-r2`).
 - Anything not verified is said so.
 
 ## Acceptance
@@ -30,7 +30,7 @@ its data errors 0 and each counter what the unit's run line gives.
 |---|---|
 | 1 | snax-forge: `data.h` from a datagen, a design check for snRuntime's top of L1, the C backend (`lower/c.py`, D135), the generator writing `main.c` and `data.h`. Here: the generic app `sw/apps/forge/`, the fixtures refreshed, regress over every folder of `forge/`, the marks checked |
 | 1b | Fix-ups (snax-forge `lower/c.py`): start marks before a start group's writes, DMA waits from dependences only (D135 amended), one function per core; forge/ refreshed |
-| 2 | The adder tree: `vsum` at W = 4 |
+| 2 | The adder tree: the Accumulator's `lanes`, a combinational W → 1 adder tree in front of its register (snax-forge D133 amended); `SnaxUnit`'s fold over W lanes; `chisel_adder_tree` bound to the Accumulator; `vsum` at W = 4 (`forge/vsum_tree/`) |
 
 ## The C backend's rules
 
@@ -89,6 +89,19 @@ Round 1b, fix-ups on the same branches (tag `gen2a-r1b`):
 | F5 | forge/ refreshed, full `make regress`, the marks check again, this file and the notes | done |
 | F6 | snax-forge: submodule at this branch's head, fixtures reproduced | snax-forge |
 
+Round 2, the adder tree (branches `ry/gen2a-2`, tag `gen2a-r2`); done, the
+acceptance met:
+
+| # | Step | Status |
+|---|---|---|
+| 1 | Here: `SnaxUnit`'s fold takes W lanes, the beat's lanes reduced by the op through a tree (`snax_unit_tree`), then folded as before; unit cases `pipelined_tree_tn` (T = n) and `pipelined_tree_t4` (T < n) at lanes 4 | done |
+| 2 | snax-forge: the Accumulator's `lanes` (input a Vec, the tree in front of the register); `AccumulatorRateSpec` over the lanes-4 cases | done |
+| 3 | snax-forge: `chisel_adder_tree` binds the Accumulator with `args: {"lanes": "W"}`, as `chisel_accumulator` now does | done |
+| 4 | snax-forge: `recipes/vsum_tree.json` (vsum at N = 64, W = 4); its fixture generated | done |
+| 5 | Here: `forge/vsum_tree/`, regress over it | done |
+| 6 | snax-forge: submodule at step 5, `test_fixture.py` over the four fixtures | snax-forge |
+| 7 | Docs in both, full `make regress` | done |
+
 ## Findings
 
 - **The marks are where the program runs them (step 10, F5).** vecadd's ELF
@@ -145,6 +158,11 @@ Round 1b, fix-ups on the same branches (tag `gen2a-r1b`):
   `stall_in 0`). F3's layout does not split them (19). The RTL's L0
   prefetches the next line (snax-forge open item 65), so it would likely not
   miss there; nothing was tuned.
+- **A forge counter depends on the core's timing (round 2).** A forge
+  accelerator's counter depends on the core's timing between the streamer's
+  and the accelerator's start writes (round 1b F2: an L0 line starting
+  between them gave 16 instead of 19), so GEN2b compares that counter with
+  care (snax-forge D123).
 - **Where the accelerator starts (F2, F3).** vecadd's accelerator starts at
   cycle 2924 in round 1 and after F1, 2908 after F2, 2922 after F3; the
   hand-written app's at 2420. main starts at 2767 (F3) against 2284: about
@@ -164,4 +182,3 @@ Round 1b, fix-ups on the same branches (tag `gen2a-r1b`):
   and the accelerator (snax-forge open item 80) and several accelerators on
   one core (open item 79) were never run; a read step, a `signal` wait and
   a 2-D DMA are refused or never made.
-- Round 2: the adder tree, `vsum` at W = 4.

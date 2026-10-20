@@ -22,14 +22,16 @@ class SnaxUnit(gvsoc.systree.Component):
     ----------
     inputs : list[str]
         Input port names, in the op's operand order: two, or one for a fold
-        (the output's value is op(acc, x) over the firings of one output, acc
-        starting from the first input; one lane).
+        (x is the beat's lanes reduced by op through a tree, and the output's
+        value is op(acc, x) over the firings of one output, acc starting from
+        the first x; the output one element).
     outputs : list[str]
         Output port names (one).
     lanes : int
-        Elements per beat.
+        Elements per input beat.
     data_width : int
-        Bits per element: 8, 16, 32 or 64, lanes * data_width a multiple of 64.
+        Bits per element: 8, 16, 32 or 64, lanes * data_width a multiple of 64;
+        64 for a fold.
     op : int
         ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3, or 4, xor 5,
         min 6, max 7.

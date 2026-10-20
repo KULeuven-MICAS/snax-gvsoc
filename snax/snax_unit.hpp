@@ -92,6 +92,22 @@ inline uint64_t snax_unit_compute(int op, bool is_signed, int width, uint64_t a,
 }
 
 
+// A fold's tree (snax-forge's Accumulator with lanes, D133): the n lanes of a
+// beat reduced to one by op on width-bit integers, halves first, so for n a
+// power of two the pairs of Chisel's reduceTree. One lane gives that lane.
+inline uint64_t snax_unit_tree(int op, bool is_signed, int width, const uint64_t *lanes, int n)
+{
+    if (n == 1)
+    {
+        return lanes[0] & (width >= 64 ? ~(uint64_t)0 : ((uint64_t)1 << width) - 1);
+    }
+    int half = n / 2;
+    return snax_unit_compute(op, is_signed, width,
+        snax_unit_tree(op, is_signed, width, lanes, half),
+        snax_unit_tree(op, is_signed, width, lanes + half, n - half));
+}
+
+
 class SnaxUnitRule
 {
 public:

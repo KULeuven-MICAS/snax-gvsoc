@@ -13,12 +13,14 @@
 // naming it):
 //   inputs, outputs  port names (lists of strings): one output, and two
 //                    inputs (the op on each pair of beats) or one (a fold:
-//                    the output's value is op(acc, x) over the firings of one
-//                    output, acc starting from the first input)
-//   lanes            elements per beat (> 0); 1 for a fold (an adder tree
-//                    has no Chisel block yet)
+//                    x is the beat's lanes reduced by op through a tree,
+//                    snax_unit_tree, and the output's value is op(acc, x)
+//                    over the firings of one output, acc starting from the
+//                    first x; the output one element)
+//   lanes            elements per input beat (> 0)
 //   data_width       bits per element: 8, 16, 32 or 64, and lanes *
-//                    data_width a multiple of 64. The streamer's beats are
+//                    data_width a multiple of 64; 64 for a fold, whose
+//                    output beat is one element. The streamer's beats are
 //                    whole 64-bit channel words, lane 0 first
 //                    (snax_streamer.cpp); the elements are packed in them
 //                    data_width bits apart, lane 0 lowest, as Chisel packs a
@@ -81,7 +83,7 @@ private:
     std::string str_prop(const char *name);
     std::vector<std::string> names_prop(const char *name);
     bool probe(vp::IoMaster &port, bool is_write);
-    void move(vp::IoMaster &port, bool is_write, uint64_t *beat);
+    void move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words);
     void compute(std::vector<uint64_t> &out);
     void fold(bool first);
 
@@ -98,7 +100,8 @@ private:
     int op;
     bool is_signed;
     bool is_fold;               // one input
-    int beat_words;             // 64-bit words per beat
+    int beat_words;             // 64-bit words per input beat
+    int out_words;              // per output beat: beat_words, 1 for a fold
     int nb_config_words;        // the ctrl write's words
     int count_word;             // the count's word in it
     int rate_word;              // the rate's, -1 without one
@@ -106,7 +109,7 @@ private:
     SnaxUnitRule rule;
 
     std::vector<std::vector<uint64_t>> beat_in;   // per input, the beat taken
-    std::vector<uint64_t> acc;                    // a fold's output so far
+    std::vector<uint64_t> acc;                    // a fold's output so far, one word
     std::deque<std::vector<uint64_t>> results;    // computed, not pushed yet
 };
 
@@ -148,11 +151,12 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
             "streamer's 64-bit channel words\n", this->lanes, this->data_width);
     }
     this->beat_words = this->lanes * this->data_width / 64;
-    if (this->is_fold && this->lanes != 1)
+    if (this->is_fold && this->data_width != 64)
     {
-        this->trace.fatal("Property lanes: %d, a fold (one input) has one lane: no Chisel block "
-            "folds lanes yet\n", this->lanes);
+        this->trace.fatal("Property data_width: %d, a fold's output is one element, so 64 bits "
+            "for a whole channel word\n", this->data_width);
     }
+    this->out_words = this->is_fold ? 1 : this->beat_words;
 
     this->op = this->int_prop("op");
     if (this->op < 0 || this->op >= UNIT_NB_OPS)
@@ -235,7 +239,7 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     this->csr_base = this->int_prop("csr_base");
 
     this->beat_in.assign(inputs.size(), std::vector<uint64_t>(this->beat_words));
-    this->acc.assign(this->beat_words, 0);
+    this->acc.assign(this->out_words, 0);
 
     // Sized once, before any port is registered: never resized after
     this->in_itf.resize(inputs.size());
@@ -385,10 +389,10 @@ bool SnaxUnit::probe(vp::IoMaster &port, bool is_write)
 }
 
 
-void SnaxUnit::move(vp::IoMaster &port, bool is_write, uint64_t *beat)
+void SnaxUnit::move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words)
 {
     this->beat_req.init();
-    this->beat_req.set_size(8 * this->beat_words);
+    this->beat_req.set_size(8 * words);
     this->beat_req.set_is_write(is_write);
     this->beat_req.set_data((uint8_t *)beat);
     if (port.req(&this->beat_req) != vp::IO_REQ_OK)
@@ -415,21 +419,13 @@ void SnaxUnit::compute(std::vector<uint64_t> &out)
 }
 
 
-// A fold's firing: the beat taken starts the output's value or is folded
-// into it, lane by lane
+// A fold's firing: the beat taken, its lanes through the tree, starts the
+// output's value or is folded into it (64-bit elements, one per word)
 void SnaxUnit::fold(bool first)
 {
-    int w = this->data_width;
-    uint64_t mask = w == 64 ? ~(uint64_t)0 : ((uint64_t)1 << w) - 1;
-    for (int lane = 0; lane < this->lanes; lane++)
-    {
-        int word = lane * w / 64;
-        int shift = lane * w % 64;
-        uint64_t a = (this->acc[word] >> shift) & mask;
-        uint64_t x = (this->beat_in[0][word] >> shift) & mask;
-        uint64_t r = first ? x : snax_unit_compute(this->op, this->is_signed, w, a, x);
-        this->acc[word] = (this->acc[word] & ~(mask << shift)) | (r << shift);
-    }
+    uint64_t x = snax_unit_tree(this->op, this->is_signed, 64, this->beat_in[0].data(),
+        this->lanes);
+    this->acc[0] = first ? x : snax_unit_compute(this->op, this->is_signed, 64, this->acc[0], x);
 }
 
 
@@ -453,7 +449,8 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         {
             for (size_t i = 0; i < _this->in_itf.size(); i++)
             {
-                _this->move(_this->in_itf[i], false, _this->beat_in[i].data());
+                _this->move(_this->in_itf[i], false, _this->beat_in[i].data(),
+                    _this->beat_words);
             }
             if (_this->is_fold)
             {
@@ -472,7 +469,7 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         }
         if (step.push)
         {
-            _this->move(_this->out_itf, true, _this->results.front().data());
+            _this->move(_this->out_itf, true, _this->results.front().data(), _this->out_words);
             _this->results.pop_front();
         }
         if (step.end)
