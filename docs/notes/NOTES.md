@@ -4241,3 +4241,34 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   both (2767, 3015); besides them `forge_core_0`, `forge_core_1` and the
   table `forge_cores`. `.cdata` 0 B, `.cbss` 16 B, `.tdata` 0 B, `.tbss`
   8 B, as in step 10.
+
+### GEN2a round 2: the adder tree
+
+- 2026-10-20. Branches `ry/gen2a-2` here and in snax-forge, tag
+  `gen2a-r2`; steps in `docs/plans/GEN2a.md`, snax-forge's side in its D133
+  (amended), C§10 and STATUS.
+- Step 1: `SnaxUnit`'s fold takes W lanes: each firing reduces the beat's
+  lanes by the op through `snax_unit_tree` (halves first), then folds as
+  before; a fold's data_width is 64 (its output one element). Unit cases
+  `pipelined_tree_tn` (lanes 4, T = n = 8, a stall_in and a stall_out) and
+  `pipelined_tree_t4` (lanes 4, count 8 rate 4 with a stall_out, then count
+  4 rate 2), a `lanes` header (the tree's, not the rule's) and 8 tree
+  vectors: `run.sh` 19 passed, the 17 before unchanged; the Python unit
+  tests 34 passed; `make regress K=forge` passed.
+- Step 2 (snax-forge): the Accumulator's `lanes`, its input a Vec, a
+  `reduceTree` of `accWidth`-bit adders in front of the register;
+  `SnaxUnitCases` reads `lanes` and `AccumulatorRateSpec` drives the block at
+  the case's lanes: `chisel-test` 56 passed with this repo's cases. With one
+  bit of `pipelined_tree_t4` flipped it fails at that cycle.
+- Steps 3 and 4 (snax-forge): `chisel_adder_tree` binds the Accumulator,
+  both bindings with `args: {"lanes": "W"}`; `recipes/vsum_tree.json`
+  (vsum, N = 64, W = 4) through sandbox, design and gen-gvsoc with no
+  refusal: `lanes` 4, one task of 16 beats, `loopCount` = `len` = 16.
+- Step 5: `forge/vsum_tree/`, 5 TCDM ports. `forge.vsum_tree`: `forge data:
+  0 errors (1 words)`, `forge counter sum_acc: 19`, run line `run 0:
+  firings 16 busy 16 stall_in 2 stall_out 0 flush 1`.
+- Step 7: full `make regress` in the image: `regression passed`; unit 1,
+  SNAX 40, `snax-shell.snax_tiled_add` 1, forge 5 (`forge.vecadd`,
+  `forge.vecmul`, `forge.vsum`, `forge.vsum_tree`, `forge-reduce.vsum-r16`),
+  plain 17.
+- Not verified: the tree on snax_cluster's RTL (GEN1, GEN2b).
