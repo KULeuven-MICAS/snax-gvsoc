@@ -61,7 +61,7 @@ Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
 | `events` | `start` | the cycle `s` the start is taken, one line per mover | `mover` |
-| `events` | `done` | the mover's last busy cycle | `mover` |
+| `events` | `done` | the mover's last busy cycle: the commit in which its last address leaves (a mover with nothing to move: the first commit after the start) | `mover` |
 | `summary` | `mover` | the streamer's end, one line per mover and run | `mover`, `run` (from 0), `busy`, `stall_xbar`, `stall_fifo`, `idle`, `qmax` (the highest count of each lane's queue, lane 0 first) |
 
 ### Crossbar (`tcdm/snax_xbar`, `snax/snax_tcdm_xbar.cpp`)
@@ -70,7 +70,7 @@ Both arbiters. Counted over the whole simulation, written at its end:
 
 | Trace | Kind | Fields |
 |---|---|---|
-| `summary` | `input` | `index`, `name` (its owner: `snax_acc<i>.<mover>.lane<l>`, `core<i>`, `axi`), `grants`, `stalls` (cycles it requested and was not granted), `stalls_dma` (the part refused or lost on a bank the DMA's superbank took), `whole_run` (1 for the cores and AXI, whose traffic starts at boot) |
+| `summary` | `input` | `index`, `name` (its owner: `snax_acc<i>.streamer.<mover>.lane<l>`, `core<i>`, `axi`), `grants`, `stalls` (cycles it requested and was not granted), `stalls_dma` (the part refused or lost on a bank the DMA's superbank took), `whole_run` (1 for the cores and AXI, whose traffic starts at boot) |
 | `summary` | `bank` | `index`, `reads`, `writes` (a SNAX input's grant or a DMA beat's word on the bank), `conflicts` (cycles with two or more of those requests on the bank) |
 
 The banks count the SNAX inputs and the DMA only; the cores' and AXI's

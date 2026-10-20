@@ -60,7 +60,7 @@ The grammar is `docs/EVENTS.md`.
 |---|---|---|
 | 0 | Docs in both: snax-forge D137 amended, C§7 for its `run/` (and its contract test), STATUS; this table, `docs/EVENTS.md` | done |
 | 1 | Probe, no code kept: (a) one `--trace` file collects several components' traces in simulation order; (b) `func` names resolve on a plain `snax_hjson` run; (c) the barrier wait is an `insn_stall` | done |
-| 2 | Unit, streamer and crossbar: the three traces, their lines, the crossbar's counters; `make regress` | todo |
+| 2 | Unit, streamer and crossbar: the three traces, their lines, the crossbar's counters; `make regress` | done |
 | 3 | Core and iDMA hooks; `make regress`; one fixture's `events.log` at task level | todo |
 | 4 | snax-forge `run/`: profile, trace, cluster, events, outputs, and their tests | todo |
 | 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | todo |
@@ -99,6 +99,19 @@ The grammar is `docs/EVENTS.md`.
   the two reads allow: at least `forge_check`'s entry minus the cycle main
   is left, at most the cycle `forge_check` is left minus main's entry.
   Before `main`, `snrt_main` runs from 1929.
+- **Unit, streamer and crossbar (step 2).** The three traces come from
+  `snax/snax_events.hpp`. The unit's `SnaxUnitRule::run_line` is now the
+  summary's `run index=<i> ...` line, so its debug trace, the unit tests'
+  cases and `regress.py`'s counter check read that form. snax-forge's
+  vecadd ELF with `--trace='/summary$:F' --trace='/events$:F'`: the
+  streamer's three `start` lines at 2931, the unit's `start` at 2932,
+  `done` lines for reader0 (2948), reader1 (2949), the unit (2951, firings
+  at 2936 to 2951) and writer0 (2952), the streamer's `mover` lines at 2953;
+  at the end the crossbar's 15 `input` lines (12 streamer lanes with 16
+  grants each, `core0`, `core1` and `axi` marked `whole_run=1`) and 32
+  `bank` lines, each bank 6 reads and 6 writes (the streamer's 192 words and
+  the DMA's 192, over 32 banks). The run's output is unchanged (226 cycles,
+  counter 19). `make regress` on a fresh build passes.
 
 ## Findings (round 1a)
 

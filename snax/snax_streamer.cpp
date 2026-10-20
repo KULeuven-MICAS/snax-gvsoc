@@ -61,6 +61,12 @@
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
 // them with the highest queue count per lane when the streamer is done.
 //
+// Events (docs/EVENTS.md, snax_events.hpp), per mover: `start` in the cycle
+// the start is taken; `done` in its last busy cycle (the commit in which its
+// last address leaves, or the streamer's end for a mover that never started);
+// the summary's `mover` line with the run's classes and queue maxima when the
+// streamer is done.
+//
 // Not modelled: reader-writers, configurable channels and byte masks, address
 // remapping (logic word sizes), datapath extensions, a second clock domain;
 // snax_streamer.py refuses their keys.
@@ -71,6 +77,7 @@
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
 #include "snax_csr_block.hpp"
+#include "snax_events.hpp"
 
 
 // A beat word in a lane's queue, and the first cycle it can leave
@@ -120,6 +127,7 @@ struct Mover
     // Cycle classes of the current run, and the class of the cycles it sleeps
     int64_t classes[NB_CLASSES];
     CycleClass gap_class;
+    bool done;                  // its done line is written for this run
 };
 
 // One channel: one 64-bit TCDM port
@@ -175,8 +183,10 @@ private:
     void pop_word(Channel &ch, int64_t cycle);
     bool priority_hint(Channel &ch, int64_t cycle);
     void end_run(int64_t cycle);
+    void mover_done(Mover &mover, int64_t cycle);
 
     vp::Trace trace;
+    SnaxEvents ev;
     vp::IoSlave csr_itf;
     std::vector<vp::IoMaster> tcdm_itf;
     std::vector<vp::WireMaster<bool>> tcdm_prio_itf;
@@ -201,6 +211,7 @@ private:
     uint32_t counter_before;    // the counter's value up to s + 1
     int64_t stepped_cycle;      // the last cycle the requests were sent
     int64_t classed_cycle;      // the last cycle classed
+    int runs;                   // starts taken, the current run's index + 1
 };
 
 
@@ -211,6 +222,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
       summary_event(this, &SnaxStreamer::summary_handler)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
+    this->ev.declare(this);
 
     js::Config *cfg = this->get_js_config();
     int addr_bits = cfg->get_child_int("addr_bits");
@@ -322,6 +334,7 @@ void SnaxStreamer::reset(bool active)
         this->counter_before = 0;
         this->stepped_cycle = -1;
         this->classed_cycle = -1;
+        this->runs = 0;
     }
 }
 
@@ -521,6 +534,9 @@ void SnaxStreamer::start(int64_t cycle)
         this->trace.msg(vp::Trace::LEVEL_DEBUG, "Mover %s: pointer 0x%x, %s\n",
             mover.name.c_str(), mover.ptr,
             mover.agu_busy ? "started" : "not started (a temporal bound is 0)");
+        mover.done = false;
+        this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld start mover=%s\n", (long)cycle,
+            mover.name.c_str());
     }
     for (Channel &ch : this->channels)
     {
@@ -528,6 +544,7 @@ void SnaxStreamer::start(int64_t cycle)
     }
 
     this->counter_before = this->counter_at(cycle);
+    this->runs++;
     this->started = true;
     this->start_cycle = cycle;
     this->end_cycle = -1;
@@ -551,6 +568,10 @@ void SnaxStreamer::start(int64_t cycle)
 // that comes back in it.
 void SnaxStreamer::end_run(int64_t cycle)
 {
+    for (Mover &mover : this->movers)
+    {
+        this->mover_done(mover, cycle);
+    }
     this->end_cycle = cycle + 1;
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Done: busy up to cycle %ld, counter %d\n",
         this->end_cycle, this->counter_at(this->end_cycle + 1));
@@ -563,22 +584,42 @@ void SnaxStreamer::end_run(int64_t cycle)
 }
 
 
+// The mover's done line, once per run: cycle is its last busy cycle
+void SnaxStreamer::mover_done(Mover &mover, int64_t cycle)
+{
+    if (!mover.done)
+    {
+        mover.done = true;
+        this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld done mover=%s\n", (long)cycle,
+            mover.name.c_str());
+    }
+}
+
+
 // Per mover, the run's cycle classes and the highest count of each lane's
 // queue over the busy window
 void SnaxStreamer::summary_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     SnaxStreamer *_this = (SnaxStreamer *)__this;
+    int64_t cycle = _this->clock.get_cycles();
     for (Mover &mover : _this->movers)
     {
-        std::string counts;
+        std::string counts, qmax;
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
-            counts += " " + std::to_string(_this->channel(mover, lane).max_count);
+            std::string count = std::to_string(_this->channel(mover, lane).max_count);
+            counts += " " + count;
+            qmax += (lane > 0 ? "," : "") + count;
         }
         _this->trace.msg(vp::Trace::LEVEL_DEBUG,
             "Mover %s: busy %ld, stall_xbar %ld, stall_fifo %ld, idle %ld; queue max%s\n",
             mover.name.c_str(), mover.classes[BUSY], mover.classes[STALL_XBAR],
             mover.classes[STALL_FIFO], mover.classes[IDLE], counts.c_str());
+        _this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld mover mover=%s run=%d busy=%ld stall_xbar=%ld stall_fifo=%ld idle=%ld "
+            "qmax=%s\n", (long)cycle, mover.name.c_str(), _this->runs - 1,
+            (long)mover.classes[BUSY], (long)mover.classes[STALL_XBAR],
+            (long)mover.classes[STALL_FIFO], (long)mover.classes[IDLE], qmax.c_str());
     }
 }
 
@@ -898,6 +939,10 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
         if (mover.agu_busy && _this->agu_has_room(mover))
         {
             _this->agu_push(mover);
+        }
+        if (!_this->mover_busy(mover))
+        {
+            _this->mover_done(mover, cycle);
         }
     }
 

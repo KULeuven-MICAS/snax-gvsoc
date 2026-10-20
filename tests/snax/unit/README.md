@@ -7,7 +7,7 @@ against hand-worked cases, with g++ only. `make regress` runs it first, as
 
 - `tb.cpp` drives the rule cycle by cycle from a case file and compares,
   every cycle, whether it fires, pushes and is busy, each start's answer,
-  and the trace line at the end of every run (`SnaxUnitRule::run_line`, the
+  and the summary line at the end of every run (`SnaxUnitRule::run_line`, the
   line the component prints), whose busy, stall_in, stall_out and flush must
   add up to the run's busy cycles in the case file. It also checks the op table on fixed vectors
   (wrapping at 8 to 64 bits, signed and unsigned min and max), and a fold's tree over a beat's
@@ -28,7 +28,7 @@ from cycle 0:
 | `lanes W` | a fold's input lanes (default 1): the tree in front of the fold, not the rule, so read by snax-forge's Chisel spec only |
 | `config ROLE...` | the roles of a start's words, `count` and `rate` (default `count`), as SnaxUnit's `config` |
 | `start CYCLE WORD... taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step), its words in `config`'s order, and its expected answer |
-| `expect run I: firings F busy B stall_in SI stall_out SO flush FL` | the trace line expected at the end of run I, in order |
+| `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the summary line expected at the end of run I, in order (`docs/EVENTS.md`) |
 | `like FILE` | run FILE (beside this one) with this file's `wait`, `latency` and `ii` instead of its own; one run per `like` |
 | `cycles` | the cycle lines follow |
 

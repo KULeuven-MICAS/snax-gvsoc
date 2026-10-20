@@ -53,12 +53,22 @@
 // cycle's arbitration, which runs after every event queued before the cycle
 // (docs/plans/SG7.md); one that comes after it on a superbank already
 // granted to a narrow request is fatal.
+//
+// Counters (docs/EVENTS.md, snax_events.hpp), over the whole simulation and
+// written by stop() as summary lines: per input its grants, its stalls (cycles
+// it requested and was not granted) and the part of them on a bank the DMA's
+// superbank took; per bank its reads and writes (a SNAX input's grant, or a
+// word of a DMA beat) and its conflicts (cycles with two or more of those
+// requests on it). The banks count the SNAX inputs and the DMA only: the
+// inputs that hold (the cores, AXI) have their own lines, marked whole_run,
+// since their traffic starts at boot.
 
 #include <algorithm>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+#include "snax_events.hpp"
 #include "snax_plain_arb.hpp"
 #include "snax_sparse_arb.hpp"
 
@@ -86,6 +96,7 @@ private:
     static void respond(vp::Block *__this, vp::ClockEvent *event);
     void answer(vp::IoReq *req, int input);
     void reset(bool active) override;
+    void stop() override;
 
     // The sparse interconnect's winner on bank among the inputs in req_mask
     int sparse_pick(int bank, uint64_t req_mask, int64_t cycle);
@@ -102,6 +113,7 @@ private:
     std::string name(int input);
 
     vp::Trace trace;
+    SnaxEvents ev;
     std::vector<vp::IoSlave> inputs;
     std::vector<vp::WireSlave<bool>> priority_itf;
     std::vector<vp::IoMaster> banks;
@@ -148,6 +160,14 @@ private:
     // Per bank: the cycle of its last narrow grant, and to whom
     std::vector<int64_t> grant_cycle;
     std::vector<int> grant_input;
+
+    // The counters: per input, per bank
+    std::vector<int64_t> input_grants;
+    std::vector<int64_t> input_stalls;
+    std::vector<int64_t> input_stalls_dma;
+    std::vector<int64_t> bank_reads;
+    std::vector<int64_t> bank_writes;
+    std::vector<int64_t> bank_conflicts;
 };
 
 
@@ -158,6 +178,7 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
       resp_event(this, &SnaxTcdmXbar::respond)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
+    this->ev.declare(this);
 
     this->nb_inputs = this->get_js_config()->get_child_int("nb_inputs");
     this->nb_banks = this->get_js_config()->get_child_int("nb_banks");
@@ -276,6 +297,33 @@ void SnaxTcdmXbar::reset(bool active)
         this->responses.clear();
         std::fill(this->superbank_cycle.begin(), this->superbank_cycle.end(), -1);
         std::fill(this->grant_cycle.begin(), this->grant_cycle.end(), -1);
+        this->input_grants.assign(this->nb_inputs, 0);
+        this->input_stalls.assign(this->nb_inputs, 0);
+        this->input_stalls_dma.assign(this->nb_inputs, 0);
+        this->bank_reads.assign(this->nb_banks, 0);
+        this->bank_writes.assign(this->nb_banks, 0);
+        this->bank_conflicts.assign(this->nb_banks, 0);
+    }
+}
+
+
+// The counters, as summary lines (docs/EVENTS.md)
+void SnaxTcdmXbar::stop()
+{
+    long cycle = (long)this->clock.get_cycles();
+    for (int i = 0; i < this->nb_inputs; i++)
+    {
+        this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld input index=%d name=%s grants=%ld stalls=%ld stalls_dma=%ld whole_run=%d\n",
+            cycle, i, this->names[i].c_str(), (long)this->input_grants[i],
+            (long)this->input_stalls[i], (long)this->input_stalls_dma[i], (int)this->holds[i]);
+    }
+    for (int bank = 0; bank < this->nb_banks; bank++)
+    {
+        this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld bank index=%d reads=%ld writes=%ld conflicts=%ld\n", cycle, bank,
+            (long)this->bank_reads[bank], (long)this->bank_writes[bank],
+            (long)this->bank_conflicts[bank]);
     }
 }
 
@@ -395,6 +443,7 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
         bank_req.set_data(data);
         bank_req.set_is_write(req->get_is_write());
         bank_req.set_opcode(req->get_opcode());
+        (req->get_is_write() ? _this->bank_writes : _this->bank_reads)[bank]++;
         vp::IoReqStatus status = _this->banks[bank].req(&bank_req);
         if (status != vp::IO_REQ_OK)
         {
@@ -477,7 +526,25 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
 
         int winner = _this->sparse ? _this->sparse_pick(bank, req_mask, cycle)
             : _this->plain_arbs[bank].pick(cycle, req_mask);
-        if (_this->bank_refuses(bank))
+        bool refuses = _this->bank_refuses(bank);
+        int requests = refuses;
+        for (int i = 0; i < _this->nb_inputs; i++)
+        {
+            if ((req_mask >> i) & 1)
+            {
+                requests += !_this->holds[i];
+                if (i != winner || refuses)
+                {
+                    _this->input_stalls[i]++;
+                    _this->input_stalls_dma[i] += refuses;
+                }
+            }
+        }
+        if (requests >= 2)
+        {
+            _this->bank_conflicts[bank]++;
+        }
+        if (refuses)
         {
             // Dropped with the losers; locked in, it wins again next cycle if
             // it still competes
@@ -503,6 +570,11 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
 
         _this->grant_cycle[bank] = cycle;
         _this->grant_input[bank] = winner;
+        _this->input_grants[winner]++;
+        if (!_this->holds[winner])
+        {
+            (req->get_is_write() ? _this->bank_writes : _this->bank_reads)[bank]++;
+        }
 
         if (_this->trace.get_active(vp::Trace::LEVEL_DEBUG))
         {

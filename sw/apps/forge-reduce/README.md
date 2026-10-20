@@ -78,8 +78,8 @@ In the container, from snax-gvsoc, with GVSoC built and the program made:
         --param chip/soc/binary=$PWD/build/sw/apps/forge-reduce/vsum/forge-reduce.elf run
 
 It warns that the platform tree does not match (LNK2a: the cluster file's
-components are not `snax_hjson`'s default's), prints the unit's line
-`run 0: firings 64 busy 64 stall_in 2 stall_out 0 flush 1` (GEN3 round 4's
-build; the core's timing can move the stalls), then
+components are not `snax_hjson`'s default's), prints the unit's lines,
+among them `run index=0 firings=64 busy=64 stall_in=2 stall_out=0 flush=1`
+(GEN3 round 4's build; the core's timing can move the stalls), then
 `forge-reduce data: 0 errors (1 sums)`, the counter (67, busy + stall_in +
 stall_out + flush of that line) and `forge-reduce errors: 0`, and exits 0.

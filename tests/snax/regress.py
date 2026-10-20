@@ -35,8 +35,9 @@ hand with phases.py (README, "Comparing with the RTL").
 
 The counter check (check_counter): a program on SnaxShell and
 SnaxUnit prints the shell's counter after a unit run; it passes when the
-counter is busy + stall_in + stall_out + flush of the unit's trace line for
-that run (`run <k>: ...`) and that run fired the task's beats. A
+counter is busy + stall_in + stall_out + flush of the unit's summary line
+for that run (`run index=<k> ...`, docs/EVENTS.md) and that run fired the
+task's beats. A
 hand-written program (snax-shell, forge-reduce) prints
 `<program> counter: <n>` for run 0, its beats snax-shell's SHELL_BEATS or
 the fixture's first task's; a generated one (check_counters) prints
@@ -121,7 +122,7 @@ def gvrun(target, elf, workdir, log, options=()):
 
 
 RUN_LINE = re.compile(
-    r"run (\d+): firings (\d+) busy (\d+) stall_in (\d+) stall_out (\d+) flush (\d+)")
+    r"run index=(\d+) firings=(\d+) busy=(\d+) stall_in=(\d+) stall_out=(\d+) flush=(\d+)")
 
 
 def check_run(counter, trace, run, beats):
@@ -129,7 +130,7 @@ def check_run(counter, trace, run, beats):
     fired beats times. Returns None when it holds, else why not."""
     lines = {int(m.group(1)): [int(n) for n in m.groups()[1:]] for m in RUN_LINE.finditer(trace)}
     if run not in lines:
-        return f"no `run {run}:` line in the unit's trace"
+        return f"no `run index={run}` line in the unit's trace"
     firings, *classes = lines[run]
     if firings != beats:
         return f"run {run} fired {firings} times, not {beats}"

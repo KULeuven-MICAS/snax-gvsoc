@@ -48,6 +48,7 @@ In the container, from snax-gvsoc, with GVSoC built and the program made:
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
 It warns that the platform tree does not match (LNK2a), prints the unit's
-`run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0`, then
+lines (`docs/EVENTS.md`), among them `run index=0 firings=16 busy=16
+stall_in=3 stall_out=0 flush=0`, then
 `forge data: 0 errors (64 words)`, `forge counter add_acc: 19` (busy +
 stall_in + stall_out + flush of that line) and `forge errors: 0`, and exits 0.

@@ -39,9 +39,9 @@ In the container, from snax-gvsoc, with GVSoC built for `snax_hjson`:
 
 It prints gvrun's warning that the platform tree does not match (the
 cluster file's accelerator is not the build's default file's, so gvrun runs
-it on the JSON config), the unit's line per run, `run 0: firings 16 busy B
-stall_in SI stall_out SO flush 0` (B + SI + SO the counter), then `run 1`
-and `run 2`, and
+it on the JSON config), the unit's lines per run (`docs/EVENTS.md`), among
+them `run index=0 firings=16 busy=B stall_in=SI stall_out=SO flush=0` (B +
+SI + SO the counter), then those of runs 1 and 2, and
 
     snax-shell data: 0 errors (192 words)
     snax-shell counter: N
@@ -50,5 +50,5 @@ and `run 2`, and
     snax-shell loopCount 0: busy 0, counter 0
     snax-shell errors: 0
 
-and exits 0. N and S follow the core's timing: 17 (`run 0: firings 16 busy
-16 stall_in 1 stall_out 0 flush 0`) and 19.
+and exits 0. N and S follow the core's timing: 17 (`run index=0 firings=16
+busy=16 stall_in=1 stall_out=0 flush=0`) and 19.

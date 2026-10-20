@@ -3,7 +3,7 @@
 wait lockstep
 inputs 2
 start 0 3 taken
-expect run 0: firings 3 busy 3 stall_in 3 stall_out 0 flush 0
+expect run index=0 firings=3 busy=3 stall_in=3 stall_out=0 flush=0
 cycles
 # a b out  fire push busy
 1 1 1      0 0 0     # 0: start

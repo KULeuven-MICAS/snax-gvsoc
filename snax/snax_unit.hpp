@@ -247,13 +247,13 @@ public:
         return s;
     }
 
-    // The trace line of the run that ended, run index from 0 (a fixed format,
-    // for FLOW3's converter): its classes add up to its busy cycles
+    // The summary line of the run that ended, run index from 0
+    // (docs/EVENTS.md): its classes add up to its busy cycles
     std::string run_line() const
     {
         char line[160];
         snprintf(line, sizeof(line),
-            "run %d: firings %u busy %ld stall_in %ld stall_out %ld flush %ld",
+            "run index=%d firings=%u busy=%ld stall_in=%ld stall_out=%ld flush=%ld",
             this->runs - 1, this->firings, (long)this->classes[BUSY],
             (long)this->classes[STALL_IN], (long)this->classes[STALL_OUT],
             (long)this->classes[FLUSH]);

@@ -55,8 +55,11 @@
 //                      cycle (idle from the next)
 //
 // Its event runs every busy cycle, scheduled as snax_alu_shell.cpp's, so it
-// runs before the streamer's step in a cycle. At the end of each run the trace
-// gives `run <i>: firings <f> busy <b> stall_in <si> stall_out <so> flush <fl>`
+// runs before the streamer's step in a cycle.
+//
+// Events (docs/EVENTS.md, snax_events.hpp): `start` (count, rate) in the cycle
+// a start is taken; `done` (firings, the first and last firing's cycles) in
+// the run's last busy cycle; there too, the summary's `run` line
 // (SnaxUnitRule::run_line), the classes adding up to the run's busy cycles.
 
 #include <deque>
@@ -65,6 +68,7 @@
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
 #include <vp/itf/wire.hpp>
+#include "snax_events.hpp"
 #include "snax_unit.hpp"
 
 
@@ -88,6 +92,7 @@ private:
     void fold(bool first);
 
     vp::Trace trace;
+    SnaxEvents ev;
     vp::IoSlave ctrl_itf;
     vp::WireMaster<bool> busy_itf;
     std::vector<vp::IoMaster> in_itf;
@@ -107,6 +112,8 @@ private:
     int rate_word;              // the rate's, -1 without one
     uint32_t csr_base;
     SnaxUnitRule rule;
+    int64_t first_fire;         // the run's first and last firing, for its done line
+    int64_t last_fire;
 
     std::vector<std::vector<uint64_t>> beat_in;   // per input, the beat taken
     std::vector<uint64_t> acc;                    // a fold's output so far, one word
@@ -119,6 +126,7 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
       fire_event(this, &SnaxUnit::fire_handler)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
+    this->ev.declare(this);
 
     std::vector<std::string> inputs = this->names_prop("inputs");
     std::vector<std::string> outputs = this->names_prop("outputs");
@@ -264,6 +272,7 @@ void SnaxUnit::reset(bool active)
     {
         this->rule.reset();
         this->results.clear();
+        this->first_fire = this->last_fire = -1;
     }
 }
 
@@ -367,6 +376,9 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
                 _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: count %u, rate %u\n",
                     cycle, count, rate);
             }
+            _this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld start count=%u rate=%u\n",
+                (long)cycle, count, rate);
+            _this->first_fire = _this->last_fire = -1;
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(true);
@@ -466,6 +478,11 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
                 _this->compute(_this->results.back());
             }
             _this->trace.msg(vp::Trace::LEVEL_TRACE, "Fire %u\n", _this->rule.firings - 1);
+            if (_this->first_fire == -1)
+            {
+                _this->first_fire = cycle;
+            }
+            _this->last_fire = cycle;
         }
         if (step.push)
         {
@@ -475,6 +492,14 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         if (step.end)
         {
             _this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s\n", _this->rule.run_line().c_str());
+            _this->ev.events.msg(vp::Trace::LEVEL_INFO,
+                "%ld done firings=%u first=%ld last=%ld\n", (long)cycle, _this->rule.firings,
+                (long)_this->first_fire, (long)_this->last_fire);
+            if (_this->ev.summary.get_active())
+            {
+                _this->ev.summary.msg(vp::Trace::LEVEL_INFO, "%ld %s\n", (long)cycle,
+                    _this->rule.run_line().c_str());
+            }
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(false);
