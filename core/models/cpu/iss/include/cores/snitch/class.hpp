@@ -158,13 +158,15 @@ public:
 
     // FLOW3's events (snax-gvsoc docs/EVENTS.md): the summary, events and beats traces,
     // the SNAX CSR accesses (reads of one CSR with one value folded into a poll), the
-    // barrier waits, the state (run or sleep, from Exec::busy_enter and busy_exit) and the
-    // function the PC is in (from Exec::insn_exec_profiling); the counts at stop
+    // barrier waits, the state (run or sleep, from Exec::busy_enter and busy_exit), the
+    // function the PC is in (from Exec::insn_exec_profiling) and every read of mcycle or
+    // mcycleh (from Csr); the counts at stop
     vp::Trace snax_summary;
     vp::Trace snax_events;
     vp::Trace snax_beats;
     void snax_state(bool run);
     void snax_func(iss_reg_t pc);
+    void snax_mcycle(const char *kind, iss_reg_t value);
     void snax_events_stop();
 
     // Temporary variable to process RAW caused by SSR and accessing stack pointer,

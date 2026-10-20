@@ -578,6 +578,16 @@ void Iss::snax_func(iss_reg_t pc)
 }
 
 
+// A read of mcycle (or mcycleh), in the cycle of the read: the program's window is between
+// two of them (snax-forge D135)
+void Iss::snax_mcycle(const char *kind, iss_reg_t value)
+{
+    this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld %s pc=0x%lx value=%lu\n",
+        (long)this->top.clock.get_cycles(), kind, (unsigned long)this->exec.current_insn,
+        (unsigned long)value);
+}
+
+
 // At the end of the simulation: the open run of reads, then the counts
 void Iss::snax_events_stop()
 {

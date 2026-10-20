@@ -80,7 +80,8 @@ accesses are in their own `input` lines.
 
 The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in
 `pulp/pulp/snitch/snitch_core.py`); `state` comes from `Exec::busy_enter` and
-`busy_exit`, `func` from `Exec::insn_exec_profiling`, in the shared exec code.
+`busy_exit`, `func` from `Exec::insn_exec_profiling`, in the shared exec code,
+and `mcycle` from `Csr` (`src/csr.cpp`).
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
@@ -89,6 +90,8 @@ The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in
 | `events` | `barrier` | the read of CSR `0x7c2` | `first`, `last` (the cycle it is released) |
 | `events` | `state` | the first cycle in it | `mode` (`run`, `sleep`) |
 | `events` | `func` | the function's first instruction | `name`, `pc` |
+| `events` | `mcycle` | the read of CSR `mcycle` (`0xb00`) | `pc`, `value` (what the read returns) |
+| `events` | `mcycleh` | the read of CSR `mcycleh` (`0xb80`), which SNAX-GVSoC does not model (it warns) | `pc`, `value` |
 | `summary` | `csrs` | the end of the simulation | `writes`, `reads` (SNAX CSRs, every read of a poll counted) |
 
 `csr` and `poll` are the SNAX CSR accesses: consecutive reads of one CSR that
