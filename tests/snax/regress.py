@@ -9,7 +9,7 @@ First runs SnaxUnit's rule against its hand-worked cases
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy, CI1) and the programs
 of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
-(SNAX_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
+(ALU_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
 `snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
@@ -50,8 +50,8 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_hjson`
-(README). Exit code 0 when every program
+Needs GVSoC built for the Makefile's SNAX_TARGETS
+(`make build TARGETS='$(SNAX_TARGETS)'`). Exit code 0 when every program
 passes, 1 otherwise.
 """
 
@@ -69,7 +69,7 @@ SW = ROOT / "sw"
 APPS = SW / "apps"
 BUILD = ROOT / "build" / "sw"
 
-SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
+ALU_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # Generated accelerators, forge/<design>/ (forge/README.md): every folder, run
 # on snax_hjson from its cluster file by the generic app (GEN2a)
 FORGE_DIR = ROOT / "forge"
@@ -183,11 +183,11 @@ class Check:
 
     def selected_snax(self, program):
         """Whether the SNAX program runs on any target."""
-        return any(self.selected(f"{program}.{target}") for target in SNAX_TARGETS)
+        return any(self.selected(f"{program}.{target}") for target in ALU_TARGETS)
 
     def run_snax(self, program, elf):
         """Runs the SNAX program's ELF on every SNAX target."""
-        for target in SNAX_TARGETS:
+        for target in ALU_TARGETS:
             self.run(f"{program}.{target}", target, elf)
 
     def run(self, name, target, elf, work=None, options=()):
@@ -246,7 +246,7 @@ def main():
     make(SW)
 
     count = check.count
-    print(f"SNAX programs on {', '.join(SNAX_TARGETS)}")
+    print(f"SNAX programs on {', '.join(ALU_TARGETS)}")
     for n in SIZES:
         if check.selected_snax(f"snax-alu-{n}"):
             make(APPS / "snax-alu", f"DATA_LEN={n}")

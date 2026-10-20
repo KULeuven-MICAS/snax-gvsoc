@@ -93,7 +93,7 @@ Build `sw/` (the runtime for both clusters), GVSoC and the programs in
 `sw/apps/`, each into `build/sw/apps/<name>/`:
 
     make sw
-    make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_hjson"
+    make build TARGETS='$(SNAX_TARGETS)'
     make -C sw/apps/snax-csr
     make -C sw/apps/snax-alu
     source sourceme.sh
@@ -176,7 +176,7 @@ run line for that run (`check_counters`). A `forge/` entry is read from its
 with `--param hjson=` (gvrun warns that the platform tree does not match),
 the unit's trace path and each accelerator task's beats; the program is
 built with `DESIGN=<design>`. It needs GVSoC built for
-`snitch;snax_alu;snax_alu_sparse;snax_hjson`, as above, and takes about
+the Makefile's `SNAX_TARGETS`, as above, and takes about
 two minutes.
 
     make regress
@@ -194,7 +194,7 @@ the programs whose name holds it, as `-k stream-timing`, `-k sparse`,
 `.github/workflows/ci.yml` runs on every push to main, on every pull
 request, and by hand (`workflow_dispatch`), in snax-forge's image
 `ghcr.io/kuleuven-micas/snax-forge:main`. One job builds GVSoC for
-`snitch;snax_alu;snax_alu_sparse;snax_hjson` (with ccache, kept between runs), runs the unit tests
+the Makefile's `SNAX_TARGETS` (with ccache, kept between runs), runs the unit tests
 (`python3 -m unittest discover -s tests/snax -p 'test_*.py'`), then
 `make regress`. Only `snax/`, `sw/` and `tests/snax/` are built and
 tested (and `forge/` run); GVSoC's other targets stay out.
