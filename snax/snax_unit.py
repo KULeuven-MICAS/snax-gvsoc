@@ -62,13 +62,15 @@ class SnaxUnit(gvsoc.systree.Component):
         Busy from the next cycle on, driven on every change.
     """
 
+    SOURCES = ['snax_unit.cpp']
+
     def __init__(self, parent: gvsoc.systree.Component, name: str, inputs: list,
             outputs: list, lanes: int, data_width: int, op: int, signed: bool = False,
             control: str = 'counted', wait: str = 'lockstep', latency: int = 0, ii: int = 1,
             csr_base: int = 0, config: list = None):
         super().__init__(parent, name)
 
-        self.add_sources(['snax_unit.cpp'])
+        self.add_sources(self.SOURCES)
 
         self.add_properties({
             'inputs': list(inputs),

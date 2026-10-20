@@ -33,11 +33,13 @@ class SnaxShell(gvsoc.systree.Component):
         The unit's busy.
     """
 
+    SOURCES = ['snax_shell.cpp']
+
     def __init__(self, parent: gvsoc.systree.Component, name: str, csr_base: int,
             fields: list):
         super().__init__(parent, name)
 
-        self.add_sources(['snax_shell.cpp'])
+        self.add_sources(self.SOURCES)
 
         self.add_properties({
             'csr_base': csr_base,

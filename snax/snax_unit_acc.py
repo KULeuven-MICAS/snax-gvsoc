@@ -31,6 +31,14 @@ from snax_unit import SnaxUnit
 UNITS = ['SnaxUnit']
 
 
+def compile_components():
+    """Has the build compile SnaxShell and SnaxUnit, as it would for a target whose tree holds
+    them: a cluster file with a datapath block runs on the installed components, and no built
+    target's default file has one. The build path only (gvsoc.systree's registry)."""
+    for sources in (SnaxShell.SOURCES, SnaxUnit.SOURCES):
+        gvsoc.systree.get_generated_component(list(sources), [], [])
+
+
 class SnaxUnitAcc(SnaxAcc):
     """The CSR mux, the streamer, SnaxShell and SnaxUnit of one slot, ports as SnaxAcc's;
     for_slot gives the slot's class."""

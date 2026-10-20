@@ -56,7 +56,7 @@ from pulp.chips.snitch.snitch import Snitch
 import snax_cfg
 from snax_cfg import CfgTargetError
 from snax_alu_acc import SnaxAluAcc
-from snax_unit_acc import SnaxUnitAcc
+from snax_unit_acc import SnaxUnitAcc, compile_components
 
 # GVSoC reads a target twice: `make build` lists its components through gapy
 # without USE_GVRUN, and gvrun runs it with USE_GVRUN set. Each pulp module
@@ -269,6 +269,7 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
         clock = Clock_domain(self, 'clock', frequency=CLOCK_FREQUENCY)
 
         if os.environ.get('USE_GVRUN') is None:
+            compile_components()
             properties = SnitchArchProperties()
             properties.nb_core_per_cluster = arch.nb_core
             properties.snax_acc = arch.snax_acc
