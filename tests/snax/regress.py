@@ -13,8 +13,9 @@ of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
 `snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
-`snax-shell` on `snax_tiled_add` (GEN3 step 2: SnaxShell and SnaxUnit), with
-the unit's trace on and the counter check below; then
+`snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file (SHELL_DESIGN:
+SnaxShell and SnaxUnit, a lockstep add), with the unit's trace on and the
+counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge` (GEN2a:
 snax-forge's generated main.c and data.h), named forge.<design>, and
 `forge-reduce.vsum-r16` (FORGE_REDUCE: vsum with its len overridden to 16 by
@@ -37,7 +38,7 @@ SnaxUnit prints the shell's counter after a unit run; it passes when the
 counter is busy + stall_in + stall_out + flush of the unit's trace line for
 that run (`run <k>: ...`) and that run fired the task's beats. A
 hand-written program (snax-shell, forge-reduce) prints
-`<program> counter: <n>` for run 0, its beats snax-shell's in OWN_TARGET or
+`<program> counter: <n>` for run 0, its beats snax-shell's SHELL_BEATS or
 the fixture's first task's; a generated one (check_counters) prints
 `forge counter <task>: <n>` per accelerator task of its manifest, the k-th
 task matched to run k.
@@ -49,7 +50,7 @@ failure prints that path and the log's last lines. Under GitHub Actions
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
 
-Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson`
+Needs GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_hjson`
 (README). Exit code 0 when every program
 passes, 1 otherwise.
 """
@@ -69,15 +70,16 @@ APPS = SW / "apps"
 BUILD = ROOT / "build" / "sw"
 
 SNAX_TARGETS = ["snax_alu", "snax_alu_sparse"]
-# Programs on one target each, with the counter check: (program, target, the
-# unit's trace path, the beats of its first run: snax-shell's RUN_BEATS,
-# DATA_LEN 192 / 4 lanes / 3 runs)
-OWN_TARGET = [("snax-shell", "snax_tiled_add", "snax_acc0/unit", 16)]
 # Generated accelerators, forge/<design>/ (forge/README.md): every folder, run
 # on snax_hjson from its cluster file by the generic app (GEN2a)
 FORGE_DIR = ROOT / "forge"
 FORGE_TARGET = "snax_hjson"
 FORGE_APP = "forge"
+# snax-shell runs on this fixture's cluster file, whose CSRs and datapath it is
+# written for, with the counter check; the beats of its first run are its
+# RUN_BEATS, DATA_LEN 192 / 4 lanes / 3 runs
+SHELL_DESIGN = "vecadd"
+SHELL_BEATS = 16
 # The hand-written forge-reduce on a fixture with its len overridden: (design,
 # RATE_OVERRIDE). len 16 for vsum's T = N = 64, 4 sums per run, the
 # multi-output path, until a kernel gives T < n (snax-forge open item 81)
@@ -271,17 +273,19 @@ def main():
     print(f"  {check.count - count} run")
 
     count = check.count
-    print(f"SNAX programs on their own target: {', '.join(entry[1] for entry in OWN_TARGET)}")
-    for prog, target, unit, beats in OWN_TARGET:
-        name = f"{prog}.{target}"
-        if check.selected(name):
-            make(APPS / prog)
-        log = check.run(name, target, BUILD / "apps" / prog / f"{prog}.elf",
-                        options=[f"--trace={unit}"])
+    prog, name = "snax-shell", f"snax-shell.{FORGE_TARGET}"
+    print(f"{prog} on {FORGE_TARGET}, forge/{SHELL_DESIGN}/'s cluster file")
+    if check.selected(name):
+        folder = FORGE_DIR / SHELL_DESIGN
+        manifest = json.loads((folder / "manifest.json").read_text())
+        make(APPS / prog)
+        log = check.run(name, FORGE_TARGET, BUILD / "apps" / prog / f"{prog}.elf",
+                        options=["--param", f"hjson={(folder / manifest['cluster']).resolve()}",
+                                 f"--trace={manifest['trace']}"])
         if log is not None:
             # Program output and trace share the log
             text = log.read_text(errors="replace")
-            why = check_counter(prog, text, text, beats)
+            why = check_counter(prog, text, text, SHELL_BEATS)
             if why is not None:
                 check.fail(name, why, log)
     print(f"  {check.count - count} run")

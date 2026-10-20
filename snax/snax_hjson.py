@@ -158,7 +158,7 @@ class SnaxHjson:
     """What the board takes from a cluster file (cfg, a snax_cfg.ClusterCfg), as ClusterArch
     arguments."""
 
-    def __init__(self, cfg, accelerator_override=None):
+    def __init__(self, cfg):
         self.cfg = cfg
         cores = cfg.cores
         if not cores:
@@ -187,12 +187,9 @@ class SnaxHjson:
                 if slot.wide_tcdm_ports:
                     raise CfgTargetError(cfg.path, f'{slot.at}.snax_wide_tcdm_ports',
                         f'{slot.wide_tcdm_ports} wide ports, not modelled')
-                self.snax_acc[i] = accelerator_override or accelerator(cfg, slot)
+                self.snax_acc[i] = accelerator(cfg, slot)
                 if slot.sparse_config is not None:
                     sparse_config[i] = slot.sparse_config
-        if accelerator_override is not None and len(self.snax_acc) != 1:
-            raise CfgTargetError(cfg.path, 'cluster.hives',
-                f'{len(self.snax_acc)} accelerator slots; a board accelerator takes one')
         if cfg.tcdm.sparse_interconnect:
             self.interconnect = {'snax_interconnect': 'sparse',
                 'snax_sparse_config': sparse_config}
@@ -267,9 +264,6 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
     # Whether the hjson option is declared; a target fixed to its cluster file
     # (snax_alu.py) has none
     hjson_option = True
-    # An accelerator class that replaces the one slot's (snax_tiled_add.py);
-    # None takes it from the hjson
-    accelerator = None
 
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
@@ -278,7 +272,7 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
         if self.hjson_option:
             path = self.declare_user_property(name='hjson', value=path,
                 description='the cluster hjson (snax_cfg.py)')
-        arch = SnaxHjson(snax_cfg.load(path), self.accelerator)
+        arch = SnaxHjson(snax_cfg.load(path))
 
         clock = Clock_domain(self, 'clock', frequency=CLOCK_FREQUENCY)
 

@@ -1,5 +1,5 @@
 # SNAX-GVSoC's CI (CI1 in snax-forge, D124): in snax-forge's development
-# image, GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson` only, the unit tests of
+# image, GVSoC built for `snitch;snax_alu;snax_alu_sparse;snax_hjson` only, the unit tests of
 # tests/snax/, then `make regress` (every program in sw/ built from the
 # pinned copy and run to exit 0). Only snax/, sw/ and tests/snax/ are built
 # and tested; GVSoC's other targets and their tests stay out.
@@ -53,11 +53,11 @@ jobs:
           key: ccache-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ccache-
 
-      # GVSoC for Snitch and the four SNAX targets, then ccache's hit rate.
+      # GVSoC for Snitch and the three SNAX targets, then ccache's hit rate.
       - name: Build GVSoC
         id: build
         run: |
-          make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson" CMAKE_FLAGS=-j$(nproc)
+          make build TARGETS="snitch;snax_alu;snax_alu_sparse;snax_hjson" CMAKE_FLAGS=-j$(nproc)
           ccache -s
 
       # phases.py's and snax_cfg.py's tests, with the image's Python as is (hjson in it).
@@ -66,7 +66,7 @@ jobs:
 
       # SnaxUnit's rule on its cases, then sw/ and the programs built, each
       # run to exit 0 (20 SNAX runs on each of snax_alu and snax_alu_sparse,
-      # snax-shell on snax_tiled_add, forge/'s three with their programs,
+      # snax-shell on snax_hjson, forge/'s three with their programs,
       # 17 plain).
       - name: Regress
         run: make regress

@@ -1,12 +1,13 @@
 # snax-shell
 
-GEN3 step 2 (`docs/plans/GEN3.md`): `SnaxShell` and `SnaxUnit` on the
-`snax_tiled_add` target (`snax/snax_tiled_add_acc.py`, a lockstep add of 4
-lanes of 64 bit behind `snax_alu`'s streamer). snax-alu's DMA and streamer
-setup (`snax-alu-lib.h`, `streamer_csr_addr_map.h`); the shell's CSRs by
-hand in the source: `loopCount` 978, start 979, busy 980, the counter 981.
-`data.h` is snax-alu's `datagen.py` (add) at 192 words, NumPy seed 0. It runs
-only on `snax_tiled_add` (snax_cluster has no such accelerator yet).
+`SnaxShell` and `SnaxUnit` (a lockstep add of 4 lanes of 64 bit behind
+`snax_alu`'s streamer), driven by hand on `snax_hjson` with
+`forge/vecadd/snax_alu.hjson`. snax-alu's DMA and streamer setup
+(`snax-alu-lib.h`); the streamer's and the shell's CSRs from
+`forge/vecadd/include/` (`streamer_csr_addr_map.h`, `acc_csr.h`):
+`loopCount` 978, start 979, busy 980, the counter 981. `data.h` is
+snax-alu's `datagen.py` (add) at 192 words, NumPy seed 0. snax_cluster has
+no such accelerator yet, so there is no RTL run to compare with.
 
 One streamer run of 48 beats feeds three unit runs of 16 beats
 (`RUN_BEATS`). It checks only what does not depend on code layout, and
@@ -28,16 +29,19 @@ streamer's timing, so a change to the program can move `n`.
 
 ## Build and run
 
-In the container, from snax-gvsoc, with GVSoC built for `snax_tiled_add`:
+In the container, from snax-gvsoc, with GVSoC built for `snax_hjson`:
 
     make -C sw/apps/snax-shell
     source sourceme.sh
-    gvrun --target snax_tiled_add --work-dir build/work/snax-shell \
-        --trace=snax_acc0/unit --param chip/soc/binary=$PWD/build/sw/apps/snax-shell/snax-shell.elf run
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+        --work-dir build/work/snax-shell --trace=snax_acc0/unit \
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-shell/snax-shell.elf run
 
-It prints the unit's line per run, `run 0: firings 16 busy B stall_in SI
-stall_out SO flush 0` (B + SI + SO the counter), then `run 1` and `run 2`,
-and
+It prints gvrun's warning that the platform tree does not match (the
+cluster file's accelerator is not the build's default file's, so gvrun runs
+it on the JSON config), the unit's line per run, `run 0: firings 16 busy B
+stall_in SI stall_out SO flush 0` (B + SI + SO the counter), then `run 1`
+and `run 2`, and
 
     snax-shell data: 0 errors (192 words)
     snax-shell counter: N
@@ -47,5 +51,4 @@ and
     snax-shell errors: 0
 
 and exits 0. N and S follow the core's timing: 17 (`run 0: firings 16 busy
-16 stall_in 1 stall_out 0 flush 0`) and 19 in GEN3 round 1b's build
-(`docs/notes/NOTES.md`).
+16 stall_in 1 stall_out 0 flush 0`) and 19.

@@ -2,11 +2,11 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The shell program of GEN3 step 2, for the snax_tiled_add target: SnaxShell
+// The shell program, on snax_hjson with forge/vecadd/snax_alu.hjson: SnaxShell
 // and SnaxUnit (lockstep add, 4 lanes of 64 bit) behind snax-alu's streamer
-// (snax/snax_tiled_add_acc.py). snax-alu's DMA and streamer setup; the
-// shell's CSRs by hand below. One streamer run of LOOP_ITER beats feeds three
-// unit runs of RUN_BEATS each:
+// (snax/snax_unit_acc.py). snax-alu's DMA and streamer setup; the shell's
+// CSRs from forge/vecadd/include/acc_csr.h. One streamer run of LOOP_ITER
+// beats feeds three unit runs of RUN_BEATS each:
 //   - start 1, alone: once busy is 0, the counter is run 1's busy cycles,
 //     printed (`snax-shell counter: <n>`); regress.py checks it against the
 //     unit's trace line of its first run (busy + stall_in + stall_out +
@@ -22,16 +22,10 @@
 
 #include "snrt.h"
 
+#include "acc_csr.h"
 #include "data.h"
 #include "snax-alu-lib.h"
 #include "streamer_csr_addr_map.h"
-
-// The shell's CSRs, after the streamer's (snax_tiled_add_acc.py): the field
-// loopCount and start, read-write; busy and the counter, read-only
-#define SHELL_LOOP_COUNT 978
-#define SHELL_START 979
-#define SHELL_BUSY 980
-#define SHELL_COUNTER 981
 
 // Three unit runs on one streamer run (LOOP_ITER is a uint64_t)
 #define RUN_BEATS ((uint32_t)(LOOP_ITER / 3))
@@ -58,28 +52,28 @@ int main() {
         configure_streamer_a((uint64_t)local_a, 0, 8, LOOP_ITER, 32);
         configure_streamer_b((uint64_t)local_b, 0, 8, LOOP_ITER, 32);
         configure_streamer_o((uint64_t)local_o, 0, 8, LOOP_ITER, 32);
-        csrw_ss(SHELL_LOOP_COUNT, RUN_BEATS);
+        csrw_ss(ACC_RW_LOOP_COUNT, RUN_BEATS);
 
         start_streamer();
 
         // Run 1 alone: its counter
-        csrw_ss(SHELL_START, 1);
-        while (csrr_ss(SHELL_BUSY)) {
+        csrw_ss(ACC_RW_START, 1);
+        while (csrr_ss(ACC_RO_BUSY)) {
         };
-        uint32_t counter = csrr_ss(SHELL_COUNTER);
+        uint32_t counter = csrr_ss(ACC_RO_PERF_COUNT);
         int counter_short = counter < RUN_BEATS;
         err += counter_short;
 
         // Runs 2 and 3: start 3 held
         uint32_t t0 = snrt_mcycle();
-        csrw_ss(SHELL_START, 1);
-        csrw_ss(SHELL_START, 1);
+        csrw_ss(ACC_RW_START, 1);
+        csrw_ss(ACC_RW_START, 1);
         uint32_t t1 = snrt_mcycle();
         uint32_t held = t1 - t0;
         int held_short = held < RUN_BEATS;
         err += held_short;
 
-        while (csrr_ss(SHELL_BUSY)) {
+        while (csrr_ss(ACC_RO_BUSY)) {
         };
         while (read_busy_streamer()) {
         };
@@ -93,10 +87,10 @@ int main() {
         err += data_errors;
 
         // A start with loopCount 0: the unit ignores it, the shell takes it
-        csrw_ss(SHELL_LOOP_COUNT, 0);
-        csrw_ss(SHELL_START, 1);
-        uint32_t busy_zero = csrr_ss(SHELL_BUSY);
-        uint32_t counter_zero = csrr_ss(SHELL_COUNTER);
+        csrw_ss(ACC_RW_LOOP_COUNT, 0);
+        csrw_ss(ACC_RW_START, 1);
+        uint32_t busy_zero = csrr_ss(ACC_RO_BUSY);
+        uint32_t counter_zero = csrr_ss(ACC_RO_PERF_COUNT);
         int zero_off = busy_zero != 0 || counter_zero != 0;
         err += zero_off;
 

@@ -6,8 +6,7 @@
 
 """The standard composite of an accelerator slot with a datapath block
 (LNK2a): the CSR mux, the streamer, SnaxShell and SnaxUnit, as GEN3's
-generator wrote it per design point (forge_<design>_acc.py) and
-snax_tiled_add_acc.py by hand.
+generator wrote it per design point (forge_<design>_acc.py).
 
     SnaxUnitAcc.for_slot(slot, tcdm_size) -> class
 
