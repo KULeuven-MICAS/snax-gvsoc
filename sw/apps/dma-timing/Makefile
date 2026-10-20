@@ -1,4 +1,4 @@
-# Builds the SG2 DMA timing program from sw/ (../../common.mk) into
+# Builds the DMA timing program from sw/ (../../common.mk) into
 # build/sw/apps/dma-timing/. data/data.h is checked in (README).
 
 APP = dma-timing

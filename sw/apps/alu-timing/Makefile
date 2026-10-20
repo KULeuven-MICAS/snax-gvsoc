@@ -1,4 +1,4 @@
-# Builds the SG4 ALU timing program, with snax-alu's library and headers,
+# Builds the ALU timing program, with snax-alu's library and headers,
 # from sw/ (../../common.mk) into build/sw/apps/alu-timing/.
 
 APP      = alu-timing

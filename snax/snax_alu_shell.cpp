@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// snax_alu's accelerator as snax_cluster builds it (SG4):
+// snax_alu's accelerator as snax_cluster builds it:
 // hw/snax_alu/src/snax_alu_shell_wrapper.sv with its CSR block snax_alu_csr.sv
 // and num_pe copies of snax_alu_pe.sv, behind the ReqRspManager that holds
-// its read-write CSRs (b2672f8).
+// its read-write CSRs.
 //
 // CSRs, offsets from its first CSR (the CSR mux removes it):
 //   0 mode, 1 length, 2 start: read-write, read back as written;
@@ -35,13 +35,13 @@
 // beat on in_a and on in_b and room on out, all in one cycle: it probes the
 // three ports (size 0, snax_streamer.cpp), then moves all three. Per lane, on
 // data_width-bit words: add (mode 0, the RTL's default), sub, mul (low bits),
-// xor. Its event runs every cycle while busy, before the streamer's step
-// (SG3 step 7), so a beat it takes returns its reader's credit in time for
-// that cycle's requests.
+// xor. Its event runs every cycle while busy, before the streamer's step, so
+// a beat it takes returns its reader's credit in time for that cycle's
+// requests.
 //
-// Where a later accelerator differs from this one (GEN3 in snax-forge), the
-// change stays local: try_fire() holds how it waits for its inputs and its
-// output, compute() what it does with a beat.
+// Where another accelerator differs from this one, the change stays local:
+// try_fire() holds how it waits for its inputs and its output, compute() what
+// it does with a beat.
 //
 // Per run, its busy cycles are classed in D59's order at II 1: busy (fired) >
 // stall_out (both inputs, no room on out) > stall_in (an input missing); the

@@ -1,4 +1,4 @@
-# Builds the SG4 streamer and ALU test, with snax-alu's library and headers,
+# Builds the streamer and ALU test, with snax-alu's library and headers,
 # from sw/ (../../common.mk) into build/sw/apps/snax-stream/.
 
 APP      = snax-stream

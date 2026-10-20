@@ -2,7 +2,7 @@
 # Copyright 2026 KU Leuven.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""Cut snax-alu's run into phases, from per-instruction traces (SG5).
+"""Cut snax-alu's run into phases, from per-instruction traces.
 
 Reads one ELF and its two instruction traces, hart 0 (compute core) and
 hart 1 (DMA core), from either side:

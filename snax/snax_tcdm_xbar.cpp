@@ -51,7 +51,7 @@
 // (bank_refuses()). A beat is a request inside one aligned superbank line; one
 // that crosses a line is refused. The DMA's beat of a cycle comes before that
 // cycle's arbitration, which runs after every event queued before the cycle
-// (docs/plans/SG7.md, round 4); one that comes after it on a superbank already
+// (docs/plans/SG7.md); one that comes after it on a superbank already
 // granted to a narrow request is fatal.
 
 #include <algorithm>

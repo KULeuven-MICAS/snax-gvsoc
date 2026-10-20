@@ -63,15 +63,20 @@ GVSOC_MODULES = $(CURDIR)/engine/python;$(CURDIR)/core/models;$(CURDIR)/pulp;$(C
 
 all: checkout build
 
-# snax_cluster's software and our programs, from the copy in sw/ (CI1,
-# sw/README.md): `make sw` builds the runtime per cluster, the math library
+# snax_cluster's software and our programs, from the copy in sw/
+# (sw/README.md): `make sw` builds the runtime per cluster, the math library
 # and the 17 plain tests into build/sw/.
 sw:
 	$(MAKE) -C sw
 
-# SNAX-GVSoC's regression (SG5, tests/snax/regress.py): builds sw/ and the
-# programs of sw/apps/, then every program must exit 0 within its timeout
-# (SG6). Needs GVSoC built for "snitch;snax_alu;snax_alu_sparse;snax_tiled_add;snax_hjson".
+# The targets SNAX-GVSoC's programs and regression run on: snitch for the
+# plain tests, then the SNAX ones. `make build TARGETS='$(SNAX_TARGETS)'`
+# builds them (single quotes, so make expands it, not the shell).
+SNAX_TARGETS = snitch;snax_alu;snax_alu_sparse;snax_hjson
+
+# SNAX-GVSoC's regression (tests/snax/regress.py): builds sw/ and the
+# programs of sw/apps/, then every program must exit 0 within its timeout.
+# Needs GVSoC built for $(SNAX_TARGETS).
 # K=SUBSTRING runs only the programs whose name holds it (regress.py -k).
 regress:
 	python3 tests/snax/regress.py $(if $(K),-k $(K))

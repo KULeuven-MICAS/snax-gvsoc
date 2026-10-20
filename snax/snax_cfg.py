@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""snax_cluster's cluster hjson, read for a SNAX-GVSoC target (LNK2a).
+"""snax_cluster's cluster hjson, read for a SNAX-GVSoC target.
 
     load(path) -> ClusterCfg
 
@@ -109,9 +109,12 @@ class CfgTargetError(SnaxCfgError):
     """A cluster hjson a target cannot model."""
 
 
-# The movers of a streamer template, in snax_cluster's order
-MOVERS = ('data_reader_params', 'data_writer_params', 'data_reader_writer_params')
-# The read-only CSRs of a shell: busy and the counter (D130 in snax-forge)
+# The movers of a streamer template the model has, in snax_cluster's order
+# (snax_streamer.py reads these); snax_cluster's data_reader_writer_params is
+# refused
+MOVERS = ('data_reader_params', 'data_writer_params')
+UNMODELLED_MOVERS = ('data_reader_writer_params',)
+# The read-only CSRs of a shell: busy and the counter
 SHELL_RO_CSRS = 2
 
 
@@ -197,9 +200,6 @@ class _Node:
 
     def where(self, key) -> str:
         return f'{self.at}.{key}' if self.at else key
-
-    def has(self, key) -> bool:
-        return key in self.value
 
     def get(self, key, kind, default=...):
         if key not in self.value:
@@ -412,6 +412,10 @@ def _check_slot(acc: _Node, slot: AccSlot):
         raise CfgSlotError(acc.file, acc.where(key), why)
 
     if slot.streamer is not None:
+        for mover in UNMODELLED_MOVERS:
+            if mover in slot.streamer:
+                raise CfgTargetError(acc.file, acc.where(f'snax_streamer_cfg.{mover}'),
+                    f'not modelled: the streamer has {", ".join(MOVERS)}')
         channels = streamer_channels(slot.streamer)
         if channels != slot.tcdm_ports:
             fail('snax_tcdm_ports', f'{slot.tcdm_ports}, but the streamer has {channels} '

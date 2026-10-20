@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""The snax_hjson target (LNK2a): a SNAX cluster read from its hjson
+"""The snax_hjson target: a SNAX cluster read from its hjson
 (snax_cfg.py), the path a target option.
 
     gvrun --target snax_hjson --work-dir build/work/<name> \
@@ -28,19 +28,19 @@ dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
 crossbar's interconnect (tcdm.sparse_interconnect and each slot's
 sparse_interconnect_config). Each core's accelerator slot gets the standard
 composite (snax_unit_acc.py) when it has a datapath block
-(snax_datapath_cfg), or the class registered under its snax_acc_name
-(register_accelerator: snax_alu is snax_alu_acc.py's SnaxAluAcc); neither
-is an error.
+(snax_datapath_cfg), or the class ACCELERATORS holds for its snax_acc_name
+(snax_alu, sw/cfg/'s slot, is snax_alu_acc.py's SnaxAluAcc); neither is an
+error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
-DMA's read path and write latency and its one cycle per stage (SG2, SG7),
-the DRAM's latency and width (SG2), the cores' added latency (SG5, SG7), the
-HTIF poll backdoor (SG7), the 10 MHz clock and the bootrom's range.
+DMA's read path and write latency and its one cycle per stage, the DRAM's
+latency and width, the cores' added latency, the HTIF poll backdoor, the
+10 MHz clock and the bootrom's range.
 
 Everything else is the Snitch chip of pulp/pulp/chips/snitch/snitch.py,
-whose own arch tree fixes the core count at 9; this follows the structure of
-the hand-written snax_alu.py it replaces (SnaxAluAttr, SnaxAluBoard), and
-snax_alu.py and snax_alu_sparse.py are this board on their sw/cfg/ file.
+whose own arch tree fixes the core count at 9. snax_alu.py and
+snax_alu_sparse.py are this board fixed to their sw/cfg/ file
+(fixed_target).
 """
 
 import os
@@ -56,7 +56,7 @@ from pulp.chips.snitch.snitch import Snitch
 import snax_cfg
 from snax_cfg import CfgTargetError
 from snax_alu_acc import SnaxAluAcc
-from snax_unit_acc import SnaxUnitAcc
+from snax_unit_acc import SnaxUnitAcc, compile_components
 
 # GVSoC reads a target twice: `make build` lists its components through gapy
 # without USE_GVRUN, and gvrun runs it with USE_GVRUN set. Each pulp module
@@ -76,12 +76,12 @@ HERE = Path(__file__).resolve().parent
 CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg')
 DEFAULT_HJSON = 'snax_alu_cluster.hjson'
 
-# The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4),
-# with the hjson's snax_alu cluster: one beat of dma_data_width per cycle into
-# L1, the DMA's queues the hjson's. A DMA read's first beat comes 5 cycles after
+# The DMA and DRAM measured on the RTL (docs/notes/NOTES.md), with the hjson's
+# snax_alu cluster: one beat of dma_data_width per cycle into L1, the DMA's
+# queues the hjson's. A DMA read's first beat comes 5 cycles after
 # its request from L1 and 11 from DRAM: the 5 common to both are the DMA's own
-# read path (read_latency), the other 6 are the DRAM's. From the SG7 round 4
-# follow-up (docs/plans/SG7.md): a beat reaches L1 2 cycles after the DMA sends
+# read path (read_latency), the other 6 are the DRAM's. From the RTL's DMA write
+# path (docs/plans/SG7.md): a beat reaches L1 2 cycles after the DMA sends
 # it, the wide crossbar's cut and axi_to_mem_interleaved, and the DMA is done at
 # the send (tcdm_write_latency); the DMA's midend, backend and AXI read each
 # take a cycle, whatever else the DMA is doing (one_cycle_per_stage).
@@ -89,8 +89,8 @@ DMA_TIMING = {'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage':
 DRAM_LATENCY = 6
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 
-# The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
-# in snax-alu's check loop, with one integer load in flight (the hjson's
+# The cores' loads, measured on the RTL (docs/notes/NOTES.md) in snax-alu's
+# check loop, with one integer load in flight (the hjson's
 # num_int_outstanding_loads: 1): a load issues only once the previous load's
 # data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
 # the core's data path gets the cycles GVSoC lacks for that (core_latency), on
@@ -98,27 +98,18 @@ DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 # fetches keep their own path. On the TCDM port the SNAX crossbar answers a
 # core's read one cycle after its grant plus these cycles; the core goes on
 # meanwhile, and the next load or an instruction on the loaded register runs in
-# the cycle after: 4 from one L1 load to the next with tcdm 2, as before the
-# cores went through the crossbar (SG7 rounds 3 and 3b).
+# the cycle after: 4 from one L1 load to the next with tcdm 2.
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 # GVSoC's host reads tohost every 1000 cycles; the RTL's host does not use the
-# bus, so the poll reads DRAM through the zero-time debug backdoor (SG7 round 3b).
+# bus, so the poll reads DRAM through the zero-time debug backdoor.
 HTIF_POLL_BACKDOOR = True
 CLOCK_FREQUENCY = 10000000
 # The bootrom's range, as the Snitch chip's
 BOOTROM = (0x0000_1000, 0x0001_0000)
 
 
-# Accelerators for a slot without a datapath block, by its snax_acc_name
-ACCELERATORS = {}
-
-
-def register_accelerator(name: str, cls):
-    """Registers the accelerator class cls for the slots named name."""
-    ACCELERATORS[name] = cls
-
-
-register_accelerator('snax_alu', SnaxAluAcc)
+# Accelerators for a slot without a datapath block, by its snax_acc_name: sw/cfg/'s
+ACCELERATORS = {'snax_alu': SnaxAluAcc}
 
 
 def cfg_file(name: str) -> Path:
@@ -130,13 +121,13 @@ def cfg_file(name: str) -> Path:
 
 
 def accelerator(cfg, slot):
-    """The accelerator class of a slot: the standard composite with a datapath block, else the
-    registered one."""
+    """The accelerator class of a slot: the standard composite with a datapath block, else
+    ACCELERATORS' one."""
     if slot.datapath is not None:
         return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
     if slot.name not in ACCELERATORS:
         raise CfgTargetError(cfg.path, f'{slot.at}.snax_acc_name',
-            f'{slot.name!r}: no snax_datapath_cfg and no accelerator registered under it '
+            f'{slot.name!r}: no snax_datapath_cfg and no accelerator of that name '
             f'({sorted(ACCELERATORS)})')
     cls = ACCELERATORS[slot.name]
     if getattr(cls, 'nb_tcdm_ports', 0) != slot.tcdm_ports:
@@ -158,7 +149,7 @@ class SnaxHjson:
     """What the board takes from a cluster file (cfg, a snax_cfg.ClusterCfg), as ClusterArch
     arguments."""
 
-    def __init__(self, cfg, accelerator_override=None):
+    def __init__(self, cfg):
         self.cfg = cfg
         cores = cfg.cores
         if not cores:
@@ -187,12 +178,9 @@ class SnaxHjson:
                 if slot.wide_tcdm_ports:
                     raise CfgTargetError(cfg.path, f'{slot.at}.snax_wide_tcdm_ports',
                         f'{slot.wide_tcdm_ports} wide ports, not modelled')
-                self.snax_acc[i] = accelerator_override or accelerator(cfg, slot)
+                self.snax_acc[i] = accelerator(cfg, slot)
                 if slot.sparse_config is not None:
                     sparse_config[i] = slot.sparse_config
-        if accelerator_override is not None and len(self.snax_acc) != 1:
-            raise CfgTargetError(cfg.path, 'cluster.hives',
-                f'{len(self.snax_acc)} accelerator slots; a board accelerator takes one')
         if cfg.tcdm.sparse_interconnect:
             self.interconnect = {'snax_interconnect': 'sparse',
                 'snax_sparse_config': sparse_config}
@@ -267,9 +255,6 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
     # Whether the hjson option is declared; a target fixed to its cluster file
     # (snax_alu.py) has none
     hjson_option = True
-    # An accelerator class that replaces the one slot's (snax_tiled_add.py);
-    # None takes it from the hjson
-    accelerator = None
 
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
@@ -278,11 +263,12 @@ class SnaxHjsonBoard(gvsoc.systree.Component):
         if self.hjson_option:
             path = self.declare_user_property(name='hjson', value=path,
                 description='the cluster hjson (snax_cfg.py)')
-        arch = SnaxHjson(snax_cfg.load(path), self.accelerator)
+        arch = SnaxHjson(snax_cfg.load(path))
 
         clock = Clock_domain(self, 'clock', frequency=CLOCK_FREQUENCY)
 
         if os.environ.get('USE_GVRUN') is None:
+            compile_components()
             properties = SnitchArchProperties()
             properties.nb_core_per_cluster = arch.nb_core
             properties.snax_acc = arch.snax_acc
@@ -313,3 +299,25 @@ class Target(gvsoc.runner.Target):
 
     def __init__(self, parser, options=None, name=None):
         super().__init__(parser, options, model=SnaxHjsonBoard, name=name)
+
+
+def fixed_target(module: str, board: str, cluster_file: str, description: str):
+    """A target fixed to one cluster file of CFG_DIRS, without the hjson option (snax_alu.py,
+    snax_alu_sparse.py): its board class, named board, and its Target class. The target is
+    named after its module, and both classes belong to it, as gapy finds a target's
+    Target only in the target's own module."""
+    model = type(board, (SnaxHjsonBoard,), {'cluster_file': cluster_file, 'hjson_option': False,
+        '__module__': module})
+
+    class FixedTarget(gvsoc.runner.Target):
+
+        gapy_description = description
+        name = module
+
+        def __init__(self, parser, options=None, name=None):
+            super().__init__(parser, options, model=model, name=name)
+
+    FixedTarget.model = model
+    FixedTarget.__module__ = module
+    FixedTarget.__name__ = FixedTarget.__qualname__ = 'Target'
+    return model, FixedTarget

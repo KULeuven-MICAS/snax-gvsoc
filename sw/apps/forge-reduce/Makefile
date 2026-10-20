@@ -1,4 +1,4 @@
-# Builds the GEN3 step 6b program for a generated one-lane reduction
+# Builds the program for a generated one-lane reduction
 # (forge/$(DESIGN)/, a design point's hjson and headers from snax-forge) from
 # sw/ (../../common.mk) into build/sw/apps/forge-reduce/$(DESIGN)/. The
 # fixture's include/ comes before sw/generated/, so its

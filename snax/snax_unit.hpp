@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxUnit's cycle rule and op table (GEN3 step 1, D128): when a Chisel
+// SnaxUnit's cycle rule and op table: when a Chisel
 // block's datapath takes a start, fires and pushes, how its busy cycles are
 // classed, and what a lane computes. Plain C++, so the component
 // (snax_unit.cpp) and the standalone test (tests/snax/unit/) run the same
@@ -25,7 +25,7 @@
 // input has a beat and the output has room, and pushes the result in the
 // same cycle (latency 0, II 1, rate 1); E is the firing that reaches count.
 //
-// pipelined, as snax-forge's snax_model/accel.py (D35) without its drain: a
+// pipelined, as snax-forge's snax_model/accel.py without its drain: a
 // join on the inputs, an L-stage pipeline that stalls as a whole when its
 // head cannot be pushed, at most one firing per II. A firing that gives a
 // result (every rate-th) puts it into the pipeline; the others put nothing.
@@ -92,7 +92,7 @@ inline uint64_t snax_unit_compute(int op, bool is_signed, int width, uint64_t a,
 }
 
 
-// A fold's tree (snax-forge's Accumulator with lanes, D133): the n lanes of a
+// A fold's tree (snax-forge's Accumulator with lanes): the n lanes of a
 // beat reduced to one by op on width-bit integers, halves first, so for n a
 // power of two the pairs of Chisel's reduceTree. One lane gives that lane.
 inline uint64_t snax_unit_tree(int op, bool is_signed, int width, const uint64_t *lanes, int n)

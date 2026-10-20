@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The winner check of SG7 step 5 (README.md): the same random requests
+// The sparse winner check (README.md): the same random requests
 // through an elaborated SparseInterconnect.sv and through snax_sparse_arb.hpp,
 // the model's own pick, compared per bank and cycle.
 //

@@ -9,7 +9,7 @@
 // in snitch_tcdm_interconnect.sv. Plain C++, so the crossbar
 // (snax_tcdm_xbar.cpp) and the winner check against the RTL
 // (tests/snax/plain_arb/) run the same code. docs/plans/SG7.md has the
-// reading (SG3, round 4).
+// reading.
 
 #pragma once
 

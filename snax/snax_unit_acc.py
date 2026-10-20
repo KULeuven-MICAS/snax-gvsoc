@@ -4,54 +4,48 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""The standard composite of an accelerator slot with a datapath block
-(LNK2a): the CSR mux, the streamer, SnaxShell and SnaxUnit, as GEN3's
-generator wrote it per design point (forge_<design>_acc.py) and
-snax_tiled_add_acc.py by hand.
+"""The standard composite of an accelerator slot with a datapath block: the CSR
+mux, the streamer, SnaxShell and SnaxUnit.
 
-    SnaxUnitAcc.for_slot(slot, tcdm_size) -> class
+    SnaxUnitAcc.for_slot(slot, tcdm_size, file) -> class
 
 The slot (snax_cfg.AccSlot) gives the streamer template and the datapath
 block (snax_cfg.Datapath), the cluster its TCDM size. The unit's inputs take
 the streamer's readers in order, its outputs the writers.
 
 CSRs: the streamer's from SNAX_CSR_FIRST (nb_csrs of its template); then the
-shell's: the datapath's fields, start, busy and the counter, read-only (D130
-in snax-forge).
+shell's: the datapath's fields, start, busy and the counter, read-only.
 """
 
 import gvsoc.systree
 import interco.router as router
+from snax_acc import SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
 from snax_cfg import CfgTargetError
 from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
 from snax_shell import SnaxShell
 from snax_unit import SnaxUnit
-from snax_alu_acc import SNAX_CSR_FIRST, SNAX_CSR_LAST
 
 # The unit kinds a datapath block may name
 UNITS = ['SnaxUnit']
 
 
-class SnaxUnitAcc(gvsoc.systree.Component):
-    """The CSR mux, the streamer, SnaxShell and SnaxUnit of one slot; for_slot gives the
-    slot's class.
+def compile_components():
+    """Has the build compile SnaxShell and SnaxUnit, as it would for a target whose tree holds
+    them: a cluster file with a datapath block runs on the installed components, and no built
+    target's default file has one. The build path only (gvsoc.systree's registry)."""
+    for sources in (SnaxShell.SOURCES, SnaxUnit.SOURCES):
+        gvsoc.systree.get_generated_component(list(sources), [], [])
 
-    Ports
-    -----
-    input : io slave
-        The compute core's CSR accesses, a 32-bit request at 4 * CSR number.
-    tcdm_<i> : io master
-        The streamer's TCDM ports (nb_tcdm_ports of them).
-    tcdm_prio_<i> : wire<bool> master
-        The priority bit of each TCDM port's request.
-    """
 
-    # Set by for_slot: the streamer template, the datapath block, the TCDM size
+class SnaxUnitAcc(SnaxAcc):
+    """The CSR mux, the streamer, SnaxShell and SnaxUnit of one slot, ports as SnaxAcc's;
+    for_slot gives the slot's class."""
+
+    # Set by for_slot: the streamer template, the datapath block, the TCDM size, and
+    # SnaxAcc's nb_tcdm_ports and tcdm_port_names
     template = None
     datapath = None
     tcdm_size = None
-    nb_tcdm_ports = 0
-    tcdm_port_names = []
 
     @classmethod
     def for_slot(cls, slot, tcdm_size: int, file='?'):
@@ -109,23 +103,4 @@ class SnaxUnitAcc(gvsoc.systree.Component):
         for j, port in enumerate(datapath.outputs):
             unit.o_PORT(port, streamer.i_WRITER(j))
 
-        self.bind(self, 'input', csr_mux, 'input')
-
-        for port in range(0, self.nb_tcdm_ports):
-            streamer.o_TCDM(port, self.i_TCDM_INTERNAL(port))
-            streamer.o_TCDM_PRIORITY(port, self.i_TCDM_PRIORITY_INTERNAL(port))
-
-    def i_INPUT(self) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, 'input', signature='io')
-
-    def i_TCDM_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, f'tcdm_{port}', signature='io')
-
-    def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
-        self.itf_bind(f'tcdm_{port}', itf, signature='io')
-
-    def i_TCDM_PRIORITY_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, f'tcdm_prio_{port}', signature='wire<bool>')
-
-    def o_TCDM_PRIORITY(self, port: int, itf: gvsoc.systree.SlaveItf):
-        self.itf_bind(f'tcdm_prio_{port}', itf, signature='wire<bool>')
+        self.bind_ports(csr_mux, streamer)

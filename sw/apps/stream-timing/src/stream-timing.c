@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// Streamer timing program for SG3: the same ELFs run on snax_cluster's RTL and
+// Streamer timing program: the same ELFs run on snax_cluster's RTL and
 // on SNAX-GVSoC. The compute core sets up snax_alu's two readers, leaves the
 // writer's bound at 0, starts the streamer and polls its busy CSR; it prints
 // the streamer's counter (977) and the mcycle span.
@@ -12,7 +12,7 @@
 // in the reader's queues and keep its credit after the run; the RTL does not
 // clear them at start. So each case is its own ELF, chosen with CASE_<name>.
 //
-// SG7's cases start with a first run that leaves beats in one reader's
+// prio_queued and idle_restart start with a first run that leaves beats in one reader's
 // queues, then the measured run, with no access to the TCDM in between;
 // they print the first run's counter too.
 
@@ -68,13 +68,13 @@ static const stream_case_t c = {"ab_same_banks", 8, NO_RUN,
 // ask for the same bank
 static const stream_case_t c = {"a_stride0", 0, NO_RUN, {0, NB_BEATS, 0, 0}};
 #elif defined(CASE_prio_queued)
-// SG7, priority: A alone leaves 4 beats in its queues; then A (4 beats) and B
+// Priority: A alone leaves 4 beats in its queues; then A (4 beats) and B
 // (1 beat) on banks 0 to 3 at once. On the sparse interconnect B asks with
 // priority 1 (queue count 0) and A with 0 (count 4)
 static const stream_case_t c = {"prio_queued", 8, {0, 4, 0, 0},
                                 {SAME_BANKS, 4, 2 * SAME_BANKS, 1}};
 #elif defined(CASE_idle_restart)
-// SG7, idle restart: B alone takes banks 0 to 3 (one beat, left in its
+// Idle restart: B alone takes banks 0 to 3 (one beat, left in its
 // queues); after idle cycles, A (1 beat) and B (4 beats) on banks 0 to 3 at
 // once, both with priority 1. The sparse pointer restarts, the plain one
 // keeps B's turn

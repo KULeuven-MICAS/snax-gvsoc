@@ -5,8 +5,8 @@
 #
 
 """The snax_alu_sparse target: snax_cluster's cfg/snax_alu_cluster.hjson at the
-pin, 9fbf35d (sw/cfg/), which is snax_alu_cluster_old.hjson with the sparse
-interconnect (SG7), read by the generic target (snax_hjson.py, LNK2a).
+pin (sw/cfg/, sw/README.md), which is snax_alu_cluster_old.hjson with the
+sparse interconnect, read by the generic target (snax_hjson.py).
 
 The snax_alu target (snax_alu.py) with its SNAX crossbar sparse: priority
 first, then round robin from the last pick (snax_tcdm_xbar.cpp). The
@@ -19,21 +19,7 @@ no hjson option.
         --param chip/soc/binary=<elf> run
 """
 
-import gvsoc.runner
-from snax_hjson import SnaxHjsonBoard
+from snax_hjson import fixed_target
 
-
-class SnaxAluSparseBoard(SnaxHjsonBoard):
-
-    cluster_file = 'snax_alu_cluster.hjson'
-    hjson_option = False
-
-
-class Target(gvsoc.runner.Target):
-
-    gapy_description = "snax_cluster's snax_alu cluster (sparse interconnect)"
-    model = SnaxAluSparseBoard
-    name = "snax_alu_sparse"
-
-    def __init__(self, parser, options=None, name=None):
-        super().__init__(parser, options, model=SnaxAluSparseBoard, name=name)
+SnaxAluSparseBoard, Target = fixed_target(__name__, 'SnaxAluSparseBoard', 'snax_alu_cluster.hjson',
+    "snax_cluster's snax_alu cluster (sparse interconnect)")
