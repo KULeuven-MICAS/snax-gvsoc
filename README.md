@@ -21,7 +21,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
 | `tests/snax/` | The regression (`regress.py`), the phase script (`phases.py`), the arbiters' checks against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
 | `docs/RUN.md` | How to run it, from the container to the regression, each command with its output |
-| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`) |
+| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`, `FLOW3.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
