@@ -62,10 +62,10 @@ The grammar is `docs/EVENTS.md`.
 | 1 | Probe, no code kept: (a) one `--trace` file collects several components' traces in simulation order; (b) `func` names resolve on a plain `snax_hjson` run; (c) the barrier wait is an `insn_stall` | done |
 | 2 | Unit, streamer and crossbar: the three traces, their lines, the crossbar's counters; `make regress` | done |
 | 3 | Core and iDMA hooks (`pulp/pulp/idma/fe/idma_fe_xdma.cpp`, the front end the SNAX targets build); `make regress`; one fixture's `events.log` at task level | done |
-| 4 | snax-forge `run/`: profile, trace, cluster, events, outputs, and their tests | todo |
-| 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | todo |
-| 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | todo |
-| 7 | Acceptance in both; CI's `gvsoc` job runs the two flows at `--trace task`; tag `flow3-r1b` | todo |
+| 4 | snax-forge `run/`: profile, trace, cluster, events, outputs, and their tests | done |
+| 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | done |
+| 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | done |
+| 7 | Acceptance in both; CI's `gvsoc` job runs the two flows at `--trace task`; tag `flow3-r1b` | container: done; CI: waits for a dispatch on `ry/flow3-2` in both |
 
 ## Round 1b findings
 
@@ -130,6 +130,28 @@ The grammar is `docs/EVENTS.md`.
   r_beats=24 w_beats=24 bytes_to_l1=1024 bytes_from_l1=512`; core 0 wrote
   18 SNAX CSRs and read 13. Boot shows too: `func` lines from 1713, two
   barriers per core before `main`. `make regress` on a fresh build passes.
+- **The converter on the flows (snax-forge steps 5 and 6).** vecadd at
+  `--trace task`: main's entry at 2799 (the boot), `forge_check`'s 211
+  cycles later, inside what the two `mcycle` reads allow for `forge
+  cycles: 226`; 48 events in the window. vsum: boot 2273, window 246
+  against 255, 40 events. At `off` the profile comes from the `summary`
+  lines alone; with the events the same profile plus the cores' classes and
+  waits.
+- **Acceptance (step 7).** On fresh clones of `ry/flow3-2` in the image:
+  here, `make build` (snax-forge's image, `SNAX_TARGETS`), the unit tests
+  (`python3 -m unittest discover -s tests/snax`, 35 OK) and `make regress`
+  passed. snax-forge with the submodule at `5a8bfbd4`: `pixi run flow` on
+  `recipes/vecadd.json` and `recipes/vsum.json` with
+  `platforms/snax_alu.json` passed at `--trace task` and `--trace off`, the
+  converter's invariants held (it fails the flow otherwise), each wrote
+  `report/design.md` and `report/run.md`; the viewer served both task runs
+  (`/api/run/<name>` with the profile, the cluster and the trace's window;
+  the profile page by eye is Ryan's); `pixi run lint` clean and `pixi run
+  test` 1811 passed, 5 skipped; both trees clean after. CI's python job
+  rehearsed on a clone without the submodule (`-e ci`): lint clean, 1787
+  passed, 29 skipped. The workflows run on pushes to main, pull requests
+  and dispatch only, so their runs on `ry/flow3-2` wait for a dispatch from
+  GitHub.
 
 ## Findings (round 1a)
 
