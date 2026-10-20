@@ -307,3 +307,25 @@ class Target(gvsoc.runner.Target):
 
     def __init__(self, parser, options=None, name=None):
         super().__init__(parser, options, model=SnaxHjsonBoard, name=name)
+
+
+def fixed_target(module: str, board: str, cluster_file: str, description: str):
+    """A target fixed to one cluster file of CFG_DIRS, without the hjson option (snax_alu.py,
+    snax_alu_sparse.py): its board class, named board, and its Target class. The target is
+    named after its module, and both classes belong to it, as gapy finds a target's
+    Target only in the target's own module."""
+    model = type(board, (SnaxHjsonBoard,), {'cluster_file': cluster_file, 'hjson_option': False,
+        '__module__': module})
+
+    class FixedTarget(gvsoc.runner.Target):
+
+        gapy_description = description
+        name = module
+
+        def __init__(self, parser, options=None, name=None):
+            super().__init__(parser, options, model=model, name=name)
+
+    FixedTarget.model = model
+    FixedTarget.__module__ = module
+    FixedTarget.__name__ = FixedTarget.__qualname__ = 'Target'
+    return model, FixedTarget

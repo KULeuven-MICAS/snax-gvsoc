@@ -18,21 +18,7 @@ hjson option.
         --param chip/soc/binary=<elf> run
 """
 
-import gvsoc.runner
-from snax_hjson import SnaxHjsonBoard
+from snax_hjson import fixed_target
 
-
-class SnaxAluBoard(SnaxHjsonBoard):
-
-    cluster_file = 'snax_alu_cluster_old.hjson'
-    hjson_option = False
-
-
-class Target(gvsoc.runner.Target):
-
-    gapy_description = "snax_cluster's snax_alu cluster (old hjson)"
-    model = SnaxAluBoard
-    name = "snax_alu"
-
-    def __init__(self, parser, options=None, name=None):
-        super().__init__(parser, options, model=SnaxAluBoard, name=name)
+SnaxAluBoard, Target = fixed_target(__name__, 'SnaxAluBoard', 'snax_alu_cluster_old.hjson',
+    "snax_cluster's snax_alu cluster (old hjson)")
