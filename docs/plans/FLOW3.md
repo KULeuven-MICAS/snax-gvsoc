@@ -153,6 +153,19 @@ The grammar is `docs/EVENTS.md`.
   and dispatch only, so their runs on `ry/flow3-2` wait for a dispatch from
   GitHub.
 
+- **One window (round 1b fix).** The converter cut the trace and the
+  cores' classes at `[func main, func forge_check)` (vecadd 211 cycles)
+  while the profile used `forge cycles:` (226). The `snitch` core now writes
+  an `mcycle` line for every read of `mcycle` (and `mcycleh`), from
+  `Csr::mcycle_csr_access`, so snax-forge cuts all three at the program's
+  own two reads, picked by the function span each falls in, and checks they
+  are exactly `forge cycles:` apart. vecadd: reads at 2812 and 3038 on core
+  0, 226 apart, boot 2812; vsum: boot 2286, 255. On fresh clones of
+  `ry/flow3-2` in the image: here `make build`, the unit tests and `make
+  regress` passed; snax-forge's four flows (vecadd and vsum at `--trace
+  task` and `off`) passed, each window equal to `forge cycles:`, each core's
+  classes adding up to it, and `pixi run test` 1810 passed, 5 skipped.
+
 ## Findings (round 1a)
 
 - **What pixi's environment changes (step 1).** `env` under `pixi run`
