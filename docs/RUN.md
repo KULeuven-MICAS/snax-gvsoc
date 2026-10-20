@@ -9,7 +9,8 @@ marked `...`). README.md says what each part is.
 ## 1. The container
 
 The tools (GVSoC's build tools, snax_cluster's RISC-V toolchain) are in
-snax-forge's image. From the folder that holds this repo:
+snax-forge's image. From the folder that holds this repo, `$ROOT` below
+(the outputs' absolute paths start there; yours will be your own):
 
     podman run --rm -it -v "$PWD":"$PWD" -w "$PWD" ghcr.io/kuleuven-micas/snax-forge:main
     cd snax-gvsoc
@@ -28,9 +29,9 @@ few minutes; a second one with nothing changed compiles nothing.
     make build TARGETS='$(SNAX_TARGETS)'
 
     ...
-    -- Up-to-date: /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/install/python/./pyproject.toml
-    -- Up-to-date: /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/install/python/./requirements.txt
-    -- Up-to-date: /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/install/python/./.gitignore
+    -- Up-to-date: $ROOT/snax-gvsoc/install/python/./pyproject.toml
+    -- Up-to-date: $ROOT/snax-gvsoc/install/python/./requirements.txt
+    -- Up-to-date: $ROOT/snax-gvsoc/install/python/./.gitignore
 
 `source sourceme.sh` puts the install's `gvrun` on `PATH`; every new
 container needs it again. It prints nothing.
@@ -44,7 +45,7 @@ tests from the copy in `sw/` into `build/sw/`:
 
     ...
     1 warning generated.
-    make[1]: Leaving directory '/users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/sw'
+    make[1]: Leaving directory '$ROOT/snax-gvsoc/sw'
 
 ## 3. A program on a hand-written target: snax-alu on snax_alu
 
@@ -54,8 +55,8 @@ tests from the copy in `sw/` into `build/sw/`:
     make -C sw/apps/snax-alu
 
     ...
-    llvm-objdump -D /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf > /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.dump
-    make: Leaving directory '/users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/sw/apps/snax-alu'
+    llvm-objdump -D $ROOT/snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf > $ROOT/snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.dump
+    make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/snax-alu'
 
     gvrun --target snax_alu --work-dir build/work/snax-alu \
         --param chip/soc/binary=$PWD/build/sw/apps/snax-alu/100/snax-alu.elf run
@@ -79,8 +80,8 @@ a cluster file, its streamer and datapath files, the headers, `main.c` and
     make -C sw/apps/forge DESIGN=vecadd
 
     ...
-    llvm-objdump -D /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/build/sw/apps/forge/vecadd/forge.elf > /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/build/sw/apps/forge/vecadd/forge.dump
-    make: Leaving directory '/users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/sw/apps/forge'
+    llvm-objdump -D $ROOT/snax-gvsoc/build/sw/apps/forge/vecadd/forge.elf > $ROOT/snax-gvsoc/build/sw/apps/forge/vecadd/forge.dump
+    make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/forge'
 
 `snax_hjson` reads the cluster file given with `--param hjson=` and puts the
 standard composite (streamer, `SnaxShell`, `SnaxUnit`) in its accelerator
@@ -90,7 +91,7 @@ slot; `--trace=snax_acc0/unit` turns on the unit's trace:
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
-    Warning: installed platform tree /users/micas/rantonio/no_backup/kul_main/_rundoc/snax-gvsoc/install/lib/libplatform_tree_snax_hjson.so does not match the live system tree, falling back to the JSON config path (rebuild the target to regenerate the tree).
+    Warning: installed platform tree $ROOT/snax-gvsoc/install/lib/libplatform_tree_snax_hjson.so does not match the live system tree, falling back to the JSON config path (rebuild the target to regenerate the tree).
     forge data: 0 errors (64 words)
     forge counter add_acc: 19
     forge errors: 0
