@@ -39,7 +39,7 @@ CI's `gvsoc` job.
 |---|---|---|
 | 0 | Docs in both: snax-forge D136, D137, D135, D128, D127 and D57 amended, C§7 and C§16, STATUS (FLOW3, RET1 folded in, open items 56, 57, 60 closed, 82 opened), ARCHITECTURE; this file | done |
 | 1 | Tools: snax-forge's `gvsoc/Makefile` names Python, CMake and the host compilers and unexports what pixi sets; every `cmake` in this Makefile is `$(CMAKE)`; `gvrun` ends in `exec "${GVRUN_PYTHON:-python3}"`. Checked by hand: no rebuild from pixi after a plain-shell build, the same ELF and stdout from both | done |
-| 2 | snax-forge `lower/c.py`: the marks out; each counter in `forge_counter[]`; `forge_check(t0)` prints `forge cycles:` then the self-check; forge/ refreshed; `make regress` | todo |
+| 2 | snax-forge `lower/c.py`: the marks out; each counter in `forge_counter[]`; `forge_check(t0)` prints `forge cycles:` then the self-check; forge/ refreshed; `make regress` | done |
 | 3 | snax-forge: the flow's stages after design are lower, gen, build, sw, gvsoc, check; `run.json` | todo |
 | 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | todo |
 | 5 | Acceptance in the container and in CI; tag `flow3-r1a` | todo |
@@ -75,3 +75,10 @@ CI's `gvsoc` job.
   ELF sha256 `4fe8f544...4d28dd` from both. `make run` on `snax_hjson`:
   byte-identical stdout (`forge data: 0 errors (64 words)`, `forge counter
   add_acc: 19`, `forge errors: 0`), exit 0 from both.
+- **The window and the counters without marks (step 2).** forge/ refreshed
+  from snax-forge's generator (only the four `main.c` changed); full `make
+  regress` on a fresh build passes (64 runs). The windows: vecadd 226,
+  vecmul 226, vsum 255, vsum_tree 207 cycles; the counters are the marked
+  programs' (19, 19, 67, 19). `forge-reduce` is hand-written and never used
+  the marks: unchanged. With one accelerator task, clang keeps the static
+  `forge_counter[1]` as one symbol, `forge_counter.0`.

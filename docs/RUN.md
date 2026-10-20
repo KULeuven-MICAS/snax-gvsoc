@@ -92,6 +92,7 @@ slot; `--trace=snax_acc0/unit` turns on the unit's trace:
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
     Warning: installed platform tree $ROOT/snax-gvsoc/install/lib/libplatform_tree_snax_hjson.so does not match the live system tree, falling back to the JSON config path (rebuild the target to regenerate the tree).
+    forge cycles: 226
     forge data: 0 errors (64 words)
     forge counter add_acc: 19
     forge errors: 0
@@ -112,8 +113,8 @@ slot; `--trace=snax_acc0/unit` turns on the unit's trace:
     0: -1: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Creating final binding (/chip/soc/cluster_0/snax_acc0/unit:a -> /chip/soc/cluster_0/snax_acc0/streamer:reader_0)
     0: 0: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Reset (active: 1)
     0: 0: [/chip/soc/cluster_0/snax_acc0/unit/comp                                  ] Reset (active: 0)
-    292200000: 2922: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] Start at cycle 2922: count 16
-    294100000: 2941: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0
+    293200000: 2932: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] Start at cycle 2932: count 16
+    295100000: 2951: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0
 
     echo "exit $?"
 
@@ -128,6 +129,9 @@ compiled for a design point.
 
 ## 5. Reading the output
 
+- `forge cycles: 226`: the program's window, `mcycle` at `forge_check()`'s
+  entry minus `mcycle` at main's entry (snax-forge D135), which snax-forge's
+  flow takes as the run's total cycles.
 - `forge data: 0 errors (64 words)`: every output word against its golden
   in `data.h` (the reference executor's result); 64 words is vecadd's `O`.
 - `forge counter add_acc: 19`: the shell's cycle counter, read after the
@@ -144,7 +148,7 @@ compiled for a design point.
   `main` returns it, so the run's exit code is 0.
 
 The other trace lines are the unit's ports being created and bound at
-start-up, and its start (`Start at cycle 2922: count 16`).
+start-up, and its start (`Start at cycle 2932: count 16`).
 
 ## 6. The regression
 
