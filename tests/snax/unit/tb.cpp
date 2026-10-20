@@ -250,7 +250,7 @@ static int run(const Case &c)
         {
             std::string got = rule.run_line();
             long b, si, so, fl;
-            if (sscanf(got.c_str(), "run %*d: firings %*u busy %ld stall_in %ld stall_out %ld flush %ld",
+            if (sscanf(got.c_str(), "run index=%*d firings=%*u busy=%ld stall_in=%ld stall_out=%ld flush=%ld",
                     &b, &si, &so, &fl) != 4)
             {
                 printf("%s: cycle %ld: cannot read \"%s\"\n", c.name.c_str(), (long)cycle,

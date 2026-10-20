@@ -7,7 +7,7 @@ ii 1
 inputs 1
 config count rate
 start 0 8 4 taken
-expect run 0: firings 8 busy 8 stall_in 0 stall_out 4 flush 1
+expect run index=0 firings=8 busy=8 stall_in=0 stall_out=4 flush=1
 cycles
 # in out  fire push busy
 1 1       0 0 0     # 0: start

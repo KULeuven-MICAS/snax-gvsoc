@@ -43,6 +43,7 @@ public:
     IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me);
 
     void reset(bool active) override;
+    void stop() override;
 
     void update() override;
     void ack_transfer(IdmaTransfer *transfer) override;
@@ -98,4 +99,21 @@ private:
     bool busy;
     // Bytes per AXI beat (64 for the 512-bit DMA)
     uint64_t beat_size;
+    // SNAX, FLOW3's events (snax-gvsoc docs/EVENTS.md): the summary, events and beats
+    // traces, and the counts the summary gives at stop. A copy's bytes go to L1 when its
+    // destination is in the local area (loc_base, loc_size), from L1 when its source is.
+    vp::Component *idma;
+    vp::Trace ev_summary;
+    vp::Trace ev_events;
+    vp::Trace ev_beats;
+    uint64_t loc_base;
+    uint64_t loc_size;
+    int64_t transfers;
+    int64_t busy_cycles;
+    int64_t busy_since;
+    int64_t r_beats_total;
+    int64_t w_beats_total;
+    int64_t bytes_to_l1;
+    int64_t bytes_from_l1;
+    bool is_local(uint64_t addr);
 };

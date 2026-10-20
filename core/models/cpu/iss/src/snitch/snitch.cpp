@@ -77,6 +77,10 @@ Iss::Iss(IssWrapper &top)
 
     this->waiting_barrier = false;
 
+    this->top.traces.new_trace("summary", &this->snax_summary, vp::INFO);
+    this->top.traces.new_trace("events", &this->snax_events, vp::INFO);
+    this->top.traces.new_trace("beats", &this->snax_beats, vp::INFO);
+
 
     this->snitch = true;
     this->fp_ss = false;
@@ -112,10 +116,18 @@ bool Iss::barrier_update(bool is_write, iss_reg_t &value)
 
         // Now we have to check if the barrier was already reached and the barrier
         // sync function already called.
+        int64_t cycle = this->top.clock.get_cycles();
         if (this->waiting_barrier)
         {
             // If not, stall the core, this will get unstalled when the barrier sync is called
             this->exec.insn_stall();
+            this->snax_barrier_first = cycle;
+            this->snax_barrier_stalled = true;
+        }
+        else
+        {
+            this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld barrier first=%ld last=%ld\n",
+                (long)cycle, (long)cycle, (long)cycle);
         }
     }
 
@@ -149,6 +161,17 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
     req->set_is_write(is_write);
     req->set_data((uint8_t *)&this->snax_csr_data);
 
+    int64_t cycle = this->top.clock.get_cycles();
+    if (is_write)
+    {
+        this->snax_reads_flush();
+        this->snax_csr_writes++;
+    }
+    else
+    {
+        this->snax_csr_reads++;
+    }
+
     int err = this->snax_csr_itf.req(req);
     if (err == vp::IO_REQ_INVALID)
     {
@@ -161,6 +184,10 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
         this->csr.trace.msg(vp::Trace::LEVEL_TRACE, "SNAX CSR write held by the block (id: 0x%x), "
             "core stalled\n", address);
         this->exec.insn_stall();
+        this->snax_held_cycle = cycle;
+        this->snax_held_pc = this->exec.current_insn;
+        this->snax_held_csr = address;
+        this->snax_held_value = (uint32_t)value;
         return true;
     }
     if (err != vp::IO_REQ_OK)
@@ -174,6 +201,13 @@ bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
     if (!is_write)
     {
         value = this->snax_csr_data;
+        this->snax_read(this->exec.current_insn, address, (uint32_t)value);
+    }
+    else
+    {
+        this->snax_events.msg(vp::Trace::LEVEL_INFO,
+            "%ld csr pc=0x%lx csr=0x%x op=w value=%u\n", (long)cycle,
+            (unsigned long)this->exec.current_insn, (unsigned)address, (unsigned)value);
     }
     if (req->get_latency() > 0)
     {
@@ -194,6 +228,11 @@ void Iss::snax_csr_response(vp::Block *__this, vp::IoReq *req)
         return;
     }
     _this->csr.trace.msg(vp::Trace::LEVEL_TRACE, "SNAX CSR write answered, core resumed\n");
+    _this->snax_events.msg(vp::Trace::LEVEL_INFO,
+        "%ld csr pc=0x%lx csr=0x%x op=w value=%u held=%ld\n", (long)_this->snax_held_cycle,
+        (unsigned long)_this->snax_held_pc, (unsigned)_this->snax_held_csr,
+        (unsigned)_this->snax_held_value,
+        (long)(_this->top.clock.get_cycles() - _this->snax_held_cycle));
     _this->exec.stalled_dec();
     _this->exec.insn_terminate();
 }
@@ -240,6 +279,15 @@ void Iss::barrier_sync(vp::Block *__this, bool value)
 
     // Clear the flag
     _this->waiting_barrier = false;
+
+    // A barrier the core stalled on: released now
+    if (_this->snax_barrier_stalled)
+    {
+        _this->snax_barrier_stalled = false;
+        _this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld barrier first=%ld last=%ld\n",
+            (long)_this->snax_barrier_first, (long)_this->snax_barrier_first,
+            (long)_this->top.clock.get_cycles());
+    }
 
     // In case the barrier is reached as soon as we notify it, we are not yet stalled
     // and should not to anything
@@ -449,4 +497,102 @@ void Iss::handle_wait_acc_ready(vp::Block *__this, vp::ClockEvent *event)
         _this->exec.current_insn = _this->exec.stall_insn;
         _this->exec.insn_resume();
     }
+}
+
+
+// FLOW3's events (snax-gvsoc docs/EVENTS.md). A SNAX CSR read joins the open run when it
+// reads the run's CSR and gets its value; any other access writes the run out first: two
+// reads or more as a poll, one as a csr line, both with the run's first cycle.
+void Iss::snax_read(iss_reg_t pc, uint32_t csr, uint32_t value)
+{
+    int64_t cycle = this->top.clock.get_cycles();
+    if (this->snax_reads_open && csr == this->snax_reads_csr && value == this->snax_reads_value)
+    {
+        this->snax_reads_last = cycle;
+        this->snax_reads_count++;
+        return;
+    }
+    this->snax_reads_flush();
+    this->snax_reads_open = true;
+    this->snax_reads_pc = pc;
+    this->snax_reads_csr = csr;
+    this->snax_reads_value = value;
+    this->snax_reads_first = this->snax_reads_last = cycle;
+    this->snax_reads_count = 1;
+}
+
+
+void Iss::snax_reads_flush()
+{
+    if (!this->snax_reads_open)
+    {
+        return;
+    }
+    this->snax_reads_open = false;
+    if (this->snax_reads_count >= 2)
+    {
+        this->snax_events.msg(vp::Trace::LEVEL_INFO,
+            "%ld poll pc=0x%lx csr=0x%x value=%u first=%ld last=%ld count=%ld\n",
+            (long)this->snax_reads_first, (unsigned long)this->snax_reads_pc,
+            (unsigned)this->snax_reads_csr, (unsigned)this->snax_reads_value,
+            (long)this->snax_reads_first, (long)this->snax_reads_last,
+            (long)this->snax_reads_count);
+    }
+    else
+    {
+        this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld csr pc=0x%lx csr=0x%x op=r value=%u\n",
+            (long)this->snax_reads_first, (unsigned long)this->snax_reads_pc,
+            (unsigned)this->snax_reads_csr, (unsigned)this->snax_reads_value);
+    }
+}
+
+
+// The core goes to run (Exec::busy_enter) or sleep (busy_exit, wfi): a line when it changes
+void Iss::snax_state(bool run)
+{
+    if ((int)run != this->snax_state_last)
+    {
+        this->snax_state_last = run;
+        this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld state mode=%s\n",
+            (long)this->top.clock.get_cycles(), run ? "run" : "sleep");
+    }
+}
+
+
+// The instruction at pc is about to run: a line when its function, by the ELF's symbols
+// (trace.cpp), is not the one before
+void Iss::snax_func(iss_reg_t pc)
+{
+    const char *func = "-", *inline_func, *file;
+    int line;
+    if (iss_trace_pc_info(pc, &func, &inline_func, &file, &line) != 0)
+    {
+        func = "-";
+    }
+    if (this->snax_func_last != func)
+    {
+        this->snax_func_last = func;
+        this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld func name=%s pc=0x%lx\n",
+            (long)this->top.clock.get_cycles(), func, (unsigned long)pc);
+    }
+}
+
+
+// A read of mcycle (or mcycleh), in the cycle of the read: the program's window is between
+// two of them (snax-forge D135)
+void Iss::snax_mcycle(const char *kind, iss_reg_t value)
+{
+    this->snax_events.msg(vp::Trace::LEVEL_INFO, "%ld %s pc=0x%lx value=%lu\n",
+        (long)this->top.clock.get_cycles(), kind, (unsigned long)this->exec.current_insn,
+        (unsigned long)value);
+}
+
+
+// At the end of the simulation: the open run of reads, then the counts
+void Iss::snax_events_stop()
+{
+    this->snax_reads_flush();
+    this->snax_summary.msg(vp::Trace::LEVEL_INFO, "%ld csrs writes=%ld reads=%ld\n",
+        (long)this->top.clock.get_cycles(), (long)this->snax_csr_writes,
+        (long)this->snax_csr_reads);
 }

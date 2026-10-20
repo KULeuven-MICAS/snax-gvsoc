@@ -13,7 +13,8 @@ This file is the checklist; a step is ticked here when it is committed.
   (`ghcr.io/kuleuven-micas/snax-forge:main`).
 - One commit per step on `ry/flow3`, here and in snax-forge; from step 2 on,
   snax-forge's submodule points at this branch's head. Round 1a is tagged
-  `flow3-r1a` in both.
+  `flow3-r1a` in both. Round 1b the same on `ry/flow3-2`, tagged
+  `flow3-r1b`.
 - Acceptance is pass/fail; anything not verified is said so.
 
 ## Acceptance
@@ -22,6 +23,13 @@ Round 1a: `pixi run flow recipes/vecadd.json --platform
 platforms/snax_alu.json`, and the same for `recipes/vsum.json`, end in a
 checked SNAX-GVSoC run (passed, exit 0), in the container and in snax-forge
 CI's `gvsoc` job.
+
+Round 1b: the same two flows at `--trace task` pass, the converter's
+invariants hold, and they write `report/design.md` and `report/run.md`; at
+`--trace off` the profile comes from the `summary` lines alone; `pixi run
+view` opens the two task-level runs on the profile page; `make regress`
+here and snax-forge's `pixi run test` pass in the container, and CI on both
+branches.
 
 ## The rounds
 
@@ -44,7 +52,121 @@ CI's `gvsoc` job.
 | 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | written, rehearsed on a fresh clone; its GitHub run waits for a dispatch on `ry/flow3` |
 | 5 | Acceptance in the container and in CI; tag `flow3-r1a` | container: done; CI: waits for step 4's run |
 
-## Findings
+## Round 1b steps
+
+The grammar is `docs/EVENTS.md`.
+
+| # | Step | Status |
+|---|---|---|
+| 0 | Docs in both: snax-forge D137 amended, C§7 for its `run/` (and its contract test), STATUS; this table, `docs/EVENTS.md` | done |
+| 1 | Probe, no code kept: (a) one `--trace` file collects several components' traces in simulation order; (b) `func` names resolve on a plain `snax_hjson` run; (c) the barrier wait is an `insn_stall` | done |
+| 2 | Unit, streamer and crossbar: the three traces, their lines, the crossbar's counters; `make regress` | done |
+| 3 | Core and iDMA hooks (`pulp/pulp/idma/fe/idma_fe_xdma.cpp`, the front end the SNAX targets build); `make regress`; one fixture's `events.log` at task level | done |
+| 4 | snax-forge `run/`: profile, trace, cluster, events, outputs, and their tests | done |
+| 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | done |
+| 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | done |
+| 7 | Acceptance in both; CI's `gvsoc` job runs the two flows at `--trace task`; tag `flow3-r1b` | container: done; CI: waits for a dispatch on `ry/flow3-2` in both |
+
+## Round 1b findings
+
+- **One file in simulation order (step 1a).** snax-forge's vecadd ELF on
+  `snax_hjson` with `--trace='/trace$:FILE'`: 18046 lines of 82 components
+  in one file, the header's time never decreasing. With a second regex
+  naming the same file (`--trace='pe0/insn$:FILE'`) both land in it,
+  interleaved in order (5353 `insn` lines among them): the trace engine
+  opens a file once per name. A message written from a component's
+  `stop()` lands last (cycle 20001), so counters at the end of the
+  simulation can be written there.
+- **Function names without the instruction trace (step 1b).** The cores'
+  `binaries` property names the ELF on a plain run, and `Trace::build`
+  registers it whatever the traces are; `iss_trace_pc_info` parses the
+  symbols on first use. Called from `Iss::snax_csr_request` on a run with
+  no `insn` trace, all 31 SNAX CSR accesses resolved (`forge_core_0`), none
+  failed. So the core writes `func` with the name itself; the fallback (the
+  PC only, names looked up by the converter) is not needed.
+- **The barrier wait (step 1c).** `Iss::barrier_update` stalls with
+  `exec.insn_stall()` (`is_stalled()` true after it) unless the barrier is
+  already reached, and `Iss::barrier_sync` releases; `Exec::busy_exit` ran
+  only at reset and at the program's end (cycles 19302 and 19313), never in
+  a barrier. Boot holds barriers too (core 0 waits from 1958 to 2106 and
+  2161 to 2796).
+- **The window and the `mcycle` reads.** On core 0, `main` is entered at
+  cycle 2799 and `forge_check` at 3010, a window of 211 cycles; `forge
+  cycles:` says 226, the reads being at 2812 (13 cycles in) and 3038 (28 in:
+  an I-cache refill in `forge_check`'s prologue). Each read comes before
+  the core leaves its function (`forge_core_0` at 2845, `printf_` at
+  3044), so snax-forge's converter checks that `forge cycles:` lies in what
+  the two reads allow: at least `forge_check`'s entry minus the cycle main
+  is left, at most the cycle `forge_check` is left minus main's entry.
+  Before `main`, `snrt_main` runs from 1929.
+- **Unit, streamer and crossbar (step 2).** The three traces come from
+  `snax/snax_events.hpp`. The unit's `SnaxUnitRule::run_line` is now the
+  summary's `run index=<i> ...` line, so its debug trace, the unit tests'
+  cases and `regress.py`'s counter check read that form. snax-forge's
+  vecadd ELF with `--trace='/summary$:F' --trace='/events$:F'`: the
+  streamer's three `start` lines at 2931, the unit's `start` at 2932,
+  `done` lines for reader0 (2948), reader1 (2949), the unit (2951, firings
+  at 2936 to 2951) and writer0 (2952), the streamer's `mover` lines at 2953;
+  at the end the crossbar's 15 `input` lines (12 streamer lanes with 16
+  grants each, `core0`, `core1` and `axi` marked `whole_run=1`) and 32
+  `bank` lines, each bank 6 reads and 6 writes (the streamer's 192 words and
+  the DMA's 192, over 32 banks). The run's output is unchanged (226 cycles,
+  counter 19). `make regress` on a fresh build passes.
+- **Core and iDMA (step 3).** The iDMA the SNAX targets build is
+  `pulp/pulp/idma/` (`pulp.idma.snitch_dma`), whose front end has SG2's busy
+  wire and the beat wires; `pulp/models/ips/pulp/idma_v2/` is a copy no SNAX
+  target compiles, left as it is. `issue` is written in `enqueue_copy`, where
+  the copy gets its ID, `done` in `ack_transfer`; the busy cycles follow
+  `update_busy`'s edges as `DMA_BUSY` counts them, the beats `send_beats`.
+  The core's `state` and `func` come from the exec code every core shares,
+  so they are behind `CONFIG_GVSOC_ISS_SNAX_EVENTS`, set for the `snitch`
+  core only. forge/vecadd at task level (`--trace='/summary$:F'
+  --trace='/events$:F'`), `build/work/forge-vecadd-task/events.log`, 362
+  lines: on core 0 `func main` at 2799 and `func forge_check` at 3010; the
+  busy CSR's reads fold into `poll ... first=2933 last=2951 count=10`, then
+  one read of 0 at 2953; the barrier before the start waits from 2912 to
+  2930; the DMA's three copies (IDs 2 to 4) issued at 2887, 2905 and 2974
+  and done at 2909, 2926 and 2989; its summary `transfers=3 busy=54
+  r_beats=24 w_beats=24 bytes_to_l1=1024 bytes_from_l1=512`; core 0 wrote
+  18 SNAX CSRs and read 13. Boot shows too: `func` lines from 1713, two
+  barriers per core before `main`. `make regress` on a fresh build passes.
+- **The converter on the flows (snax-forge steps 5 and 6).** vecadd at
+  `--trace task`: main's entry at 2799 (the boot), `forge_check`'s 211
+  cycles later, inside what the two `mcycle` reads allow for `forge
+  cycles: 226`; 48 events in the window. vsum: boot 2273, window 246
+  against 255, 40 events. At `off` the profile comes from the `summary`
+  lines alone; with the events the same profile plus the cores' classes and
+  waits.
+- **Acceptance (step 7).** On fresh clones of `ry/flow3-2` in the image:
+  here, `make build` (snax-forge's image, `SNAX_TARGETS`), the unit tests
+  (`python3 -m unittest discover -s tests/snax`, 35 OK) and `make regress`
+  passed. snax-forge with the submodule at `5a8bfbd4`: `pixi run flow` on
+  `recipes/vecadd.json` and `recipes/vsum.json` with
+  `platforms/snax_alu.json` passed at `--trace task` and `--trace off`, the
+  converter's invariants held (it fails the flow otherwise), each wrote
+  `report/design.md` and `report/run.md`; the viewer served both task runs
+  (`/api/run/<name>` with the profile, the cluster and the trace's window;
+  the profile page by eye is Ryan's); `pixi run lint` clean and `pixi run
+  test` 1811 passed, 5 skipped; both trees clean after. CI's python job
+  rehearsed on a clone without the submodule (`-e ci`): lint clean, 1787
+  passed, 29 skipped. The workflows run on pushes to main, pull requests
+  and dispatch only, so their runs on `ry/flow3-2` wait for a dispatch from
+  GitHub.
+
+- **One window (round 1b fix).** The converter cut the trace and the
+  cores' classes at `[func main, func forge_check)` (vecadd 211 cycles)
+  while the profile used `forge cycles:` (226). The `snitch` core now writes
+  an `mcycle` line for every read of `mcycle` (and `mcycleh`), from
+  `Csr::mcycle_csr_access`, so snax-forge cuts all three at the program's
+  own two reads, picked by the function span each falls in, and checks they
+  are exactly `forge cycles:` apart. vecadd: reads at 2812 and 3038 on core
+  0, 226 apart, boot 2812; vsum: boot 2286, 255. On fresh clones of
+  `ry/flow3-2` in the image: here `make build`, the unit tests and `make
+  regress` passed; snax-forge's four flows (vecadd and vsum at `--trace
+  task` and `off`) passed, each window equal to `forge cycles:`, each core's
+  classes adding up to it, and `pixi run test` 1810 passed, 5 skipped.
+
+## Findings (round 1a)
 
 - **What pixi's environment changes (step 1).** `env` under `pixi run`
   against the image's plain shell: pixi puts its env's `bin/` first on

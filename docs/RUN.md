@@ -98,7 +98,8 @@ a cluster file, its streamer and datapath files, the headers, `main.c` and
 
 `snax_hjson` reads the cluster file given with `--param hjson=` and puts the
 standard composite (streamer, `SnaxShell`, `SnaxUnit`) in its accelerator
-slot; `--trace=snax_acc0/unit` turns on the unit's trace:
+slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
+`trace`, and its `events` and `summary`, `docs/EVENTS.md`):
 
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
@@ -111,7 +112,10 @@ slot; `--trace=snax_acc0/unit` turns on the unit's trace:
     forge errors: 0
     ...
     293200000: 2932: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] Start at cycle 2932: count 16
-    295100000: 2951: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] run 0: firings 16 busy 16 stall_in 3 stall_out 0 flush 0
+    293200000: 2932: [/chip/soc/cluster_0/snax_acc0/unit/events                                ] 2932 start count=16 rate=1
+    295100000: 2951: [/chip/soc/cluster_0/snax_acc0/unit/trace                                 ] run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=0
+    295100000: 2951: [/chip/soc/cluster_0/snax_acc0/unit/events                                ] 2951 done firings=16 first=2936 last=2951
+    295100000: 2951: [/chip/soc/cluster_0/snax_acc0/unit/summary                               ] 2951 run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=0
 
     echo "exit $?"
 
@@ -133,8 +137,8 @@ compiled for a design point.
   in `data.h` (the reference executor's result); 64 words is vecadd's `O`.
 - `forge counter add_acc: 19`: the shell's cycle counter, read after the
   accelerator task `add_acc` finished.
-- The unit's run line, `run 0: firings 16 busy 16 stall_in 3 stall_out 0
-  flush 0`: the counter is busy + stall_in + stall_out + flush (16 + 3 +
+- The unit's run line, `run index=0 firings=16 busy=16 stall_in=3
+  stall_out=0 flush=0`: the counter is busy + stall_in + stall_out + flush (16 + 3 +
   0 + 0 = 19), and the firings are the task's beats in the manifest:
 
       grep '"tasks"' forge/vecadd/manifest.json

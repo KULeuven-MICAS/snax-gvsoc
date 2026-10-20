@@ -79,7 +79,7 @@ Csr::Csr(Iss &iss)
 
     // Machine timers and counters
     this->declare_csr(&this->mcycle,   "mcycle",    0xB00);
-    this->mcycle.register_callback(std::bind(&Csr::mcycle_access, this, std::placeholders::_1, std::placeholders::_2));
+    this->mcycle.register_callback(std::bind(&Csr::mcycle_csr_access, this, std::placeholders::_1, std::placeholders::_2));
     // Machine counter / timers
     for (int i=0; i<29; i++)
     {
@@ -244,6 +244,18 @@ bool Csr::mcycle_access(bool is_write, iss_reg_t &value)
         value = this->iss.top.clock.get_cycles();
     }
     return false;
+}
+
+bool Csr::mcycle_csr_access(bool is_write, iss_reg_t &value)
+{
+    bool result = this->mcycle_access(is_write, value);
+#ifdef CONFIG_GVSOC_ISS_SNAX_EVENTS
+    if (!is_write)
+    {
+        this->iss.snax_mcycle("mcycle", value);
+    }
+#endif
+    return result;
 }
 
 
@@ -485,6 +497,9 @@ static bool minstret_write(Iss *iss, unsigned int value)
 static bool mcycleh_read(Iss *iss, iss_reg_t *value)
 {
     printf("WARNING UNIMPLEMENTED CSR: mcycleh\n");
+#ifdef CONFIG_GVSOC_ISS_SNAX_EVENTS
+    iss->snax_mcycle("mcycleh", *value);
+#endif
     return false;
 }
 

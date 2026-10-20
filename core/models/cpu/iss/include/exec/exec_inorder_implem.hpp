@@ -206,6 +206,13 @@ inline void Exec::insn_exec_profiling()
     this->irq_enter.set(0);
     this->irq_exit.set(0);
 
+#ifdef CONFIG_GVSOC_ISS_SNAX_EVENTS
+    if (this->iss.snax_events.get_active())
+    {
+        this->iss.snax_func(this->iss.exec.current_insn);
+    }
+#endif
+
     if (this->iss.timing.pc_trace_event.get_event_active())
     {
         this->iss.timing.pc_trace_event.event((uint8_t *)&this->iss.exec.current_insn);
@@ -246,6 +253,9 @@ inline bool Exec::clock_active_get()
 
 inline void Exec::busy_enter()
 {
+#ifdef CONFIG_GVSOC_ISS_SNAX_EVENTS
+    this->iss.snax_state(true);
+#endif
     uint8_t one = 1;
     this->iss.timing.state_event.event(&one);
     this->iss.exec.busy.set(1);
@@ -257,6 +267,9 @@ inline void Exec::busy_enter()
 
 inline void Exec::busy_exit()
 {
+#ifdef CONFIG_GVSOC_ISS_SNAX_EVENTS
+    this->iss.snax_state(false);
+#endif
     this->iss.timing.state_event.event_highz();
     this->iss.exec.busy.release();
     if (this->iss.exec.busy_itf.is_bound())

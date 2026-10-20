@@ -6,7 +6,7 @@ latency 1
 ii 2
 inputs 2
 start 0 3 taken
-expect run 0: firings 3 busy 5 stall_in 1 stall_out 1 flush 1
+expect run index=0 firings=3 busy=5 stall_in=1 stall_out=1 flush=1
 cycles
 # a b out  fire push busy
 1 1 1      0 0 0     # 0: start

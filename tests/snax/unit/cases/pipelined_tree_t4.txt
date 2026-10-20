@@ -15,8 +15,8 @@ config count rate
 start 0 8 4 taken
 start 10 8 4 refused
 start 11 4 2 taken
-expect run 0: firings 8 busy 8 stall_in 0 stall_out 1 flush 1
-expect run 1: firings 4 busy 4 stall_in 0 stall_out 0 flush 1
+expect run index=0 firings=8 busy=8 stall_in=0 stall_out=1 flush=1
+expect run index=1 firings=4 busy=4 stall_in=0 stall_out=0 flush=1
 cycles
 # in out  fire push busy
 1 1       0 0 0     # 0: start
