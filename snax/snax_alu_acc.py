@@ -25,7 +25,7 @@ from snax_alu_shell import SnaxAluShell
 
 
 # snax_alu_streamer_template of snax_cluster's cfg/snax_alu_cluster_old.hjson
-# at b2672f8 (unchanged up to the pin, 9fbf35d), with the hjson's keys
+# at the pin (sw/cfg/), with the hjson's keys
 STREAMER_TEMPLATE = {
     'data_reader_params': {
         'spatial_bounds': [[4], [4]],

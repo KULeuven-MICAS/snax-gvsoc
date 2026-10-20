@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""snax_cluster's cluster hjson, read for a SNAX-GVSoC target (LNK2a).
+"""snax_cluster's cluster hjson, read for a SNAX-GVSoC target.
 
     load(path) -> ClusterCfg
 
@@ -114,7 +114,7 @@ class CfgTargetError(SnaxCfgError):
 # refused
 MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
-# The read-only CSRs of a shell: busy and the counter (D130 in snax-forge)
+# The read-only CSRs of a shell: busy and the counter
 SHELL_RO_CSRS = 2
 
 

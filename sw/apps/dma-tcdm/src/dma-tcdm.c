@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The DMA against the streamer in the TCDM (SG7 round 4): the same ELFs run
+// The DMA against the streamer in the TCDM: the same ELFs run
 // on snax_cluster's RTL and on SNAX-GVSoC. One ELF per case, chosen with
 // CASE_<name>; each prints the counter it compares, chosen not to depend on
 // the cores' timing (D123).

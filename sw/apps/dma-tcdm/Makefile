@@ -1,4 +1,4 @@
-# Builds the SG7 DMA TCDM program, with snax-alu's library and headers, from
+# Builds the DMA TCDM program, with snax-alu's library and headers, from
 # sw/ (../../common.mk) into build/sw/apps/dma-tcdm/, one ELF per case.
 
 APP      = dma-tcdm

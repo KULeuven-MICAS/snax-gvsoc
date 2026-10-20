@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The plain winner check of SG7 round 4 (README.md): the same random
+// The plain winner check (README.md): the same random
 // requests and grants through common_cells' rr_arb_tree (plain_arb_top.sv)
 // and through snax_plain_arb.hpp, the model's own pick, compared per cycle.
 //

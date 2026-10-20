@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// ALU timing program for SG4: the same ELF runs on snax_cluster's RTL and on
+// ALU timing program: the same ELF runs on snax_cluster's RTL and on
 // SNAX-GVSoC. Five cases, one after the other, on snax-alu's three streamers
 // and the ALU, set up through snax-alu's library. Each prints its errors, the
 // streamer's counter (977), the ALU's (982) and the gap between the two

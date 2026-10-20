@@ -1,4 +1,4 @@
-# Builds the SG7 core TCDM program from sw/ (../../common.mk) into
+# Builds the core TCDM program from sw/ (../../common.mk) into
 # build/sw/apps/core-tcdm/, one ELF per case.
 
 APP   = core-tcdm

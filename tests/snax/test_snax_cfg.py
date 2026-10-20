@@ -1,7 +1,7 @@
 # Copyright 2026 KU Leuven.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests of snax/snax_cfg.py (LNK2a step 2). Run from snax-gvsoc:
+"""Unit tests of snax/snax_cfg.py. Run from snax-gvsoc:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
@@ -186,7 +186,7 @@ class Broken(unittest.TestCase):
         d = sparse()
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "#/snax_alu_streamer_template", "x": 1}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "is not")
-        # A key without #/ is a whole file's name since round 2: no such file
+        # A key without #/ is a whole file's name: no such file
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "snax_alu_streamer_template"}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "no file")
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "#snax_alu_streamer_template"}

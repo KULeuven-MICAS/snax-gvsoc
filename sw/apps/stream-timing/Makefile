@@ -1,4 +1,4 @@
-# Builds the SG3 streamer timing program from sw/ (../../common.mk) into
+# Builds the streamer timing program from sw/ (../../common.mk) into
 # build/sw/apps/stream-timing/, one ELF per case.
 
 APP   = stream-timing

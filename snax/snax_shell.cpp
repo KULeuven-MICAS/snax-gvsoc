@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxShell (GEN3 step 2, D128, D130): the CSR manager in front of a SnaxUnit,
+// SnaxShell (D130 in snax-forge): the CSR manager in front of a SnaxUnit,
 // GeMMX's shell contract as snax_cluster gives it (05615e4): the
 // ReqRspManager (hw/chisel/.../reqRspManager/ReqRspManager.scala) holding the
 // read-write CSRs, BlockGemm's ctrl handshake, busy and performance counter

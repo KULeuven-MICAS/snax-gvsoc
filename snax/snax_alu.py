@@ -4,14 +4,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""The snax_alu target: snax_cluster's cfg/snax_alu_cluster_old.hjson at b2672f8,
-unchanged up to the pin, 9fbf35d (sw/cfg/), read by the generic target
-(snax_hjson.py, LNK2a): written by hand from it until then.
+"""The snax_alu target: snax_cluster's cfg/snax_alu_cluster_old.hjson at the pin
+(sw/cfg/, sw/README.md), read by the generic target (snax_hjson.py).
 
 One cluster with a compute core (hart 0, the one that drives the accelerator)
 and a DMA core (hart 1), both rv32ima, 128 KiB TCDM in 32 banks and the plain
-interconnect. The compute core's slot, snax_alu, is snax_alu_acc.py (the
-registered accelerator of that name). The file is fixed: the target takes no
+interconnect. The compute core's slot, snax_alu, is snax_alu_acc.py
+(snax_hjson.ACCELERATORS). The file is fixed: the target takes no
 hjson option.
 
     gvrun --target snax_alu --work-dir build/work/<name> \

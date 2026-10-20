@@ -1,4 +1,4 @@
-# SNAX-GVSoC's CI (CI1 in snax-forge, D124): in snax-forge's development
+# SNAX-GVSoC's CI (D124 in snax-forge): in snax-forge's development
 # image, GVSoC built for the Makefile's SNAX_TARGETS only, the unit tests of
 # tests/snax/, then `make regress` (every program in sw/ built from the
 # pinned copy and run to exit 0). Only snax/, sw/ and tests/snax/ are built
@@ -66,8 +66,8 @@ jobs:
 
       # SnaxUnit's rule on its cases, then sw/ and the programs built, each
       # run to exit 0 (20 SNAX runs on each of snax_alu and snax_alu_sparse,
-      # snax-shell on snax_hjson, forge/'s three with their programs,
-      # 17 plain).
+      # snax-shell on snax_hjson, every folder of forge/ with its program and
+      # forge-reduce on vsum, 17 plain).
       - name: Regress
         run: make regress
 

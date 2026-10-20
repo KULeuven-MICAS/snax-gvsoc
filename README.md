@@ -21,7 +21,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
 | `tests/snax/` | The regression (`regress.py`), the phase script (`phases.py`), the arbiters' checks against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
 | `docs/RUN.md` | How to run it, from the container to the regression, each command with its output |
-| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`) |
+| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
@@ -63,8 +63,9 @@ and a narrow request there is refused and keeps its turn. The two clusters
 build the same ELF (`sw/README.md`).
 `snax_hjson` (`snax/snax_hjson.py`, LNK2a) is any such cluster read from
 its hjson (`snax/snax_cfg.py`), the file given with `--param hjson=<path>`
-(`sw/cfg/snax_alu_cluster.hjson` by default); on either `sw/cfg/` file it
-gives the logs and `gvsoc_config.json` of the matching hand-written target.
+(`sw/cfg/snax_alu_cluster.hjson` by default); `snax_alu` and
+`snax_alu_sparse` are this target fixed to their `sw/cfg/` file
+(`fixed_target`).
 
 Each program of `sw/apps/` builds with `make -C sw/apps/<name>` into
 `build/sw/apps/<name>/`, and the same ELF runs on both targets. Adding

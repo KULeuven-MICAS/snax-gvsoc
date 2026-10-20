@@ -2,29 +2,29 @@
 # Copyright 2026 KU Leuven.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""SNAX-GVSoC's regression (SG5, pass/finish only since SG6): `make regress`.
+"""SNAX-GVSoC's regression, pass or finish: `make regress`.
 
 First runs SnaxUnit's rule against its hand-worked cases
 (tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
-snax_cluster's plain tests, from the pinned copy, CI1) and the programs
-of sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
-(ALU_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`, SG7),
+snax_cluster's plain tests, from the pinned copy) and the programs of
+sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
+(ALU_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
 `snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
 `snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
 `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file (SHELL_DESIGN:
 SnaxShell and SnaxUnit, a lockstep add), with the unit's trace on and the
 counter check below; then
-every folder of forge/ (FORGE_DIR) with the generic app `forge` (GEN2a:
-snax-forge's generated main.c and data.h), named forge.<design>, and
+every folder of forge/ (FORGE_DIR) with the generic app `forge`
+(snax-forge's generated main.c and data.h), named forge.<design>, and
 `forge-reduce.vsum-r16` (FORGE_REDUCE: vsum with its len overridden to 16 by
-hand, four sums, until a kernel gives T < n, snax-forge open item 81): the
+hand, four sums, since no kernel gives T < n, snax-forge open item 81): the
 fixture's manifest.json gives its cluster file, the unit's trace path and
 each accelerator task's beats; it runs on `snax_hjson` with
-`--param hjson=<cluster file>` (LNK2a: its components are not the default
-file's, so gvrun warns and runs it on the JSON config), with the counter
-checks; then
+`--param hjson=<cluster file>` (its components are not the default file's,
+so gvrun warns and runs it on the JSON config), with the counter checks;
+then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
 
@@ -33,7 +33,7 @@ returns its error count, but `stream-timing` and the `core-tcdm` cases other
 than `subword`, which return 0. No other output or cycle count is compared; the comparison with the RTL is made by
 hand with phases.py (README, "Comparing with the RTL").
 
-The counter check (check_counter, GEN3): a program on SnaxShell and
+The counter check (check_counter): a program on SnaxShell and
 SnaxUnit prints the shell's counter after a unit run; it passes when the
 counter is busy + stall_in + stall_out + flush of the unit's trace line for
 that run (`run <k>: ...`) and that run fired the task's beats. A
@@ -71,7 +71,7 @@ BUILD = ROOT / "build" / "sw"
 
 ALU_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # Generated accelerators, forge/<design>/ (forge/README.md): every folder, run
-# on snax_hjson from its cluster file by the generic app (GEN2a)
+# on snax_hjson from its cluster file by the generic app
 FORGE_DIR = ROOT / "forge"
 FORGE_TARGET = "snax_hjson"
 FORGE_APP = "forge"
@@ -82,7 +82,7 @@ SHELL_DESIGN = "vecadd"
 SHELL_BEATS = 16
 # The hand-written forge-reduce on a fixture with its len overridden: (design,
 # RATE_OVERRIDE). len 16 for vsum's T = N = 64, 4 sums per run, the
-# multi-output path, until a kernel gives T < n (snax-forge open item 81)
+# multi-output path, which no kernel gives yet (T < n, snax-forge open item 81)
 FORGE_REDUCE = [("vsum", 16)]
 SIZES = [4, 100, 128, 1024, 4096]
 # The SNAX programs built once into one ELF per case, <program>-<case>.elf

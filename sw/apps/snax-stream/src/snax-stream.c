@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// snax-alu's three streamers and the ALU in its four modes (SG4): readers A
+// snax-alu's three streamers and the ALU in its four modes: readers A
 // and B and the writer O set up as snax-alu sets them, through snax-alu's
 // library, one run per mode (add, sub, mul, xor). A and B are full 64-bit
 // words, so sub underflows and mul keeps the low 64 bits of its product, as

@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The program of GEN3 step 6b for a generated one-lane reduction
+// The program for a generated one-lane reduction
 // (forge/<design>/, snax-forge's GVSoC generator): O[k] = the sum of A over
 // RATE consecutive words, for BEATS / RATE sums, on the generated headers
 // only (streamer_csr_addr_map.h and acc_csr.h from forge/<design>/include/).

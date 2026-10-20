@@ -2,10 +2,10 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The cores' TCDM accesses through the interconnect (SG7 round 3): the same
-// ELFs run on snax_cluster's RTL and on SNAX-GVSoC. One ELF per case, chosen
-// with CASE_<name>; each prints the value it compares, chosen not to depend
-// on the core's timing (D123).
+// The cores' TCDM accesses through the interconnect: the same ELFs run on
+// snax_cluster's RTL and on SNAX-GVSoC. One ELF per case, chosen with
+// CASE_<name>; each prints the value it compares, chosen not to depend on the
+// core's timing (D123).
 //
 //   subword          the compute core's stores and loads of bytes, halves,
 //                    words and doublewords (two words on rv32ima), an

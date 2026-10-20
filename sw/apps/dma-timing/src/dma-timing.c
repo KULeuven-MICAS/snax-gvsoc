@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// DMA timing program for SG2: the same ELF runs on snax_cluster's RTL and on
+// DMA timing program: the same ELF runs on snax_cluster's RTL and on
 // SNAX-GVSoC. The DMA core copies between DRAM (L2) and L1 at a few sizes and
 // measures each case with mcycle and the cluster's DMA perf counters; the
 // compute core prints one line per case after the barrier, checks busy, r
@@ -32,9 +32,8 @@ typedef struct {
     enum dir dir;
     uint32_t copies;  // back-to-back copies, each `bytes` long, placed
     uint32_t bytes;   // one after the other
-    // The RTL's busy, r and w (SG2 step 3 at b2672f8, the same at 9fbf35d in
-    // SG7 round 4): they do not depend on the core (D123), so any other value
-    // is the DMA's own timing moving
+    // The RTL's busy, r and w: they do not depend on the core (D123), so any
+    // other value is the DMA's own timing moving
     uint32_t rtl_busy, rtl_r, rtl_w;
 } dma_case_t;
 

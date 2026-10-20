@@ -1,7 +1,7 @@
 # Copyright 2026 KU Leuven.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests of phases.py (SG5 P3). Run from snax-gvsoc:
+"""Unit tests of phases.py. Run from snax-gvsoc:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""The snax_hjson target (LNK2a): a SNAX cluster read from its hjson
+"""The snax_hjson target: a SNAX cluster read from its hjson
 (snax_cfg.py), the path a target option.
 
     gvrun --target snax_hjson --work-dir build/work/<name> \
@@ -33,14 +33,14 @@ composite (snax_unit_acc.py) when it has a datapath block
 error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
-DMA's read path and write latency and its one cycle per stage (SG2, SG7),
-the DRAM's latency and width (SG2), the cores' added latency (SG5, SG7), the
-HTIF poll backdoor (SG7), the 10 MHz clock and the bootrom's range.
+DMA's read path and write latency and its one cycle per stage, the DRAM's
+latency and width, the cores' added latency, the HTIF poll backdoor, the
+10 MHz clock and the bootrom's range.
 
 Everything else is the Snitch chip of pulp/pulp/chips/snitch/snitch.py,
-whose own arch tree fixes the core count at 9; this follows the structure of
-the hand-written snax_alu.py it replaces (SnaxAluAttr, SnaxAluBoard), and
-snax_alu.py and snax_alu_sparse.py are this board on their sw/cfg/ file.
+whose own arch tree fixes the core count at 9. snax_alu.py and
+snax_alu_sparse.py are this board fixed to their sw/cfg/ file
+(fixed_target).
 """
 
 import os
@@ -76,12 +76,12 @@ HERE = Path(__file__).resolve().parent
 CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg')
 DEFAULT_HJSON = 'snax_alu_cluster.hjson'
 
-# The DMA and DRAM measured on the RTL in SG2 (docs/notes/NOTES.md, SG2 step 4),
-# with the hjson's snax_alu cluster: one beat of dma_data_width per cycle into
-# L1, the DMA's queues the hjson's. A DMA read's first beat comes 5 cycles after
+# The DMA and DRAM measured on the RTL (docs/notes/NOTES.md), with the hjson's
+# snax_alu cluster: one beat of dma_data_width per cycle into L1, the DMA's
+# queues the hjson's. A DMA read's first beat comes 5 cycles after
 # its request from L1 and 11 from DRAM: the 5 common to both are the DMA's own
-# read path (read_latency), the other 6 are the DRAM's. From the SG7 round 4
-# follow-up (docs/plans/SG7.md): a beat reaches L1 2 cycles after the DMA sends
+# read path (read_latency), the other 6 are the DRAM's. From the RTL's DMA write
+# path (docs/plans/SG7.md): a beat reaches L1 2 cycles after the DMA sends
 # it, the wide crossbar's cut and axi_to_mem_interleaved, and the DMA is done at
 # the send (tcdm_write_latency); the DMA's midend, backend and AXI read each
 # take a cycle, whatever else the DMA is doing (one_cycle_per_stage).
@@ -89,8 +89,8 @@ DMA_TIMING = {'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage':
 DRAM_LATENCY = 6
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 
-# The cores' loads, measured on the RTL in SG5 (docs/notes/NOTES.md, SG5 step 6)
-# in snax-alu's check loop, with one integer load in flight (the hjson's
+# The cores' loads, measured on the RTL (docs/notes/NOTES.md) in snax-alu's
+# check loop, with one integer load in flight (the hjson's
 # num_int_outstanding_loads: 1): a load issues only once the previous load's
 # data is back. From one load to the next, 4 cycles from L1 and 14 from DRAM;
 # the core's data path gets the cycles GVSoC lacks for that (core_latency), on
@@ -98,11 +98,10 @@ DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 # fetches keep their own path. On the TCDM port the SNAX crossbar answers a
 # core's read one cycle after its grant plus these cycles; the core goes on
 # meanwhile, and the next load or an instruction on the loaded register runs in
-# the cycle after: 4 from one L1 load to the next with tcdm 2, as before the
-# cores went through the crossbar (SG7 rounds 3 and 3b).
+# the cycle after: 4 from one L1 load to the next with tcdm 2.
 CORE_LATENCY = {'tcdm': 2, 'narrow': 6}
 # GVSoC's host reads tohost every 1000 cycles; the RTL's host does not use the
-# bus, so the poll reads DRAM through the zero-time debug backdoor (SG7 round 3b).
+# bus, so the poll reads DRAM through the zero-time debug backdoor.
 HTIF_POLL_BACKDOOR = True
 CLOCK_FREQUENCY = 10000000
 # The bootrom's range, as the Snitch chip's

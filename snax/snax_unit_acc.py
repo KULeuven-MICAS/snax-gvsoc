@@ -4,19 +4,17 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""The standard composite of an accelerator slot with a datapath block
-(LNK2a): the CSR mux, the streamer, SnaxShell and SnaxUnit, as GEN3's
-generator wrote it per design point (forge_<design>_acc.py).
+"""The standard composite of an accelerator slot with a datapath block: the CSR
+mux, the streamer, SnaxShell and SnaxUnit.
 
-    SnaxUnitAcc.for_slot(slot, tcdm_size) -> class
+    SnaxUnitAcc.for_slot(slot, tcdm_size, file) -> class
 
 The slot (snax_cfg.AccSlot) gives the streamer template and the datapath
 block (snax_cfg.Datapath), the cluster its TCDM size. The unit's inputs take
 the streamer's readers in order, its outputs the writers.
 
 CSRs: the streamer's from SNAX_CSR_FIRST (nb_csrs of its template); then the
-shell's: the datapath's fields, start, busy and the counter, read-only (D130
-in snax-forge).
+shell's: the datapath's fields, start, busy and the counter, read-only.
 """
 
 import gvsoc.systree

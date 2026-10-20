@@ -5,8 +5,8 @@
 #
 
 """The snax_alu_sparse target: snax_cluster's cfg/snax_alu_cluster.hjson at the
-pin, 9fbf35d (sw/cfg/), which is snax_alu_cluster_old.hjson with the sparse
-interconnect (SG7), read by the generic target (snax_hjson.py, LNK2a).
+pin (sw/cfg/, sw/README.md), which is snax_alu_cluster_old.hjson with the
+sparse interconnect, read by the generic target (snax_hjson.py).
 
 The snax_alu target (snax_alu.py) with its SNAX crossbar sparse: priority
 first, then round robin from the last pick (snax_tcdm_xbar.cpp). The
