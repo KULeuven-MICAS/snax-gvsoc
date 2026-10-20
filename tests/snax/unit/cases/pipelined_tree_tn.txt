@@ -1,0 +1,29 @@
+# pipelined fold over 4 lanes, L = 1, II 1, rate 8, count 8 (snax-forge's
+# Accumulator with lanes 4 at T = n = 8): each firing takes a 4-lane beat
+# through the tree, as one lane does; one sum per run. A missing input in
+# cycle 3 is stall_in; the sum, given by firing 7 in cycle 9, finds no room in
+# cycle 10 (stall_out) and is pushed in cycle 11, the run's last (flush):
+# busy 8 + stall_in 1 + stall_out 1 + flush 1 = 11 busy cycles
+wait pipelined
+latency 1
+ii 1
+inputs 1
+lanes 4
+config count rate
+start 0 8 8 taken
+expect run 0: firings 8 busy 8 stall_in 1 stall_out 1 flush 1
+cycles
+# in out  fire push busy
+1 1       0 0 0     # 0: start
+1 1       1 0 1     # 1: firing 0
+1 1       1 0 1     # 2
+0 1       0 0 1     # 3: no input: stall_in
+1 1       1 0 1     # 4: firing 2
+1 1       1 0 1     # 5
+1 1       1 0 1     # 6
+1 1       1 0 1     # 7
+1 1       1 0 1     # 8
+1 1       1 0 1     # 9: firing 7 (the last), gives the sum
+1 0       0 0 1     # 10: no room: stall_out
+1 1       0 1 1     # 11: push, the end (flush)
+1 1       0 0 0     # 12

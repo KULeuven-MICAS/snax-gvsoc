@@ -9,7 +9,7 @@
 // snax_unit.hpp's rule with them and compares every cycle and the trace line
 // at the end of each run, whose busy, stall_in, stall_out and flush must add
 // up to the run's busy cycles in the case file. It also checks the op table
-// on fixed vectors.
+// and a fold's tree on fixed vectors.
 //
 //   tb CASE...
 //
@@ -45,6 +45,7 @@ struct Case
     int latency = 0;
     int ii = 1;
     int inputs = 2;
+    int lanes = 1;      // a fold's input lanes: the tree, not the rule
     std::vector<std::string> config = {"count"};    // the start words' roles
     std::vector<StartLine> starts;
     std::vector<std::string> expects;   // run lines, in order
@@ -106,6 +107,7 @@ static bool parse(const std::string &path, Case &c)
         else if (key == "latency") { ok = (bool)(ss >> c.latency); c.has_latency = true; }
         else if (key == "ii") { ok = (bool)(ss >> c.ii); c.has_ii = true; }
         else if (key == "inputs") { ok = (bool)(ss >> c.inputs); }
+        else if (key == "lanes") { ok = (bool)(ss >> c.lanes) && c.lanes > 0; }
         else if (key == "config")
         {
             c.config.clear();
@@ -160,6 +162,11 @@ static bool parse(const std::string &path, Case &c)
             fprintf(stderr, "%s:%d: cannot read \"%s\"\n", path.c_str(), lineno, raw.c_str());
             return false;
         }
+    }
+    if (c.lanes > 1 && c.inputs != 1)
+    {
+        fprintf(stderr, "%s: lanes %d needs a fold (inputs 1)\n", path.c_str(), c.lanes);
+        return false;
     }
     return true;
 }
@@ -320,6 +327,37 @@ static int check_ops(int *count)
     return errors;
 }
 
+// A fold's tree on fixed vectors: halves first, wrapping, one lane as it is
+static int check_tree(int *count)
+{
+    struct Vector { int op; bool is_signed; int width; std::vector<uint64_t> lanes; uint64_t r; };
+    static const Vector vectors[] = {
+        {UNIT_ADD, false, 64, {7}, 7},
+        {UNIT_ADD, false, 64, {1, 2, 3, 4}, 10},
+        {UNIT_ADD, false, 64, {~0ull, 1, 2, 3}, 5},
+        {UNIT_ADD, false, 8, {0x80, 0x80, 0x01, 0x02}, 0x03},
+        {UNIT_ADD, false, 64, {1, 2, 3}, 6},
+        // (a0 - a1) - (a2 - a3): the order of the halves
+        {UNIT_SUB, false, 64, {10, 4, 3, 1}, 4},
+        {UNIT_MIN, true, 64, {5, ~0ull, 3, 2}, ~0ull},
+        {UNIT_MAX, false, 64, {5, ~0ull, 3, 2}, ~0ull},
+    };
+    int errors = 0;
+    *count = sizeof(vectors) / sizeof(vectors[0]);
+    for (const Vector &v : vectors)
+    {
+        uint64_t r = snax_unit_tree(v.op, v.is_signed, v.width, v.lanes.data(), v.lanes.size());
+        if (r != v.r)
+        {
+            printf("tree: %s%s w%d over %zu lanes = 0x%lx, expected 0x%lx\n",
+                snax_unit_op_names[v.op], v.is_signed ? " signed" : "", v.width, v.lanes.size(),
+                (unsigned long)r, (unsigned long)v.r);
+            errors++;
+        }
+    }
+    return errors;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -333,6 +371,11 @@ int main(int argc, char **argv)
     printf("%s ops: %d vectors\n", op_errors ? "FAIL" : "PASS", nb_ops);
     failed += op_errors != 0;
     passed += op_errors == 0;
+    int nb_trees;
+    int tree_errors = check_tree(&nb_trees);
+    printf("%s tree: %d vectors\n", tree_errors ? "FAIL" : "PASS", nb_trees);
+    failed += tree_errors != 0;
+    passed += tree_errors == 0;
 
     for (int i = 1; i < argc; i++)
     {
