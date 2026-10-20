@@ -9,6 +9,7 @@
 import math
 
 import gvsoc.systree
+from snax_cfg import MOVERS
 
 
 # The keys of a mover group in the hjson's streamer template that the model
@@ -17,8 +18,9 @@ import gvsoc.systree
 # reads them.
 MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth', 'dynamicPriority',
     'higherStaticPriority']
-# The keys of the streamer template the model reads, or that do not change it
-TEMPLATE_KEYS = ['data_reader_params', 'data_writer_params', 'snax_library_name']
+# The keys of the streamer template the model reads (snax_cfg.MOVERS), or that do
+# not change it
+TEMPLATE_KEYS = [*MOVERS, 'snax_library_name']
 
 
 def check_template(template: dict):
@@ -33,7 +35,7 @@ def check_template(template: dict):
     for key in template:
         if key not in TEMPLATE_KEYS:
             raise RuntimeError(f'Streamer template key not modelled: {key}')
-    for group in ['data_reader_params', 'data_writer_params']:
+    for group in MOVERS:
         for key in template.get(group, {}):
             if key not in MOVER_KEYS:
                 raise RuntimeError(f'Streamer template key not modelled: {group}.{key}')

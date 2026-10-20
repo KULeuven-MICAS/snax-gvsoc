@@ -28,9 +28,9 @@ dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
 crossbar's interconnect (tcdm.sparse_interconnect and each slot's
 sparse_interconnect_config). Each core's accelerator slot gets the standard
 composite (snax_unit_acc.py) when it has a datapath block
-(snax_datapath_cfg), or the class registered under its snax_acc_name
-(register_accelerator: snax_alu is snax_alu_acc.py's SnaxAluAcc); neither
-is an error.
+(snax_datapath_cfg), or the class ACCELERATORS holds for its snax_acc_name
+(snax_alu, sw/cfg/'s slot, is snax_alu_acc.py's SnaxAluAcc); neither is an
+error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
 DMA's read path and write latency and its one cycle per stage (SG2, SG7),
@@ -109,16 +109,8 @@ CLOCK_FREQUENCY = 10000000
 BOOTROM = (0x0000_1000, 0x0001_0000)
 
 
-# Accelerators for a slot without a datapath block, by its snax_acc_name
-ACCELERATORS = {}
-
-
-def register_accelerator(name: str, cls):
-    """Registers the accelerator class cls for the slots named name."""
-    ACCELERATORS[name] = cls
-
-
-register_accelerator('snax_alu', SnaxAluAcc)
+# Accelerators for a slot without a datapath block, by its snax_acc_name: sw/cfg/'s
+ACCELERATORS = {'snax_alu': SnaxAluAcc}
 
 
 def cfg_file(name: str) -> Path:
@@ -130,13 +122,13 @@ def cfg_file(name: str) -> Path:
 
 
 def accelerator(cfg, slot):
-    """The accelerator class of a slot: the standard composite with a datapath block, else the
-    registered one."""
+    """The accelerator class of a slot: the standard composite with a datapath block, else
+    ACCELERATORS' one."""
     if slot.datapath is not None:
         return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
     if slot.name not in ACCELERATORS:
         raise CfgTargetError(cfg.path, f'{slot.at}.snax_acc_name',
-            f'{slot.name!r}: no snax_datapath_cfg and no accelerator registered under it '
+            f'{slot.name!r}: no snax_datapath_cfg and no accelerator of that name '
             f'({sorted(ACCELERATORS)})')
     cls = ACCELERATORS[slot.name]
     if getattr(cls, 'nb_tcdm_ports', 0) != slot.tcdm_ports:

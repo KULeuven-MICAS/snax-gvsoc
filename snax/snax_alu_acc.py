@@ -19,6 +19,7 @@ does.
 
 import gvsoc.systree
 import interco.router as router
+from snax_acc import SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
 from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
 from snax_alu_shell import SnaxAluShell
 
@@ -45,11 +46,6 @@ STREAMER_TEMPLATE = {
 # log2, 17 bits
 TCDM_SIZE = 128 * 1024
 
-# The first SNAX CSR (CSR_SNAX_BEGIN, 960) and the last one the core sends
-# out (1535). The core puts CSR n at byte address 4 * n on its snax_csr port.
-SNAX_CSR_FIRST = 0x3C0
-SNAX_CSR_LAST = 0x5FF
-
 # The streamer's CSRs come first: 3 movers x 5 read-write CSRs and start, then
 # busy and the performance counter, 960 to 977 (streamer_csr_addr_map.h).
 # Where csr_mux switches to the ALU: AddrSelOffSet of snax_csr_mux_demux.sv.
@@ -64,21 +60,9 @@ ALU_NUM_PE = 4
 ALU_DATA_WIDTH = 64
 
 
-class SnaxAluAcc(gvsoc.systree.Component):
-    """snax_alu's accelerator: the CSR mux, the streamer and the ALU.
+class SnaxAluAcc(SnaxAcc):
+    """snax_alu's accelerator: the CSR mux, the streamer and the ALU; ports as SnaxAcc's."""
 
-    Ports
-    -----
-    input : io slave
-        The compute core's CSR accesses, a 32-bit request at 4 * CSR number.
-    tcdm_<i> : io master
-        The streamer's TCDM ports (nb_tcdm_ports of them).
-    tcdm_prio_<i> : wire<bool> master
-        The priority bit of each TCDM port's request.
-    """
-
-    # The cluster binds this many TCDM ports (snax_tcdm_ports in the hjson),
-    # named in the crossbar's trace by their owner
     nb_tcdm_ports = nb_tcdm_ports(STREAMER_TEMPLATE)
     tcdm_port_names = ['streamer.' + name for name in tcdm_port_names(STREAMER_TEMPLATE)]
 
@@ -109,24 +93,4 @@ class SnaxAluAcc(gvsoc.systree.Component):
         alu.o_IN_B(streamer.i_READER(1))
         alu.o_OUT(streamer.i_WRITER(0))
 
-        self.bind(self, 'input', csr_mux, 'input')
-
-        for port in range(0, self.nb_tcdm_ports):
-            streamer.o_TCDM(port, self.i_TCDM_INTERNAL(port))
-            streamer.o_TCDM_PRIORITY(port, self.i_TCDM_PRIORITY_INTERNAL(port))
-
-    def i_INPUT(self) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, 'input', signature='io')
-
-    def i_TCDM_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
-        # Inside the composite: the streamer's port i leaves as tcdm_<i>
-        return gvsoc.systree.SlaveItf(self, f'tcdm_{port}', signature='io')
-
-    def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
-        self.itf_bind(f'tcdm_{port}', itf, signature='io')
-
-    def i_TCDM_PRIORITY_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, f'tcdm_prio_{port}', signature='wire<bool>')
-
-    def o_TCDM_PRIORITY(self, port: int, itf: gvsoc.systree.SlaveItf):
-        self.itf_bind(f'tcdm_prio_{port}', itf, signature='wire<bool>')
+        self.bind_ports(csr_mux, streamer)

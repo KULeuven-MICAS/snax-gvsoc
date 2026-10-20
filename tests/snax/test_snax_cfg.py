@@ -237,6 +237,14 @@ class Broken(unittest.TestCase):
         self.slot(d)["snax_wide_tcdm_ports"] = 0
         self.fails(snax_cfg.CfgSlotError, d, "snax_narrow_tcdm_ports", "narrow 8 + wide 0")
 
+    def test_reader_writer_refused(self):
+        """snax_cluster's data_reader_writer_params: no mover of the model's streamer."""
+        d = sparse()
+        d["snax_alu_streamer_template"]["data_reader_writer_params"] = {
+            "spatial_bounds": [[4]], "temporal_dim": [1], "num_channel": [4], "fifo_depth": [8]}
+        self.fails(snax_cfg.CfgTargetError, d, "snax_streamer_cfg.data_reader_writer_params",
+                   "not modelled")
+
 
 class AccFile(unittest.TestCase):
     """A slot's streamer and datapath in an accelerator file next to the cluster file."""
