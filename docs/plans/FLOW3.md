@@ -38,10 +38,40 @@ CI's `gvsoc` job.
 | # | Step | Status |
 |---|---|---|
 | 0 | Docs in both: snax-forge D136, D137, D135, D128, D127 and D57 amended, C§7 and C§16, STATUS (FLOW3, RET1 folded in, open items 56, 57, 60 closed, 82 opened), ARCHITECTURE; this file | done |
-| 1 | Tools: snax-forge's `gvsoc/Makefile` names Python, CMake and the host compilers and unexports what pixi sets; every `cmake` in this Makefile is `$(CMAKE)`; `gvrun` ends in `exec "${GVRUN_PYTHON:-python3}"`. Checked by hand: no rebuild from pixi after a plain-shell build, the same ELF and stdout from both | todo |
+| 1 | Tools: snax-forge's `gvsoc/Makefile` names Python, CMake and the host compilers and unexports what pixi sets; every `cmake` in this Makefile is `$(CMAKE)`; `gvrun` ends in `exec "${GVRUN_PYTHON:-python3}"`. Checked by hand: no rebuild from pixi after a plain-shell build, the same ELF and stdout from both | done |
 | 2 | snax-forge `lower/c.py`: the marks out; each counter in `forge_counter[]`; `forge_check(t0)` prints `forge cycles:` then the self-check; forge/ refreshed; `make regress` | todo |
 | 3 | snax-forge: the flow's stages after design are lower, gen, build, sw, gvsoc, check; `run.json` | todo |
 | 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | todo |
 | 5 | Acceptance in the container and in CI; tag `flow3-r1a` | todo |
 
 ## Findings
+
+- **What pixi's environment changes (step 1).** `env` under `pixi run`
+  against the image's plain shell: pixi puts its env's `bin/` first on
+  `PATH` (its `python3`, `make` 4.4.1, `ninja`, and conda's binutils as
+  plain `ld`, `as`, `ar`), and adds conda's compiler setup: `CC`, `CXX`,
+  `CPP`, `GCC`, `GXX`, the `*_FOR_BUILD` compilers, `CFLAGS`, `CXXFLAGS`,
+  `CPPFLAGS`, `LDFLAGS`, `LDFLAGS_LD`, the `DEBUG_*` flags, `AR`, `AS`,
+  `LD`, `NM`, `RANLIB`, `STRIP`, `OBJCOPY`, `OBJDUMP`, `READELF` and the
+  other binutils names, `CONDA_BUILD_SYSROOT`, `HOST`, `BUILD` and their
+  aliases, `MESON_ARGS`; CMake-relevant, `CMAKE_ARGS` and
+  `CMAKE_PREFIX_PATH` (pixi's env first). It also sets `CONDA_PREFIX`,
+  `PIXI_*`, `JAVA_HOME`, `DACE_default_build_folder`, `SNAX_FORGE_HW_OUT`,
+  `OMP_NUM_THREADS=1` and `GSETTINGS_SCHEMA_DIR`, which no build reads.
+  `PYTHONPATH` and `LD_LIBRARY_PATH` are untouched. The host gcc finds `ld`
+  and `as` through `PATH` (`gcc -print-prog-name=ld` is `ld`), so
+  snax-forge's `gvsoc/Makefile` puts the host compilers' folder
+  (`/usr/bin/`) right after the image's Python on its recipes' `PATH`, and
+  unexports the compiler setup above; `CC` and `CXX` are its own unless
+  given on make's command line.
+- **The three checks hold (step 1).** With `out/snax-gvsoc/` wiped, `make
+  -C gvsoc build` in the plain shell (this branch's checkout as
+  `SNAX_GVSOC`), then `pixi run make -C gvsoc build`: the three
+  `CMakeCache.txt` (GVSoC, gvrun, config_tree) byte-identical before and
+  after, no object or library newer than before it, none of the build's
+  `Building` or `Linking` lines; the cache names `/usr/bin/gcc`, `g++`,
+  `ar` and `ld`. `make sw APPS=forge` on snax-forge's generated vecadd,
+  with `build/sw/` and snax-forge's `out/snax-gvsoc/sw/` wiped before each:
+  ELF sha256 `4fe8f544...4d28dd` from both. `make run` on `snax_hjson`:
+  byte-identical stdout (`forge data: 0 errors (64 words)`, `forge counter
+  add_acc: 19`, `forge errors: 0`), exit 0 from both.

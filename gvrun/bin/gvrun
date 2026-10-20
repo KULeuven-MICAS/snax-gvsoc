@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 set -e
 
@@ -32,4 +33,4 @@ if [ -x "$VENV_GVRUN" ]; then
         exec "$VENV_GVRUN" --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
 fi
 
-exec python3 -m gvrun --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
+exec "${GVRUN_PYTHON:-python3}" -m gvrun --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
