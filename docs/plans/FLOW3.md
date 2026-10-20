@@ -40,7 +40,7 @@ CI's `gvsoc` job.
 | 0 | Docs in both: snax-forge D136, D137, D135, D128, D127 and D57 amended, C§7 and C§16, STATUS (FLOW3, RET1 folded in, open items 56, 57, 60 closed, 82 opened), ARCHITECTURE; this file | done |
 | 1 | Tools: snax-forge's `gvsoc/Makefile` names Python, CMake and the host compilers and unexports what pixi sets; every `cmake` in this Makefile is `$(CMAKE)`; `gvrun` ends in `exec "${GVRUN_PYTHON:-python3}"`. Checked by hand: no rebuild from pixi after a plain-shell build, the same ELF and stdout from both | done |
 | 2 | snax-forge `lower/c.py`: the marks out; each counter in `forge_counter[]`; `forge_check(t0)` prints `forge cycles:` then the self-check; forge/ refreshed; `make regress` | done |
-| 3 | snax-forge: the flow's stages after design are lower, gen, build, sw, gvsoc, check; `run.json` | todo |
+| 3 | snax-forge: the flow's stages after design are lower, gen, build, sw, gvsoc, check; `run.json` | done |
 | 4 | snax-forge CI: the `gvsoc` job, the flow on vecadd and vsum | todo |
 | 5 | Acceptance in the container and in CI; tag `flow3-r1a` | todo |
 
@@ -82,3 +82,14 @@ CI's `gvsoc` job.
   programs' (19, 19, 67, 19). `forge-reduce` is hand-written and never used
   the marks: unchanged. With one accelerator task, clang keeps the static
   `forge_counter[1]` as one symbol, `forge_counter.0`.
+- **The flow on SNAX-GVSoC (step 3).** `pixi run flow` on vecadd and vsum
+  (`platforms/snax_alu.json`) gives the fixtures' windows and counters
+  (226 and 19, 255 and 67), exit 0; its first run built GVSoC (the build's
+  folder came from another checkout), the next ones found it up to date
+  (about 3 s a flow). The build, `make sw` and `make run` leave this repo's
+  tree clean (`git status --porcelain` empty), so a flow does not see its
+  own build as a dirty tree.
+- **The program's exit code is not its error count (step 3).** A vecadd
+  program with two goldens changed by hand prints `forge errors: 2` and the
+  run exits 1 (`make: *** [Makefile:110: run] Error 1`), so the flow reads
+  the counts from the printed lines and only pass or fail from the exit.
