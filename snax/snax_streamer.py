@@ -124,11 +124,24 @@ class SnaxStreamer(gvsoc.systree.Component):
 
         self.add_sources(['snax_streamer.cpp'])
 
+        self.movers = movers_of(template)
         self.add_properties({
             'csr_base': csr_base,
             'addr_bits': int(math.log2(tcdm_size)),
-            'movers': movers_of(template),
+            'movers': self.movers,
         })
+
+    def gen_gtkw(self, tree, comp_traces):
+        """Its VCD signals (snax_streamer.cpp), tagged snax, for gvrun's --vcd and view.gtkw."""
+        tree.begin_group('snax_streamer')
+        tree.add_trace(self, 'streamer_busy', 'streamer_busy', tag='snax')
+        for mover in self.movers:
+            name = mover['name']
+            tree.add_trace(self, f'{name}_busy', f'{name}_busy', tag='snax')
+            for lane in range(mover['num_channel']):
+                count = f'{name}_lane{lane}_count'
+                tree.add_trace(self, count, count, '[7:0]', tag='snax')
+        tree.end_group('snax_streamer')
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, 'input', signature='io')

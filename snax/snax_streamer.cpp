@@ -81,11 +81,16 @@
 // the summary's `mover` line with the run's classes and queue maxima when the
 // streamer is done.
 //
+// VCD signals (snax_events.hpp, gtkwave only): streamer_busy (from s + 1 to
+// e, as the RTL's), <mover>_busy (from s + 1 to its last busy cycle) and
+// <mover>_lane<l>_count (the lane's queue count, from the cycle it holds).
+//
 // Not modelled: reader-writers, configurable channels and byte masks, address
 // remapping (logic word sizes), datapath extensions, a second clock domain;
 // snax_streamer.py refuses their keys.
 
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -217,6 +222,10 @@ private:
     vp::ClockEvent step_event;
     vp::ClockEvent commit_event;
     vp::ClockEvent summary_event;
+    SnaxSignals sigs;
+    SnaxSignal sig_busy;
+    std::vector<std::unique_ptr<SnaxSignal>> sig_mover_busy;   // per mover
+    std::vector<std::unique_ptr<SnaxSignal>> sig_count;        // per channel
 
     uint32_t addr_mask;         // the AGU's address width, from the TCDM size
     int nb_rw;                  // read-write CSRs, the start CSR last
@@ -241,7 +250,9 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     : vp::Component(config),
       step_event(this, &SnaxStreamer::step_handler),
       commit_event(this, &SnaxStreamer::commit_handler),
-      summary_event(this, &SnaxStreamer::summary_handler)
+      summary_event(this, &SnaxStreamer::summary_handler),
+      sigs(this),
+      sig_busy(*this, "streamer_busy", 1)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
@@ -307,7 +318,10 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
             this->tcdm_itf[id].set_resp_meth_muxed(&SnaxStreamer::tcdm_resp, id);
             this->new_master_port("tcdm_" + std::to_string(id), &this->tcdm_itf[id]);
             this->new_master_port("tcdm_prio_" + std::to_string(id), &this->tcdm_prio_itf[id]);
+            this->sig_count.emplace_back(new SnaxSignal(*this,
+                mover.name + "_lane" + std::to_string(lane) + "_count", 8));
         }
+        this->sig_mover_busy.emplace_back(new SnaxSignal(*this, mover.name + "_busy", 1));
     }
 
     for (size_t i = 0; i < this->readers.size(); i++)
@@ -474,6 +488,7 @@ void SnaxStreamer::queue_changed(Channel &ch)
         ch.count_cycle = cycle;
     }
     ch.count_end = ch.data.size();
+    this->sigs.set_from(*this->sig_count[&ch - this->channels.data()], ch.count_end, cycle + 1);
 }
 
 
@@ -606,6 +621,12 @@ void SnaxStreamer::start(int64_t cycle)
         ch.max_count = ch.count;
     }
 
+    this->sigs.set_from(this->sig_busy, 1, cycle + 1);
+    for (size_t m = 0; m < this->movers.size(); m++)
+    {
+        this->sigs.set_from(*this->sig_mover_busy[m], 1, cycle + 1);
+    }
+
     this->counter_before = this->counter_at(cycle);
     this->runs++;
     this->started = true;
@@ -636,6 +657,7 @@ void SnaxStreamer::end_run(int64_t cycle)
         this->mover_done(mover, cycle);
     }
     this->end_cycle = cycle + 1;
+    this->sigs.set_from(this->sig_busy, 0, this->end_cycle + 1);
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Done: busy up to cycle %ld, counter %d\n",
         this->end_cycle, this->counter_at(this->end_cycle + 1));
     for (Mover &mover : this->movers)
@@ -653,6 +675,7 @@ void SnaxStreamer::mover_done(Mover &mover, int64_t cycle)
     if (!mover.done)
     {
         mover.done = true;
+        this->sigs.set_from(*this->sig_mover_busy[&mover - this->movers.data()], 0, cycle + 1);
         this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld done mover=%s\n", (long)cycle,
             mover.name.c_str());
     }

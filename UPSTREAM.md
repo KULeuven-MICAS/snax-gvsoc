@@ -104,3 +104,5 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/idma/be/idma_be.cpp` | `enqueue_transfer` keeps the row's start (`row_src`, `row_dst`) | FLOW3 2a step 2 |
 | `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | Each line to the TCDM (and each delayed one) carries its copy's ID, its index on that side and the other side's address in the `IDMA_SNAX_ARG_*` slots | FLOW3 2a step 2 |
 | `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | FLOW3's `beats` trace: a `burst` line per request to AXI (its copy, address and size as it leaves, written when its data is back or it is acknowledged) | FLOW3 2a step 2 |
+| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | The busy wire as the VCD signal `dma_busy` | FLOW3 2a step 4 |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma.gen_gtkw` lists `fe/dma_busy` under the tag `snax` | FLOW3 2a step 4 |

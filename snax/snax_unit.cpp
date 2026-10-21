@@ -65,6 +65,10 @@
 // the streamer hands it back, -1 if it does not, and the input words), `push`
 // per result pushed (its index n among the run's results, the firings it
 // folds, the output words).
+//
+// VCD signals (snax_events.hpp, gtkwave only): busy (from s + 1 to E), fire
+// and push (1 in a cycle the unit fires, pushes), cycle_class (0 idle, 1 busy,
+// 2 stall_in, 3 stall_out, 4 flush; snax_unit.hpp's classes plus one).
 
 #include <deque>
 #include <string>
@@ -103,6 +107,11 @@ private:
     vp::IoMaster out_itf;
     vp::ClockEvent fire_event;
     vp::IoReq beat_req;
+    SnaxSignals sigs;
+    SnaxSignal sig_busy;
+    SnaxSignal sig_fire;
+    SnaxSignal sig_push;
+    SnaxSignal sig_class;
 
     int lanes;
     int data_width;
@@ -136,7 +145,12 @@ private:
 
 SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     : vp::Component(config),
-      fire_event(this, &SnaxUnit::fire_handler)
+      fire_event(this, &SnaxUnit::fire_handler),
+      sigs(this),
+      sig_busy(*this, "busy", 1),
+      sig_fire(*this, "fire", 1),
+      sig_push(*this, "push", 1),
+      sig_class(*this, "cycle_class", 3)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
@@ -472,6 +486,10 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         bool room = _this->probe(_this->out_itf, true);
 
         SnaxUnitRule::Step step = _this->rule.step(cycle, inputs, room);
+        _this->sigs.set(_this->sig_busy, 1);
+        _this->sigs.set(_this->sig_fire, step.fire);
+        _this->sigs.set(_this->sig_push, step.push);
+        _this->sigs.set(_this->sig_class, step.cls + 1);
         if (step.fire)
         {
             uint32_t n = _this->rule.firings - 1;
@@ -550,6 +568,11 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(false);
+            }
+            for (SnaxSignal *s : {&_this->sig_busy, &_this->sig_fire, &_this->sig_push,
+                &_this->sig_class})
+            {
+                _this->sigs.set_from(*s, 0, cycle + 1);
             }
         }
     }

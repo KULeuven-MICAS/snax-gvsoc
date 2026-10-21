@@ -96,3 +96,10 @@ class SnaxUnit(gvsoc.systree.Component):
 
     def o_BUSY(self, itf: gvsoc.systree.SlaveItf):
         self.itf_bind('busy', itf, signature='wire<bool>')
+
+    def gen_gtkw(self, tree, comp_traces):
+        """Its VCD signals (snax_unit.cpp), tagged snax, for gvrun's --vcd and view.gtkw."""
+        tree.begin_group('snax_unit')
+        for name, ext in (('busy', ''), ('fire', ''), ('push', ''), ('cycle_class', '[2:0]')):
+            tree.add_trace(self, name, name, ext, tag='snax')
+        tree.end_group('snax_unit')

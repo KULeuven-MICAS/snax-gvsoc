@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 import gvsoc.systree
 
@@ -87,6 +88,11 @@ class SnitchDma(gvsoc.systree.Component):
             "tcdm_write_latency": tcdm_write_latency,
             "one_cycle_per_stage": one_cycle_per_stage,
         })
+
+    # SNAX, FLOW3: the busy wire's VCD signal (idma_fe_xdma.cpp), tagged snax, for gvrun's
+    # --vcd and view.gtkw
+    def gen_gtkw(self, tree, comp_traces):
+        tree.add_trace(self, 'dma_busy', 'fe/dma_busy', tag='snax')
 
     def i_OFFLOAD(self) -> gvsoc.systree.SlaveItf:
         """Returns the offload port.

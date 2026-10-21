@@ -73,8 +73,14 @@
 // trace_inputs is a list joined by ',' of input names (input_names) or
 // indices and dma; default (its default) is every input that resends (the
 // SNAX ports) and dma.
+//
+// VCD signals (snax_events.hpp, gtkwave only): per input in<i>_q_valid (it
+// requests), in<i>_q_ready (it is granted) and in<i>_stall (it is refused),
+// the RTL's TCDM handshake names; per bank bank<b>_grant, the input it granted
+// plus one (0 none, nb_inputs + 1 the DMA's beat).
 
 #include <algorithm>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -178,6 +184,16 @@ private:
     // Per input: whether its beat and stall lines are written; the DMA's
     std::vector<bool> trace_input;
     bool trace_dma;
+
+    SnaxSignals sigs;
+    std::vector<std::unique_ptr<SnaxSignal>> sig_valid, sig_ready, sig_stall;  // per input
+    std::vector<std::unique_ptr<SnaxSignal>> sig_bank;                         // per bank
+    // bank's signal: value in this cycle only
+    void bank_signal(int bank, uint64_t value)
+    {
+        this->sigs.set(*this->sig_bank[bank], value);
+        this->sigs.set_from(*this->sig_bank[bank], 0, this->clock.get_cycles() + 1);
+    }
     // Per bank: the cycle of its last narrow grant, and to whom
     std::vector<int64_t> grant_cycle;
     std::vector<int> grant_input;
@@ -196,7 +212,8 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     : vp::Component(config),
       arb_event(this, &SnaxTcdmXbar::arbitrate),
       held_event(this, &SnaxTcdmXbar::held_cycle),
-      resp_event(this, &SnaxTcdmXbar::respond)
+      resp_event(this, &SnaxTcdmXbar::respond),
+      sigs(this)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
@@ -294,6 +311,15 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     for (int i = 0; i < this->nb_banks; i++)
     {
         this->new_master_port("out_" + std::to_string(i), &this->banks[i]);
+        this->sig_bank.emplace_back(new SnaxSignal(*this, "bank" + std::to_string(i) + "_grant",
+            8));
+    }
+    for (int i = 0; i < this->nb_inputs; i++)
+    {
+        std::string in = "in" + std::to_string(i);
+        this->sig_valid.emplace_back(new SnaxSignal(*this, in + "_q_valid", 1));
+        this->sig_ready.emplace_back(new SnaxSignal(*this, in + "_q_ready", 1));
+        this->sig_stall.emplace_back(new SnaxSignal(*this, in + "_stall", 1));
     }
     if (this->superbank_banks > 0)
     {
@@ -448,6 +474,11 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     }
     _this->superbank_cycle[superbank] = cycle;
     _this->superbank_addr[superbank] = addr;
+    for (int bank = superbank * _this->superbank_banks;
+        bank < (superbank + 1) * _this->superbank_banks; bank++)
+    {
+        _this->bank_signal(bank, _this->nb_inputs + 1);
+    }
     _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Superbank %d: grant dma (%s 0x%lx, %ld B)\n",
         superbank, req->get_is_write() ? "write" : "read", addr, size);
 
@@ -626,6 +657,18 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         int winner = _this->sparse ? _this->sparse_pick(bank, req_mask, cycle)
             : _this->plain_arbs[bank].pick(cycle, req_mask);
         bool refuses = _this->bank_refuses(bank);
+        for (int i = 0; i < _this->nb_inputs; i++)
+        {
+            if ((req_mask >> i) & 1)
+            {
+                _this->sigs.pulse(*_this->sig_valid[i]);
+                _this->sigs.pulse(*(i != winner || refuses ? _this->sig_stall : _this->sig_ready)[i]);
+            }
+        }
+        if (!refuses)
+        {
+            _this->bank_signal(bank, winner + 1);
+        }
         if (_this->ev.stalls.get_active())
         {
             // Every requester refused here: the losers, and the winner too when the

@@ -86,6 +86,10 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
             raise RuntimeError(f'holds has {len(holds)} inputs, the crossbar {nb_inputs}')
 
         self.add_sources(['snax_tcdm_xbar.cpp'])
+        self.nb_inputs = nb_inputs
+        self.nb_banks = nb_banks
+        self.input_names = list(input_names) if input_names is not None \
+            else [f'in_{i}' for i in range(0, nb_inputs)]
 
         trace_inputs = self.declare_user_property(name='trace_inputs', value='default',
             description='The inputs whose beat and stall lines are written: input names or '
@@ -115,3 +119,18 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
 
     def o_BANK(self, bank: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'out_{bank}', itf, signature='io')
+
+    def gen_gtkw(self, tree, comp_traces):
+        """Its VCD signals (snax_tcdm_xbar.cpp), tagged snax, for gvrun's --vcd and view.gtkw:
+        a group per input (named by its owner) and the banks."""
+        tree.begin_group('snax_xbar')
+        for i in range(self.nb_inputs):
+            tree.begin_group(self.input_names[i])
+            for kind in ('q_valid', 'q_ready', 'stall'):
+                tree.add_trace(self, kind, f'in{i}_{kind}', tag='snax')
+            tree.end_group(self.input_names[i])
+        tree.begin_group('banks')
+        for bank in range(self.nb_banks):
+            tree.add_trace(self, f'bank{bank}_grant', f'bank{bank}_grant', '[7:0]', tag='snax')
+        tree.end_group('banks')
+        tree.end_group('snax_xbar')

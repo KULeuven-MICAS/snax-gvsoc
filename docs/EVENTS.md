@@ -180,6 +180,21 @@ The AXI backend (`idma/axi_read`, `idma/axi_write`,
 |---|---|---|---|
 | `beats` | `burst` | the request to AXI, written when `back` is known | `id`, `op`, `addr`, `size`, `back` (a read's data back: the request plus its latency and `read_latency`; a write's acknowledgement, which the backend takes in the request's cycle); no values (the same bytes are on the `dma` lines) |
 
+### VCD signals
+
+For gtkwave only (snax-forge never reads them): `vp::Signal`s the SNAX
+components set, grouped under the tag `snax` in their `gen_gtkw`, so gvrun's
+`--vcd` writes them to `all.vcd` and lists them in `view.gtkw` (with
+`--event-tags=snax`, or `--event` regexes naming the components). A value
+holds from the cycle it is true in, as the RTL's register would.
+
+| Component | Signals |
+|---|---|
+| unit | `busy` (from `s + 1` to `E`), `fire`, `push` (1 in a cycle it fires, pushes), `cycle_class` (0 idle, 1 busy, 2 `stall_in`, 3 `stall_out`, 4 `flush`) |
+| streamer | `streamer_busy` (the RTL's, from `s + 1` to its end), `<mover>_busy`, `<mover>_lane<l>_count` (the queue count, as the `fifo` lines) |
+| crossbar | per input `in<i>_q_valid` (it requests), `in<i>_q_ready` (it is granted), `in<i>_stall` (it is refused), the RTL's TCDM handshake; per bank `bank<b>_grant`, the input it granted plus one (0 none, the input count plus one for the DMA) |
+| iDMA | `fe/dma_busy` (`snitch_cc.sv`'s `dma_busy`: the busy wire `DMA_BUSY` counts) |
+
 ### Instructions (`pe<i>/insn`)
 
 GVSoC's own instruction trace, on at `finegrained`, one `--trace` regex per

@@ -33,7 +33,8 @@ IDmaFeXdma::IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me)
     reps(*this, "reps", 32),
     next_transfer_id(*this, "next_transfer_id", 32, true, 2),
     completed_id(*this, "completed_id", 32, true, 1),
-    do_transfer_grant(*this, "do_transfer_grant", 1)
+    do_transfer_grant(*this, "do_transfer_grant", 1),
+    dma_busy(*this, "dma_busy", 1)
 {
     // Middle-end will be used later for interaction
     this->me = me;
@@ -247,6 +248,7 @@ void IDmaFeXdma::update_busy()
             this->busy_cycles += cycle - this->busy_since;
         }
         this->busy = busy;
+        this->dma_busy.set(busy);
         if (this->busy_itf.is_bound())
         {
             this->busy_itf.sync(busy);
