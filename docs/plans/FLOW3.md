@@ -14,7 +14,7 @@ This file is the checklist; a step is ticked here when it is committed.
 - One commit per step on `ry/flow3`, here and in snax-forge; from step 2 on,
   snax-forge's submodule points at this branch's head. Round 1a is tagged
   `flow3-r1a` in both. Round 1b the same on `ry/flow3-2`, tagged
-  `flow3-r1b`.
+  `flow3-r1b`; round 2a on `ry/flow3-4`, tagged `flow3-r2a` (local).
 - Acceptance is pass/fail; anything not verified is said so.
 
 ## Acceptance
@@ -31,6 +31,18 @@ view` opens the two task-level runs on the profile page; `make regress`
 here and snax-forge's `pixi run test` pass in the container, and CI on both
 branches.
 
+Round 2a: in the container, `pixi run flow` on `recipes/vecadd.json` and
+`recipes/vsum.json` (`platforms/snax_alu.json`) passes at `--trace off`,
+`task`, `beat`, `stall` and `finegrained`, every converter invariant
+holding; tracing changes nothing: each run's `forge cycles:` is its `off`
+run's, and the `profile.json` of its `beat`, `stall` and `finegrained` runs
+is byte-identical to its `task` run's; one flow with `--vcd` writes the VCD,
+each SNAX signal named, and `view.gtkw` into `run/`; `make regress` here and
+snax-forge's `pixi run test` pass; the sizes of `events.log` and
+`trace.jsonl` at `beat` and `stall`, per line kind and per output element,
+are in the findings; snax-forge CI's `gvsoc` job also runs vecadd at
+`--trace stall`.
+
 ## The rounds
 
 | Round | Content |
@@ -38,7 +50,8 @@ branches.
 | 1a | The flow on SNAX-GVSoC: snax-forge's `gvsoc/Makefile` names the image's tools, so the flow calls make from pixi; `gvrun` runs on `GVRUN_PYTHON`; the program's window and `forge_check()` in place of the marks; the flow's stages lower, gen, build, sw, gvsoc, check; snax-forge CI's `gvsoc` job |
 | 1b | The events (snax-forge D137): an `events` `vp::Trace` per SNAX component here, in this repo's own grammar (component path, port, address, cycle; class runs; counters at the end of the run), enabled per path; snax-forge's converter into its C§7; levels `task` and `beat`; the reports again |
 | 1c | RET1: SNAX-MODEL removed from snax-forge, in round 1's PR |
-| 2 | Data values on beat events and the accelerator's push event (snax-forge open items 23, 25); the level `finegrained`; VCD as a gtkwave dump only |
+| 2a | The beat- and stall-level events (`docs/EVENTS.md`): the crossbar's `grant`, `dma` and `stall`, the AXI backend's `burst`, the unit's `fire` and `push`, the streamer's `fifo`, linked by ids and carrying values (snax-forge open items 23, 25); the `stalls` trace; the levels `beat`, `stall` and `finegrained` (the cores' `insn`); the crossbar's source filter; VCD signals, a gtkwave dump only; snax-forge's converter for them, with its invariants |
+| 2b | snax-forge's memory view (D96) and movement view (D97) rebuilt on 2a's events, on `ry/flow3-5` |
 | 3 | The schedule inside the program's window, with a lane per core and folded stretches (snax-forge D57) |
 
 ## Round 1a steps
@@ -66,6 +79,21 @@ The grammar is `docs/EVENTS.md`.
 | 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | done |
 | 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | done |
 | 7 | Acceptance in both; CI's `gvsoc` job runs the two flows at `--trace task`; tag `flow3-r1b` | container: done; CI: waits for a dispatch on `ry/flow3-2` in both |
+
+## Round 2a steps
+
+The grammar is `docs/EVENTS.md`.
+
+| # | Step | Status |
+|---|---|---|
+| 0 | Docs in both: snax-forge STATUS (RET1 done, round 2 as 2a and 2b), D137 amended, C§7 and `run/trace.py`'s docstring; `docs/EVENTS.md`, this table | done |
+| 1 | Probe, no code kept: (a) an `IoReq` argument slot set by the streamer and by the TCDM backend reaches the crossbar unchanged; (b) the streamer can return `b` to the unit with a beat; (c) the AXI backend's path, where a burst's `back` is known; (d) the TCDM backend computes `l2` per beat (1D, 2D); (e) a `pe<i>/insn` line on `snax_hjson`; (f) `--trace-format`; (g) the crossbar's inputs property set per run without a rebuild | todo |
+| 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | todo |
+| 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | todo |
+| 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | todo |
+| 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | todo |
+| 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | todo |
+| 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | todo |
 
 ## Round 1b findings
 
