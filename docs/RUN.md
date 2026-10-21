@@ -152,6 +152,53 @@ The trace lines cut at `...` are the unit's ports being created and bound
 at start-up; the last but one is its start (`Start at cycle 2932: count
 16`).
 
+### Beats, stalls and a VCD
+
+The levels above `task` are more trace names (`docs/EVENTS.md`): `beats`
+for every grant, DMA beat and burst, firing and push, `stalls` for every
+refused request and queue count, each a `--trace` regex into one file. The
+crossbar writes them for its SNAX ports and the DMA unless `--param
+chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...` names others:
+
+    mkdir -p build/work/forge-vecadd-stall
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+        --work-dir build/work/forge-vecadd-stall \
+        --trace="/beats\$:$PWD/build/work/forge-vecadd-stall/events.log" \
+        --trace="/stalls\$:$PWD/build/work/forge-vecadd-stall/events.log" \
+        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
+
+    forge cycles: 226
+    forge data: 0 errors (64 words)
+    forge counter add_acc: 19
+    forge errors: 0
+
+The first firing names the beat it took from each reader, the first stall
+the input that won its bank, the first queue count its cycle:
+
+    grep -m1 ' fire ' build/work/forge-vecadd-stall/events.log | sed 's/.*\] //'
+    grep -m1 ' stall in' build/work/forge-vecadd-stall/events.log | sed 's/.*\] //'
+    grep -m1 ' fifo ' build/work/forge-vecadd-stall/events.log | sed 's/.*\] //'
+
+    2936 fire n=0 b=0,0 value=0x2bd,0x111,0x16,0xfffffffffffffe33,0x2ee,0xfffffffffffffd26,0x9d,0x1ba
+    2933 stall in=4 addr=0x200 bank=0 row=2 by=0 by_addr=0x0 b=0
+    2935 fifo mover=reader0 lane=0 count=1
+
+`--vcd --event-tags=snax` dumps the SNAX components' signals (busy, firings,
+queue counts, the crossbar's handshakes; `docs/EVENTS.md`) for gtkwave, into
+a work directory that exists:
+
+    mkdir -p build/work/forge-vecadd-vcd
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+        --work-dir build/work/forge-vecadd-vcd --vcd --event-tags=snax \
+        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
+
+    ...
+    A Gtkwave script has been generated and can be opened with the following command:
+    gtkwave build/work/forge-vecadd-vcd/view.gtkw
+
+snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd`
+(its `docs/RUN.md`).
+
 ## 6. The regression
 
 `make regress` runs `SnaxUnit`'s rule on its cases, builds `sw/` and every
