@@ -15,6 +15,8 @@ This file is the checklist; a step is ticked here when it is committed.
   snax-forge's submodule points at this branch's head. Round 1a is tagged
   `flow3-r1a` in both. Round 1b the same on `ry/flow3-2`, tagged
   `flow3-r1b`; round 2a on `ry/flow3-4`, tagged `flow3-r2a` (local).
+  Round 3's first half on `ry/flow3-6`, tagged `flow3-r3a` in snax-forge
+  (local).
 - Acceptance is pass/fail; anything not verified is said so.
 
 ## Acceptance
@@ -43,6 +45,16 @@ snax-forge's `pixi run test` pass; the sizes of `events.log` and
 are in the findings; snax-forge CI's `gvsoc` job also runs vecadd at
 `--trace stall`.
 
+Round 3a: `make regress` here passes with the class check; in the
+container vecadd and vsum pass at the defaults (windows 226 and 255) and at
+`N=512` with `W=4` and `W=8`, at every level, every invariant holding (the
+class runs' included) and each `forge cycles:` equal to its `off` run's;
+through snax-forge's `viz/api.py` on the `N=512` runs the schedule's
+segments cover the window exactly, each fold a quiet stretch of at least 16
+cycles, the lanes are one per core, the DMA, each mover and the
+accelerator, stepping visits exactly the index's event and boundary
+cycles, and the cluster answer at an event cycle names only its lines.
+
 ## The rounds
 
 | Round | Content |
@@ -52,7 +64,7 @@ are in the findings; snax-forge CI's `gvsoc` job also runs vecadd at
 | 1c | RET1: SNAX-MODEL removed from snax-forge, in round 1's PR |
 | 2a | The beat- and stall-level events (`docs/EVENTS.md`): the crossbar's `grant`, `dma` and `stall`, the AXI backend's `burst`, the unit's `fire` and `push`, the streamer's `fifo`, linked by ids and carrying values (snax-forge open items 23, 25); the `stalls` trace; the levels `beat`, `stall` and `finegrained` (the cores' `insn`); the crossbar's source filter; VCD signals, a gtkwave dump only; snax-forge's converter for them, with its invariants |
 | 2b | snax-forge's memory view (D96) and movement view (D97) rebuilt on 2a's events, on `ry/flow3-5` |
-| 3 | The schedule inside the program's window, with a lane per core and folded stretches (snax-forge D57) |
+| 3 | The schedule inside the program's window, with a lane per core and folded stretches, and the cluster view at a cycle (snax-forge D57); 3a (G1, S0 to S4) on `ry/flow3-6`, 3b (S5 to S7) later on another branch |
 
 ## Round 1a steps
 
@@ -94,6 +106,22 @@ The grammar is `docs/EVENTS.md`.
 | 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | done |
 | 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | done |
 | 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | container: done; CI: the job written, its run waits for a dispatch on `ry/flow3-4` |
+
+## Round 3 steps
+
+G1 is this repo's; S0 to S7 are snax-forge's.
+
+| # | Step | Status |
+|---|---|---|
+| G1 | The unit's and the streamer's `class` lines in `beats` on each change of class (`docs/EVENTS.md`); `tests/snax/classes.py`, the class check on the forge/ runs of `make regress` | done |
+| S0 | snax-forge docs: STATUS (round 2b merged, the FLOW3 row cut to scope and acceptance), C§7's `class` and the class totals on `done`, D57, ARCHITECTURE's viewer | |
+| S1 | `N` a recipe param of vecadd, vecmul, vsum and vsum_tree; the stress run at `N=512`, `W=4` and `W=8`, every level | |
+| S2 | The converter's class part: `class` lines into C§7, the summary's class totals on `done`, the class-run invariant; the core's spans in one function of `run/` | |
+| S3 | The schedule's query: `viz/index.py`'s class runs, spans, copies, event and boundary cycles; `viz/schedule.py` (lanes, folded segments, detail); its routes | |
+| S4 | The cluster view's query and stepping: `viz/cluster.py` (`cluster_at`, `step`); their routes | |
+| S5 | The schedule and cluster views drawn in `static/*.js` from S3's and S4's answers | later |
+| S6 | loop1 | later |
+| S7 | Closing docs and round 3's acceptance | later |
 
 ## Round 2a findings
 

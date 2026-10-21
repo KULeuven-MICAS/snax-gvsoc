@@ -13,7 +13,7 @@ Each SNAX component has four GVSoC traces (`vp::Trace`, `snax/snax_events.hpp`),
 |---|---|---|
 | `summary` | counters: per run of a unit or streamer at its end, the others' at the end of the simulation | every level, `off` included |
 | `events` | what happens once per task: starts, dones, CSR accesses, waits, function entries, DMA copies | `task` |
-| `beats` | one line per beat: grants, DMA beats and bursts, firings, pushes | `beat` |
+| `beats` | one line per beat: grants, DMA beats and bursts, firings, pushes; one per change of a unit's or mover's cycle class | `beat` |
 | `stalls` | one line per refused request and per change of a queue's count | `stall` |
 
 The levels are cumulative, each the one before plus a trace: `off`
@@ -67,8 +67,8 @@ ignores the rest of the header. The line itself is
 
 `<cycle>` is a cycle of the component's own clock: the cycle the line is
 about (below, per kind). Most lines are written in that cycle; a `poll`, a
-`barrier`, a held `csr` write, a single `csr` read and a `fifo` are written
-later, when they are known, so sort by `<cycle>` for time order; lines of
+`barrier`, a held `csr` write, a single `csr` read, a `fifo` and a mover's
+`class` for cycles the streamer slept through are written later, when they are known, so sort by `<cycle>` for time order; lines of
 one cycle are in simulation order. A value is a decimal integer, a
 hexadecimal one with `0x` (addresses, `pc`, `csr`, and every `value`: bank
 words, each the bytes it covers little-endian), a list of integers joined by
@@ -88,6 +88,7 @@ The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`);
 | `summary` | `run` | `E` | `index` (from 0), `firings`, `busy`, `stall_in`, `stall_out`, `flush` (they add up to `E - s`) |
 | `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order), `value` (each input port's beat words, port order, flat) |
 | `beats` | `push` | the push | `n` (its index among the run's results), `first`, `last` (the firings it folds; equal at rate 1), `value` (the output beat's words) |
+| `beats` | `class` | the first cycle of a run of one class, from `s + 1` to `E` | `mode` (`busy`, `stall_in`, `stall_out`, `flush`: the class the `run` line counts the cycle in) |
 
 ### Streamer (`snax_acc<i>/streamer`, `snax/snax_streamer.cpp`)
 
@@ -98,7 +99,14 @@ Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
 | `events` | `start` | the cycle `s` the start is taken, one line per mover | `mover` |
 | `events` | `done` | the mover's last busy cycle: the commit in which its last address leaves (a mover with nothing to move: the first commit after the start) | `mover` |
 | `summary` | `mover` | the streamer's end, one line per mover and run | `mover`, `run` (from 0), `busy`, `stall_xbar`, `stall_fifo`, `idle`, `qmax` (the highest count of each lane's queue, lane 0 first) |
+| `beats` | `class` | the first cycle of a run of one class, from `s + 1` to the streamer's end `e` (the `mover` line's cycle) | `mover`, `mode` (`busy`, `stall_xbar`, `stall_fifo`, `idle`: the class the `mover` line counts the cycle in) |
 | `stalls` | `fifo` | the first cycle a lane's queue count holds (written once it is known: at the lane's next change or the streamer's end) | `mover`, `lane`, `count` |
+
+A run's `class` lines give each of its cycles the class its summary line
+counts it in, so per class the lengths of its runs (a line to the next one,
+the last to the span's end) add up to that line's count; `tests/snax/classes.py`
+checks it on every forge/ run of `make regress`. No line covers the idle
+time between runs.
 
 A lane's queue count in a cycle is the RTL queue's, the one the priority
 hint reads: the words visible by then and not popped before it, which are
