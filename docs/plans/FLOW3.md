@@ -91,7 +91,7 @@ The grammar is `docs/EVENTS.md`.
 | 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | done |
 | 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | done |
 | 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | done |
-| 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | todo |
+| 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | done |
 | 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | todo |
 | 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | todo |
 
