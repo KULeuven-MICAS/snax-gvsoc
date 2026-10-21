@@ -87,13 +87,68 @@ The grammar is `docs/EVENTS.md`.
 | # | Step | Status |
 |---|---|---|
 | 0 | Docs in both: snax-forge STATUS (RET1 done, round 2 as 2a and 2b), D137 amended, C§7 and `run/trace.py`'s docstring; `docs/EVENTS.md`, this table | done |
-| 1 | Probe, no code kept: (a) an `IoReq` argument slot set by the streamer and by the TCDM backend reaches the crossbar unchanged; (b) the streamer can return `b` to the unit with a beat; (c) the AXI backend's path, where a burst's `back` is known; (d) the TCDM backend computes `l2` per beat (1D, 2D); (e) a `pe<i>/insn` line on `snax_hjson`; (f) `--trace-format`; (g) the crossbar's inputs property set per run without a rebuild | todo |
+| 1 | Probe, no code kept: (a) an `IoReq` argument slot set by the streamer and by the TCDM backend reaches the crossbar unchanged; (b) the streamer can return `b` to the unit with a beat; (c) the AXI backend's path, where a burst's `back` is known; (d) the TCDM backend computes `l2` per beat (1D, 2D); (e) a `pe<i>/insn` line on `snax_hjson`; (f) `--trace-format`; (g) the crossbar's inputs property set per run without a rebuild | done |
 | 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | todo |
 | 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | todo |
 | 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | todo |
 | 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | todo |
 | 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | todo |
 | 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | todo |
+
+## Round 2a findings
+
+- **The probe (step 1).** forge/vecadd on `snax_hjson` with temporary
+  prints, then reverted; each answer from a run unless said.
+  (a) Holds. Argument slot 15 set by the streamer on its requests arrives
+  at the crossbar's `req` unchanged, `arg_current_index()` 0 (the streamer
+  is bound straight to `in_<i>`; the cores' requests come through
+  `cores_ico` with slot 15 still 0). The TCDM backend's slots 13 to 15
+  arrive at `dma_req` unchanged for reads; its writes go through the
+  delayed request (`tcdm_write_latency`, `delayed_req`), which must carry
+  the slots itself: tagged there, all 16 write beats arrived tagged.
+  (b) Holds. A slot the streamer's `reader_req` sets on the unit's
+  `beat_req` is read by the unit after `move` (32 tags, one per port and
+  firing, in order).
+  (c) The AXI backend is `/chip/soc/cluster_0/idma/axi_read` and
+  `.../idma/axi_write` (`IDmaBeAxi`, a `vp::Block`). Every request
+  returned `IO_REQ_OK` with its latency (reads 6 or 7, writes 6): a read's
+  data is back at `read_handle_req_end`, the request's cycle plus that
+  latency plus `read_latency`; a write is acknowledged in
+  `write_handle_req_end`, called at once on `IO_REQ_OK`, so in the
+  request's cycle. On `IO_REQ_PENDING` both would be known at
+  `axi_response`. A router rewrites a request's address during `req`, so
+  the address is taken before it.
+  (d) Holds, 1D and 2D (one load as 4 rows of 128 B, the store as 2 rows of
+  256 B, temporarily in forge/vecadd's `main.c`): `IDmaBe::write_data`
+  moves a row transfer's `dst` and `size` as data goes, so the row's `src`
+  and `dst` are kept when `IDmaBe::enqueue_transfer` takes it; the other
+  side's address of a beat at `a` is then that row's start plus `a`'s
+  offset in it. All 24 beats' `l2` were right.
+  (e) A `pe0/insn` line (5353 on vecadd) is GVSoC's header, then
+  `<func>:<n>` padded, the mode (`M`), the PC in hex without `0x`, the
+  mnemonic, its operands and the registers it writes and reads (`a0=...`,
+  `sp:...`, `PA:...`), not `<cycle> <kind> key=value`; 209 to 235 bytes.
+  (f) From the code (`trace_engine.cpp`, `trace.cpp`): `--trace-format
+  short` writes `<ps>ps <cycles> `, without the path the converter names a
+  line by; `long` (the default) pads the path to the longest one (72
+  characters here) inside ANSI colour codes. No shorter form keeps the
+  path.
+  (g) A property declared in `snax_tcdm_xbar.py` with
+  `declare_user_property` (a gvrun `TargetParameter`) is set by `--param
+  chip/soc/cluster_0/tcdm/snax_xbar/<name>=<value>`: the C++ read the
+  given value from `get_js_config()`. `snax_hjson` builds its tree from
+  Python at run time for a design point's cluster file, so nothing is
+  rebuilt.
+- **A queue's count: `qmax` is not the RTL's count (step 1).** `qmax` is
+  the highest `data.size()` after any push or pop, so within a cycle; the
+  priority hint reads the RTL queue's count, the words visible by then and
+  not popped before. A writer's beat is pushed by the unit and the head
+  word popped at the commit in one cycle, the push first: `data.size()` is
+  2 for a moment while the RTL's count stays 1. On vecadd, from both
+  counts per lane: readers 2 and 1 both ways, the writer `qmax` 2 against
+  a highest count of 1, on all four lanes. So a `fifo` line cannot carry
+  one count whose maximum is `qmax` and that is also the words visible
+  minus the words popped.
 
 ## Round 1b findings
 
