@@ -98,10 +98,19 @@ Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
 | `events` | `start` | the cycle `s` the start is taken, one line per mover | `mover` |
 | `events` | `done` | the mover's last busy cycle: the commit in which its last address leaves (a mover with nothing to move: the first commit after the start) | `mover` |
 | `summary` | `mover` | the streamer's end, one line per mover and run | `mover`, `run` (from 0), `busy`, `stall_xbar`, `stall_fifo`, `idle`, `qmax` (the highest count of each lane's queue, lane 0 first) |
-| `stalls` | `fifo` | the first cycle a lane's queue count holds | `mover`, `lane`, `count` |
+| `stalls` | `fifo` | the first cycle a lane's queue count holds (written once it is known: at the lane's next change or the streamer's end) | `mover`, `lane`, `count` |
 
-A lane's queue count in a cycle is the one `qmax` and the priority hint
-read: the words visible by then and not popped before it.
+A lane's queue count in a cycle is the RTL queue's, the one the priority
+hint reads: the words visible by then and not popped before it, which are
+the words in the queue at the end of the cycle before. A push and a pop in
+one cycle (a writer's: the unit's beat, then the commit's grant) leave it
+as it was. `qmax` is its highest value in the run.
+
+Every TCDM request of the streamer carries its beat's `b` for the
+crossbar's lines; a reader numbers its beats in its AGU's order from 0 in
+each run, a writer in the order the unit hands them over, and the beat a
+reader hands the unit carries its `b` back (with a repeat, every time it
+is handed out).
 
 ### Crossbar (`tcdm/snax_xbar`, `snax/snax_tcdm_xbar.cpp`)
 

@@ -89,7 +89,7 @@ The grammar is `docs/EVENTS.md`.
 | 0 | Docs in both: snax-forge STATUS (RET1 done, round 2 as 2a and 2b), D137 amended, C§7 and `run/trace.py`'s docstring; `docs/EVENTS.md`, this table | done |
 | 1 | Probe, no code kept: (a) an `IoReq` argument slot set by the streamer and by the TCDM backend reaches the crossbar unchanged; (b) the streamer can return `b` to the unit with a beat; (c) the AXI backend's path, where a burst's `back` is known; (d) the TCDM backend computes `l2` per beat (1D, 2D); (e) a `pe<i>/insn` line on `snax_hjson`; (f) `--trace-format`; (g) the crossbar's inputs property set per run without a rebuild | done |
 | 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | done |
-| 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | todo |
+| 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | done |
 | 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | todo |
 | 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | todo |
 | 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | todo |
@@ -160,6 +160,25 @@ The grammar is `docs/EVENTS.md`.
   writes, each acknowledged in its own cycle); vsum 65 grants, 10 `dma`.
   With `trace_inputs=core0,dma` the crossbar writes core 0's 322 grants
   (from boot) and the DMA's beats only; an unknown name stops the run.
+
+- **The streamer and the unit (step 3).** `qmax` is now the highest RTL
+  count (the decision after step 1), so of the forge fixtures only
+  vecadd's summary changes, its writer's `qmax` from 2,2,2,2 to 1,1,1,1
+  (vecmul's the same way); vsum's `events.log` at task level is
+  byte-identical, and every stdout is. At `stall`: vecadd 16 `fire` (`b`
+  0 to 15 on both readers), 16 `push` and 32 `fifo`; vsum 64 `fire` and one
+  `push` (`first=0 last=63`); vsum_tree 16 and one; `forge-reduce`'s
+  vsum-r16 64 `fire` and four `push` (`first` 0, 16, 32, 48). Checked
+  against each other by a script on all five (not kept; snax-forge's
+  converter checks the same from step 6): every `b` a firing names is
+  granted on every lane of its mover with the fire's values, every push's
+  value is its writer's grants', and every lane's `fifo` lines are the
+  words visible (a read's `back` plus one, a push plus one) minus those
+  popped (the last firing naming the beat, the writer's grant), 0 at the
+  end, their highest the summary's `qmax`. No fixture has a reader with a
+  repeat, so several firings naming one `b` is checked by the code only.
+  This repo has no test of its own for an events file; the stall-level
+  file is parsed by snax-forge's converter from step 5 on.
 
 ## Round 1b findings
 
