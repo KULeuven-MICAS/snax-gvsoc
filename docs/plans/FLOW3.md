@@ -93,7 +93,7 @@ The grammar is `docs/EVENTS.md`.
 | 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | done |
 | 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | done |
 | 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | done |
-| 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | todo |
+| 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | container: done; CI: the job written, its run waits for a dispatch on `ry/flow3-4` |
 
 ## Round 2a findings
 
@@ -205,6 +205,53 @@ The grammar is `docs/EVENTS.md`.
   `--trace='/idma/axi_(read|write)/beats$:F'`, gave no lines, though the
   engine compiles its regexes `REG_EXTENDED` (why was not looked into); the
   flow names the two traces apart.
+
+- **Acceptance (step 7).** On fresh clones of `ry/flow3-4` in the image:
+  here (`9f73fa3d`), `make build` (110 s), the unit tests (35 OK) and `make
+  regress` passed, the tree clean after; snax-forge (`192d5e2`, the
+  submodule at `fec4c219`, which differs from this branch's head in
+  `docs/` only), `pixi install`, then `pixi run flow` on
+  `recipes/vecadd.json` and `recipes/vsum.json` with
+  `platforms/snax_alu.json` at `off`, `task`, `beat`, `stall` and
+  `finegrained` all passed, every invariant holding (the converter fails
+  the flow otherwise); every run's `forge cycles:` is its `off` run's (226,
+  255) and the `profile.json` of each `beat`, `stall` and `finegrained` run
+  is byte-identical to its `task` run's. vecadd at `stall --vcd` wrote
+  `run/all.vcd` (107 variables, all 98 SNAX signals among them) and
+  `run/view.gtkw` (listing the 98, its dumpfile `run/all.vcd`). `pixi run
+  test` 1055 passed, 3 skipped; `pixi run lint` clean; both trees clean
+  after. snax-forge CI's `gvsoc` job also runs vecadd at `--trace stall`;
+  the workflows run on pushes to main, pull requests and dispatch only, so
+  its run on `ry/flow3-4` waits for a dispatch.
+- **Sizes (step 7, snax-forge open item 39).** Bytes per run, and per output
+  element (vecadd's `C` has 64, vsum's one sum); the beat lines only (the
+  rest of `events.log`, the summary and events, is 53716 B on vecadd and
+  49709 B on vsum; of `trace.jsonl`, 4693 B and 3840 B):
+
+  | Run | Kind | `events.log` lines | B | B per element | `trace.jsonl` B | B per element |
+  |---|---|---:|---:|---:|---:|---:|
+  | vecadd `beat` | all | 623 | 102873 | 1607 | 66116 | 1033 |
+  | vecadd `stall` | all | 659 | 108039 | 1688 | 69504 | 1086 |
+  | vecadd | `grant` | 192 | 34502 | 539 | 42674 | 667 |
+  | vecadd | `dma` | 24 | 6571 | 103 | 9426 | 147 |
+  | vecadd | `burst` | 10 | 1572 | 25 | 1507 | 24 |
+  | vecadd | `fire` | 16 | 3553 | 56 | 4877 | 76 |
+  | vecadd | `push` | 16 | 2959 | 46 | 2939 | 46 |
+  | vecadd | `stall` | 4 | 654 | 10 | 752 | 12 |
+  | vecadd | `fifo` | 32 | 4512 | 71 | 2636 | 41 |
+  | vsum `beat` | all | 485 | 73181 | 73181 | 31412 | 31412 |
+  | vsum `stall` | all | 489 | 73745 | 73745 | 31749 | 31749 |
+  | vsum | `grant` | 65 | 11650 | 11650 | 14347 | 14347 |
+  | vsum | `fire` | 64 | 8897 | 8897 | 9348 | 9348 |
+  | vsum | `dma` | 9 | 2466 | 2466 | 3451 | 3451 |
+  | vsum | `burst`, `push`, `fifo` | 2, 1, 4 | 315, 144, 564 | | 304, 122, 337 | |
+
+  GVSoC's header (the time, the cycle, the path padded to 72 characters in
+  ANSI colours) is 55% of vecadd's beat and stall lines' bytes; a grant is
+  180 B in `events.log` and 222 B in `trace.jsonl` (with its region,
+  elements and values). Per element, vecadd at `stall` is 1.7 KB of
+  `events.log` and 1.1 KB of `trace.jsonl`, of which the grants are 539 B
+  and 667 B.
 
 ## Round 1b findings
 
