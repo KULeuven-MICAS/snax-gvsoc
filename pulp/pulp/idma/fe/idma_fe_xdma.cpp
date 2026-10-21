@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include <vp/vp.hpp>
 #include "idma_fe_xdma.hpp"
@@ -163,6 +164,7 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
     transfer->dst_stride = this->dst_stride.get();
     transfer->reps = this->reps.get();
     transfer->config = config;
+    transfer->id = transfer_id;
 
     this->trace.msg(vp::Trace::LEVEL_INFO, "Enqueuing transfer (id: %d, src: %llx, dst: %llx, "
         "size: %llx, src_stride: %llx, dst_stride: %llx, reps: %llx, config: %llx)\n",

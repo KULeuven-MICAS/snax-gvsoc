@@ -17,9 +17,11 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #pragma once
 
+#include <map>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
@@ -83,6 +85,19 @@ private:
     vp::IoMaster ico_itf;
     // Trace for this block, messages will be displayed with this block's name
     vp::Trace trace;
+    // SNAX: FLOW3's beats trace (docs/EVENTS.md): a burst line per request to AXI, written
+    // when its data is back (a read) or it is acknowledged (a write)
+    vp::Trace beats;
+    struct SentBurst
+    {
+        int64_t cycle;
+        uint64_t id;
+        uint64_t addr;
+        uint64_t size;
+    };
+    std::map<vp::IoReq *, SentBurst> sent_bursts;
+    void burst_sent(vp::IoReq *req, IdmaTransfer *transfer);
+    void burst_back(vp::IoReq *req, int64_t back);
     // Block FSM event, used to trigger all checks after something has been updated
     vp::ClockEvent fsm_event;
     // Array of statically allocated bursts, according to specified number of outstanding

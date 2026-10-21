@@ -99,3 +99,8 @@ Every upstream file we edit gets one comment line near its top,
 | `pulp/pulp/snitch/snitch_core.py` | `Snitch` builds with `CONFIG_GVSOC_ISS_SNAX_EVENTS` | FLOW3 1b step 3 |
 | `core/models/cpu/iss/src/csr.cpp`, `include/csr.hpp` | With `CONFIG_GVSOC_ISS_SNAX_EVENTS`, a read of `mcycle` (its own callback, `mcycle_csr_access`; `cycle` keeps `mcycle_access`) or of `mcycleh` writes the Snitch core's `mcycle` / `mcycleh` event line | FLOW3 1b fix step 1 |
 | `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | FLOW3's events: the front end's `summary`, `events` and `beats` traces; `issue` per copy in `enqueue_copy`, `done` in `ack_transfer`; at stop the copies, busy cycles, beats and bytes to and from the local area (`loc_base`, `loc_size`) | FLOW3 1b step 3 |
+| `pulp/pulp/idma/idma.hpp` | `IdmaTransfer` holds a copy's `id` and its beats on the local memory so far (`local_reads`, `local_writes`), and a row's `row_src` and `row_dst`; `IDMA_SNAX_ARG_*`, the argument slots of the SNAX crossbar's `dma` line | FLOW3 2a step 2 |
+| `pulp/pulp/idma/fe/idma_fe_xdma.cpp` | A copy's transfer carries its ID | FLOW3 2a step 2 |
+| `pulp/pulp/idma/be/idma_be.cpp` | `enqueue_transfer` keeps the row's start (`row_src`, `row_dst`) | FLOW3 2a step 2 |
+| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | Each line to the TCDM (and each delayed one) carries its copy's ID, its index on that side and the other side's address in the `IDMA_SNAX_ARG_*` slots | FLOW3 2a step 2 |
+| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | FLOW3's `beats` trace: a `burst` line per request to AXI (its copy, address and size as it leaves, written when its data is back or it is acknowledged) | FLOW3 2a step 2 |

@@ -47,6 +47,11 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
         Banks per DMA beat (the hjson's dma_data_width / data_width), dividing
         nb_banks; 0 for no dma port.
 
+    trace_inputs, a gvrun parameter (``--param <path>/trace_inputs=...``), lists
+    the inputs whose beat and stall lines are written (docs/EVENTS.md): input
+    names or indices and ``dma``, joined by ``,``; ``default`` is the inputs
+    that resend (the SNAX ports) and ``dma``.
+
     Ports
     -----
     in_<i> : io slave
@@ -82,6 +87,10 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
 
         self.add_sources(['snax_tcdm_xbar.cpp'])
 
+        trace_inputs = self.declare_user_property(name='trace_inputs', value='default',
+            description='The inputs whose beat and stall lines are written: input names or '
+                'indices and dma, joined by ","; default, the SNAX ports and dma')
+
         self.add_properties({
             'nb_inputs': nb_inputs,
             'nb_banks': nb_banks,
@@ -92,6 +101,7 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
             'interconnect': interconnect,
             'sparse_config': [list(port) for port in sparse_config or []],
             'superbank_banks': superbank_banks,
+            'trace_inputs': trace_inputs,
         })
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:

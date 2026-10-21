@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include <vp/vp.hpp>
 #include "idma_be.hpp"
@@ -68,6 +69,9 @@ void IDmaBe::enqueue_transfer(IdmaTransfer *transfer)
 
     // Remember the transfer as it has to be provided when burst are sent to backend protocols
     this->current_transfer = transfer;
+    // SNAX: the row as it starts, for the TCDM backend's beats (write_data moves dst)
+    transfer->row_src = transfer->src;
+    transfer->row_dst = transfer->dst;
     this->transfer_cycle = this->clock.get_cycles();
 
     // Extract information abouth the transfer. This will be used to split it into smaller bursts

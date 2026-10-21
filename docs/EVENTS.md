@@ -30,9 +30,12 @@ level.) With these traces off, a run is the same as without them.
 
 **Sources.** The crossbar writes the `beats` and `stalls` lines of every L1
 access, so a path regex cannot split the streamer's from the cores'. Its
-property `trace_inputs` lists the inputs it writes them for (by index;
-`dma` for the DMA port): by default the SNAX ports and the DMA, the cores
-and AXI only when named. The filter is the `beats` and `stalls` lines' and
+property `trace_inputs`, a gvrun parameter (`--param
+chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...`, nothing rebuilt),
+lists the inputs it writes them for, joined by `,`: input names as the
+summary's `input` lines give them (or indices), and `dma` for the DMA port;
+`default`, its value when not given, is the SNAX ports and the DMA. The
+cores and AXI are written only when named; an unknown name is fatal. The filter is the `beats` and `stalls` lines' and
 the `insn` traces' (one regex per core) only; `summary` and `events` are
 always whole. The window of a run (its `main`) is not known here ahead of
 time, so boot's lines are written too and the converter drops them.
@@ -117,7 +120,7 @@ Per access, for the inputs `trace_inputs` names (section Sources):
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
 | `beats` | `grant` | the grant (the bank access happens then) | `in` (the input's index, as in the `input` lines), `op` (`r`, `w`, `a`), `addr` (as the crossbar receives it: the TCDM offset), `bank`, `row`, `value` (the word read or written), `back` (the cycle the response arrives), `b` on a SNAX port only, `size` only when less than a word |
-| `beats` | `dma` | the DMA beat (`dma_req`) | `id`, `i`, `op`, `addr`, `size`, `bank` (its first), `row`, `value` (one word per bank it covers), `l2` (the address of the beat's first byte on the copy's other side), `back` for a read |
+| `beats` | `dma` | the DMA beat (`dma_req`) | `id`, `i` (its index among the copy's beats on L1 of its `op`), `op`, `addr`, `size`, `bank` (its first), `row`, `value` (one word per bank it covers), `l2` (the address of the beat's first byte on the copy's other side), `back` for a read; a beat the iDMA did not send (none yet) has `id`, `i` and `l2` -1 |
 | `stalls` | `stall` | each cycle a request is refused | `in`, `addr`, `bank`, `row`, `by` (the input the bank granted, or `-1` when the DMA's superbank took it), `by_addr` (the winner's address), `b` on a SNAX port only |
 
 There is no request line (every requesting cycle ends in a grant or a
@@ -166,7 +169,7 @@ The AXI backend (`idma/axi_read`, `idma/axi_write`,
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
-| `beats` | `burst` | the request to AXI | `id`, `op`, `addr`, `size`, `back` (the data back for a read, the acknowledgement for a write); no values (the same bytes are on the `dma` lines) |
+| `beats` | `burst` | the request to AXI, written when `back` is known | `id`, `op`, `addr`, `size`, `back` (a read's data back: the request plus its latency and `read_latency`; a write's acknowledgement, which the backend takes in the request's cycle); no values (the same bytes are on the `dma` lines) |
 
 ### Instructions (`pe<i>/insn`)
 

@@ -88,7 +88,7 @@ The grammar is `docs/EVENTS.md`.
 |---|---|---|
 | 0 | Docs in both: snax-forge STATUS (RET1 done, round 2 as 2a and 2b), D137 amended, C§7 and `run/trace.py`'s docstring; `docs/EVENTS.md`, this table | done |
 | 1 | Probe, no code kept: (a) an `IoReq` argument slot set by the streamer and by the TCDM backend reaches the crossbar unchanged; (b) the streamer can return `b` to the unit with a beat; (c) the AXI backend's path, where a burst's `back` is known; (d) the TCDM backend computes `l2` per beat (1D, 2D); (e) a `pe<i>/insn` line on `snax_hjson`; (f) `--trace-format`; (g) the crossbar's inputs property set per run without a rebuild | done |
-| 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | todo |
+| 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | done |
 | 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | todo |
 | 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | todo |
 | 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | todo |
@@ -149,6 +149,17 @@ The grammar is `docs/EVENTS.md`.
   a highest count of 1, on all four lanes. So a `fifo` line cannot carry
   one count whose maximum is `qmax` and that is also the words visible
   minus the words popped.
+
+- **The crossbar and the iDMA (step 2).** forge/vecadd and forge/vsum on
+  `snax_hjson`: at task level their `events.log` is byte-identical to the
+  one before the change; with `beats` and `stalls` on too, their stdout is
+  the same and so are their `summary` and `events` lines. vecadd at
+  `stall`: 192 `grant` lines (the 12 streamer lanes, 16 each), 4 `stall`,
+  24 `dma` (copies 2 and 3 eight writes each into L1, copy 4 eight reads,
+  `i` 0 to 7 in each) and 10 `burst` (two 512-byte reads, eight 64-byte
+  writes, each acknowledged in its own cycle); vsum 65 grants, 10 `dma`.
+  With `trace_inputs=core0,dma` the crossbar writes core 0's 322 grants
+  (from boot) and the DMA's beats only; an unknown name stops the run.
 
 ## Round 1b findings
 

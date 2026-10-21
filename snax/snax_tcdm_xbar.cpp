@@ -62,8 +62,20 @@
 // requests on it). The banks count the SNAX inputs and the DMA only: the
 // inputs that hold (the cores, AXI) have their own lines, marked whole_run,
 // since their traffic starts at boot.
+//
+// Beat and stall lines (docs/EVENTS.md), for the inputs the property
+// trace_inputs names: a grant line per grant, with the word the bank access
+// read or wrote and the cycle its response comes; a stall line per input and
+// cycle refused, with the input the bank granted (-1: the DMA's superbank);
+// a dma line per DMA beat, with one word per bank it covers. A streamer's
+// request carries its beat's b, a DMA beat its copy's id, its index and its
+// other side's address, in the argument slots snax_events.hpp names.
+// trace_inputs is a list joined by ',' of input names (input_names) or
+// indices and dma; default (its default) is every input that resends (the
+// SNAX ports) and dma.
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -111,6 +123,10 @@ private:
     // An input's name for the trace; sparse, one asking with priority 1 is
     // marked with !
     std::string name(int input);
+    // The inputs and the DMA the beat and stall lines are written for
+    void trace_inputs_from(std::string value);
+    // A request's b, as a field of its line, when its master set one
+    std::string beat_field(vp::IoReq *req);
 
     vp::Trace trace;
     SnaxEvents ev;
@@ -155,8 +171,13 @@ private:
     // Granted requests waiting for their response, in grant order
     std::vector<Response> responses;
 
-    // Per superbank: the cycle the DMA last took it
+    // Per superbank: the cycle the DMA last took it, and the address of that beat
     std::vector<int64_t> superbank_cycle;
+    std::vector<uint64_t> superbank_addr;
+
+    // Per input: whether its beat and stall lines are written; the DMA's
+    std::vector<bool> trace_input;
+    bool trace_dma;
     // Per bank: the cycle of its last narrow grant, and to whom
     std::vector<int64_t> grant_cycle;
     std::vector<int> grant_input;
@@ -235,7 +256,10 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     if (this->superbank_banks > 0)
     {
         this->superbank_cycle.assign(this->nb_banks / this->superbank_banks, -1);
+        this->superbank_addr.assign(this->nb_banks / this->superbank_banks, 0);
     }
+    js::Config *trace_inputs = this->get_js_config()->get("trace_inputs");
+    this->trace_inputs_from(trace_inputs != NULL ? trace_inputs->get_str() : "default");
 
     if (this->sparse)
     {
@@ -423,6 +447,7 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
         }
     }
     _this->superbank_cycle[superbank] = cycle;
+    _this->superbank_addr[superbank] = addr;
     _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Superbank %d: grant dma (%s 0x%lx, %ld B)\n",
         superbank, req->get_is_write() ? "write" : "read", addr, size);
 
@@ -431,6 +456,8 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     uint64_t width = 1ULL << _this->width_bits;
     uint8_t *data = req->get_data();
     int64_t latency = 0;
+    uint64_t beat_addr = addr, beat_size = size;
+    std::string values;
     while (size > 0)
     {
         uint64_t chunk = std::min(width - (addr & (width - 1)), size);
@@ -452,11 +479,28 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
             return vp::IO_REQ_INVALID;
         }
         latency = std::max(latency, (int64_t)bank_req.get_latency());
+        values += (values.empty() ? "" : ",") + snax_word(data, chunk);
         addr += chunk;
         data += chunk;
         size -= chunk;
     }
     req->inc_latency(latency);
+
+    if (_this->trace_dma && _this->ev.beats.get_active())
+    {
+        // A beat the iDMA's TCDM backend did not tag has no copy: -1
+        bool tagged = snax_arg_get(req, SNAX_ARG_TAG) == SNAX_TAG_DMA;
+        std::string back = req->get_is_write() ? ""
+            : " back=" + std::to_string((long)(cycle + latency));
+        _this->ev.beats.msg(vp::Trace::LEVEL_INFO,
+            "%ld dma id=%ld i=%ld op=%s addr=0x%lx size=%ld bank=%d row=%ld value=%s l2=0x%lx%s\n",
+            (long)cycle, tagged ? (long)snax_arg_get(req, SNAX_ARG_ID) : -1L,
+            tagged ? (long)snax_arg_get(req, SNAX_ARG_INDEX) : -1L,
+            req->get_is_write() ? "w" : "r", (unsigned long)beat_addr, (long)beat_size,
+            first_bank, (long)(beat_addr >> (_this->width_bits + _this->bank_bits)),
+            values.c_str(), tagged ? (unsigned long)snax_arg_get(req, SNAX_ARG_L2) : ~0UL,
+            back.c_str());
+    }
     return vp::IO_REQ_OK;
 }
 
@@ -464,6 +508,61 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
 std::string SnaxTcdmXbar::name(int input)
 {
     return this->names[input] + (this->sparse && this->priority[input] ? "!" : "");
+}
+
+
+void SnaxTcdmXbar::trace_inputs_from(std::string value)
+{
+    this->trace_input.assign(this->nb_inputs, false);
+    this->trace_dma = false;
+    std::stringstream tokens(value);
+    std::string token;
+    while (std::getline(tokens, token, ','))
+    {
+        if (token.empty())
+        {
+            continue;
+        }
+        if (token == "default")
+        {
+            for (int i = 0; i < this->nb_inputs; i++)
+            {
+                this->trace_input[i] = this->trace_input[i] || !this->holds[i];
+            }
+            this->trace_dma = true;
+            continue;
+        }
+        if (token == "dma")
+        {
+            this->trace_dma = true;
+            continue;
+        }
+        int input = -1;
+        for (int i = 0; i < this->nb_inputs; i++)
+        {
+            if (this->names[i] == token || std::to_string(i) == token)
+            {
+                input = i;
+            }
+        }
+        if (input == -1)
+        {
+            this->trace.fatal("Property trace_inputs: %s is not an input (input_names, an index "
+                "or dma)\n", token.c_str());
+            return;
+        }
+        this->trace_input[input] = true;
+    }
+}
+
+
+std::string SnaxTcdmXbar::beat_field(vp::IoReq *req)
+{
+    if (snax_arg_get(req, SNAX_ARG_TAG) != SNAX_TAG_BEAT)
+    {
+        return "";
+    }
+    return " b=" + std::to_string((long)snax_arg_get(req, SNAX_ARG_ID));
 }
 
 
@@ -527,6 +626,27 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         int winner = _this->sparse ? _this->sparse_pick(bank, req_mask, cycle)
             : _this->plain_arbs[bank].pick(cycle, req_mask);
         bool refuses = _this->bank_refuses(bank);
+        if (_this->ev.stalls.get_active())
+        {
+            // Every requester refused here: the losers, and the winner too when the
+            // DMA's superbank took the bank
+            int by = refuses ? -1 : winner;
+            uint64_t by_addr = refuses
+                ? _this->superbank_addr[bank / _this->superbank_banks]
+                : _this->pending[winner]->get_addr();
+            for (int i = 0; i < _this->nb_inputs; i++)
+            {
+                if (((req_mask >> i) & 1) && (i != winner || refuses) && _this->trace_input[i])
+                {
+                    uint64_t addr = _this->pending[i]->get_addr();
+                    _this->ev.stalls.msg(vp::Trace::LEVEL_INFO,
+                        "%ld stall in=%d addr=0x%lx bank=%d row=%ld by=%d by_addr=0x%lx%s\n",
+                        (long)cycle, i, (unsigned long)addr, bank,
+                        (long)(addr >> (_this->width_bits + _this->bank_bits)), by,
+                        (unsigned long)by_addr, _this->beat_field(_this->pending[i]).c_str());
+                }
+            }
+        }
         int requests = refuses;
         for (int i = 0; i < _this->nb_inputs; i++)
         {
@@ -608,9 +728,26 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         req->set_addr(addr);
         req->resp_port = resp_port;
 
+        // Answered at the grant (a held write), else one cycle after it
+        bool at_grant = _this->holds[winner] && req->get_opcode() == vp::IoReqOpcode::WRITE;
+        if (_this->trace_input[winner] && _this->ev.beats.get_active())
+        {
+            vp::IoReqOpcode opcode = req->get_opcode();
+            std::string size = req->get_size() < (1ULL << _this->width_bits)
+                ? " size=" + std::to_string(req->get_size()) : "";
+            _this->ev.beats.msg(vp::Trace::LEVEL_INFO,
+                "%ld grant in=%d op=%s addr=0x%lx bank=%d row=%ld value=%s back=%ld%s%s\n",
+                (long)cycle, winner, opcode == vp::IoReqOpcode::READ ? "r"
+                    : opcode == vp::IoReqOpcode::WRITE ? "w" : "a",
+                (unsigned long)addr, bank, (long)(addr >> (_this->width_bits + _this->bank_bits)),
+                snax_word(req->get_data(), req->get_size()).c_str(),
+                (long)(at_grant ? cycle : cycle + 1 + latency),
+                _this->beat_field(req).c_str(), size.c_str());
+        }
+
         _this->pending[winner] = NULL;
         resp_port->grant(req);
-        if (_this->holds[winner] && req->get_opcode() == vp::IoReqOpcode::WRITE)
+        if (at_grant)
         {
             _this->answer(req, winner);
         }
