@@ -14,7 +14,7 @@ This file is the checklist; a step is ticked here when it is committed.
 - One commit per step on `ry/flow3`, here and in snax-forge; from step 2 on,
   snax-forge's submodule points at this branch's head. Round 1a is tagged
   `flow3-r1a` in both. Round 1b the same on `ry/flow3-2`, tagged
-  `flow3-r1b`.
+  `flow3-r1b`; round 2a on `ry/flow3-4`, tagged `flow3-r2a` (local).
 - Acceptance is pass/fail; anything not verified is said so.
 
 ## Acceptance
@@ -31,6 +31,18 @@ view` opens the two task-level runs on the profile page; `make regress`
 here and snax-forge's `pixi run test` pass in the container, and CI on both
 branches.
 
+Round 2a: in the container, `pixi run flow` on `recipes/vecadd.json` and
+`recipes/vsum.json` (`platforms/snax_alu.json`) passes at `--trace off`,
+`task`, `beat`, `stall` and `finegrained`, every converter invariant
+holding; tracing changes nothing: each run's `forge cycles:` is its `off`
+run's, and the `profile.json` of its `beat`, `stall` and `finegrained` runs
+is byte-identical to its `task` run's; one flow with `--vcd` writes the VCD,
+each SNAX signal named, and `view.gtkw` into `run/`; `make regress` here and
+snax-forge's `pixi run test` pass; the sizes of `events.log` and
+`trace.jsonl` at `beat` and `stall`, per line kind and per output element,
+are in the findings; snax-forge CI's `gvsoc` job also runs vecadd at
+`--trace stall`.
+
 ## The rounds
 
 | Round | Content |
@@ -38,7 +50,8 @@ branches.
 | 1a | The flow on SNAX-GVSoC: snax-forge's `gvsoc/Makefile` names the image's tools, so the flow calls make from pixi; `gvrun` runs on `GVRUN_PYTHON`; the program's window and `forge_check()` in place of the marks; the flow's stages lower, gen, build, sw, gvsoc, check; snax-forge CI's `gvsoc` job |
 | 1b | The events (snax-forge D137): an `events` `vp::Trace` per SNAX component here, in this repo's own grammar (component path, port, address, cycle; class runs; counters at the end of the run), enabled per path; snax-forge's converter into its C§7; levels `task` and `beat`; the reports again |
 | 1c | RET1: SNAX-MODEL removed from snax-forge, in round 1's PR |
-| 2 | Data values on beat events and the accelerator's push event (snax-forge open items 23, 25); the level `finegrained`; VCD as a gtkwave dump only |
+| 2a | The beat- and stall-level events (`docs/EVENTS.md`): the crossbar's `grant`, `dma` and `stall`, the AXI backend's `burst`, the unit's `fire` and `push`, the streamer's `fifo`, linked by ids and carrying values (snax-forge open items 23, 25); the `stalls` trace; the levels `beat`, `stall` and `finegrained` (the cores' `insn`); the crossbar's source filter; VCD signals, a gtkwave dump only; snax-forge's converter for them, with its invariants |
+| 2b | snax-forge's memory view (D96) and movement view (D97) rebuilt on 2a's events, on `ry/flow3-5` |
 | 3 | The schedule inside the program's window, with a lane per core and folded stretches (snax-forge D57) |
 
 ## Round 1a steps
@@ -66,6 +79,179 @@ The grammar is `docs/EVENTS.md`.
 | 5 | snax-forge `run/convert.py`, the flow's `convert` stage, a recorded vecadd `events.log` as a test fixture | done |
 | 6 | snax-forge's viewer and reports on `run/`, the reports written by the flow | done |
 | 7 | Acceptance in both; CI's `gvsoc` job runs the two flows at `--trace task`; tag `flow3-r1b` | container: done; CI: waits for a dispatch on `ry/flow3-2` in both |
+
+## Round 2a steps
+
+The grammar is `docs/EVENTS.md`.
+
+| # | Step | Status |
+|---|---|---|
+| 0 | Docs in both: snax-forge STATUS (RET1 done, round 2 as 2a and 2b), D137 amended, C§7 and `run/trace.py`'s docstring; `docs/EVENTS.md`, this table | done |
+| 1 | Probe, no code kept: (a) an `IoReq` argument slot set by the streamer and by the TCDM backend reaches the crossbar unchanged; (b) the streamer can return `b` to the unit with a beat; (c) the AXI backend's path, where a burst's `back` is known; (d) the TCDM backend computes `l2` per beat (1D, 2D); (e) a `pe<i>/insn` line on `snax_hjson`; (f) `--trace-format`; (g) the crossbar's inputs property set per run without a rebuild | done |
+| 2 | Crossbar and iDMA: `grant`, `dma`, `stall`, `trace_inputs`; the TCDM backend's `id`, `i`, `l2`; the AXI backend's `burst`; traces off change nothing; `make regress`; snax-forge's submodule bumped | done |
+| 3 | Streamer and unit: `b` numbered and passed; `fifo`; `fire` and `push`; `make regress`; one fixture's `events.log` at `stall` parses; submodule bumped | done |
+| 4 | VCD signals on the unit, streamer, crossbar and iDMA, tagged `snax`; a `make run` with `--vcd` writes a VCD naming each; submodule bumped | done |
+| 5 | snax-forge `run/`: `regions_of`, `Cluster.bank_row` and `dma_beat_bytes`, the grammar of `beats`, `stalls` and `insn`, the trace's kinds and levels | done |
+| 6 | snax-forge's converter (beat, stall, finegrained, every invariant), the flow's `--trace LEVEL[:SOURCES]` and `--vcd`, a recorded vecadd `events.log` at `stall`, `docs/RUN.md` in both | done |
+| 7 | Acceptance in both; snax-forge CI's `gvsoc` job at `--trace stall`; sizes (snax-forge open item 39); tag `flow3-r2a` | container: done; CI: the job written, its run waits for a dispatch on `ry/flow3-4` |
+
+## Round 2a findings
+
+- **The probe (step 1).** forge/vecadd on `snax_hjson` with temporary
+  prints, then reverted; each answer from a run unless said.
+  (a) Holds. Argument slot 15 set by the streamer on its requests arrives
+  at the crossbar's `req` unchanged, `arg_current_index()` 0 (the streamer
+  is bound straight to `in_<i>`; the cores' requests come through
+  `cores_ico` with slot 15 still 0). The TCDM backend's slots 13 to 15
+  arrive at `dma_req` unchanged for reads; its writes go through the
+  delayed request (`tcdm_write_latency`, `delayed_req`), which must carry
+  the slots itself: tagged there, all 16 write beats arrived tagged.
+  (b) Holds. A slot the streamer's `reader_req` sets on the unit's
+  `beat_req` is read by the unit after `move` (32 tags, one per port and
+  firing, in order).
+  (c) The AXI backend is `/chip/soc/cluster_0/idma/axi_read` and
+  `.../idma/axi_write` (`IDmaBeAxi`, a `vp::Block`). Every request
+  returned `IO_REQ_OK` with its latency (reads 6 or 7, writes 6): a read's
+  data is back at `read_handle_req_end`, the request's cycle plus that
+  latency plus `read_latency`; a write is acknowledged in
+  `write_handle_req_end`, called at once on `IO_REQ_OK`, so in the
+  request's cycle. On `IO_REQ_PENDING` both would be known at
+  `axi_response`. A router rewrites a request's address during `req`, so
+  the address is taken before it.
+  (d) Holds, 1D and 2D (one load as 4 rows of 128 B, the store as 2 rows of
+  256 B, temporarily in forge/vecadd's `main.c`): `IDmaBe::write_data`
+  moves a row transfer's `dst` and `size` as data goes, so the row's `src`
+  and `dst` are kept when `IDmaBe::enqueue_transfer` takes it; the other
+  side's address of a beat at `a` is then that row's start plus `a`'s
+  offset in it. All 24 beats' `l2` were right.
+  (e) A `pe0/insn` line (5353 on vecadd) is GVSoC's header, then
+  `<func>:<n>` padded, the mode (`M`), the PC in hex without `0x`, the
+  mnemonic, its operands and the registers it writes and reads (`a0=...`,
+  `sp:...`, `PA:...`), not `<cycle> <kind> key=value`; 209 to 235 bytes.
+  (f) From the code (`trace_engine.cpp`, `trace.cpp`): `--trace-format
+  short` writes `<ps>ps <cycles> `, without the path the converter names a
+  line by; `long` (the default) pads the path to the longest one (72
+  characters here) inside ANSI colour codes. No shorter form keeps the
+  path.
+  (g) A property declared in `snax_tcdm_xbar.py` with
+  `declare_user_property` (a gvrun `TargetParameter`) is set by `--param
+  chip/soc/cluster_0/tcdm/snax_xbar/<name>=<value>`: the C++ read the
+  given value from `get_js_config()`. `snax_hjson` builds its tree from
+  Python at run time for a design point's cluster file, so nothing is
+  rebuilt.
+- **A queue's count: `qmax` is not the RTL's count (step 1).** `qmax` is
+  the highest `data.size()` after any push or pop, so within a cycle; the
+  priority hint reads the RTL queue's count, the words visible by then and
+  not popped before. A writer's beat is pushed by the unit and the head
+  word popped at the commit in one cycle, the push first: `data.size()` is
+  2 for a moment while the RTL's count stays 1. On vecadd, from both
+  counts per lane: readers 2 and 1 both ways, the writer `qmax` 2 against
+  a highest count of 1, on all four lanes. So a `fifo` line cannot carry
+  one count whose maximum is `qmax` and that is also the words visible
+  minus the words popped.
+
+- **The crossbar and the iDMA (step 2).** forge/vecadd and forge/vsum on
+  `snax_hjson`: at task level their `events.log` is byte-identical to the
+  one before the change; with `beats` and `stalls` on too, their stdout is
+  the same and so are their `summary` and `events` lines. vecadd at
+  `stall`: 192 `grant` lines (the 12 streamer lanes, 16 each), 4 `stall`,
+  24 `dma` (copies 2 and 3 eight writes each into L1, copy 4 eight reads,
+  `i` 0 to 7 in each) and 10 `burst` (two 512-byte reads, eight 64-byte
+  writes, each acknowledged in its own cycle); vsum 65 grants, 10 `dma`.
+  With `trace_inputs=core0,dma` the crossbar writes core 0's 322 grants
+  (from boot) and the DMA's beats only; an unknown name stops the run.
+
+- **The streamer and the unit (step 3).** `qmax` is now the highest RTL
+  count (the decision after step 1), so of the forge fixtures only
+  vecadd's summary changes, its writer's `qmax` from 2,2,2,2 to 1,1,1,1
+  (vecmul's the same way); vsum's `events.log` at task level is
+  byte-identical, and every stdout is. At `stall`: vecadd 16 `fire` (`b`
+  0 to 15 on both readers), 16 `push` and 32 `fifo`; vsum 64 `fire` and one
+  `push` (`first=0 last=63`); vsum_tree 16 and one; `forge-reduce`'s
+  vsum-r16 64 `fire` and four `push` (`first` 0, 16, 32, 48). Checked
+  against each other by a script on all five (not kept; snax-forge's
+  converter checks the same from step 6): every `b` a firing names is
+  granted on every lane of its mover with the fire's values, every push's
+  value is its writer's grants', and every lane's `fifo` lines are the
+  words visible (a read's `back` plus one, a push plus one) minus those
+  popped (the last firing naming the beat, the writer's grant), 0 at the
+  end, their highest the summary's `qmax`. No fixture has a reader with a
+  repeat, so several firings naming one `b` is checked by the code only.
+  This repo has no test of its own for an events file; the stall-level
+  file is parsed by snax-forge's converter from step 5 on.
+
+- **VCD signals (step 4).** forge/vecadd with `--vcd --event-tags=snax`
+  (snax-forge's `gvsoc/Makefile`'s `run` with these in `GVRUN_ARGS`):
+  `all.vcd` (194 kB) and `view.gtkw` name all 98 SNAX signals (the unit's
+  4, the streamer's 16, the crossbar's 45 for its 15 inputs and 32 for its
+  banks, the DMA's busy), beside the cores' own. Their values agree with
+  the lines: the unit busy from 2933 to 2951 (start at 2932), `fire` high
+  through its 16 firings, `reader0_lane0_count` changing at 2935, 2936,
+  2951 and 2952 as its `fifo` lines, `dma_busy` from 2887 to 2926 and from
+  2974 to 2989. GVSoC dumps a signal when it is set, so a value known a
+  cycle ahead is queued and set in its cycle (`SnaxSignals`,
+  `snax/snax_events.hpp`). With and without `--vcd` the `events.log` at
+  task level is byte-identical, as are the program's lines (gvrun adds
+  its gtkwave lines to stdout).
+
+- **The converter and the flow (snax-forge step 6).** In the container,
+  with the submodule at `fec4c219`, `pixi run flow` on vecadd and vsum
+  (`platforms/snax_alu.json`) at `off`, `task`, `beat`, `stall` and
+  `finegrained`, and vecadd at `stall --vcd`, all passed with every
+  invariant: vecadd 49 events at task, 307 at beat, 343 at stall, 494 at
+  finegrained; vsum 41, 182, 186, 374. Each `forge cycles:` is the `off`
+  run's (226, 255) and each `profile.json` above `task` is the task run's,
+  byte for byte. One regex with an alternation,
+  `--trace='/idma/axi_(read|write)/beats$:F'`, gave no lines, though the
+  engine compiles its regexes `REG_EXTENDED` (why was not looked into); the
+  flow names the two traces apart.
+
+- **Acceptance (step 7).** On fresh clones of `ry/flow3-4` in the image:
+  here (`9f73fa3d`), `make build` (110 s), the unit tests (35 OK) and `make
+  regress` passed, the tree clean after; snax-forge (`192d5e2`, the
+  submodule at `fec4c219`, which differs from this branch's head in
+  `docs/` only), `pixi install`, then `pixi run flow` on
+  `recipes/vecadd.json` and `recipes/vsum.json` with
+  `platforms/snax_alu.json` at `off`, `task`, `beat`, `stall` and
+  `finegrained` all passed, every invariant holding (the converter fails
+  the flow otherwise); every run's `forge cycles:` is its `off` run's (226,
+  255) and the `profile.json` of each `beat`, `stall` and `finegrained` run
+  is byte-identical to its `task` run's. vecadd at `stall --vcd` wrote
+  `run/all.vcd` (107 variables, all 98 SNAX signals among them) and
+  `run/view.gtkw` (listing the 98, its dumpfile `run/all.vcd`). `pixi run
+  test` 1055 passed, 3 skipped; `pixi run lint` clean; both trees clean
+  after. snax-forge CI's `gvsoc` job also runs vecadd at `--trace stall`;
+  the workflows run on pushes to main, pull requests and dispatch only, so
+  its run on `ry/flow3-4` waits for a dispatch.
+- **Sizes (step 7, snax-forge open item 39).** Bytes per run, and per output
+  element (vecadd's `C` has 64, vsum's one sum); the beat lines only (the
+  rest of `events.log`, the summary and events, is 53716 B on vecadd and
+  49709 B on vsum; of `trace.jsonl`, 4693 B and 3840 B):
+
+  | Run | Kind | `events.log` lines | B | B per element | `trace.jsonl` B | B per element |
+  |---|---|---:|---:|---:|---:|---:|
+  | vecadd `beat` | all | 623 | 102873 | 1607 | 66116 | 1033 |
+  | vecadd `stall` | all | 659 | 108039 | 1688 | 69504 | 1086 |
+  | vecadd | `grant` | 192 | 34502 | 539 | 42674 | 667 |
+  | vecadd | `dma` | 24 | 6571 | 103 | 9426 | 147 |
+  | vecadd | `burst` | 10 | 1572 | 25 | 1507 | 24 |
+  | vecadd | `fire` | 16 | 3553 | 56 | 4877 | 76 |
+  | vecadd | `push` | 16 | 2959 | 46 | 2939 | 46 |
+  | vecadd | `stall` | 4 | 654 | 10 | 752 | 12 |
+  | vecadd | `fifo` | 32 | 4512 | 71 | 2636 | 41 |
+  | vsum `beat` | all | 485 | 73181 | 73181 | 31412 | 31412 |
+  | vsum `stall` | all | 489 | 73745 | 73745 | 31749 | 31749 |
+  | vsum | `grant` | 65 | 11650 | 11650 | 14347 | 14347 |
+  | vsum | `fire` | 64 | 8897 | 8897 | 9348 | 9348 |
+  | vsum | `dma` | 9 | 2466 | 2466 | 3451 | 3451 |
+  | vsum | `burst`, `push`, `fifo` | 2, 1, 4 | 315, 144, 564 | | 304, 122, 337 | |
+
+  GVSoC's header (the time, the cycle, the path padded to 72 characters in
+  ANSI colours) is 55% of vecadd's beat and stall lines' bytes; a grant is
+  180 B in `events.log` and 222 B in `trace.jsonl` (with its region,
+  elements and values). Per element, vecadd at `stall` is 1.7 KB of
+  `events.log` and 1.1 KB of `trace.jsonl`, of which the grants are 539 B
+  and 667 B.
 
 ## Round 1b findings
 

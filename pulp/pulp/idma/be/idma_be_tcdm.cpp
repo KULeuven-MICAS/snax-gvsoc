@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include <algorithm>
 #include <vp/vp.hpp>
@@ -161,6 +162,28 @@ void IDmaBeTcdm::reset(bool active)
 
 
 
+// SNAX: the row as the backend took it gives the other side's address of each beat
+IDmaBeTcdm::BeatIds IDmaBeTcdm::beat_ids(IdmaTransfer *transfer, uint64_t base, bool is_write)
+{
+    IdmaTransfer *copy = transfer->parent;
+    uint64_t index = is_write ? copy->local_writes++ : copy->local_reads++;
+    uint64_t l2 = is_write ? transfer->row_src + (base - transfer->row_dst)
+        : transfer->row_dst + (base - transfer->row_src);
+    return {copy->id, index, l2};
+}
+
+
+
+void IDmaBeTcdm::tag(vp::IoReq *req, const BeatIds &ids)
+{
+    *req->arg_get(IDMA_SNAX_ARG_TAG) = (void *)IDMA_SNAX_TAG_DMA;
+    *req->arg_get(IDMA_SNAX_ARG_ID) = (void *)(uintptr_t)ids.id;
+    *req->arg_get(IDMA_SNAX_ARG_INDEX) = (void *)(uintptr_t)ids.index;
+    *req->arg_get(IDMA_SNAX_ARG_L2) = (void *)(uintptr_t)ids.l2;
+}
+
+
+
 void IDmaBeTcdm::write_line()
 {
     // Only send the line if no line was already sent in this cycle. Since we try to send a line as
@@ -177,6 +200,7 @@ void IDmaBeTcdm::write_line()
             base, size);
 
         uint8_t *data = this->write_current_chunk_data;
+        BeatIds ids = this->beat_ids(this->write_current_transfer, base, true);
 
         // Update chunk info for next line
         this->write_current_chunk_base += size;
@@ -188,7 +212,7 @@ void IDmaBeTcdm::write_line()
             // SNAX: the line reaches the TCDM later and is acknowledged now
             this->delayed_lines.push_back({this->clock.get_cycles()
                 + (int64_t)this->tcdm_write_latency, base,
-                std::vector<uint8_t>(data, data + size)});
+                std::vector<uint8_t>(data, data + size), ids});
             if (!this->delayed_write_event.is_enqueued())
             {
                 this->delayed_write_event.enqueue(this->tcdm_write_latency);
@@ -202,6 +226,7 @@ void IDmaBeTcdm::write_line()
         vp::IoReq *req = &this->req;
 
         req->prepare();
+        this->tag(req, ids);
         req->set_is_write(true);
         req->set_addr(base - this->loc_base);
         req->set_size(size);
@@ -256,6 +281,7 @@ void IDmaBeTcdm::delayed_write_handler(vp::Block *__this, vp::ClockEvent *event)
             line.base, line.data.size());
         vp::IoReq *req = &_this->delayed_req;
         req->prepare();
+        _this->tag(req, line.ids);
         req->set_is_write(true);
         req->set_addr(line.base - _this->loc_base);
         req->set_size(line.data.size());
@@ -353,6 +379,7 @@ void IDmaBeTcdm::read_line()
 
     // Prepare the IO request to TCDM
     req->prepare();
+    this->tag(req, this->beat_ids(this->burst_queue_transfer.front(), base, false));
     req->set_is_write(false);
     req->set_addr(base - this->loc_base);
     req->set_size(size);

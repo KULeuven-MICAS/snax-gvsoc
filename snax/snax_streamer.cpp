@@ -61,17 +61,36 @@
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
 // them with the highest queue count per lane when the streamer is done.
 //
+// A lane's queue count in a cycle is the RTL queue's, the one the priority
+// hint reads: the words visible by then and not popped before it, so the
+// words in the queue at the end of the cycle before. A push and a pop in one
+// cycle (a writer's, the unit first) leave it as it was. The run's highest
+// count per lane is qmax; with the stalls trace on, a fifo line gives each
+// count from the first cycle it holds, written once that cycle's changes are
+// known (the next change, or the streamer's end).
+//
+// Beats (docs/EVENTS.md): a reader's beats are numbered b in its AGU's order
+// from 0 in each run, a writer's in the order the unit hands them over. Each
+// TCDM request carries its beat's b (SNAX_ARG_ID, snax_events.hpp) for the
+// crossbar's lines; a reader's words keep it, and the beat handed to the
+// unit carries it back (a beat with a repeat, every time it is handed out).
+//
 // Events (docs/EVENTS.md, snax_events.hpp), per mover: `start` in the cycle
 // the start is taken; `done` in its last busy cycle (the commit in which its
 // last address leaves, or the streamer's end for a mover that never started);
 // the summary's `mover` line with the run's classes and queue maxima when the
 // streamer is done.
 //
+// VCD signals (snax_events.hpp, gtkwave only): streamer_busy (from s + 1 to
+// e, as the RTL's), <mover>_busy (from s + 1 to its last busy cycle) and
+// <mover>_lane<l>_count (the lane's queue count, from the cycle it holds).
+//
 // Not modelled: reader-writers, configurable channels and byte masks, address
 // remapping (logic word sizes), datapath extensions, a second clock domain;
 // snax_streamer.py refuses their keys.
 
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -85,6 +104,7 @@ struct Word
 {
     int64_t visible;
     uint64_t value;
+    int64_t b;                  // its beat
 };
 
 // A word popped from a lane's queue: when it became visible, when it left
@@ -118,6 +138,7 @@ struct Mover
     std::vector<uint32_t> temporal_strides;
     uint32_t repeat;            // a reader's beat repeat (temporal stride 0 on loop 0)
     uint32_t handed;            // times the head beat was handed out
+    int64_t beats;              // beats numbered in this run: the next one's b
 
     // AGU
     bool agu_busy;
@@ -137,6 +158,7 @@ struct Channel
     int lane;                   // index within its mover
 
     std::deque<uint32_t> addrs; // address FIFO, fifo_depth deep
+    std::deque<int64_t> addr_beats;  // a reader's: each address's beat
     int used;                   // reader: reads in flight plus words buffered
     vp::IoReq *held;            // request sent and not granted yet
     bool requested;             // sent a request in this cycle
@@ -144,6 +166,9 @@ struct Channel
     std::deque<Word> data;      // the lane's queue, fifo_depth deep
     std::deque<PoppedWord> popped;  // words popped in the last two cycles
     int max_count;              // highest count of the lane's queue in this run
+    int count;                  // the queue's count, as last written
+    int64_t count_cycle;        // the last cycle its words changed, -1 if none
+    int count_end;              // the words in it after that cycle's changes
     bool priority;              // the priority bit of the request sent
 
     // Requests in flight, at most fifo_depth, plus the one being sent
@@ -179,7 +204,9 @@ private:
     bool mover_busy(Mover &mover);
     bool can_request(Channel &ch, int64_t cycle);
     void wake(int64_t delay);
-    void trace_count(Channel &ch);
+    void queue_changed(Channel &ch);
+    void count_flush(Channel &ch);
+    void tag(vp::IoReq *req, int64_t b);
     void pop_word(Channel &ch, int64_t cycle);
     bool priority_hint(Channel &ch, int64_t cycle);
     void end_run(int64_t cycle);
@@ -195,6 +222,10 @@ private:
     vp::ClockEvent step_event;
     vp::ClockEvent commit_event;
     vp::ClockEvent summary_event;
+    SnaxSignals sigs;
+    SnaxSignal sig_busy;
+    std::vector<std::unique_ptr<SnaxSignal>> sig_mover_busy;   // per mover
+    std::vector<std::unique_ptr<SnaxSignal>> sig_count;        // per channel
 
     uint32_t addr_mask;         // the AGU's address width, from the TCDM size
     int nb_rw;                  // read-write CSRs, the start CSR last
@@ -219,7 +250,9 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     : vp::Component(config),
       step_event(this, &SnaxStreamer::step_handler),
       commit_event(this, &SnaxStreamer::commit_handler),
-      summary_event(this, &SnaxStreamer::summary_handler)
+      summary_event(this, &SnaxStreamer::summary_handler),
+      sigs(this),
+      sig_busy(*this, "streamer_busy", 1)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
@@ -285,7 +318,10 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
             this->tcdm_itf[id].set_resp_meth_muxed(&SnaxStreamer::tcdm_resp, id);
             this->new_master_port("tcdm_" + std::to_string(id), &this->tcdm_itf[id]);
             this->new_master_port("tcdm_prio_" + std::to_string(id), &this->tcdm_prio_itf[id]);
+            this->sig_count.emplace_back(new SnaxSignal(*this,
+                mover.name + "_lane" + std::to_string(lane) + "_count", 8));
         }
+        this->sig_mover_busy.emplace_back(new SnaxSignal(*this, mover.name + "_busy", 1));
     }
 
     for (size_t i = 0; i < this->readers.size(); i++)
@@ -314,6 +350,7 @@ void SnaxStreamer::reset(bool active)
         for (Channel &ch : this->channels)
         {
             ch.addrs.clear();
+            ch.addr_beats.clear();
             ch.data.clear();
             ch.popped.clear();
             ch.priority = false;
@@ -322,6 +359,9 @@ void SnaxStreamer::reset(bool active)
             ch.requested = false;
             ch.granted = false;
             ch.max_count = 0;
+            ch.count = 0;
+            ch.count_cycle = -1;
+            ch.count_end = 0;
             ch.free_reqs.clear();
             for (int i = 0; i <= ch.mover->fifo_depth; i++)
             {
@@ -435,15 +475,48 @@ void SnaxStreamer::wake(int64_t delay)
 }
 
 
-void SnaxStreamer::trace_count(Channel &ch)
+// A word pushed into or popped from the lane's queue in this cycle: the count
+// of the cycle after the last change is known once this cycle has a change
+void SnaxStreamer::queue_changed(Channel &ch)
 {
-    int count = ch.data.size();
-    if (count > ch.max_count)
+    int64_t cycle = this->clock.get_cycles();
+    this->trace.msg(vp::Trace::LEVEL_TRACE, "Queue %s.lane%d: %ld\n", ch.mover->name.c_str(),
+        ch.lane, (long)ch.data.size());
+    if (cycle != ch.count_cycle)
     {
-        ch.max_count = count;
+        this->count_flush(ch);
+        ch.count_cycle = cycle;
     }
-    this->trace.msg(vp::Trace::LEVEL_TRACE, "Queue %s.lane%d: %d\n", ch.mover->name.c_str(),
-        ch.lane, count);
+    ch.count_end = ch.data.size();
+    this->sigs.set_from(*this->sig_count[&ch - this->channels.data()], ch.count_end, cycle + 1);
+}
+
+
+// The count from the cycle after the last change: the words left by then
+void SnaxStreamer::count_flush(Channel &ch)
+{
+    if (ch.count_cycle < 0 || ch.count_end == ch.count)
+    {
+        return;
+    }
+    ch.count = ch.count_end;
+    if (ch.count > ch.max_count)
+    {
+        ch.max_count = ch.count;
+    }
+    if (this->ev.stalls.get_active())
+    {
+        this->ev.stalls.msg(vp::Trace::LEVEL_INFO, "%ld fifo mover=%s lane=%d count=%d\n",
+            (long)(ch.count_cycle + 1), ch.mover->name.c_str(), ch.lane, ch.count);
+    }
+}
+
+
+// A request's beat, for the crossbar's lines
+void SnaxStreamer::tag(vp::IoReq *req, int64_t b)
+{
+    snax_arg_set(req, SNAX_ARG_TAG, SNAX_TAG_BEAT);
+    snax_arg_set(req, SNAX_ARG_ID, (uint64_t)b);
 }
 
 
@@ -525,6 +598,7 @@ void SnaxStreamer::start(int64_t cycle)
 
         // The hand-out counter restarts with the run (HandShakeRepeater's reset)
         mover.handed = 0;
+        mover.beats = 0;
         for (int c = 0; c < NB_CLASSES; c++)
         {
             mover.classes[c] = 0;
@@ -540,7 +614,17 @@ void SnaxStreamer::start(int64_t cycle)
     }
     for (Channel &ch : this->channels)
     {
-        ch.max_count = ch.data.size();
+        if (ch.count_cycle < cycle)
+        {
+            this->count_flush(ch);
+        }
+        ch.max_count = ch.count;
+    }
+
+    this->sigs.set_from(this->sig_busy, 1, cycle + 1);
+    for (size_t m = 0; m < this->movers.size(); m++)
+    {
+        this->sigs.set_from(*this->sig_mover_busy[m], 1, cycle + 1);
     }
 
     this->counter_before = this->counter_at(cycle);
@@ -573,6 +657,7 @@ void SnaxStreamer::end_run(int64_t cycle)
         this->mover_done(mover, cycle);
     }
     this->end_cycle = cycle + 1;
+    this->sigs.set_from(this->sig_busy, 0, this->end_cycle + 1);
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Done: busy up to cycle %ld, counter %d\n",
         this->end_cycle, this->counter_at(this->end_cycle + 1));
     for (Mover &mover : this->movers)
@@ -590,6 +675,7 @@ void SnaxStreamer::mover_done(Mover &mover, int64_t cycle)
     if (!mover.done)
     {
         mover.done = true;
+        this->sigs.set_from(*this->sig_mover_busy[&mover - this->movers.data()], 0, cycle + 1);
         this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld done mover=%s\n", (long)cycle,
             mover.name.c_str());
     }
@@ -605,6 +691,10 @@ void SnaxStreamer::summary_handler(vp::Block *__this, vp::ClockEvent *event)
     for (Mover &mover : _this->movers)
     {
         std::string counts, qmax;
+        for (int lane = 0; lane < mover.num_channel; lane++)
+        {
+            _this->count_flush(_this->channel(mover, lane));
+        }
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
             std::string count = std::to_string(_this->channel(mover, lane).max_count);
@@ -688,10 +778,18 @@ vp::IoReqStatus SnaxStreamer::reader_req(vp::Block *__this, vp::IoReq *req, int 
     }
 
     uint64_t *beat = (uint64_t *)req->get_data();
+    int64_t b = _this->channel(mover, 0).data.front().b;
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
-        beat[lane] = _this->channel(mover, lane).data.front().value;
+        const Word &word = _this->channel(mover, lane).data.front();
+        if (word.b != b)
+        {
+            _this->trace.fatal("reader_%d: lane %d's head word is of beat %ld, lane 0's of %ld\n",
+                id, lane, (long)word.b, (long)b);
+        }
+        beat[lane] = word.value;
     }
+    _this->tag(req, b);
 
     mover.handed++;
     if (mover.handed >= mover.repeat)
@@ -702,7 +800,7 @@ vp::IoReqStatus SnaxStreamer::reader_req(vp::Block *__this, vp::IoReq *req, int 
             Channel &ch = _this->channel(mover, lane);
             _this->pop_word(ch, cycle);
             ch.used--;
-            _this->trace_count(ch);
+            _this->queue_changed(ch);
         }
         // The credit is back in this cycle
         _this->wake(0);
@@ -740,11 +838,12 @@ vp::IoReqStatus SnaxStreamer::writer_req(vp::Block *__this, vp::IoReq *req, int 
     }
 
     uint64_t *beat = (uint64_t *)req->get_data();
+    int64_t b = mover.beats++;
     for (int lane = 0; lane < mover.num_channel; lane++)
     {
         Channel &ch = _this->channel(mover, lane);
-        ch.data.push_back({cycle + 1, beat[lane]});
-        _this->trace_count(ch);
+        ch.data.push_back({cycle + 1, beat[lane], b});
+        _this->queue_changed(ch);
     }
     _this->wake(1);
     return vp::IO_REQ_OK;
@@ -784,6 +883,7 @@ void SnaxStreamer::step_handler(vp::Block *__this, vp::ClockEvent *event)
             {
                 ch.bufs[slot] = ch.data.front().value;
             }
+            _this->tag(req, ch.mover->is_reader ? ch.addr_beats.front() : ch.data.front().b);
             req->set_data((uint8_t *)&ch.bufs[slot]);
             ch.held = req;
             ch.priority = ch.mover->dynamic_priority ? _this->priority_hint(ch, cycle - 1)
@@ -826,8 +926,9 @@ void SnaxStreamer::tcdm_resp(vp::Block *__this, vp::IoReq *req, int id)
     int slot = req - ch.reqs.data();
     if (ch.mover->is_reader)
     {
-        ch.data.push_back({_this->clock.get_cycles() + 1, ch.bufs[slot]});
-        _this->trace_count(ch);
+        ch.data.push_back({_this->clock.get_cycles() + 1, ch.bufs[slot],
+            (int64_t)snax_arg_get(req, SNAX_ARG_ID)});
+        _this->queue_changed(ch);
     }
     ch.free_reqs.push_back(slot);
 }
@@ -854,6 +955,11 @@ void SnaxStreamer::agu_push(Mover &mover)
         }
         uint32_t addr = (mover.ptr + temporal + spatial) & this->addr_mask;
         this->channel(mover, lane).addrs.push_back(addr);
+        this->channel(mover, lane).addr_beats.push_back(mover.beats);
+    }
+    if (mover.is_reader)
+    {
+        mover.beats++;
     }
 
     // The loops: loop 0 ticks on every group, loop d when loop d - 1 wraps.
@@ -918,6 +1024,7 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
         if (ch.granted)
         {
             ch.addrs.pop_front();
+            ch.addr_beats.pop_front();
             if (ch.mover->is_reader)
             {
                 ch.used++;
@@ -925,7 +1032,7 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
             else
             {
                 _this->pop_word(ch, cycle);
-                _this->trace_count(ch);
+                _this->queue_changed(ch);
             }
             ch.held = NULL;
         }

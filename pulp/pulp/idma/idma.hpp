@@ -17,11 +17,21 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #pragma once
 
 #include <vector>
 #include <vp/vp.hpp>
+
+// SNAX: the argument slots a TCDM beat carries to the SNAX crossbar's dma line, the same as
+// snax/snax_events.hpp's SNAX_ARG_TAG, SNAX_ARG_ID, SNAX_ARG_INDEX, SNAX_ARG_L2 and
+// SNAX_TAG_DMA (docs/EVENTS.md)
+#define IDMA_SNAX_ARG_TAG (IO_REQ_NB_ARGS - 1)
+#define IDMA_SNAX_ARG_ID (IO_REQ_NB_ARGS - 2)
+#define IDMA_SNAX_ARG_INDEX (IO_REQ_NB_ARGS - 3)
+#define IDMA_SNAX_ARG_L2 (IO_REQ_NB_ARGS - 4)
+#define IDMA_SNAX_TAG_DMA ((uintptr_t)0x534e4432)
 
 
 
@@ -62,6 +72,15 @@ public:
     // Parent transfer. In case the parent has been split into several simpler transfers,
     // this field is set in the bursts to the parent transfer
     IdmaTransfer *parent;
+    // SNAX: a copy's ID (the front end's), and its beats on the local memory so far, read and
+    // written (the index of its next one on each side)
+    uint32_t id;
+    uint64_t local_reads;
+    uint64_t local_writes;
+    // SNAX: a row's source and destination as the backend took it (src, dst and size move as
+    // its data goes)
+    uint64_t row_src;
+    uint64_t row_dst;
 };
 
 

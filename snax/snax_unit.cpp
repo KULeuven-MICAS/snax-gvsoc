@@ -61,6 +61,14 @@
 // a start is taken; `done` (firings, the first and last firing's cycles) in
 // the run's last busy cycle; there too, the summary's `run` line
 // (SnaxUnitRule::run_line), the classes adding up to the run's busy cycles.
+// Beats: `fire` per firing (its index n in the run, each input's beat b as
+// the streamer hands it back, -1 if it does not, and the input words), `push`
+// per result pushed (its index n among the run's results, the firings it
+// folds, the output words).
+//
+// VCD signals (snax_events.hpp, gtkwave only): busy (from s + 1 to E), fire
+// and push (1 in a cycle the unit fires, pushes), cycle_class (0 idle, 1 busy,
+// 2 stall_in, 3 stall_out, 4 flush; snax_unit.hpp's classes plus one).
 
 #include <deque>
 #include <string>
@@ -99,6 +107,11 @@ private:
     vp::IoMaster out_itf;
     vp::ClockEvent fire_event;
     vp::IoReq beat_req;
+    SnaxSignals sigs;
+    SnaxSignal sig_busy;
+    SnaxSignal sig_fire;
+    SnaxSignal sig_push;
+    SnaxSignal sig_class;
 
     int lanes;
     int data_width;
@@ -115,15 +128,29 @@ private:
     int64_t first_fire;         // the run's first and last firing, for its done line
     int64_t last_fire;
 
+    // A result computed and not pushed yet: its words and the firings it folds
+    struct Result
+    {
+        std::vector<uint64_t> words;
+        uint32_t first;
+        uint32_t last;
+    };
+
     std::vector<std::vector<uint64_t>> beat_in;   // per input, the beat taken
     std::vector<uint64_t> acc;                    // a fold's output so far, one word
-    std::deque<std::vector<uint64_t>> results;    // computed, not pushed yet
+    std::deque<Result> results;
+    uint32_t pushes;                              // results pushed in this run
 };
 
 
 SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     : vp::Component(config),
-      fire_event(this, &SnaxUnit::fire_handler)
+      fire_event(this, &SnaxUnit::fire_handler),
+      sigs(this),
+      sig_busy(*this, "busy", 1),
+      sig_fire(*this, "fire", 1),
+      sig_push(*this, "push", 1),
+      sig_class(*this, "cycle_class", 3)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
@@ -273,6 +300,7 @@ void SnaxUnit::reset(bool active)
         this->rule.reset();
         this->results.clear();
         this->first_fire = this->last_fire = -1;
+        this->pushes = 0;
     }
 }
 
@@ -379,6 +407,7 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
             _this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld start count=%u rate=%u\n",
                 (long)cycle, count, rate);
             _this->first_fire = _this->last_fire = -1;
+            _this->pushes = 0;
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(true);
@@ -457,25 +486,48 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         bool room = _this->probe(_this->out_itf, true);
 
         SnaxUnitRule::Step step = _this->rule.step(cycle, inputs, room);
+        _this->sigs.set(_this->sig_busy, 1);
+        _this->sigs.set(_this->sig_fire, step.fire);
+        _this->sigs.set(_this->sig_push, step.push);
+        _this->sigs.set(_this->sig_class, step.cls + 1);
         if (step.fire)
         {
+            uint32_t n = _this->rule.firings - 1;
+            bool traced = _this->ev.beats.get_active();
+            std::string beats, values;
             for (size_t i = 0; i < _this->in_itf.size(); i++)
             {
                 _this->move(_this->in_itf[i], false, _this->beat_in[i].data(),
                     _this->beat_words);
+                if (!traced)
+                {
+                    continue;
+                }
+                bool tagged = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
+                beats += (i > 0 ? "," : "") + std::to_string(tagged
+                    ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L);
+                for (uint64_t word : _this->beat_in[i])
+                {
+                    values += (values.empty() ? "" : ",") + snax_word((uint8_t *)&word, 8);
+                }
+            }
+            if (traced)
+            {
+                _this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld fire n=%u b=%s value=%s\n",
+                    (long)cycle, n, beats.c_str(), values.c_str());
             }
             if (_this->is_fold)
             {
-                _this->fold((_this->rule.firings - 1) % _this->rule.rate == 0);
+                _this->fold(n % _this->rule.rate == 0);
                 if (step.result)
                 {
-                    _this->results.push_back(_this->acc);
+                    _this->results.push_back({_this->acc, n + 1 - _this->rule.rate, n});
                 }
             }
             else
             {
-                _this->results.emplace_back();
-                _this->compute(_this->results.back());
+                _this->results.push_back({{}, n, n});
+                _this->compute(_this->results.back().words);
             }
             _this->trace.msg(vp::Trace::LEVEL_TRACE, "Fire %u\n", _this->rule.firings - 1);
             if (_this->first_fire == -1)
@@ -486,7 +538,20 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         }
         if (step.push)
         {
-            _this->move(_this->out_itf, true, _this->results.front().data(), _this->out_words);
+            Result &result = _this->results.front();
+            _this->move(_this->out_itf, true, result.words.data(), _this->out_words);
+            if (_this->ev.beats.get_active())
+            {
+                std::string values;
+                for (uint64_t word : result.words)
+                {
+                    values += (values.empty() ? "" : ",") + snax_word((uint8_t *)&word, 8);
+                }
+                _this->ev.beats.msg(vp::Trace::LEVEL_INFO,
+                    "%ld push n=%u first=%u last=%u value=%s\n", (long)cycle, _this->pushes,
+                    result.first, result.last, values.c_str());
+            }
+            _this->pushes++;
             _this->results.pop_front();
         }
         if (step.end)
@@ -503,6 +568,11 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(false);
+            }
+            for (SnaxSignal *s : {&_this->sig_busy, &_this->sig_fire, &_this->sig_push,
+                &_this->sig_class})
+            {
+                _this->sigs.set_from(*s, 0, cycle + 1);
             }
         }
     }

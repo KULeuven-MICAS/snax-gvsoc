@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #pragma once
 
@@ -69,6 +70,17 @@ private:
     void read_line();
     // Handle the end of a write request
     void write_handle_req_ack();
+    // SNAX: a beat's ids for the SNAX crossbar's dma line (idma.hpp's IDMA_SNAX_ARG_*): its
+    // copy's ID, its index among the copy's beats on this side, the address of its first byte
+    // on the copy's other side
+    struct BeatIds
+    {
+        uint64_t id;
+        uint64_t index;
+        uint64_t l2;
+    };
+    BeatIds beat_ids(IdmaTransfer *transfer, uint64_t base, bool is_write);
+    static void tag(vp::IoReq *req, const BeatIds &ids);
     // Remove a chunk of data from current burst. This is used to track when a burst is done
     void remove_chunk_from_current_burst(uint64_t size);
     // Extract first pending information to let FSM start writing and reading lines from it
@@ -161,6 +173,7 @@ private:
         int64_t cycle;              // the cycle it is written in the TCDM
         uint64_t base;
         std::vector<uint8_t> data;
+        BeatIds ids;
     };
     // SNAX: lines on their way to the TCDM, in order, and the request that writes them
     std::deque<DelayedLine> delayed_lines;

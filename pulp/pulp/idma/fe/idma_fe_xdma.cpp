@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include <vp/vp.hpp>
 #include "idma_fe_xdma.hpp"
@@ -32,7 +33,8 @@ IDmaFeXdma::IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me)
     reps(*this, "reps", 32),
     next_transfer_id(*this, "next_transfer_id", 32, true, 2),
     completed_id(*this, "completed_id", 32, true, 1),
-    do_transfer_grant(*this, "do_transfer_grant", 1)
+    do_transfer_grant(*this, "do_transfer_grant", 1),
+    dma_busy(*this, "dma_busy", 1)
 {
     // Middle-end will be used later for interaction
     this->me = me;
@@ -163,6 +165,7 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
     transfer->dst_stride = this->dst_stride.get();
     transfer->reps = this->reps.get();
     transfer->config = config;
+    transfer->id = transfer_id;
 
     this->trace.msg(vp::Trace::LEVEL_INFO, "Enqueuing transfer (id: %d, src: %llx, dst: %llx, "
         "size: %llx, src_stride: %llx, dst_stride: %llx, reps: %llx, config: %llx)\n",
@@ -245,6 +248,7 @@ void IDmaFeXdma::update_busy()
             this->busy_cycles += cycle - this->busy_since;
         }
         this->busy = busy;
+        this->dma_busy.set(busy);
         if (this->busy_itf.is_bound())
         {
             this->busy_itf.sync(busy);

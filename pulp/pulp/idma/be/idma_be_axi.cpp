@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include <algorithm>
 #include <vp/vp.hpp>
@@ -41,6 +42,8 @@ IDmaBeAxi::IDmaBeAxi(vp::Component *idma, std::string itf_name, IdmaBeProducer *
 
     // Declare our own trace so that we can individually activate traces
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
+    // SNAX: FLOW3's beats trace
+    this->traces.new_trace("beats", &this->beats, vp::INFO);
 
     // Get the top parameter giving the maximum number of outstanding bursts to AXI interconnect
     int burst_queue_size = idma->get_js_config()->get_int("burst_queue_size");
@@ -200,6 +203,7 @@ void IDmaBeAxi::send_read_burst_to_axi()
 
     // Reinit timings
     req->prepare();
+    this->burst_sent(req, (IdmaTransfer *)*req->arg_get(0));
 
     // Send to AXI interface
     vp::IoReqStatus status = this->ico_itf.req(req);
@@ -231,6 +235,7 @@ void IDmaBeAxi::read_handle_req_end(vp::IoReq *req)
     // SNAX: the DMA's own read path latency comes on top of the interconnect's. Bursts are
     // sent ahead (burst_queue_size), so back-to-back bursts overlap it.
     uint64_t latency = req->get_latency() + this->read_latency;
+    this->burst_back(req, this->clock.get_cycles() + latency);
     this->read_timestamps[req->id] = this->clock.get_cycles() + latency;
     // Queue the requests, they will be notified in order.
     this->read_waiting_bursts.push(req);
@@ -314,6 +319,7 @@ void IDmaBeAxi::write_data(IdmaTransfer *transfer, uint8_t *data, uint64_t size)
     req->set_data(data);
     req->arg_alloc();
     *req->arg_get(0) = (void *)transfer;
+    this->burst_sent(req, transfer);
 
     vp::IoReqStatus status = this->ico_itf.req(req);
     if (status == vp::IoReqStatus::IO_REQ_OK)
@@ -336,6 +342,7 @@ void IDmaBeAxi::write_data(IdmaTransfer *transfer, uint8_t *data, uint64_t size)
 
 void IDmaBeAxi::write_handle_req_end(vp::IoReq *req)
 {
+    this->burst_back(req, this->clock.get_cycles());
     this->trace.msg(vp::Trace::LEVEL_TRACE, "Handling end of request (req: %p)\n", req);
 
     // Acknowledge now the data since they are gone, to let the other backend protocol sending the
@@ -364,6 +371,35 @@ void IDmaBeAxi::write_handle_req_end(vp::IoReq *req)
 
     // For now we ignore the latency for write requests.
     // This will be better modeled when we switch to the new AXI router
+}
+
+
+
+// SNAX: a request to AXI, as it leaves (a router moves its address)
+void IDmaBeAxi::burst_sent(vp::IoReq *req, IdmaTransfer *transfer)
+{
+    if (this->beats.get_active())
+    {
+        this->sent_bursts[req] = {this->clock.get_cycles(), transfer->parent->id, req->get_addr(),
+            req->get_size()};
+    }
+}
+
+
+
+// SNAX: its burst line, now that its data is back or it is acknowledged
+void IDmaBeAxi::burst_back(vp::IoReq *req, int64_t back)
+{
+    auto it = this->sent_bursts.find(req);
+    if (it == this->sent_bursts.end())
+    {
+        return;
+    }
+    SentBurst &b = it->second;
+    this->beats.msg(vp::Trace::LEVEL_INFO, "%ld burst id=%lu op=%s addr=0x%lx size=%lu back=%ld\n",
+        (long)b.cycle, (unsigned long)b.id, req->get_is_write() ? "w" : "r",
+        (unsigned long)b.addr, (unsigned long)b.size, (long)back);
+    this->sent_bursts.erase(it);
 }
 
 
