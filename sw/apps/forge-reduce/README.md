@@ -73,7 +73,7 @@ draws it, and `OUT` the sums; it depends on the manifest and the Makefile.
 In the container, from snax-gvsoc, with GVSoC built and the program made:
 
     source sourceme.sh
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vsum/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vsum/snax_forge.hjson \
         --work-dir build/work/forge-reduce --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge-reduce/vsum/forge-reduce.elf run
 

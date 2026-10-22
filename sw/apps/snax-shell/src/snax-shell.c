@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The shell program, on snax_hjson with forge/vecadd/snax_alu.hjson: SnaxShell
+// The shell program, on snax_hjson with forge/vecadd/snax_forge.hjson: SnaxShell
 // and SnaxUnit (lockstep add, 4 lanes of 64 bit) behind snax-alu's streamer
 // (snax/snax_unit_acc.py). snax-alu's DMA and streamer setup; the shell's
 // CSRs from forge/vecadd/include/acc_csr.h. One streamer run of LOOP_ITER

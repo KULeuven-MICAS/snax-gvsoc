@@ -43,7 +43,7 @@ counter against the unit's run line for that task (`check_counter`).
 In the container, from snax-gvsoc, with GVSoC built and the program made:
 
     source sourceme.sh
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 

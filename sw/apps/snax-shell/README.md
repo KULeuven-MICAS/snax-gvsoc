@@ -2,7 +2,7 @@
 
 `SnaxShell` and `SnaxUnit` (a lockstep add of 4 lanes of 64 bit behind
 `snax_alu`'s streamer), driven by hand on `snax_hjson` with
-`forge/vecadd/snax_alu.hjson`. snax-alu's DMA and streamer setup
+`forge/vecadd/snax_forge.hjson`. snax-alu's DMA and streamer setup
 (`snax-alu-lib.h`); the streamer's and the shell's CSRs from
 `forge/vecadd/include/` (`streamer_csr_addr_map.h`, `acc_csr.h`):
 `loopCount` 978, start 979, busy 980, the counter 981. `data.h` is
@@ -33,7 +33,7 @@ In the container, from snax-gvsoc, with GVSoC built for `snax_hjson`:
 
     make -C sw/apps/snax-shell
     source sourceme.sh
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --work-dir build/work/snax-shell --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/snax-shell/snax-shell.elf run
 

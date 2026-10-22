@@ -11,26 +11,30 @@ compares it byte for byte.
 
 | Folder | Design point | Slot |
 |---|---|---|
-| `vecadd/` | `recipes/vecadd.json` (W = 4, N = 64) on `platforms/snax_alu.json` | 12 TCDM ports, `loopCount` |
-| `vecmul/` | `recipes/vecmul.json` (W = 4, N = 64, `elementwise_mul`) on `platforms/snax_alu.json` | 12 TCDM ports, `loopCount` |
-| `vsum/` | `recipes/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_accumulator`, T = N) on `platforms/snax_alu.json` | 2 TCDM ports, `loopCount`, `len` |
-| `vsum_tree/` | `recipes/vsum_tree.json` (W = 4, N = 64, `accumulate`'s `chisel_adder_tree`, T = N) on `platforms/snax_alu.json` | 5 TCDM ports, `loopCount`, `len` |
+| `vecadd/` | `recipes/vecadd.json` (W = 4, N = 64) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
+| `vecmul/` | `recipes/vecmul.json` (W = 4, N = 64, `elementwise_mul`) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
+| `vsum/` | `recipes/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_accumulator`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
+| `vsum_tree/` | `recipes/vsum_tree.json` (W = 4, N = 64, `accumulate`'s `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
 
 Each folder holds:
 
-- `snax_alu.hjson`, the cluster file, named after the base platform: its
-  source (snax-forge's `platforms/snax_alu.hjson`, a copy of
+- `snax_forge.hjson`, the cluster file, named after the base platform: its
+  source (snax-forge's `platforms/snax_alu_cluster.hjson`, a copy of
   `sw/cfg/snax_alu_cluster.hjson`, the sparse interconnect) with the
-  platform's values written back and the compute core's slot set for the
-  design: `snax_tcdm_ports`, `sparse_interconnect_config`,
-  `snax_num_rw_csr` (the shell's fields and start), `snax_num_ro_csr` (busy
-  and the counter), and two `$ref`s to the whole of the other two files.
-  The slot keeps `snax_acc_name: snax_alu` (the platform's
-  `accelerator_slot`).
-- `snax_alu_streamer.hjson`, the streamer file, named after the slot: the
+  platform's values written back, the cluster renamed `snax_forge_cluster`
+  (`name` and its entry in `bender_target`) and the compute core's only
+  slot set for the design: `snax_acc_name: snax_forge` (the platform's
+  `accelerator_slot`, so a generated accelerator takes no name of
+  snax_cluster's own), the slot's `bender_target` dropped,
+  `snax_tcdm_ports`, `sparse_interconnect_config`, `snax_num_rw_csr` (the
+  shell's fields and start), `snax_num_ro_csr` (busy and the counter), then
+  `snax_disable_csr_manager: true` and `snax_forge_rtl: "rtl/files.f"`
+  (the RTL's file list in snax-forge's bundle, for snax_cluster; this repo
+  ignores both), and two `$ref`s to the whole of the other two files.
+- `snax_forge_streamer.hjson`, the streamer file, named after the slot: the
   streamer template lowered for the design point (readers the input ports
   in the BRM's port order, writers the output ports).
-- `snax_alu_acc.hjson`, the accelerator file: the datapath block the
+- `snax_forge_acc.hjson`, the accelerator file: the datapath block the
   standard composite takes (`snax/snax_cfg.py` lists its fields,
   `snax/snax_unit_acc.py` builds it).
 - `include/`: the headers a program drives it with
@@ -61,7 +65,7 @@ From a snax-forge checkout next to this one (snax-forge README, "Refreshing
 a fixture"), the folder cleared first:
 
     pixi run sandbox recipes/vecadd.json
-    pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_alu.json
+    pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_forge.json
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
 (the same with `vecmul`, `vsum` or `vsum_tree`), then commit the folder as written and
@@ -75,7 +79,7 @@ by the generic app, and gvrun runs the installed `snax_hjson` on the cluster
 file:
 
     make -C sw/apps/forge DESIGN=vecadd
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
 The reader resolves the `$ref`s (relative to the cluster file), the slot's
