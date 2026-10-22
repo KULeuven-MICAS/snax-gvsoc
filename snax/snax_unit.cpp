@@ -64,7 +64,8 @@
 // Beats: `fire` per firing (its index n in the run, each input's beat b as
 // the streamer hands it back, -1 if it does not, and the input words), `push`
 // per result pushed (its index n among the run's results, the firings it
-// folds, the output words).
+// folds, the output words), and `class` (mode) in the first cycle of each run
+// of one class: the rule's class per busy cycle, the one the run line counts.
 //
 // VCD signals (snax_events.hpp, gtkwave only): busy (from s + 1 to E), fire
 // and push (1 in a cycle the unit fires, pushes), cycle_class (0 idle, 1 busy,
@@ -127,6 +128,7 @@ private:
     SnaxUnitRule rule;
     int64_t first_fire;         // the run's first and last firing, for its done line
     int64_t last_fire;
+    int line_class;             // the class of the last class line in this run, -1 none
 
     // A result computed and not pushed yet: its words and the firings it folds
     struct Result
@@ -301,6 +303,7 @@ void SnaxUnit::reset(bool active)
         this->results.clear();
         this->first_fire = this->last_fire = -1;
         this->pushes = 0;
+        this->line_class = -1;
     }
 }
 
@@ -408,6 +411,7 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
                 (long)cycle, count, rate);
             _this->first_fire = _this->last_fire = -1;
             _this->pushes = 0;
+            _this->line_class = -1;
             if (_this->busy_itf.is_bound())
             {
                 _this->busy_itf.sync(true);
@@ -490,6 +494,12 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         _this->sigs.set(_this->sig_fire, step.fire);
         _this->sigs.set(_this->sig_push, step.push);
         _this->sigs.set(_this->sig_class, step.cls + 1);
+        if (step.cls != _this->line_class)
+        {
+            _this->line_class = step.cls;
+            _this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld class mode=%s\n", (long)cycle,
+                snax_unit_class_names[step.cls]);
+        }
         if (step.fire)
         {
             uint32_t n = _this->rule.firings - 1;

@@ -59,7 +59,10 @@
 // Per mover, the cycles of each run are classed as SNAX-MODEL classed them:
 // busy (a channel granted) > stall_xbar (requested, none granted) >
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
-// them with the highest queue count per lane when the streamer is done.
+// them with the highest queue count per lane when the streamer is done. The
+// cycles classed run from s + 1 to e; with the beats trace on, a class line
+// gives the first cycle of each run of one class (cycles slept through are
+// classed, and their line written, when the mover wakes).
 //
 // A lane's queue count in a cycle is the RTL queue's, the one the priority
 // hint reads: the words visible by then and not popped before it, so the
@@ -148,6 +151,7 @@ struct Mover
     // Cycle classes of the current run, and the class of the cycles it sleeps
     int64_t classes[NB_CLASSES];
     CycleClass gap_class;
+    int line_class;             // the class of its last class line in this run, -1 none
     bool done;                  // its done line is written for this run
 };
 
@@ -211,6 +215,7 @@ private:
     bool priority_hint(Channel &ch, int64_t cycle);
     void end_run(int64_t cycle);
     void mover_done(Mover &mover, int64_t cycle);
+    void classify(Mover &mover, CycleClass cls, int64_t first, int64_t cycles);
 
     vp::Trace trace;
     SnaxEvents ev;
@@ -604,6 +609,7 @@ void SnaxStreamer::start(int64_t cycle)
             mover.classes[c] = 0;
         }
         mover.gap_class = IDLE;
+        mover.line_class = -1;
 
         this->trace.msg(vp::Trace::LEVEL_DEBUG, "Mover %s: pointer 0x%x, %s\n",
             mover.name.c_str(), mover.ptr,
@@ -662,7 +668,8 @@ void SnaxStreamer::end_run(int64_t cycle)
         this->end_cycle, this->counter_at(this->end_cycle + 1));
     for (Mover &mover : this->movers)
     {
-        mover.classes[IDLE] += this->end_cycle - this->classed_cycle;
+        this->classify(mover, IDLE, this->classed_cycle + 1,
+            this->end_cycle - this->classed_cycle);
     }
     this->classed_cycle = this->end_cycle;
     this->summary_event.enqueue(1);
@@ -678,6 +685,24 @@ void SnaxStreamer::mover_done(Mover &mover, int64_t cycle)
         this->sigs.set_from(*this->sig_mover_busy[&mover - this->movers.data()], 0, cycle + 1);
         this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld done mover=%s\n", (long)cycle,
             mover.name.c_str());
+    }
+}
+
+
+// cycles cycles of the mover's run from first on are of class cls; a class
+// line when it is not the class of the cycle before
+void SnaxStreamer::classify(Mover &mover, CycleClass cls, int64_t first, int64_t cycles)
+{
+    if (cycles <= 0)
+    {
+        return;
+    }
+    mover.classes[cls] += cycles;
+    if (cls != mover.line_class)
+    {
+        mover.line_class = cls;
+        this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld class mover=%s mode=%s\n", (long)first,
+            mover.name.c_str(), class_names[cls]);
     }
 }
 
@@ -1005,7 +1030,8 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
     for (Mover &mover : _this->movers)
     {
         // The cycles slept through keep the class the mover had when it slept
-        mover.classes[mover.gap_class] += cycle - _this->classed_cycle - 1;
+        _this->classify(mover, mover.gap_class, _this->classed_cycle + 1,
+            cycle - _this->classed_cycle - 1);
 
         bool granted = false, requested = false;
         for (int lane = 0; lane < mover.num_channel; lane++)
@@ -1014,8 +1040,8 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
             granted |= ch.granted;
             requested |= ch.requested;
         }
-        mover.classes[granted ? BUSY : requested ? STALL_XBAR :
-            _this->has_addresses(mover) ? STALL_FIFO : IDLE]++;
+        _this->classify(mover, granted ? BUSY : requested ? STALL_XBAR :
+            _this->has_addresses(mover) ? STALL_FIFO : IDLE, cycle, 1);
     }
     _this->classed_cycle = cycle;
 

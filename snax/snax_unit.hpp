@@ -108,6 +108,10 @@ inline uint64_t snax_unit_tree(int op, bool is_signed, int width, const uint64_t
 }
 
 
+// SnaxUnitRule's classes by name, as its run line and the class lines give them
+static const char *const snax_unit_class_names[] = {"busy", "stall_in", "stall_out", "flush"};
+
+
 class SnaxUnitRule
 {
 public:
