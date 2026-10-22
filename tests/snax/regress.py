@@ -21,7 +21,8 @@ every folder of forge/ (FORGE_DIR) with the generic app `forge`
 `forge-reduce.vsum-r16` (FORGE_REDUCE: vsum with its len overridden to 16 by
 hand, four sums, since no kernel gives T < n, snax-forge open item 81): the
 fixture's manifest.json gives its cluster file, the unit's trace path and
-each accelerator task's beats; it runs on `snax_hjson` with
+each accelerator task's beats (the unit's `summary`, `events` and `beats`
+traces under the trace path are on); it runs on `snax_hjson` with
 `--param hjson=<cluster file>` (its components are not the default file's,
 so gvrun warns and runs it on the JSON config), with the counter checks;
 then
@@ -36,8 +37,8 @@ hand with phases.py (README, "Comparing with the RTL").
 The counter check (check_counter): a program on SnaxShell and
 SnaxUnit prints the shell's counter after a unit run; it passes when the
 counter is busy + stall_in + stall_out + flush of the unit's summary line
-for that run (`run index=<k> ...`, docs/EVENTS.md) and that run fired the
-task's beats. A
+for that run (`run index=<k> ...` in trace.log, docs/EVENTS.md) and that run
+fired the task's beats. A
 hand-written program (snax-shell, forge-reduce) prints
 `<program> counter: <n>` for run 0, its beats snax-shell's SHELL_BEATS or
 the fixture's first task's; a generated one (check_counters) prints
@@ -49,6 +50,10 @@ the streamers' `summary`, `events` and `beats` traces on (CLASS_TRACES); it
 passes when, per run of the unit and of each mover, the lengths of its
 class runs (the `class` lines) add up per class to its summary line's
 counts and cover its busy span exactly.
+
+Both checks read trace.log through classes.parse(): a line of it that is not
+a whole trace line fails the run, naming the file and the line number,
+instead of being skipped (check_traces).
 
 gvrun runs with PYTHONDONTWRITEBYTECODE=1, so no __pycache__ lands beside
 the modules it imports. Each run's stdout and stderr go to build/regress/work/<name>/run.log, a
@@ -95,8 +100,11 @@ SHELL_BEATS = 16
 # RATE_OVERRIDE). len 16 for vsum's T = N = 64, 4 sums per run, the
 # multi-output path, which no kernel gives yet (T < n, snax-forge open item 81)
 FORGE_REDUCE = [("vsum", 16)]
-# The streamers' traces a forge/ run also writes, for the class check, one
-# --trace each (GVSoC compiles them as POSIX basic regexes: no +, no |)
+# The unit's traces a forge/ run writes below its manifest's trace path, and
+# the streamers' for the class check, one --trace each (GVSoC compiles them as
+# POSIX basic regexes: no +, no |): docs/EVENTS.md's only, not the components'
+# own `comp` and `trace` lines, so every line of trace.log has its grammar
+UNIT_TRACES = ("summary", "events", "beats")
 CLASS_TRACES = [f"snax_acc[0-9]*/streamer/{t}$" for t in ("summary", "events", "beats")]
 SIZES = [4, 100, 128, 1024, 4096]
 # The SNAX programs built once into one ELF per case, <program>-<case>.elf
@@ -134,14 +142,9 @@ def gvrun(target, elf, workdir, log, options=()):
     return p.returncode
 
 
-RUN_LINE = re.compile(
-    r"run index=(\d+) firings=(\d+) busy=(\d+) stall_in=(\d+) stall_out=(\d+) flush=(\d+)")
-
-
-def check_run(counter, trace, run, beats):
-    """A counter against the unit's line for run `run` in trace, which must have
-    fired beats times. Returns None when it holds, else why not."""
-    lines = {int(m.group(1)): [int(n) for n in m.groups()[1:]] for m in RUN_LINE.finditer(trace)}
+def check_run(counter, lines, run, beats):
+    """A counter against the unit's line for run `run` (lines: classes.unit_runs()),
+    which must have fired beats times. Returns None when it holds, else why not."""
     if run not in lines:
         return f"no `run index={run}` line in the unit's trace"
     firings, *classes = lines[run]
@@ -153,21 +156,21 @@ def check_run(counter, trace, run, beats):
     return None
 
 
-def check_counter(program, log, beats):
+def check_counter(program, log, lines, beats):
     """The counter check of a hand-written program: `<program> counter: <n>`
-    in log (the program's output and the unit's trace) against run 0. Returns
-    None when it holds, else why not."""
+    in log (the program's output) against run 0 of lines (the unit's runs,
+    classes.unit_runs()). Returns None when it holds, else why not."""
     counter = re.search(rf"^{re.escape(program)} counter: (\d+)$", log, re.MULTILINE)
     if counter is None:
         return f"no `{program} counter:` line"
-    return check_run(int(counter.group(1)), log, 0, beats)
+    return check_run(int(counter.group(1)), lines, 0, beats)
 
 
-def check_counters(log, tasks):
+def check_counters(log, lines, tasks):
     """The counter checks of a generated program: per accelerator task of the
     manifest, in order, `forge counter <task>: <n>` in log (the program's
-    output and the unit's trace) against run k. Returns None when they hold,
-    else why not."""
+    output) against run k of lines (the unit's runs, classes.unit_runs()).
+    Returns None when they hold, else why not."""
     if not tasks:
         return "no accelerator task in the manifest"
     for k, task in enumerate(tasks):
@@ -175,10 +178,30 @@ def check_counters(log, tasks):
                             re.MULTILINE)
         if counter is None:
             return f"no `forge counter {task['name']}:` line"
-        why = check_run(int(counter.group(1)), log, k, task["beats"])
+        why = check_run(int(counter.group(1)), lines, k, task["beats"])
         if why is not None:
             return f"{task['name']}: {why}"
     return None
+
+
+def check_traces(log, traces, counters):
+    """A forge/ run's checks on its run.log (log) and its trace.log (traces):
+    every line of trace.log parses (classes.parse), then counters(output,
+    unit runs) and the class check hold. Returns (None, None) when they do,
+    else (why not, the file it read)."""
+    try:
+        name = str(traces.relative_to(ROOT))
+    except ValueError:  # not below the checkout
+        name = str(traces)
+    try:
+        parsed = classes.parse(traces.read_text(errors="replace"), name)
+    except classes.LineError as e:
+        return str(e), traces
+    why = counters(log.read_text(errors="replace"), classes.unit_runs(parsed))
+    if why is not None:
+        return why, log
+    why = classes.check(parsed)
+    return (None, None) if why is None else (why, traces)
 
 
 def make(path, *args):
@@ -224,10 +247,9 @@ class Check:
 
     def run_fixture(self, name, design, app, elf, make_args, counters):
         """Builds app (make_args) and runs elf on FORGE_TARGET with forge/<design>/'s
-        cluster file, the unit's trace and CLASS_TRACES on, into trace.log beside
-        the run's log; counters(text, manifest) is its counter check on the log and
-        the traces, None when it holds, else why not; then the class check on the
-        traces."""
+        cluster file, the unit's UNIT_TRACES and CLASS_TRACES on, into trace.log beside
+        the run's log; then check_traces() with counters(log, unit runs,
+        manifest), its counter check."""
         if not self.selected(name):
             return
         folder = FORGE_DIR / design
@@ -238,18 +260,15 @@ class Check:
         log = self.run(name, FORGE_TARGET, elf,
                        options=["--param", f"hjson={(folder / manifest['cluster']).resolve()}",
                                 *(f"--trace={t}:{traces}"
-                                  for t in (manifest["trace"], *CLASS_TRACES))])
+                                  for t in (*(f"{manifest['trace']}/{u}$" for u in UNIT_TRACES),
+                                            *CLASS_TRACES))])
         if log is not None:
             # The traces in their own file: GVSoC buffers its stdout, so the
-            # program's output there can cut a trace line in two
-            text = traces.read_text(errors="replace")
-            why = counters(log.read_text(errors="replace") + "\n" + text, manifest)
+            # program's output there could cut a trace line in two
+            why, where = check_traces(log, traces,
+                                      lambda text, runs: counters(text, runs, manifest))
             if why is not None:
-                self.fail(name, why, log)
-                return
-            why = classes.check(text)
-            if why is not None:
-                self.fail(name, why, traces)
+                self.fail(name, why, where)
 
     def run_script(self, name, script):
         """Runs a test script, its output into the log; it passes when it
@@ -314,7 +333,7 @@ def main():
     prog, name = "snax-shell", f"snax-shell.{FORGE_TARGET}"
     print(f"{prog} on {FORGE_TARGET}, forge/{SHELL_DESIGN}/'s cluster file")
     check.run_fixture(name, SHELL_DESIGN, prog, BUILD / "apps" / prog / f"{prog}.elf", [],
-                      lambda log, _: check_counter(prog, log, SHELL_BEATS))
+                      lambda log, runs, _: check_counter(prog, log, runs, SHELL_BEATS))
     print(f"  {check.count - count} run")
 
     count = check.count
@@ -326,14 +345,15 @@ def main():
         check.run_fixture(f"{FORGE_APP}.{design}", design, FORGE_APP,
                           BUILD / "apps" / FORGE_APP / design / f"{FORGE_APP}.elf",
                           [f"DESIGN={design}"],
-                          lambda log, manifest: check_counters(log, manifest["tasks"]))
+                          lambda log, runs, manifest: check_counters(log, runs,
+                                                                     manifest["tasks"]))
     for design, rate in FORGE_REDUCE:
         prog, variant = "forge-reduce", f"{design}-r{rate}"
         check.run_fixture(f"{prog}.{variant}", design, prog,
                           BUILD / "apps" / prog / variant / f"{prog}.elf",
                           [f"DESIGN={design}", f"RATE_OVERRIDE={rate}"],
-                          lambda log, manifest: check_counter(
-                              "forge-reduce", log, manifest["tasks"][0]["beats"]))
+                          lambda log, runs, manifest: check_counter(
+                              "forge-reduce", log, runs, manifest["tasks"][0]["beats"]))
     print(f"  {check.count - count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")

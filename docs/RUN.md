@@ -155,8 +155,9 @@ at start-up; the last but one is its start (`Start at cycle 2932: count
 ### Beats, stalls and a VCD
 
 The levels above `task` are more trace names (`docs/EVENTS.md`): `beats`
-for every grant, DMA beat and burst, firing and push, `stalls` for every
-refused request and queue count, each a `--trace` regex into one file. The
+for every grant, DMA beat and burst, firing and push and every change of a
+unit's or mover's cycle class (`class`), `stalls` for every refused request
+and queue count, each a `--trace` regex into one file. The
 crossbar writes them for its SNAX ports and the DMA unless `--param
 chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...` names others:
 

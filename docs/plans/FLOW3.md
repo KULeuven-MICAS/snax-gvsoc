@@ -16,7 +16,8 @@ This file is the checklist; a step is ticked here when it is committed.
   `flow3-r1a` in both. Round 1b the same on `ry/flow3-2`, tagged
   `flow3-r1b`; round 2a on `ry/flow3-4`, tagged `flow3-r2a` (local).
   Round 3's first half on `ry/flow3-6`, tagged `flow3-r3a` in snax-forge
-  (local).
+  (local); its second half on `ry/flow3-7`, tagged `flow3-r3b` in
+  snax-forge (local).
 - Acceptance is pass/fail; anything not verified is said so.
 
 ## Acceptance
@@ -64,7 +65,7 @@ cycles, and the cluster answer at an event cycle names only its lines.
 | 1c | RET1: SNAX-MODEL removed from snax-forge, in round 1's PR |
 | 2a | The beat- and stall-level events (`docs/EVENTS.md`): the crossbar's `grant`, `dma` and `stall`, the AXI backend's `burst`, the unit's `fire` and `push`, the streamer's `fifo`, linked by ids and carrying values (snax-forge open items 23, 25); the `stalls` trace; the levels `beat`, `stall` and `finegrained` (the cores' `insn`); the crossbar's source filter; VCD signals, a gtkwave dump only; snax-forge's converter for them, with its invariants |
 | 2b | snax-forge's memory view (D96) and movement view (D97) rebuilt on 2a's events, on `ry/flow3-5` |
-| 3 | The schedule inside the program's window, with a lane per core and folded stretches, and the cluster view at a cycle (snax-forge D57); 3a (G1, S0 to S4) on `ry/flow3-6`, 3b (S5 to S7) later on another branch |
+| 3 | The schedule inside the program's window, with a lane per core and folded stretches, and the cluster view at a cycle (snax-forge D57); 3a (G1, S0 to S4) on `ry/flow3-6`, 3b (S5 to S7) on `ry/flow3-7` |
 
 ## Round 1a steps
 
@@ -115,14 +116,14 @@ G1 is this repo's; S0 to S7 are snax-forge's.
 |---|---|---|
 | G1 | The unit's and the streamer's `class` lines in `beats` on each change of class (`docs/EVENTS.md`); `tests/snax/classes.py`, the class check on the forge/ runs of `make regress` | done |
 | G1b | `make regress`'s forge/ runs write their traces to `trace.log`, not stdout: CI's run had the program's output cut a `class` line in two, and the class check failed on forge.vecadd | done |
-| S0 | snax-forge docs: STATUS (round 2b merged, the FLOW3 row cut to scope and acceptance), C§7's `class` and the class totals on `done`, D57, ARCHITECTURE's viewer | |
-| S1 | `N` a recipe param of vecadd, vecmul, vsum and vsum_tree; the stress run at `N=512`, `W=4` and `W=8`, every level | |
-| S2 | The converter's class part: `class` lines into C§7, the summary's class totals on `done`, the class-run invariant; the core's spans in one function of `run/` | |
-| S3 | The schedule's query: `viz/index.py`'s class runs, spans, copies, event and boundary cycles; `viz/schedule.py` (lanes, folded segments, detail); its routes | |
-| S4 | The cluster view's query and stepping: `viz/cluster.py` (`cluster_at`, `step`); their routes | |
-| S5 | The schedule and cluster views drawn in `static/*.js` from S3's and S4's answers | later |
-| S6 | loop1 | later |
-| S7 | Closing docs and round 3's acceptance | later |
+| S0 | snax-forge docs: STATUS (round 2b merged, the FLOW3 row cut to scope and acceptance), C§7's `class` and the class totals on `done`, D57, ARCHITECTURE's viewer | done |
+| S1 | `N` a recipe param of vecadd, vecmul, vsum and vsum_tree; the stress run at `N=512`, `W=4` and `W=8`, every level | done |
+| S2 | The converter's class part: `class` lines into C§7, the summary's class totals on `done`, the class-run invariant; the core's spans in one function of `run/` | done |
+| S3 | The schedule's query: `viz/index.py`'s class runs, spans, copies, event and boundary cycles; `viz/schedule.py` (lanes, folded segments, detail); its routes | done |
+| S4 | The cluster view's query and stepping: `viz/cluster.py` (`cluster_at`, `step`); their routes | done |
+| S5 | The schedule and cluster views drawn in `static/*.js` from S3's and S4's answers only; the old `/events` and `/fifo` routes removed | done |
+| S6 | loop1 on SNAX-GVSoC: vecadd at `N=512`, then `W=8`, predicted and checked | done |
+| S7 | Closing docs and round 3's acceptance; here, `make regress`'s line checks (`classes.parse`) fail on a line of `trace.log` they cannot parse, naming the file and line, instead of skipping it (`tests/snax/test_classes.py`), and its forge/ runs write only the unit's and the streamer's `docs/EVENTS.md` traces there, not GVSoC's own `comp` and `trace` lines | done |
 
 ## Round 2a findings
 
