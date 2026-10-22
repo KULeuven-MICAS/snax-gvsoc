@@ -114,6 +114,7 @@ G1 is this repo's; S0 to S7 are snax-forge's.
 | # | Step | Status |
 |---|---|---|
 | G1 | The unit's and the streamer's `class` lines in `beats` on each change of class (`docs/EVENTS.md`); `tests/snax/classes.py`, the class check on the forge/ runs of `make regress` | done |
+| G1b | `make regress`'s forge/ runs write their traces to `trace.log`, not stdout: CI's run had the program's output cut a `class` line in two, and the class check failed on forge.vecadd | done |
 | S0 | snax-forge docs: STATUS (round 2b merged, the FLOW3 row cut to scope and acceptance), C§7's `class` and the class totals on `done`, D57, ARCHITECTURE's viewer | |
 | S1 | `N` a recipe param of vecadd, vecmul, vsum and vsum_tree; the stress run at `N=512`, `W=4` and `W=8`, every level | |
 | S2 | The converter's class part: `class` lines into C§7, the summary's class totals on `done`, the class-run invariant; the core's spans in one function of `run/` | |

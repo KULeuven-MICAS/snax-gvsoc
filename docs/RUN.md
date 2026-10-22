@@ -223,8 +223,9 @@ About two minutes:
     regression passed
 
 Each run's output is in `build/regress/work/<name>/run.log`, beside its
-`gvsoc_config.json`; a failure prints that path and the log's last 20
-lines. `K=` runs only the programs whose name holds it (`make regress -k`
+`gvsoc_config.json`, and a forge/ run's traces in `trace.log` beside it
+(GVSoC buffers its stdout, so the program's output there can cut a trace
+line in two); a failure prints the file it read and its last 20 lines. `K=` runs only the programs whose name holds it (`make regress -k`
 does not: make reads `-k` itself):
 
     make regress K=forge
@@ -247,6 +248,7 @@ does not: make reads `-k` itself):
     gvsoc_config.json
     gvsoc_runtime_config.txt
     run.log
+    trace.log
     trace_file.txt
 
 ## 7. The unit tests

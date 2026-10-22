@@ -71,13 +71,15 @@ jobs:
       - name: Regress
         run: make regress
 
-      # The run.log of every program, when a step failed.
+      # The run.log of every program and a forge/ run's trace.log, when a step failed.
       - name: Upload regress logs
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: regress-logs
-          path: build/regress/work/**/run.log
+          path: |
+            build/regress/work/**/run.log
+            build/regress/work/**/trace.log
           if-no-files-found: ignore
 
       # Saved on every run with a build, PRs included: the cache is tens of MB.

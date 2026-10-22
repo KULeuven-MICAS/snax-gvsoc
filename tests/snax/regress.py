@@ -51,8 +51,10 @@ class runs (the `class` lines) add up per class to its summary line's
 counts and cover its busy span exactly.
 
 gvrun runs with PYTHONDONTWRITEBYTECODE=1, so no __pycache__ lands beside
-the modules it imports. Each run's stdout and stderr go to build/regress/work/<name>/run.log; a
-failure prints that path and the log's last lines. Under GitHub Actions
+the modules it imports. Each run's stdout and stderr go to build/regress/work/<name>/run.log, a
+forge/ run's traces to trace.log beside it (GVSoC buffers its stdout, so the
+program's output written there can cut a trace line in two); a failure
+prints the file it read and its last lines. Under GitHub Actions
 (GITHUB_ACTIONS=true) each failure also prints an `::error` line, an
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
 runs only the programs whose name holds it.
@@ -222,24 +224,32 @@ class Check:
 
     def run_fixture(self, name, design, app, elf, make_args, counters):
         """Builds app (make_args) and runs elf on FORGE_TARGET with forge/<design>/'s
-        cluster file, the unit's trace and CLASS_TRACES on; counters(log, manifest) is
-        its counter check, None when it holds, else why not; then the class check."""
+        cluster file, the unit's trace and CLASS_TRACES on, into trace.log beside
+        the run's log; counters(text, manifest) is its counter check on the log and
+        the traces, None when it holds, else why not; then the class check on the
+        traces."""
         if not self.selected(name):
             return
         folder = FORGE_DIR / design
         # Plain json: the manifest is snax-forge's, read without it
         manifest = json.loads((folder / "manifest.json").read_text())
         make(APPS / app, *make_args)
+        traces = WORK / name / "trace.log"
         log = self.run(name, FORGE_TARGET, elf,
                        options=["--param", f"hjson={(folder / manifest['cluster']).resolve()}",
-                                f"--trace={manifest['trace']}",
-                                *(f"--trace={t}" for t in CLASS_TRACES)])
+                                *(f"--trace={t}:{traces}"
+                                  for t in (manifest["trace"], *CLASS_TRACES))])
         if log is not None:
-            # Program output and trace share the log
-            text = log.read_text(errors="replace")
-            why = counters(text, manifest) or classes.check(text)
+            # The traces in their own file: GVSoC buffers its stdout, so the
+            # program's output there can cut a trace line in two
+            text = traces.read_text(errors="replace")
+            why = counters(log.read_text(errors="replace") + "\n" + text, manifest)
             if why is not None:
                 self.fail(name, why, log)
+                return
+            why = classes.check(text)
+            if why is not None:
+                self.fail(name, why, traces)
 
     def run_script(self, name, script):
         """Runs a test script, its output into the log; it passes when it
