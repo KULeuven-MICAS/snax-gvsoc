@@ -12,46 +12,91 @@ line, lie inside a run's span, and the lengths of the runs of each class
 (a line to the next one in the span, or to its end) must add up to the
 summary line's count of that class. Equal, or fail.
 
+parse() reads a trace file line by line: every line must be a trace line
+(GVSoC's header, then `<cycle> <kind> <key>=<value> ...`), and a `run`,
+`mover` or `class` line must have its fields, its counts integers. Any other
+line fails with the file and its line number, never skipped: a line cut in
+two by another writer turns into a wrong count when skipped. regress.py's
+counter check reads the unit's `run` lines from the same parse.
+
 `python3 tests/snax/classes.py LOG ...` checks each log, which needs the
-components' `summary` and `beats` traces on, and exits 1 on the first
-failure; regress.py calls check() on the forge/ fixtures' runs.
+components' `summary` and `beats` traces on and nothing else in it, and
+exits 1 on the first failure; regress.py calls parse() and check() on the
+forge/ fixtures' trace.log.
 """
 
 import re
 import sys
+from collections import namedtuple
 
-LINE = re.compile(r"\[(?:\x1b\[\d+m)?(?P<path>\S+)/(?P<trace>summary|beats)\s*(?:\x1b\[\d+m)?\]"
-                  r" (?P<cycle>-?\d+) (?P<kind>run|mover|class)(?P<fields>( \S+=\S+)*)$")
+LINE = re.compile(r"^ *\d+: +-?\d+: \[(?:\x1b\[\d+m)?(?P<path>\S+)/(?P<trace>\w+) *(?:\x1b\[\d+m)?\]"
+                  r" (?P<cycle>-?\d+) (?P<kind>\w+)(?P<fields>(?: [^\s=]+=\S+)*)$")
 UNIT_CLASSES = ["busy", "stall_in", "stall_out", "flush"]
 MOVER_CLASSES = ["busy", "stall_xbar", "stall_fifo", "idle"]
+# The fields a line of these kinds must have, and those of them that are counts
+FIELDS = {"run": ["index", "firings", *UNIT_CLASSES], "mover": ["mover", "run", *MOVER_CLASSES],
+          "class": ["mode"]}
+COUNTS = {"run": FIELDS["run"], "mover": FIELDS["mover"][1:], "class": []}
+
+Line = namedtuple("Line", "number path trace cycle kind fields")
 
 
-def runs(text):
+class LineError(ValueError):
+    """A line of a trace file that does not parse; the message names the file
+    and the line number."""
+
+
+def parse(text, name="trace.log"):
+    """Every line of a trace file as a Line (module doc); a LineError naming
+    name and the line number on the first one that does not parse."""
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        m = LINE.match(line)
+        if m is None:
+            raise LineError(f"{name} line {number}: not a trace line: {line!r}")
+        fields = dict(f.split("=", 1) for f in m.group("fields").split())
+        kind, path = m.group("kind"), m.group("path")
+        need = FIELDS.get(kind, []) + (["mover"] if kind == "class" and path.endswith("/streamer")
+                                       else [])
+        missing = [f for f in need if f not in fields]
+        if missing:
+            raise LineError(f"{name} line {number}: a {kind} line without "
+                            f"{', '.join(missing)}: {line!r}")
+        bad = [f for f in COUNTS.get(kind, []) if not fields[f].isdigit()]
+        if bad:
+            raise LineError(f"{name} line {number}: {', '.join(bad)} not an integer: {line!r}")
+        out.append(Line(number, path, m.group("trace"), int(m.group("cycle")), kind, fields))
+    return out
+
+
+def unit_runs(parsed):
+    """The unit's `run` lines by index: [firings, busy, stall_in, stall_out, flush]."""
+    return {int(x.fields["index"]): [int(x.fields[f]) for f in FIELDS["run"][1:]]
+            for x in parsed if x.kind == "run"}
+
+
+def runs(parsed):
     """Per (component path, mover or None): its runs as (name, end, counts)
     and its class lines as (cycle, mode), in the log's order."""
     spans, lines = {}, {}
-    for line in text.splitlines():
-        m = LINE.search(line)
-        if m is None:
-            continue
-        fields = dict(f.split("=", 1) for f in m.group("fields").split())
-        cycle = int(m.group("cycle"))
-        key = (m.group("path"), fields.get("mover"))
-        if m.group("kind") == "class":
-            lines.setdefault(key, []).append((cycle, fields["mode"]))
-        elif m.group("kind") == "run":
-            counts = {c: int(fields[c]) for c in UNIT_CLASSES}
-            spans.setdefault(key, []).append((f"run {fields['index']}", cycle, counts))
-        else:
-            counts = {c: int(fields[c]) for c in MOVER_CLASSES}
-            spans.setdefault(key, []).append((f"run {fields['run']}", cycle, counts))
+    for x in parsed:
+        key = (x.path, x.fields.get("mover"))
+        if x.kind == "class":
+            lines.setdefault(key, []).append((x.cycle, x.fields["mode"]))
+        elif x.kind == "run":
+            counts = {c: int(x.fields[c]) for c in UNIT_CLASSES}
+            spans.setdefault(key, []).append((f"run {x.fields['index']}", x.cycle, counts))
+        elif x.kind == "mover":
+            counts = {c: int(x.fields[c]) for c in MOVER_CLASSES}
+            spans.setdefault(key, []).append((f"run {x.fields['run']}", x.cycle, counts))
     return spans, lines
 
 
-def check(text):
-    """None when every run's class lines match its summary line, else why not.
-    A log without class lines fails: the beats trace must be on."""
-    spans, lines = runs(text)
+def check(parsed):
+    """None when every run's class lines match its summary line, else why not;
+    parsed as parse() gives it. A log without class lines fails: the beats
+    trace must be on."""
+    spans, lines = runs(parsed)
     if not lines:
         return "no class lines: the beats trace is off"
     for key, items in sorted(spans.items(), key=lambda kv: (kv[0][0], kv[0][1] or "")):
@@ -84,7 +129,12 @@ def check(text):
 def main():
     for path in sys.argv[1:]:
         with open(path, errors="replace") as f:
-            why = check(f.read())
+            text = f.read()
+        try:
+            why = check(parse(text, path))
+        except LineError as e:
+            print(e)  # it names the file and the line
+            return 1
         if why is not None:
             print(f"{path}: {why}")
             return 1
