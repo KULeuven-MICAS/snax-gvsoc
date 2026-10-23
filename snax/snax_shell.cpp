@@ -4,41 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxShell (D130 in snax-forge): the CSR manager in front of a SnaxUnit,
-// GeMMX's shell contract as snax_cluster gives it (05615e4): the
-// ReqRspManager (hw/chisel/.../reqRspManager/ReqRspManager.scala) holding the
-// read-write CSRs, BlockGemm's ctrl handshake, busy and performance counter
-// (hw/chisel_acc/.../gemm/BlockGemm.scala).
-//
-// CSRs, offsets from its first CSR (the CSR mux removes it): the fields
-// (property `fields`, in order), then start: read-write, read back as
-// written; then busy and the counter: read-only (ro_set[0], ro_set[1]).
-//
-// Rules, c being the cycle of an access:
-//   - a write to a field, or to start with bit 0 clear, is taken at once;
-//   - a start (bit 0 of the start CSR written 1) goes to the unit's ctrl as
-//     the fields as they stand, in CSR order, when the unit is idle in c
-//     (BlockGemm: ctrl.ready is idle); the start is then accepted in c and
-//     the write answered at once. While the unit is busy in c the write is
-//     held (IO_REQ_PENDING: the ReqRspManager's req.ready is ctrl.ready), and
-//     sent, then answered, in the cycle busy falls: E + 1, E the run's last
-//     cycle;
-//   - busy reads the unit's busy in c;
-//   - the counter is reset by an accepted start and counts each busy cycle,
-//     then holds after the run (BlockGemm's performance_counter): at c it is
-//     the busy cycles after the accepted start and before c. A start the unit
-//     ignores (count 0) still resets it.
-// Busy and the counter are computed when read, from the cycles the unit's
-// busy wire rose (busy from the next cycle) and fell (idle from the next).
-// The unit sets the wire synchronously in the ctrl write that starts it, so a
-// start sent in c sees its rise in c.
+// SnaxShell (D130 in snax-forge): the CSR manager in front of a SnaxUnit.
+// Its rule (the CSRs, start, hold while busy, busy, the counter) is
+// SnaxShellRule in snax_shell.hpp, which tests/snax/shell/ checks against
+// hand-worked cases; this file wires it to the CSR port, the unit's ctrl and
+// busy ports, and the event that takes a held start in E + 1.
 
-#include <algorithm>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
 #include <vp/itf/wire.hpp>
 #include "snax_csr_block.hpp"
+#include "snax_shell.hpp"
 
 
 class SnaxShell : public vp::Component
@@ -52,9 +29,6 @@ private:
     static void send_handler(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
 
-    bool unit_idle(int64_t cycle);
-    bool busy_at(int64_t cycle);
-    uint32_t counter_at(int64_t cycle);
     void send(int64_t cycle);
 
     vp::Trace trace;
@@ -65,18 +39,12 @@ private:
     vp::IoReq ctrl_req;
 
     int nb_fields;
-    int start_index;            // the start CSR: the last read-write one
+    SnaxShellRule rule;
+    // The CSRs' decoding, refusals and messages; its registers mirror the
+    // rule's, written in the same calls
     SnaxCsrBlock csrs;          // the fields, start; busy, counter
     std::vector<uint32_t> config_words;
-
-    // The unit's busy wire: the cycles it last rose and fell (-1 if not)
-    int64_t rise_cycle;
-    int64_t fall_cycle;
-    // The last accepted start (-1 if none)
-    int64_t accept_cycle;
-    // A start held while busy, and the value it writes to the start CSR
-    vp::IoReq *held_req;
-    uint32_t held_value;
+    vp::IoReq *held_req;        // the held start's request (rule.held)
 };
 
 
@@ -106,7 +74,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     }
 
     this->nb_fields = fields->get_size();
-    this->start_index = this->nb_fields;
+    this->rule.configure(this->nb_fields);
     this->csrs.configure(&this->trace, csr_base->get_int(), this->nb_fields + 1, 2);
     this->config_words.resize(this->nb_fields);
 
@@ -129,41 +97,9 @@ void SnaxShell::reset(bool active)
     if (active)
     {
         this->csrs.reset();
-        this->rise_cycle = this->fall_cycle = -1;
-        this->accept_cycle = -1;
+        this->rule.reset();
         this->held_req = nullptr;
     }
-}
-
-
-// Idle in cycle: never started, or the last run ended before it
-bool SnaxShell::unit_idle(int64_t cycle)
-{
-    return this->rise_cycle == -1 || (this->fall_cycle != -1 && this->fall_cycle < cycle);
-}
-
-
-bool SnaxShell::busy_at(int64_t cycle)
-{
-    return this->rise_cycle != -1 && cycle > this->rise_cycle &&
-        (this->fall_cycle == -1 || cycle <= this->fall_cycle);
-}
-
-
-// The busy cycles in [accept + 1, cycle - 1]
-uint32_t SnaxShell::counter_at(int64_t cycle)
-{
-    if (this->accept_cycle == -1 || this->rise_cycle == -1)
-    {
-        return 0;
-    }
-    int64_t first = std::max(this->accept_cycle, this->rise_cycle) + 1;
-    int64_t last = cycle - 1;
-    if (this->fall_cycle != -1 && this->fall_cycle < last)
-    {
-        last = this->fall_cycle;
-    }
-    return last >= first ? last - first + 1 : 0;
 }
 
 
@@ -172,7 +108,7 @@ void SnaxShell::send(int64_t cycle)
 {
     for (int i = 0; i < this->nb_fields; i++)
     {
-        this->config_words[i] = this->csrs.regs[i];
+        this->config_words[i] = this->rule.regs[i];
     }
     this->ctrl_req.init();
     this->ctrl_req.set_size(4 * this->nb_fields);
@@ -182,7 +118,6 @@ void SnaxShell::send(int64_t cycle)
     {
         this->trace.fatal("Start refused by the unit at cycle %ld while idle\n", cycle);
     }
-    this->accept_cycle = cycle;
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld\n", cycle);
 }
 
@@ -194,7 +129,7 @@ vp::IoReqStatus SnaxShell::csr_req(vp::Block *__this, vp::IoReq *req)
 
     vp::IoReqStatus status;
     int index = _this->csrs.access(req, &status, [&](int ro) -> uint32_t {
-        return ro == 0 ? _this->busy_at(cycle) : _this->counter_at(cycle);
+        return _this->rule.read(cycle, _this->nb_fields + 1 + ro);
     });
     if (index < 0)
     {
@@ -202,27 +137,25 @@ vp::IoReqStatus SnaxShell::csr_req(vp::Block *__this, vp::IoReq *req)
     }
 
     uint32_t value = *(uint32_t *)req->get_data();
-    if (index != _this->start_index || !(value & 1))
+    SnaxShellRule::Write write = _this->rule.write(cycle, index, value);
+    if (!write.held)
     {
         _this->csrs.write(index, value);
+        if (write.start)
+        {
+            _this->send(cycle);
+        }
         return vp::IO_REQ_OK;
     }
 
-    if (_this->unit_idle(cycle))
-    {
-        _this->csrs.write(index, value);
-        _this->send(cycle);
-        return vp::IO_REQ_OK;
-    }
-
-    // Held until the cycle busy falls; if the run already ended in this
+    // Held until the cycle after busy falls; if the run already ended in this
     // cycle, that is the next one
     _this->held_req = req;
-    _this->held_value = value;
     _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start held at cycle %ld: the unit is busy\n", cycle);
-    if (_this->fall_cycle != -1 && !_this->send_event.is_enqueued())
+    int64_t release = _this->rule.release_cycle();
+    if (release != -1 && !_this->send_event.is_enqueued())
     {
-        _this->send_event.enqueue(_this->fall_cycle + 1 - cycle);
+        _this->send_event.enqueue(release - cycle);
     }
     return vp::IO_REQ_PENDING;
 }
@@ -232,22 +165,17 @@ void SnaxShell::busy_sync(vp::Block *__this, bool busy)
 {
     SnaxShell *_this = (SnaxShell *)__this;
     int64_t cycle = _this->clock.get_cycles();
-    if (busy)
+    _this->rule.busy(cycle, busy);
+    int64_t release = _this->rule.release_cycle();
+    if (release != -1 && !_this->send_event.is_enqueued())
     {
-        _this->rise_cycle = cycle;
-        _this->fall_cycle = -1;
-        return;
-    }
-    _this->fall_cycle = cycle;
-    if (_this->held_req != nullptr && !_this->send_event.is_enqueued())
-    {
-        _this->send_event.enqueue(1);
+        _this->send_event.enqueue(release - cycle);
     }
 }
 
 
-// The cycle busy falls: the held start goes to the unit, then its write is
-// answered
+// The cycle after busy falls: the held start goes to the unit, then its
+// write is answered
 void SnaxShell::send_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     SnaxShell *_this = (SnaxShell *)__this;
@@ -258,7 +186,9 @@ void SnaxShell::send_handler(vp::Block *__this, vp::ClockEvent *event)
         return;
     }
     _this->held_req = nullptr;
-    _this->csrs.write(_this->start_index, _this->held_value, " (held)");
+    _this->rule.release(cycle);
+    _this->csrs.write(_this->rule.start_index(), _this->rule.regs[_this->rule.start_index()],
+        " (held)");
     _this->send(cycle);
     req->status = vp::IO_REQ_OK;
     req->get_resp_port()->resp(req);

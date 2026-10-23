@@ -1,0 +1,14 @@
+# A field reads back as written, all 32 bits; so does start written with
+# bit 0 clear (6), which starts nothing. Writes are taken at once (answered
+# in their own cycle); a read gives the register in its cycle. No start, so
+# busy stays 0.
+fields loopCount
+config count
+wait lockstep
+inputs 2
+cycles
+# a b out  access          result      busy
+1 1 1      w 0 0xdeadbeef  0           0     # 0: loopCount, taken at once
+1 1 1      r 0             0xdeadbeef  0     # 1: as written
+1 1 1      w 1 6           2           0     # 2: start, bit 0 clear: a plain write
+1 1 1      r 1             6           0     # 3: as written

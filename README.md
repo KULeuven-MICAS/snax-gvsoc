@@ -112,7 +112,8 @@ fixture's `main.c` (`DESIGN=<design>`); `docs/RUN.md` runs `vecadd`.
 ### Regression
 
 `make regress` first runs `SnaxUnit`'s rule on its cases (`unit`,
-`tests/snax/unit/README.md`), then builds `sw/` and the programs of `sw/apps/`, runs each ELF
+`tests/snax/unit/README.md`) and `SnaxShell`'s on its own (`shell`,
+`tests/snax/shell/README.md`), then builds `sw/` and the programs of `sw/apps/`, runs each ELF
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`

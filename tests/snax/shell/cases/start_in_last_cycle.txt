@@ -1,0 +1,19 @@
+# A start offered exactly in a run's last cycle E: the unit is still busy in
+# E, so the write is held one cycle and taken in E + 1, as any held start.
+# c1's start (count 2): busy c2, c3, E = 3. The start offered in c3 is held
+# and answered in c4 = E + 1; its run is busy c5, c6 (E = 6), and the
+# counter, reset in c4, reads 0 in c5, 1 in c6 and 2 after.
+fields loopCount
+config count
+wait lockstep
+inputs 2
+cycles
+# a b out  access   result  busy
+1 1 1      w 0 2    0       0     # 0: loopCount 2
+1 1 1      w 1 1    1       0     # 1: start accepted; busy from 2
+1 1 1      r 2      1       1     # 2: fires
+1 1 1      w 1 1    4       1     # 3: fires, E: still busy, held
+1 1 1      .        -       0     # 4: E + 1: sent, answered; busy from 5
+1 1 1      r 3      0       1     # 5: [5, 4]: 0
+1 1 1      r 3      1       1     # 6: [5, 5]; E
+1 1 1      r 3      2       0     # 7: [5, 6]

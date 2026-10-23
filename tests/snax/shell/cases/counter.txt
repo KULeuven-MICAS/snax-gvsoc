@@ -1,0 +1,25 @@
+# The counter at c is the busy cycles after the accepted start and before c,
+# held after the run; the next accepted start resets it. c1's start (count
+# 3): busy c2 .. c4, so the counter reads 0, 1, 2 in c2 .. c4 and 3 after.
+# c9's start (count 2): busy c10, c11; 0 in c10 (reset, no busy cycle before
+# c10 since c9), 1, then 2 held.
+fields loopCount
+config count
+wait lockstep
+inputs 2
+cycles
+# a b out  access   result  busy
+1 1 1      w 0 3    0       0     # 0: loopCount 3
+1 1 1      w 1 1    1       0     # 1: start accepted; busy from 2
+1 1 1      r 3      0       1     # 2: busy cycles in [2, 1]: 0
+1 1 1      r 3      1       1     # 3: [2, 2]
+1 1 1      r 3      2       1     # 4: [2, 3]; E
+1 1 1      r 3      3       0     # 5: [2, 4]
+1 1 1      r 3      3       0     # 6: held
+1 1 1      r 3      3       0     # 7
+1 1 1      w 0 2    8       0     # 8: loopCount 2
+1 1 1      w 1 1    9       0     # 9: start accepted, the counter reset; busy from 10
+1 1 1      r 3      0       1     # 10: [10, 9]: 0
+1 1 1      r 3      1       1     # 11: [10, 10]; E
+1 1 1      r 3      2       0     # 12: [10, 11]
+1 1 1      r 3      2       0     # 13: held

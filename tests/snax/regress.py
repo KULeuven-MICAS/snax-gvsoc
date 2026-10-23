@@ -5,7 +5,9 @@
 """SNAX-GVSoC's regression, pass or finish: `make regress`.
 
 First runs SnaxUnit's rule against its hand-worked cases
-(tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0). Then
+(tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0), then
+SnaxShell's rule with the unit's against its own (tests/snax/shell/run.sh;
+`shell`, likewise). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
 sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
@@ -309,6 +311,11 @@ def main():
     print("SnaxUnit's rule (tests/snax/unit)")
     check.run_script("unit", HERE / "unit" / "run.sh")
     print(f"  {check.count} run")
+
+    count = check.count
+    print("SnaxShell's rule (tests/snax/shell)")
+    check.run_script("shell", HERE / "shell" / "run.sh")
+    print(f"  {check.count - count} run")
 
     make(SW)
 

@@ -1,0 +1,16 @@
+# A write to start with bit 0 clear (2) is a plain write, answered at once:
+# nothing goes to the unit, so busy stays 0 and the counter (never reset by
+# an accepted start) reads 0; start reads back 2.
+fields loopCount
+config count
+wait lockstep
+inputs 2
+cycles
+# a b out  access   result  busy
+1 1 1      w 0 4    0       0     # 0: loopCount 4
+1 1 1      w 1 2    1       0     # 1: start, bit 0 clear: taken at once, no run
+1 1 1      r 2      0       0     # 2: busy
+1 1 1      r 2      0       0     # 3
+1 1 1      r 2      0       0     # 4
+1 1 1      r 3      0       0     # 5: the counter: no accepted start
+1 1 1      r 1      2       0     # 6: start as written
