@@ -87,7 +87,7 @@ core.
 `sw/apps/snax-shell/` drives `SnaxShell` (GeMMX's shell contract: a start
 waits while busy, busy and a cycle counter) and `SnaxUnit` (a lockstep add,
 4 lanes of 64 bit) behind `snax_alu`'s streamer by hand. It runs on
-`snax_hjson` with `forge/vecadd/snax_alu.hjson`, whose datapath block and
+`snax_hjson` with `forge/vecadd/snax_forge.hjson`, whose datapath block and
 CSRs (`forge/vecadd/include/`) are that accelerator's; its README has the
 commands and the lines it prints.
 
@@ -95,9 +95,10 @@ commands and the lines it prints.
 
 `forge/<design>/` holds one design point as SNAX-GVSoC reads it (LNK2a):
 snax-forge's generator's three hjson files, the cluster file
-`snax_alu.hjson` (`sw/cfg/snax_alu_cluster.hjson` with the accelerator slot
-set for the design), the streamer file `snax_alu_streamer.hjson` (the slot's
-streamer template) and the accelerator file `snax_alu_acc.hjson` (its
+`snax_forge.hjson` (`sw/cfg/snax_alu_cluster.hjson` as the cluster
+`snax_forge_cluster`, its accelerator slot renamed `snax_forge` and set for
+the design), the streamer file `snax_forge_streamer.hjson` (the slot's
+streamer template) and the accelerator file `snax_forge_acc.hjson` (its
 datapath block), the headers a program drives it with, the program itself,
 `main.c` with its `data.h` (GEN2a), and `manifest.json` (`forge/README.md`).
 No model is built: `snax_hjson` reads the cluster file and puts the

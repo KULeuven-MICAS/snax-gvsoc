@@ -5,7 +5,7 @@ The main path to a run of a generated design point is snax-forge's flow
 point, builds GVSoC when needed and the program, runs it on `snax_hjson`
 and takes the program's own check. From snax-forge, in the container:
 
-    pixi run flow recipes/vecadd.json --platform platforms/snax_alu.json
+    pixi run flow recipes/vecadd.json --platform platforms/snax_forge.json
 
     ...
       gvsoc     snax_hjson, exit 0 -> run/
@@ -101,7 +101,7 @@ standard composite (streamer, `SnaxShell`, `SnaxUnit`) in its accelerator
 slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
 `trace`, and its `events` and `summary`, `docs/EVENTS.md`):
 
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
@@ -162,7 +162,7 @@ crossbar writes them for its SNAX ports and the DMA unless `--param
 chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...` names others:
 
     mkdir -p build/work/forge-vecadd-stall
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --work-dir build/work/forge-vecadd-stall \
         --trace="/beats\$:$PWD/build/work/forge-vecadd-stall/events.log" \
         --trace="/stalls\$:$PWD/build/work/forge-vecadd-stall/events.log" \
@@ -189,7 +189,7 @@ queue counts, the crossbar's handshakes; `docs/EVENTS.md`) for gtkwave, into
 a work directory that exists:
 
     mkdir -p build/work/forge-vecadd-vcd
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_alu.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --work-dir build/work/forge-vecadd-vcd --vcd --event-tags=snax \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
@@ -254,13 +254,15 @@ does not: make reads `-k` itself):
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader and `phases.py`, with the image's Python:
+`snax_cfg.py`'s reader, `phases.py`, the class lines, and the composite's
+CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
+`make build`; skipped without it), with the image's Python:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    ...................................
+    .............................................
     ----------------------------------------------------------------------
-    Ran 35 tests in 0.149s
+    Ran 45 tests in 0.157s
 
     OK
 

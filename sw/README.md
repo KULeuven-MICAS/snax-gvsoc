@@ -28,7 +28,7 @@ into `build/sw/apps/<name>/`, building the libraries first when needed:
 
 | What | Commit | |
 |---|---|---|
-| `snax_cluster` | `05615e45061533c60f90db419934f224445fcc43` | 2026-10-16, sparse_interconnect: carry the TCDM user field to the banks (#658) |
+| `snax_cluster` | `cf4b0002ccc6b695d63c26bf30f69fdc3d715b97` | 2026-10-23, Build clusters from snax-forge bundles (snax_forge_rtl, cross-file $ref, snax-forge-ci) (#659) |
 | `sw/deps/printf` | `d3b984684bb8a8bdc48cc7a1abecb93ce59bbe3e` | 2020-01-01, chore(readme): 2020 announcement |
 | `sw/deps/riscv-opcodes` | `94caf0e0fefff1009ba144bccb6d8f7d425ea2f5` | 2023-10-03, Add custom HW barrier CSR (#9) |
 

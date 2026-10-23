@@ -1,7 +1,7 @@
 # Builds the shell program, with snax-alu's library (the streamer's setup)
 # and forge/vecadd/include/'s headers (the streamer's and the shell's CSRs),
 # from sw/ (../../common.mk) into build/sw/apps/snax-shell/. It runs on
-# snax_hjson with forge/vecadd/snax_alu.hjson. data.h is snax-alu's
+# snax_hjson with forge/vecadd/snax_forge.hjson. data.h is snax-alu's
 # datagen.py (add, mode 0) at DATA_LEN 192, NumPy seed 0, as snax-alu's
 # Makefile makes it.
 

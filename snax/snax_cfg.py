@@ -10,9 +10,9 @@
 
 The hjson is the contract: snax_cluster's clustergen and snaxgen read the
 same file. A design is three files: the cluster file, named after its base
-platform (snax_alu.hjson), the streamer file and the accelerator file, named
-after its slot (snax_alu_streamer.hjson, the streamer template, and
-snax_alu_acc.hjson, the datapath block). The cluster's snax_acc_cfg entry
+platform (snax_forge.hjson), the streamer file and the accelerator file, named
+after its slot (snax_forge_streamer.hjson, the streamer template, and
+snax_forge_acc.hjson, the datapath block). The cluster's snax_acc_cfg entry
 (the slot) keeps the slot keys; its snax_streamer_cfg and snax_datapath_cfg
 are $refs to the other two, each the whole file.
 

@@ -5,7 +5,8 @@
 #
 
 """What every SNAX accelerator composite shares (snax_alu_acc.py, snax_unit_acc.py): the CSR
-range the core sends out, and the ports the cluster binds."""
+range the core sends out, the part of it an accelerator may use, and the ports the cluster
+binds."""
 
 import gvsoc.systree
 
@@ -14,6 +15,11 @@ import gvsoc.systree
 # out (1535). The core puts CSR n at byte address 4 * n on its snax_csr port.
 SNAX_CSR_FIRST = 0x3C0
 SNAX_CSR_LAST = 0x5FF
+# The last CSR an accelerator may use: snax_cluster's hw/snitch/src/csr_snax_def.sv reserves
+# 0x5FE (CSR_SNAX_READ_TASK_READY_QUEUE) and 0x5FF (CSR_SNAX_WRITE_TASK_DONE_QUEUE), which
+# hw/snax_util/src/snax_intf_translator.sv routes to the cluster's top-level CSR port, not
+# to the accelerator
+SNAX_ACC_CSR_LAST = 0x5FD
 
 
 class SnaxAcc(gvsoc.systree.Component):

@@ -101,13 +101,15 @@ class SwCfg(unittest.TestCase):
 
 
 class Fixtures(unittest.TestCase):
-    """forge/'s cluster files: snax_alu_cluster.hjson with the slot set for the design."""
+    """forge/'s cluster files: snax_alu_cluster.hjson renamed snax_forge_cluster, its slot
+    snax_forge set for the design."""
 
     def slot(self, design):
-        cfg = snax_cfg.load(FORGE / design / "snax_alu.hjson")
+        cfg = snax_cfg.load(FORGE / design / "snax_forge.hjson")
+        self.assertEqual(cfg.name, "snax_forge_cluster")
         self.assertTrue(cfg.tcdm.sparse_interconnect)
         (slot,) = cfg.cores[0].accelerators
-        self.assertEqual(slot.name, "snax_alu")
+        self.assertEqual(slot.name, "snax_forge")
         return slot
 
     def test_vecadd_vecmul(self):

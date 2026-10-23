@@ -4272,3 +4272,19 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   `forge.vecmul`, `forge.vsum`, `forge.vsum_tree`, `forge-reduce.vsum-r16`),
   plain 17.
 - Not verified: the tree on snax_cluster's RTL (GEN1, GEN2b).
+- 2026-10-23. LNK2b round 3 (snax-forge's), `ry/lnk2b`: `make
+  sync-snax-cluster` to snax_cluster `cf4b0002` (#659, snax-forge's LNK2b
+  round 2). It changed `sw/docs/schema/snitch_cluster.schema.json` (the
+  `snax_acc_cfg` item schema keyed `"items"`, no item defaults, the keys
+  `snax_disable_csr_manager`, `snax_datapath_cfg` and `snax_forge_rtl`) and
+  the pin; no MIRRORED build file changed; the checkout's
+  `streamer_csr_addr_map.h` equals the hand copy but for the 'Generated at'
+  line. forge/'s four cluster files validate against it (Draft 7, refs
+  resolved as `snax_cfg.py` does), and a string `snax_disable_csr_manager`
+  is refused. `SNAX_ACC_CSR_LAST = 0x5FD` (`snax_acc.py`): snax_cluster sends
+  0x5FE and 0x5FF (its task queues) to the cluster's top-level CSR port, so
+  `SnaxUnitAcc` refuses a shell whose counter lands past 0x5FD
+  (`tests/snax/test_snax_unit_acc.py`); `SNAX_CSR_LAST` stays the mapped
+  window. Fresh clone in the image: unit tests 45 passed, `make regress`
+  passed (unit 1, SNAX 40, snax-shell 1, forge 5, plain 17), every forge/
+  trace.log identical to round 1's.
