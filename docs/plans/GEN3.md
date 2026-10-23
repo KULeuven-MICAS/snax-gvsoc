@@ -178,7 +178,9 @@ Round 2b, fix-ups after round 2 (all in snax-forge):
 ## Open
 
 - A start written in the run's last cycle E: `SnaxShell` holds it and
-  sends it in E + 1 (the `fall_cycle` path in `csr_req`), read, never run.
+  sends it in E + 1; since GEN2b the case `start_in_last_cycle`
+  (`tests/snax/shell/`) checks it on `SnaxShellRule` and on the Chisel shell
+  wrapper, but no program runs it.
 - `csrrw` with a destination register on a held start: the core's pending
   write path (`snax_csr_response`) was run only with rd = x0 (`csrw`).
 - No kernel gives a fold with more than one sum per run (T < n):
