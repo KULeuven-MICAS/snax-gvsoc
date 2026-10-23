@@ -202,7 +202,7 @@ snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd`
 
 ## 6. The regression
 
-`make regress` runs `SnaxUnit`'s rule on its cases, builds `sw/` and every
+`make regress` runs `SnaxUnit`'s and `SnaxShell`'s rules on their cases, builds `sw/` and every
 program, and runs them all: the SNAX programs on `snax_alu` and
 `snax_alu_sparse`, snax-shell and every `forge/` folder on `snax_hjson`
 (their counters checked as in section 5), and the plain tests on `snitch`.
@@ -212,6 +212,8 @@ About two minutes:
 
     python3 tests/snax/regress.py 
     SnaxUnit's rule (tests/snax/unit)
+      1 run
+    SnaxShell's rule (tests/snax/shell)
       1 run
     SNAX programs on snax_alu, snax_alu_sparse
       40 run
@@ -233,6 +235,8 @@ does not: make reads `-k` itself):
 
     python3 tests/snax/regress.py -k forge
     SnaxUnit's rule (tests/snax/unit)
+      0 run
+    SnaxShell's rule (tests/snax/shell)
       0 run
     SNAX programs on snax_alu, snax_alu_sparse
       0 run
@@ -291,3 +295,19 @@ regression's `unit`):
     PASS pipelined_tree_t4: 18 cycles, 2 run(s)
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
     19 passed, 0 failed
+
+`SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against
+its hand-worked cases, with g++ (the regression's `shell`,
+`tests/snax/shell/README.md`):
+
+    tests/snax/shell/run.sh
+
+    PASS counter_after_start: 14 cycles
+    PASS counter: 14 cycles
+    PASS count_zero: 9 cycles
+    PASS field_read_back: 4 cycles
+    PASS read_busy: 8 cycles
+    PASS start_bit0_clear: 7 cycles
+    PASS start_held: 11 cycles
+    PASS start_in_last_cycle: 8 cycles
+    8 passed, 0 failed

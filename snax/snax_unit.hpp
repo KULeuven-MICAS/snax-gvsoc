@@ -57,7 +57,7 @@
 enum SnaxUnitOp { UNIT_ADD, UNIT_SUB, UNIT_MUL, UNIT_AND, UNIT_OR, UNIT_XOR, UNIT_MIN, UNIT_MAX,
     UNIT_NB_OPS };
 
-static const char *snax_unit_op_names[UNIT_NB_OPS] =
+static const char *const snax_unit_op_names[UNIT_NB_OPS] =
     {"add", "sub", "mul", "and", "or", "xor", "min", "max"};
 
 

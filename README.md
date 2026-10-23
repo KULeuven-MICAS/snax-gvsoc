@@ -112,7 +112,8 @@ fixture's `main.c` (`DESIGN=<design>`); `docs/RUN.md` runs `vecadd`.
 ### Regression
 
 `make regress` first runs `SnaxUnit`'s rule on its cases (`unit`,
-`tests/snax/unit/README.md`), then builds `sw/` and the programs of `sw/apps/`, runs each ELF
+`tests/snax/unit/README.md`) and `SnaxShell`'s on its own (`shell`,
+`tests/snax/shell/README.md`), then builds `sw/` and the programs of `sw/apps/`, runs each ELF
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
 `snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
 cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
@@ -205,6 +206,11 @@ traces, and cut both runs into phases:
     python3 tests/snax/phases.py $E --gvsoc build/work/cmp-$n
 
 `--show PHASE` lists one phase's instructions on either side.
+
+Generated accelerators (`forge/`, snax-forge's bundles) are compared through
+snax_cluster's `target/snitch_cluster/snax_forge.mk` instead: snax-forge's ELF
+on the bundle's RTL with `SIM=vlt` or `vsim` (snax-forge `docs/RUN.md` section
+8); GEN2b's runs and gaps are in `docs/plans/GEN2b.md`.
 
 ## License
 

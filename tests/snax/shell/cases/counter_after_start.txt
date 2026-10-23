@@ -1,0 +1,28 @@
+# The counter read as soon as a start is accepted. One access per cycle, and
+# the start's write takes its own cycle (a held one every cycle up to E + 1),
+# so the earliest read is the cycle after the accepted start: it gives 0
+# whatever the last run counted, the reset of the accepted start, before any
+# busy cycle of its run. c1's start (count 3): busy c2 .. c4; the counter
+# reads 3 in c6. c7's start, taken at once (idle): the counter reads 0 in c8.
+# c9's start, offered while busy (c8, c9: count 3 again, E = 10), is held and
+# taken in c11 = E + 1: the counter, 3 before, reads 0 in c12.
+fields loopCount
+config count
+wait lockstep
+inputs 2
+cycles
+# a b out  access   result  busy
+1 1 1      w 0 3    0       0     # 0: loopCount 3
+1 1 1      w 1 1    1       0     # 1: start accepted; busy from 2
+1 1 1      -        -       1     # 2: fires
+1 1 1      -        -       1     # 3: fires
+1 1 1      -        -       1     # 4: fires, E
+1 1 1      -        -       0     # 5: idle
+1 1 1      r 3      3       0     # 6: [2, 5], held at 3
+1 1 1      w 1 1    7       0     # 7: start accepted at once; busy from 8
+1 1 1      r 3      0       1     # 8: reset in c7: [8, 7]: 0
+1 1 1      w 1 1    11      1     # 9: busy: held until E + 1 = 11
+1 1 1      .        -       1     # 10: fires, E
+1 1 1      .        -       0     # 11: E + 1: sent, answered; busy from 12
+1 1 1      r 3      0       1     # 12: reset in c11: [12, 11]: 0
+1 1 1      r 3      1       1     # 13: [12, 12]

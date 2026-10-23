@@ -4288,3 +4288,18 @@ RTL comparison is round 3's and 3b's, unchanged. Prediction held.
   window. Fresh clone in the image: unit tests 45 passed, `make regress`
   passed (unit 1, SNAX 40, snax-shell 1, forge 5, plain 17), every forge/
   trace.log identical to round 1's.
+- 2026-10-23. GEN2b round 3 (`docs/plans/GEN2b.md`), `ry/gen2b`, Part A
+  (snax-forge open item 84): `SnaxShellRule` in `snax/snax_shell.hpp`, the
+  rule text with it; `snax_shell.cpp` keeps the ports, `SnaxCsrBlock` (its
+  registers mirror the rule's) and the send event, and calls the rule for
+  every decision. `tests/snax/shell/`: `tb.cpp` steps it with
+  `SnaxUnitRule` (the shell's start starts the unit, the unit's busy feeds
+  the shell), eight cases, `run.sh`: `8 passed, 0 failed`, on the host (g++
+  8.5) and in the image (g++ 13.3). `snax_unit_op_names` is `const char
+  *const` now, so a TU including `snax_unit.hpp` without the op names
+  builds with `-Wall -Werror`. `shell` in `make regress` after `unit`. Fresh
+  builds of main and the branch in the image: `make regress` passed on both,
+  every `run.log` and `trace.log` of main's 53 equal with the checkout's path
+  masked, the forge counters (19, 19, 19, 67) and `snax-shell`'s included.
+  snax-forge's `ShellCasesSpec` on the same files: all eight pass, so the two
+  sides agree and no rule changed.
