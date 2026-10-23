@@ -64,7 +64,8 @@ and a narrow request there is refused and keeps its turn. The two clusters
 build the same ELF (`sw/README.md`).
 `snax_hjson` (`snax/snax_hjson.py`, LNK2a) is any such cluster read from
 its hjson (`snax/snax_cfg.py`), the file given with `--param hjson=<path>`
-(`sw/cfg/snax_alu_cluster.hjson` by default); `snax_alu` and
+(`sw/cfg/snax_forge/snax_forge.hjson`, `forge/vecadd/`'s cluster, by
+default); `snax_alu` and
 `snax_alu_sparse` are this target fixed to their `sw/cfg/` file
 (`fixed_target`).
 
@@ -115,9 +116,10 @@ fixture's `main.c` (`DESIGN=<design>`); `docs/RUN.md` runs `vecadd`.
 `tests/snax/unit/README.md`) and `SnaxShell`'s on its own (`shell`,
 `tests/snax/shell/README.md`), then builds `sw/` and the programs of `sw/apps/`, runs each ELF
 on `snax_alu` and on `snax_alu_sparse`, named `<program>.<target>`:
-`snax-alu` at five sizes, `snax-stream`, `alu-timing`, the `stream-timing`
-cases, `dma-timing`, `snax-csr`, the `core-tcdm` cases and the `dma-tcdm`
-case, then `snax-shell` on `snax_hjson` with `forge/vecadd/`'s cluster file and the unit's trace on, then
+`snax-alu` at five sizes, `snax-stream` and `alu-timing`; then the cluster
+tests on `snax_hjson` with `forge/vecadd/`'s cluster file: `dma-timing`,
+`snax-csr`, the `stream-timing` cases, the `core-tcdm` cases and the
+`dma-tcdm` case; then `snax-shell` on `snax_hjson` with `forge/vecadd/`'s cluster file and the unit's trace on, then
 every folder of `forge/` with the generic app (`forge.<design>`) and
 `forge-reduce.vsum-r16` (vsum with its len overridden to 16, four sums;
 `FORGE_REDUCE` in `tests/snax/regress.py`), then
@@ -133,7 +135,8 @@ GEN3); so must `forge-reduce`'s, and a generated program's
 `forge counter <task>:` line per accelerator task, matched to the unit's
 run line for that run (`check_counters`). A `forge/` entry is read from its
 `manifest.json` with plain json: its cluster file, run on `snax_hjson`
-with `--param hjson=` (gvrun warns that the platform tree does not match),
+with `--param hjson=` (but for vecadd's, gvrun warns that the platform tree
+does not match),
 the unit's trace path and each accelerator task's beats; the program is
 built with `DESIGN=<design>`. `docs/RUN.md` runs it and says where the logs
 go.

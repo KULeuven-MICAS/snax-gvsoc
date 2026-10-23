@@ -12,10 +12,10 @@
 
 (or --target snax_hjson:hjson=<cluster.hjson>). A relative path is taken
 from gvrun's working directory. Without it, the build's default:
-sw/cfg/snax_alu_cluster.hjson, installed beside this module as
-cfg/snax_alu_cluster.hjson (snax/CMakeLists.txt). The build's platform tree
-holds the default file's components and bindings: a file with the same ones
-(snax_alu_cluster_old.hjson) uses it, its properties coming through the JSON
+sw/cfg/snax_forge/snax_forge.hjson, snax-forge's vecadd fixture's cluster,
+installed beside this module as cfg/snax_forge/snax_forge.hjson
+(snax/CMakeLists.txt). The build's platform tree holds the default file's
+components and bindings: a file with the same ones (forge/vecadd/'s) uses it, its properties coming through the JSON
 config as always; one with others (another accelerator) does not match, so
 gvrun warns and runs it on the JSON config (runner_gvrun2.py).
 
@@ -74,7 +74,7 @@ HERE = Path(__file__).resolve().parent
 # the install (snax/CMakeLists.txt copies sw/cfg/ there), the repo's sw/cfg/
 # when the build reads the sources
 CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg')
-DEFAULT_HJSON = 'snax_alu_cluster.hjson'
+DEFAULT_HJSON = 'snax_forge/snax_forge.hjson'
 
 # The DMA and DRAM measured on the RTL (docs/notes/NOTES.md), with the hjson's
 # snax_alu cluster: one beat of dma_data_width per cycle into L1, the DMA's

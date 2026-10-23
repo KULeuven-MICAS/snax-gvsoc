@@ -10,14 +10,16 @@ SnaxShell's rule with the unit's against its own (tests/snax/shell/run.sh;
 `shell`, likewise). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
-sw/apps/, then runs each SNAX program, the same ELF, on each SNAX target
+sw/apps/, then runs each ALU program, the same ELF, on each ALU target
 (ALU_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`),
 named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
-`snax-stream`, `alu-timing`, the seven `stream-timing` cases, `dma-timing`,
-`snax-csr`, the three `core-tcdm` cases and the `dma-tcdm` case; then
-`snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file (SHELL_DESIGN:
-SnaxShell and SnaxUnit, a lockstep add), with the unit's trace on and the
-counter check below; then
+`snax-stream` and `alu-timing`; then the cluster tests on `snax_hjson` with
+forge/vecadd/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
+`dma-timing`, `snax-csr`, the seven `stream-timing` cases, the three
+`core-tcdm` cases and the `dma-tcdm` case, each a plain run (exit code
+only); then `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file
+(SHELL_DESIGN: SnaxShell and SnaxUnit, a lockstep add), with the unit's
+trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
 (snax-forge's generated main.c and data.h), named forge.<design>, and
 `forge-reduce.vsum-r16` (FORGE_REDUCE: vsum with its len overridden to 16 by
@@ -25,8 +27,9 @@ hand, four sums, since no kernel gives T < n, snax-forge open item 81): the
 fixture's manifest.json gives its cluster file, the unit's trace path and
 each accelerator task's beats (the unit's `summary`, `events` and `beats`
 traces under the trace path are on); it runs on `snax_hjson` with
-`--param hjson=<cluster file>` (its components are not the default file's,
-so gvrun warns and runs it on the JSON config), with the counter checks;
+`--param hjson=<cluster file>` (but for vecadd's, its components are not
+the default file's, so gvrun warns and runs it on the JSON config), with the
+counter checks;
 then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
@@ -47,7 +50,7 @@ the fixture's first task's; a generated one (check_counters) prints
 `forge counter <task>: <n>` per accelerator task of its manifest, the k-th
 task matched to run k.
 
-The class check (classes.py): every run on a forge/ cluster file also has
+The class check (classes.py): every forge/ fixture run above also has
 the streamers' `summary`, `events` and `beats` traces on (CLASS_TRACES); it
 passes when, per run of the unit and of each mover, the lengths of its
 class runs (the `class` lines) add up per class to its summary line's
@@ -93,6 +96,10 @@ ALU_TARGETS = ["snax_alu", "snax_alu_sparse"]
 FORGE_DIR = ROOT / "forge"
 FORGE_TARGET = "snax_hjson"
 FORGE_APP = "forge"
+# The cluster tests run on this fixture's cluster file (its manifest's), whose
+# streamer and shell they are written for
+CLUSTER_DESIGN = "vecadd"
+CLUSTER_TESTS = ["dma-timing", "snax-csr"]
 # snax-shell runs on this fixture's cluster file, whose CSRs and datapath it is
 # written for, with the counter check; the beats of its first run are its
 # RUN_BEATS, DATA_LEN 192 / 4 lanes / 3 runs
@@ -109,7 +116,7 @@ FORGE_REDUCE = [("vsum", 16)]
 UNIT_TRACES = ("summary", "events", "beats")
 CLASS_TRACES = [f"snax_acc[0-9]*/streamer/{t}$" for t in ("summary", "events", "beats")]
 SIZES = [4, 100, 128, 1024, 4096]
-# The SNAX programs built once into one ELF per case, <program>-<case>.elf
+# The cluster tests built once into one ELF per case, <program>-<case>.elf
 CASES = [
     ("stream-timing", ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
                        "prio_queued", "idle_restart"]),
@@ -142,6 +149,13 @@ def gvrun(target, elf, workdir, log, options=()):
     except subprocess.TimeoutExpired:
         return None
     return p.returncode
+
+
+def cluster_file(design):
+    """forge/<design>/'s cluster file, as its manifest names it (plain json: the manifest is
+    snax-forge's, read without it)."""
+    folder = FORGE_DIR / design
+    return (folder / json.loads((folder / "manifest.json").read_text())["cluster"]).resolve()
 
 
 def check_run(counter, lines, run, beats):
@@ -254,13 +268,11 @@ class Check:
         manifest), its counter check."""
         if not self.selected(name):
             return
-        folder = FORGE_DIR / design
-        # Plain json: the manifest is snax-forge's, read without it
-        manifest = json.loads((folder / "manifest.json").read_text())
+        manifest = json.loads((FORGE_DIR / design / "manifest.json").read_text())
         make(APPS / app, *make_args)
         traces = WORK / name / "trace.log"
         log = self.run(name, FORGE_TARGET, elf,
-                       options=["--param", f"hjson={(folder / manifest['cluster']).resolve()}",
+                       options=["--param", f"hjson={cluster_file(design)}",
                                 *(f"--trace={t}:{traces}"
                                   for t in (*(f"{manifest['trace']}/{u}$" for u in UNIT_TRACES),
                                             *CLASS_TRACES))])
@@ -320,20 +332,28 @@ def main():
     make(SW)
 
     count = check.count
-    print(f"SNAX programs on {', '.join(ALU_TARGETS)}")
+    print(f"ALU programs on {', '.join(ALU_TARGETS)}")
     for n in SIZES:
         if check.selected_snax(f"snax-alu-{n}"):
             make(APPS / "snax-alu", f"DATA_LEN={n}")
         check.run_snax(f"snax-alu-{n}", BUILD / "apps" / "snax-alu" / str(n) / "snax-alu.elf")
-    for prog in ("snax-stream", "alu-timing", "dma-timing", "snax-csr"):
+    for prog in ("snax-stream", "alu-timing"):
         if check.selected_snax(prog):
             make(APPS / prog)
         check.run_snax(prog, BUILD / "apps" / prog / f"{prog}.elf")
-    for prog, cases in CASES:
-        if any(check.selected_snax(f"{prog}-{case}") for case in cases):
+    print(f"  {check.count - count} run")
+
+    count = check.count
+    print(f"cluster tests on {FORGE_TARGET}, forge/{CLUSTER_DESIGN}/'s cluster file")
+    hjson = ["--param", f"hjson={cluster_file(CLUSTER_DESIGN)}"]
+    programs = [(prog, [prog]) for prog in CLUSTER_TESTS]
+    programs += [(prog, [f"{prog}-{case}" for case in cases]) for prog, cases in CASES]
+    for prog, names in programs:
+        if any(check.selected(f"{name}.{FORGE_TARGET}") for name in names):
             make(APPS / prog)
-        for case in cases:
-            check.run_snax(f"{prog}-{case}", BUILD / "apps" / prog / f"{prog}-{case}.elf")
+        for name in names:
+            check.run(f"{name}.{FORGE_TARGET}", FORGE_TARGET,
+                      BUILD / "apps" / prog / f"{name}.elf", options=hjson)
     print(f"  {check.count - count} run")
 
     count = check.count
