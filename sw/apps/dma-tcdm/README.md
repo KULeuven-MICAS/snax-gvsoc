@@ -15,7 +15,7 @@ instruction cache.
 
 | Case | What | Compare |
 |---|---|---|
-| `dma_vs_reader` | The accelerator (add, 256 beats) with A, B and O each on its own four banks, every beat in the next 256 B row: A on banks 0 to 3 (superbank 0), B on 8 to 11, O on 16 to 19. 50 cycles after a barrier the DMA core copies four 64 B blocks from DRAM into the rows after them, one row apart: in the first run at the rows' last 64 B (superbank 3, which no mover uses), in the measured run at their first 64 B (superbank 0, A's) | 977 of the measured run (the first run's shown) |
+| `dma_vs_reader` | The accelerator (add, 256 beats) with A, B and O each on its own four banks, every beat in the next 256 B row: A on banks 0 to 3 (superbank 0), B on 8 to 11, O on 16 to 19. 50 cycles after a barrier the DMA core copies four 64 B blocks from DRAM into the rows after them, one row apart: in the first run at the rows' last 64 B (superbank 3, which no mover uses), in the measured run at their first 64 B (superbank 0, A's) | 977 of the measured run (the first run's shown): 264 (260) on SNAX-GVSoC and on the RTL from snax-forge's vecadd bundle (Verilator, snax_cluster `b9e475b4`) |
 
 - `dma_vs_reader`: the accelerator starts first and waits for the
   streamer, so 977 is the beats plus 4 without contention:
