@@ -2,8 +2,8 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# What the programs in apps/ share (CI1): built for snax_alu_cluster_old
-# against the runtime and math library of sw/, with the include dirs,
+# What the programs in apps/ share (CI1): built for snax_forge (snax-forge's
+# vecadd fixture's cluster) against the runtime and math library of sw/, with the include dirs,
 # libraries, linker script and link flags of snax_cluster's sw/apps/common.mk
 # at the pin; the cluster's generated headers come first. An app sets APP
 # and, before including this file, its own INCDIRS, LIB_OBJS (objects
@@ -15,7 +15,7 @@
 
 APP_DIR := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
 SW      := $(abspath $(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
-CLUSTER  = snax_alu_cluster_old
+CLUSTER  = snax_forge
 SW_BUILD = $(abspath $(SW)/../build/sw)
 BUILDDIR ?= $(SW_BUILD)/apps/$(APP)
 

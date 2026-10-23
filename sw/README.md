@@ -3,7 +3,7 @@
 The software snax-gvsoc's programs are built from: a pinned copy of the
 files of [snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)
 a build reads (the Snitch runtime, the math library, the 17 plain tests,
-the `snax-alu` app and library, three cluster configurations and the
+the `snax-alu` app and library, four cluster configurations and the
 schema clustergen checks a cluster configuration against), the headers
 generated from them, and our own programs in `apps/` (CI1, D126 in
 snax-forge). No snax_cluster checkout is needed to build or run them; one
@@ -16,7 +16,7 @@ in `sync.py`, and nowhere else.
 
 `make sw` at the top (`make -C sw`, `Makefile` here) builds into
 `build/sw/`: `libmath.a`; per cluster, `<cluster>/libsnRuntime.a`, and for
-`snax_alu_cluster_old` `snax-alu-lib.o`; every plain test in `tests/`
+`snax_forge` `snax-alu-lib.o`; every plain test in `tests/`
 (the 17 of `COPIED`) for `snitch_cluster` into `tests/`; the regression
 runs the same set. Flags come from `toolchain.mk`, include
 order and link flags from upstream's Makefiles (`MIRRORED` in `sync.py`).
@@ -28,7 +28,7 @@ into `build/sw/apps/<name>/`, building the libraries first when needed:
 
 | What | Commit | |
 |---|---|---|
-| `snax_cluster` | `cf4b0002ccc6b695d63c26bf30f69fdc3d715b97` | 2026-10-23, Build clusters from snax-forge bundles (snax_forge_rtl, cross-file $ref, snax-forge-ci) (#659) |
+| `snax_cluster` | `b9e475b4693ae899b3c982e8a751fb6dda9a62fe` | 2026-10-23, Run snax-forge bundles' programs on the RTL: snax_forge.mk, sw/apps/snax-forge, vecadd and vsum fixtures (#661) |
 | `sw/deps/printf` | `d3b984684bb8a8bdc48cc7a1abecb93ce59bbe3e` | 2020-01-01, chore(readme): 2020 announcement |
 | `sw/deps/riscv-opcodes` | `94caf0e0fefff1009ba144bccb6d8f7d425ea2f5` | 2023-10-03, Add custom HW barrier CSR (#9) |
 
@@ -44,6 +44,7 @@ every relative include in the copied files (`../../deps/...`,
 |---|---|
 | `sw/X` | `sw/X` |
 | `target/snitch_cluster/sw/X` | `sw/X` |
+| `target/snitch_cluster/cfg/snax_forge/vecadd/X` | `sw/cfg/snax_forge/X` |
 | `target/snitch_cluster/cfg/X` | `sw/cfg/X` |
 | `util/sim/X` | `sw/util/X` |
 | `LICENSE` | `sw/LICENSE` |
@@ -67,15 +68,16 @@ upstream's own rules, in the checkout:
 
 | File | Made by |
 |---|---|
-| `generated/<cluster>/snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` | `make -C target/snitch_cluster CFG_OVERRIDE=cfg/<cluster>.hjson` (clustergen and the `.h.tpl` templates), for `snitch_cluster` and `snax_alu_cluster_old` |
+| `generated/<cluster>/snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` | `make -C target/snitch_cluster CFG_OVERRIDE=<cluster's cfg>` (clustergen and the `.h.tpl` templates), for `snitch_cluster`, `snax_alu_cluster_old` and `snax_forge` (`cfg/snax_forge/vecadd/snax_forge.hjson`, snax-forge's vecadd fixture, the cluster `common.mk` builds the apps for) |
 | none for `snax_alu_cluster` (the sparse interconnect, SG7) | `sync.py` makes its three headers the same way and fails unless they equal `snax_alu_cluster_old`'s (`SAME_HEADERS`), so its programs are `snax_alu_cluster_old`'s, with no folder and no runtime of their own |
-| `runtime/common/snitch_cluster_peripheral.h` | the same `make` (regtool from `snitch_cluster_peripheral_reg.hjson`, then clang-format); the same for both clusters, which `sync.py` checks |
+| `generated/snax_forge/streamer_csr_addr_map.h` | `make -C target/snitch_cluster CFG_OVERRIDE=cfg/snax_forge/vecadd/snax_forge.hjson sw-snax-gen` (snaxgen's SW-only path, sbt), without its `Generated at` line (`STREAMERS`) |
+| `runtime/common/snitch_cluster_peripheral.h` | the same `make` (regtool from `snitch_cluster_peripheral_reg.hjson`, then clang-format); the same for every cluster, which `sync.py` checks |
 | `math/include/bits/alltypes.h` | `sed -f math/tools/mkalltypes.sed` on the two `alltypes.h.in`, the rule of snax_cluster's `sw/math/Makefile` |
 | `generated/snax_alu_cluster_old/streamer_csr_addr_map.h` | by hand: a copy of what the Chisel streamer writes in `rtl-gen` (`target/snitch_cluster/sw/snax/snax-alu/include/`), the same for `snax_alu_cluster_old.hjson` and `snax_alu_cluster.hjson` (SG7 step 2); `sync.py` never writes it and only compares it with the checkout's when there is one |
 
 ## Sync and review
 
-In snax-forge's image, from this repository, with a checkout at the new
+In snax-forge's image with sbt on `PATH` (snax-forge's pixi env has it), from this repository, with a checkout at the new
 commit, its submodules initialised and no tracked change in what sync reads
 (`CHECKED` in `sync.py`):
 

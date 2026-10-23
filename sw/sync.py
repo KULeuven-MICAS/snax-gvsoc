@@ -14,9 +14,11 @@ SNAX_CLUSTER=<path>` (CI1, sw/README.md).
    (CLUSTERS), snitch_cluster_cfg.h and snitch_cluster_addrmap.h into
    sw/generated/<cluster>/ and snitch_cluster_peripheral.h (the same for
    every cluster) into sw/runtime/common/, made in the checkout by
-   `make -C target/snitch_cluster`; for the clusters of SAME_HEADERS, the
-   same headers, only compared with another cluster's (a difference fails
-   the sync); sw/math/include/bits/alltypes.h with the sed rule of
+   `make -C target/snitch_cluster`; for the clusters of STREAMERS, the
+   streamer_csr_addr_map.h snaxgen writes (`make sw-snax-gen`, sbt) into
+   sw/generated/<cluster>/, without its "Generated at" line; for the
+   clusters of SAME_HEADERS, the same headers, only compared with another
+   cluster's (a difference fails the sync); sw/math/include/bits/alltypes.h with the sed rule of
    snax_cluster's sw/math/Makefile.
 4. Writes the new pin (snax_cluster HEAD, the printf and riscv-opcodes
    submodule commits) into sw/README.md.
@@ -26,9 +28,10 @@ SNAX_CLUSTER=<path>` (CI1, sw/README.md).
    equals sw/generated/'s hand copy, which sync never writes.
 
 Paths: sw/X -> sw/X, target/snitch_cluster/sw/X -> sw/X,
+target/snitch_cluster/cfg/snax_forge/vecadd/X -> sw/cfg/snax_forge/X,
 target/snitch_cluster/cfg/X -> sw/cfg/X, util/sim/X -> sw/util/X,
 LICENSE -> sw/LICENSE, docs/schema/X -> sw/docs/schema/X. Run it in snax-forge's image (clustergen, regtool,
-clang-format, bender).
+clang-format, bender) with sbt on PATH (snax-forge's pixi env has it).
 """
 
 import argparse
@@ -44,6 +47,7 @@ README = SW / "README.md"
 
 # The files a build reads (traced with clang -MD), by their path in snax_cluster.
 TSW = "target/snitch_cluster/sw"
+FORGE = "snax_forge/vecadd"
 COPIED = [
     "LICENSE",
     "sw/snRuntime/base.ld",
@@ -85,6 +89,9 @@ COPIED = [
     "target/snitch_cluster/cfg/snax_alu_cluster.hjson",
     "target/snitch_cluster/cfg/snax_alu_cluster_old.hjson",
     "target/snitch_cluster/cfg/snitch_cluster.hjson",
+    # snax-forge's vecadd fixture, the cluster the apps build for
+    *(f"target/snitch_cluster/cfg/{FORGE}/{n}.hjson"
+      for n in ("snax_forge", "snax_forge_streamer", "snax_forge_acc")),
     # The cluster hjson's schema, clustergen's check of it (LNK2a round 2)
     "docs/schema/snitch_cluster.schema.json",
     "util/sim/data_utils.py",
@@ -93,11 +100,16 @@ COPIED = [
 MATH = "sw/math"
 MATH_SKIP = ("Makefile", ".gitignore", "include/bits/")
 
-CLUSTERS = ["snitch_cluster", "snax_alu_cluster_old"]
+# Each cluster's configuration, relative to target/snitch_cluster
+CLUSTERS = {"snitch_cluster": "cfg/snitch_cluster.hjson",
+            "snax_alu_cluster_old": "cfg/snax_alu_cluster_old.hjson",
+            "snax_forge": f"cfg/{FORGE}/snax_forge.hjson"}
+# Clusters whose streamer header snaxgen writes, where it writes it
+STREAMERS = {"snax_forge": f"{TSW}/snax/snax_forge/include/streamer_csr_addr_map.h"}
 # Clusters whose headers must equal another's, so they share its generated/
 # folder and runtime: made and compared, not kept. The checkout is left on
 # the last one made.
-SAME_HEADERS = {"snax_alu_cluster": "snax_alu_cluster_old"}
+SAME_HEADERS = {"cfg/snax_alu_cluster.hjson": "snax_alu_cluster_old"}
 COMMON = f"{TSW}/runtime/common"
 CLUSTER_GEN = ["snitch_cluster_cfg.h", "snitch_cluster_addrmap.h"]
 PERIPHERAL = "snitch_cluster_peripheral.h"
@@ -121,7 +133,8 @@ PIN_ROW = re.compile(r"^\| `(?P<what>[^`]+)` \| `(?P<commit>[0-9a-f]{40})` \|.*$
 
 def local(upstream):
     """Where an upstream path goes in sw/."""
-    for prefix, to in ((f"{TSW}/", ""), ("target/snitch_cluster/cfg/", "cfg/"),
+    for prefix, to in ((f"{TSW}/", ""), (f"target/snitch_cluster/cfg/{FORGE}/", "cfg/snax_forge/"),
+                       ("target/snitch_cluster/cfg/", "cfg/"),
                        ("util/sim/", "util/"), ("sw/", "")):
         if upstream.startswith(prefix):
             return SW / (to + upstream[len(prefix):])
@@ -183,40 +196,56 @@ def copy(checkout):
     return gone
 
 
-def make_headers(checkout, cluster):
-    """Makes the cluster's headers in the checkout; returns their text by name."""
+def make_headers(checkout, cfg):
+    """Makes the headers of the cluster configuration cfg in the checkout; returns their text
+    by name."""
     common = checkout / COMMON
     names = CLUSTER_GEN + [PERIPHERAL]
     for n in names:
         (common / n).unlink(missing_ok=True)
     targets = [f"sw/runtime/common/{n}" for n in names]
     p = subprocess.run(["make", "-C", str(checkout / "target/snitch_cluster"),
-                        f"CFG_OVERRIDE=cfg/{cluster}.hjson", *targets],
+                        f"CFG_OVERRIDE={cfg}", *targets],
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if p.returncode != 0:
-        raise SystemExit(f"header generation failed for {cluster}:\n{p.stdout}")
+        raise SystemExit(f"header generation failed for {cfg}:\n{p.stdout}")
     return {n: (common / n).read_text() for n in names}
+
+
+def make_streamer(checkout, cluster, out):
+    """Makes the cluster's streamer header with snaxgen's SW-only path; writes it to out without
+    the line that holds the time it was made."""
+    header = checkout / STREAMERS[cluster]
+    header.unlink(missing_ok=True)
+    p = subprocess.run(["make", "-C", str(checkout / "target/snitch_cluster"),
+                        f"CFG_OVERRIDE={CLUSTERS[cluster]}", "sw-snax-gen"],
+                       text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode != 0 or not header.is_file():
+        raise SystemExit(f"streamer header generation failed for {cluster}:\n{p.stdout}")
+    (out / header.name).write_text("\n".join(streamer_lines(header)) + "\n")
 
 
 def generate(checkout):
     common = checkout / COMMON
     peripheral = None
     made = {}
-    for cluster in CLUSTERS:
-        made[cluster] = make_headers(checkout, cluster)
+    for cluster, cfg in CLUSTERS.items():
+        made[cluster] = make_headers(checkout, cfg)
         out = SW / "generated" / cluster
         out.mkdir(parents=True, exist_ok=True)
         for n in CLUSTER_GEN:
             shutil.copy2(common / n, out / n)
+        if cluster in STREAMERS:
+            make_streamer(checkout, cluster, out)
         text = (common / PERIPHERAL).read_text()
         if peripheral is not None and text != peripheral:
-            raise SystemExit(f"{PERIPHERAL} differs between {CLUSTERS[0]} and {cluster}")
+            raise SystemExit(f"{PERIPHERAL} differs between {next(iter(CLUSTERS))} and {cluster}")
         peripheral = text
-    for cluster, same in SAME_HEADERS.items():
-        headers = make_headers(checkout, cluster)
+    for cfg, same in SAME_HEADERS.items():
+        headers = make_headers(checkout, cfg)
         differ = [n for n in headers if headers[n] != made[same][n]]
         if differ:
-            raise SystemExit(f"{cluster}: {', '.join(differ)} not equal to {same}'s")
+            raise SystemExit(f"{cfg}: {', '.join(differ)} not equal to {same}'s")
     (SW / "runtime/common" / PERIPHERAL).write_text(peripheral)
     # sw/math/Makefile's rule for $(ALLTYPES_H)
     math = SW / "math"

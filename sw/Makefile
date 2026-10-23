@@ -4,7 +4,7 @@
 #
 # Builds snax_cluster's software from the copy in sw/ (CI1, README.md) into
 # build/sw/: libmath.a; per cluster, <cluster>/libsnRuntime.a (and for
-# snax_alu_cluster_old snax-alu-lib.o); every plain test in tests/ (the 17
+# snax_forge snax-alu-lib.o); every plain test in tests/ (the 17
 # of COPIED in sync.py) for snitch_cluster into tests/. Flags from
 # toolchain.mk; include order and link flags as snax_cluster's
 # sw/math/Makefile, runtime/common/common.mk, snax/snax-alu/Makefile and
@@ -24,7 +24,7 @@ all: libs tests
 SNRT_DIR    = $(SW)/snRuntime
 RUNTIME_DIR = $(SW)/runtime/rtl-generic
 MATH_DIR    = $(SW)/math
-CLUSTERS    = snitch_cluster snax_alu_cluster_old
+CLUSTERS    = snitch_cluster snax_alu_cluster_old snax_forge
 
 # The math headers, in the order of every upstream Makefile that uses them
 MATH_INCDIRS  = $(MATH_DIR)/arch/riscv64/
@@ -72,7 +72,7 @@ RUNTIMES     = $(foreach c,$(CLUSTERS),$(BUILD)/$(c)/libsnRuntime.a)
 
 # snax/snax-alu/Makefile's include dirs: common.mk's between its own and the
 # runtime's (rtl-generic/include does not exist, as upstream)
-ALU_LIB = $(BUILD)/snax_alu_cluster_old/snax-alu-lib.o
+ALU_LIB = $(BUILD)/snax_forge/snax-alu-lib.o
 ALU_LIB_INCDIRS  = $(SW)/snax/snax-alu/include
 ALU_LIB_INCDIRS += $(RUNTIME_INCDIRS)
 ALU_LIB_INCDIRS += $(RUNTIME_DIR)/src
@@ -91,7 +91,7 @@ $(BUILD)/$(1)/libsnRuntime.a: $(addprefix $(BUILD)/$(1)/,$(RUNTIME_OBJS))
 endef
 $(foreach c,$(CLUSTERS),$(eval $(call cluster_rules,$(c))))
 
-$(ALU_LIB): INCDIRS = $(SW)/generated/snax_alu_cluster_old $(ALU_LIB_INCDIRS)
+$(ALU_LIB): INCDIRS = $(SW)/generated/snax_forge $(ALU_LIB_INCDIRS)
 $(ALU_LIB): $(SW)/snax/snax-alu/src/snax-alu-lib.c
 	@mkdir -p $(@D)
 	$(RISCV_CC) $(RISCV_CFLAGS) $(DEPFLAGS) -c $< -o $@

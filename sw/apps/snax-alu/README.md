@@ -3,7 +3,7 @@
 snax_cluster's `snax-alu` app, copied into `sw/` so SNAX-GVSoC is developed
 against a fixed program: `src/snax-alu.c` and `data/datagen.py` here, its
 library in `sw/snax/snax-alu/`, the streamer's CSR map in
-`sw/generated/snax_alu_cluster_old/`, cluster `cfg/snax_alu_cluster_old.hjson`.
+`sw/generated/snax_forge/`, cluster `cfg/snax_alu_cluster_old.hjson`.
 Where each file comes from: `sw/README.md`, "Provenance of snax-alu".
 
 ## Build
