@@ -207,6 +207,11 @@ traces, and cut both runs into phases:
 
 `--show PHASE` lists one phase's instructions on either side.
 
+Generated accelerators (`forge/`, snax-forge's bundles) are compared through
+snax_cluster's `target/snitch_cluster/snax_forge.mk` instead: snax-forge's ELF
+on the bundle's RTL with `SIM=vlt` or `vsim` (snax-forge `docs/RUN.md` section
+8); GEN2b's runs and gaps are in `docs/plans/GEN2b.md`.
+
 ## License
 
 Apache 2.0, see `LICENSE` and `UPSTREAM.md`.
