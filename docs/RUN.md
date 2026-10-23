@@ -254,13 +254,15 @@ does not: make reads `-k` itself):
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader and `phases.py`, with the image's Python:
+`snax_cfg.py`'s reader, `phases.py`, the class lines, and the composite's
+CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
+`make build`; skipped without it), with the image's Python:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    ...................................
+    .............................................
     ----------------------------------------------------------------------
-    Ran 35 tests in 0.149s
+    Ran 45 tests in 0.157s
 
     OK
 

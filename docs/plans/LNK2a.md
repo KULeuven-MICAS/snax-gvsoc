@@ -106,7 +106,7 @@ Taken before round 2, not reopened:
   files (`snax_forge/gen/schema/`, `jsonschema`).
 - Here: `snax_cfg.py` resolves whole-file refs; `sw/sync.py` copies
   snax_cluster's `docs/schema/snitch_cluster.schema.json` (its `"items:"`
-  typo as it is); forge/'s fixtures are the writer's output, parsed equal to
+  typo as it was; fixed by snax-forge's LNK2b, synced at `cf4b0002`); forge/'s fixtures are the writer's output, parsed equal to
   round 1's (the streamer and datapath split into two files, the manifest's
   `files` with the streamer file, no `note`).
 
@@ -128,7 +128,11 @@ Taken before round 2, not reopened:
 - **The schema's `"items:"` typo.** `docs/schema/snitch_cluster.schema.json:497`
   (at the pin, `05615e4`) names the `snax_acc_cfg` item schema `"items:"`,
   not `"items"`, so no `snax_acc_cfg` entry is ever validated: neither the
-  slot keys nor a new `snax_datapath_cfg` are checked by clustergen.
+  slot keys nor a new `snax_datapath_cfg` are checked by clustergen. Fixed
+  in snax_cluster `cf4b0002` (snax-forge LNK2b, synced here): `"items"`,
+  with `snax_disable_csr_manager`, `snax_datapath_cfg` and `snax_forge_rtl`,
+  and no item defaults, since clustergen's validator would write them into
+  an accelerator-less core's `{}`.
 - **The timing is not in the hjson.** The DMA's read path, write latency and
   stages, the DRAM's latency and width, the cores' added latency, the HTIF
   backdoor and the clock stay constants, calibrated to the RTL (SG2, SG5,

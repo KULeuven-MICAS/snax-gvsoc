@@ -14,12 +14,13 @@ block (snax_cfg.Datapath), the cluster its TCDM size. The unit's inputs take
 the streamer's readers in order, its outputs the writers.
 
 CSRs: the streamer's from SNAX_CSR_FIRST (nb_csrs of its template); then the
-shell's: the datapath's fields, start, busy and the counter, read-only.
+shell's: the datapath's fields, start, busy and the counter, read-only. The
+counter must be at most SNAX_ACC_CSR_LAST (snax_acc.py).
 """
 
 import gvsoc.systree
 import interco.router as router
-from snax_acc import SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
+from snax_acc import SNAX_ACC_CSR_LAST, SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
 from snax_cfg import CfgTargetError
 from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
 from snax_shell import SnaxShell
@@ -56,9 +57,10 @@ class SnaxUnitAcc(SnaxAcc):
             raise CfgTargetError(file, f'{slot.at}.snax_datapath_cfg.unit',
                 f'{datapath.unit!r}, not a unit kind ({UNITS})')
         shell_last = SNAX_CSR_FIRST + nb_csrs(slot.streamer) + len(datapath.fields) + 2
-        if shell_last > SNAX_CSR_LAST:
+        if shell_last > SNAX_ACC_CSR_LAST:
             raise CfgTargetError(file, slot.at,
-                f"the shell's last CSR {shell_last} is past {SNAX_CSR_LAST}")
+                f"the shell's last CSR {shell_last} is past {SNAX_ACC_CSR_LAST}, the last an "
+                "accelerator may use")
         return type(f'SnaxUnitAcc_{slot.name}', (cls,), {
             'template': slot.streamer,
             'datapath': datapath,
