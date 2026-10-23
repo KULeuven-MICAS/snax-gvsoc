@@ -87,8 +87,9 @@ absolute path (and on the fixtures, the same RTL); window / counter.
 
 `forge errors: 0` and `forge data: 0 errors` in every run; the fixtures' own
 programs print the RTL's lines at the default N. N reaches the hardware only
-as a CSR (`loopCount`), so a design's `N=512` bundle has the default's RTL
-and one build runs both ELFs.
+as CSR values (the streamer's bounds and addresses, the accelerator's
+`loopCount` and vsum's `len`), so a design's `N=512` bundle has the
+default's RTL and one build runs both ELFs.
 
 ## The gaps
 
