@@ -84,6 +84,7 @@ file:
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
 The reader resolves the `$ref`s (relative to the cluster file), the slot's
-datapath block gets the standard composite on the installed components, and
-since its components are not those of the target's default file, gvrun
-warns that the platform tree does not match and runs it on the JSON config.
+datapath block gets the standard composite on the installed components.
+The target's default file is `vecadd/`'s cluster (`sw/cfg/snax_forge/`), so
+`vecadd/` runs on the build's platform tree; for the others gvrun warns that
+the platform tree does not match and runs them on the JSON config.
