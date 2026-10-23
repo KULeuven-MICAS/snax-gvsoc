@@ -27,10 +27,8 @@ their num_int_outstanding_loads, boot_addr, cluster_base_addr, the TCDM
 dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
 crossbar's interconnect (tcdm.sparse_interconnect and each slot's
 sparse_interconnect_config). Each core's accelerator slot gets the standard
-composite (snax_unit_acc.py) when it has a datapath block
-(snax_datapath_cfg), or the class ACCELERATORS holds for its snax_acc_name
-(snax_alu, sw/cfg/'s slot, is snax_alu_acc.py's SnaxAluAcc); neither is an
-error.
+composite (snax_unit_acc.py) from its datapath block (snax_datapath_cfg); a
+slot without one is an error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
 DMA's read path and write latency and its one cycle per stage, the DRAM's
@@ -38,9 +36,7 @@ latency and width, the cores' added latency, the HTIF poll backdoor, the
 10 MHz clock and the bootrom's range.
 
 Everything else is the Snitch chip of pulp/pulp/chips/snitch/snitch.py,
-whose own arch tree fixes the core count at 9. snax_alu.py and
-snax_alu_sparse.py are this board fixed to their sw/cfg/ file
-(fixed_target).
+whose own arch tree fixes the core count at 9.
 """
 
 import os
@@ -55,7 +51,6 @@ from pulp.snitch.snitch_cluster.snitch_cluster import ClusterArch
 from pulp.chips.snitch.snitch import Snitch
 import snax_cfg
 from snax_cfg import CfgTargetError
-from snax_alu_acc import SnaxAluAcc
 from snax_unit_acc import SnaxUnitAcc, compile_components
 
 # GVSoC reads a target twice: `make build` lists its components through gapy
@@ -108,10 +103,6 @@ CLOCK_FREQUENCY = 10000000
 BOOTROM = (0x0000_1000, 0x0001_0000)
 
 
-# Accelerators for a slot without a datapath block, by its snax_acc_name: sw/cfg/'s
-ACCELERATORS = {'snax_alu': SnaxAluAcc}
-
-
 def cfg_file(name: str) -> Path:
     """The cluster file name in the first of CFG_DIRS that holds it."""
     for folder in CFG_DIRS:
@@ -121,19 +112,11 @@ def cfg_file(name: str) -> Path:
 
 
 def accelerator(cfg, slot):
-    """The accelerator class of a slot: the standard composite with a datapath block, else
-    ACCELERATORS' one."""
-    if slot.datapath is not None:
-        return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
-    if slot.name not in ACCELERATORS:
-        raise CfgTargetError(cfg.path, f'{slot.at}.snax_acc_name',
-            f'{slot.name!r}: no snax_datapath_cfg and no accelerator of that name '
-            f'({sorted(ACCELERATORS)})')
-    cls = ACCELERATORS[slot.name]
-    if getattr(cls, 'nb_tcdm_ports', 0) != slot.tcdm_ports:
-        raise CfgTargetError(cfg.path, f'{slot.at}.snax_tcdm_ports',
-            f'{slot.tcdm_ports}, but {cls.__name__} has {getattr(cls, "nb_tcdm_ports", 0)}')
-    return cls
+    """The accelerator class of a slot: the standard composite of its datapath block."""
+    if slot.datapath is None:
+        raise CfgTargetError(cfg.path, f'{slot.at}.snax_datapath_cfg',
+            f'missing: {slot.name!r} has no datapath block, which the model builds a slot from')
+    return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
 
 
 def _one(cfg, values: dict, what: str):
@@ -250,19 +233,11 @@ class SnaxHjsonAttr(Tree):
 
 class SnaxHjsonBoard(gvsoc.systree.Component):
 
-    # The cluster file when the hjson option is not given, a name in CFG_DIRS
-    cluster_file = DEFAULT_HJSON
-    # Whether the hjson option is declared; a target fixed to its cluster file
-    # (snax_alu.py) has none
-    hjson_option = True
-
     def __init__(self, parent, name: str, parser, options):
         super().__init__(parent, name, options=options)
 
-        path = str(cfg_file(self.cluster_file))
-        if self.hjson_option:
-            path = self.declare_user_property(name='hjson', value=path,
-                description='the cluster hjson (snax_cfg.py)')
+        path = self.declare_user_property(name='hjson', value=str(cfg_file(DEFAULT_HJSON)),
+            description='the cluster hjson (snax_cfg.py)')
         arch = SnaxHjson(snax_cfg.load(path))
 
         clock = Clock_domain(self, 'clock', frequency=CLOCK_FREQUENCY)
@@ -300,24 +275,3 @@ class Target(gvsoc.runner.Target):
     def __init__(self, parser, options=None, name=None):
         super().__init__(parser, options, model=SnaxHjsonBoard, name=name)
 
-
-def fixed_target(module: str, board: str, cluster_file: str, description: str):
-    """A target fixed to one cluster file of CFG_DIRS, without the hjson option (snax_alu.py,
-    snax_alu_sparse.py): its board class, named board, and its Target class. The target is
-    named after its module, and both classes belong to it, as gapy finds a target's
-    Target only in the target's own module."""
-    model = type(board, (SnaxHjsonBoard,), {'cluster_file': cluster_file, 'hjson_option': False,
-        '__module__': module})
-
-    class FixedTarget(gvsoc.runner.Target):
-
-        gapy_description = description
-        name = module
-
-        def __init__(self, parser, options=None, name=None):
-            super().__init__(parser, options, model=model, name=name)
-
-    FixedTarget.model = model
-    FixedTarget.__module__ = module
-    FixedTarget.__name__ = FixedTarget.__qualname__ = 'Target'
-    return model, FixedTarget

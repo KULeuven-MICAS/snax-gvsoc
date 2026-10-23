@@ -10,10 +10,7 @@ SnaxShell's rule with the unit's against its own (tests/snax/shell/run.sh;
 `shell`, likewise). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
-sw/apps/, then runs each ALU program, the same ELF, on each ALU target
-(ALU_TARGETS: `snax_alu`, plain interconnect, and `snax_alu_sparse`),
-named <program>.<target>: `snax-alu` at DATA_LEN 4, 100, 128, 1024, 4096,
-`snax-stream` and `alu-timing`; then the cluster tests on `snax_hjson` with
+sw/apps/, then runs the cluster tests on `snax_hjson` with
 forge/vecadd/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
 `dma-timing`, `snax-csr`, the seven `stream-timing` cases, the three
 `core-tcdm` cases and the `dma-tcdm` case, each a plain run (exit code
@@ -36,8 +33,9 @@ from build/sw/tests/; a plain ELF missing is a failure.
 
 A program passes when it exits 0 within TIMEOUT seconds: every SNAX program
 returns its error count, but `stream-timing` and the `core-tcdm` cases other
-than `subword`, which return 0. No other output or cycle count is compared; the comparison with the RTL is made by
-hand with phases.py (README, "Comparing with the RTL").
+than `subword`, which return 0. No other output or cycle count is
+compared; the comparison with the RTL is made by hand (README, "Comparing
+with the RTL").
 
 The counter check (check_counter): a program on SnaxShell and
 SnaxUnit prints the shell's counter after a unit run; it passes when the
@@ -90,7 +88,6 @@ SW = ROOT / "sw"
 APPS = SW / "apps"
 BUILD = ROOT / "build" / "sw"
 
-ALU_TARGETS = ["snax_alu", "snax_alu_sparse"]
 # Generated accelerators, forge/<design>/ (forge/README.md): every folder, run
 # on snax_hjson from its cluster file by the generic app
 FORGE_DIR = ROOT / "forge"
@@ -115,7 +112,6 @@ FORGE_REDUCE = [("vsum", 16)]
 # own `comp` and `trace` lines, so every line of trace.log has its grammar
 UNIT_TRACES = ("summary", "events", "beats")
 CLASS_TRACES = [f"snax_acc[0-9]*/streamer/{t}$" for t in ("summary", "events", "beats")]
-SIZES = [4, 100, 128, 1024, 4096]
 # The cluster tests built once into one ELF per case, <program>-<case>.elf
 CASES = [
     ("stream-timing", ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
@@ -239,15 +235,6 @@ class Check:
     def selected(self, name):
         return self.only is None or self.only in name
 
-    def selected_snax(self, program):
-        """Whether the SNAX program runs on any target."""
-        return any(self.selected(f"{program}.{target}") for target in ALU_TARGETS)
-
-    def run_snax(self, program, elf):
-        """Runs the SNAX program's ELF on every SNAX target."""
-        for target in ALU_TARGETS:
-            self.run(f"{program}.{target}", target, elf)
-
     def run(self, name, target, elf, work=None, options=()):
         """Runs one program; returns its log when it exited 0, else None."""
         if not self.selected(name):
@@ -330,18 +317,6 @@ def main():
     print(f"  {check.count - count} run")
 
     make(SW)
-
-    count = check.count
-    print(f"ALU programs on {', '.join(ALU_TARGETS)}")
-    for n in SIZES:
-        if check.selected_snax(f"snax-alu-{n}"):
-            make(APPS / "snax-alu", f"DATA_LEN={n}")
-        check.run_snax(f"snax-alu-{n}", BUILD / "apps" / "snax-alu" / str(n) / "snax-alu.elf")
-    for prog in ("snax-stream", "alu-timing"):
-        if check.selected_snax(prog):
-            make(APPS / prog)
-        check.run_snax(prog, BUILD / "apps" / prog / f"{prog}.elf")
-    print(f"  {check.count - count} run")
 
     count = check.count
     print(f"cluster tests on {FORGE_TARGET}, forge/{CLUSTER_DESIGN}/'s cluster file")

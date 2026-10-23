@@ -88,7 +88,7 @@ class SnaxUnitAcc(SnaxAcc):
             csr_base=shell_csr_first)
 
         # The streamer's range, then everything to the last SNAX CSR to the
-        # shell, as snax_alu_acc.py does for the ALU
+        # shell
         streamer_base = 4 * SNAX_CSR_FIRST
         shell_base = 4 * shell_csr_first
         csr_mux.o_MAP(streamer.i_INPUT(), base=streamer_base,

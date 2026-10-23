@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The shell program, on snax_hjson with forge/vecadd/snax_forge.hjson: SnaxShell
-// and SnaxUnit (lockstep add, 4 lanes of 64 bit) behind snax-alu's streamer
-// (snax/snax_unit_acc.py). snax-alu's DMA and streamer setup; the shell's
-// CSRs from forge/vecadd/include/acc_csr.h. One streamer run of LOOP_ITER
+// and SnaxUnit (lockstep add, 4 lanes of 64 bit) behind the streamer
+// (snax/snax_unit_acc.py). snax_cluster's snax-alu DMA and streamer setup; the
+// streamer's and the shell's CSRs from forge/vecadd/include/. One streamer run of LOOP_ITER
 // beats feeds three unit runs of RUN_BEATS each:
 //   - start 1, alone: once busy is 0, the counter is run 1's busy cycles,
 //     printed (`snax-shell counter: <n>`); regress.py checks it against the
@@ -24,7 +24,6 @@
 
 #include "acc_csr.h"
 #include "data.h"
-#include "snax-alu-lib.h"
 #include "streamer_csr_addr_map.h"
 
 // Three unit runs on one streamer run (LOOP_ITER is a uint64_t)
@@ -38,7 +37,7 @@ int main() {
     local_b = local_a + DATA_LEN;
     local_o = local_b + DATA_LEN;
 
-    // A and B into L1 by the DMA core, as snax-alu
+    // A and B into L1 by the DMA core, as snax_cluster's snax-alu
     if (snrt_is_dm_core()) {
         size_t vector_size = DATA_LEN * sizeof(uint64_t);
         snrt_dma_start_1d(local_a, A, vector_size);
@@ -49,12 +48,24 @@ int main() {
     snrt_cluster_hw_barrier();
 
     if (snrt_is_compute_core()) {
-        configure_streamer_a((uint64_t)local_a, 0, 8, LOOP_ITER, 32);
-        configure_streamer_b((uint64_t)local_b, 0, 8, LOOP_ITER, 32);
-        configure_streamer_o((uint64_t)local_o, 0, 8, LOOP_ITER, 32);
+        csrw_ss(BASE_PTR_READER_0_LOW, (uint32_t)local_a);
+        csrw_ss(BASE_PTR_READER_0_HIGH, 0);
+        csrw_ss(S_STRIDE_READER_0_0, 8);
+        csrw_ss(T_BOUND_READER_0_0, LOOP_ITER);
+        csrw_ss(T_STRIDE_READER_0_0, 32);
+        csrw_ss(BASE_PTR_READER_1_LOW, (uint32_t)local_b);
+        csrw_ss(BASE_PTR_READER_1_HIGH, 0);
+        csrw_ss(S_STRIDE_READER_1_0, 8);
+        csrw_ss(T_BOUND_READER_1_0, LOOP_ITER);
+        csrw_ss(T_STRIDE_READER_1_0, 32);
+        csrw_ss(BASE_PTR_WRITER_0_LOW, (uint32_t)local_o);
+        csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
+        csrw_ss(S_STRIDE_WRITER_0_0, 8);
+        csrw_ss(T_BOUND_WRITER_0_0, LOOP_ITER);
+        csrw_ss(T_STRIDE_WRITER_0_0, 32);
         csrw_ss(ACC_RW_LOOP_COUNT, RUN_BEATS);
 
-        start_streamer();
+        csrw_ss(STREAMER_START_CSR, 1);
 
         // Run 1 alone: its counter
         csrw_ss(ACC_RW_START, 1);
@@ -75,7 +86,7 @@ int main() {
 
         while (csrr_ss(ACC_RO_BUSY)) {
         };
-        while (read_busy_streamer()) {
+        while (csrr_ss(STREAMER_BUSY_CSR)) {
         };
 
         int data_errors = 0;

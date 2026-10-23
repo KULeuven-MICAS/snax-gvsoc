@@ -70,9 +70,9 @@ sw:
 	$(MAKE) -C sw
 
 # The targets SNAX-GVSoC's programs and regression run on: snitch for the
-# plain tests, then the SNAX ones. `make build TARGETS='$(SNAX_TARGETS)'`
+# plain tests, then snax_hjson. `make build TARGETS='$(SNAX_TARGETS)'`
 # builds them (single quotes, so make expands it, not the shell).
-SNAX_TARGETS = snitch;snax_alu;snax_alu_sparse;snax_hjson
+SNAX_TARGETS = snitch;snax_hjson
 
 # SNAX-GVSoC's regression (tests/snax/regress.py): builds sw/ and the
 # programs of sw/apps/, then every program must exit 0 within its timeout.

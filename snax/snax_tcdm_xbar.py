@@ -108,15 +108,6 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
             'trace_inputs': trace_inputs,
         })
 
-    def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
-
-    def i_PRIORITY(self, port: int) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, f'prio_{port}', signature='wire<bool>')
-
-    def i_DMA(self) -> gvsoc.systree.SlaveItf:
-        return gvsoc.systree.SlaveItf(self, 'dma', signature='io')
-
     def o_BANK(self, bank: int, itf: gvsoc.systree.SlaveItf):
         self.itf_bind(f'out_{bank}', itf, signature='io')
 

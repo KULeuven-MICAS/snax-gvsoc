@@ -29,8 +29,8 @@ def check_template(template: dict):
     Parameters
     ----------
     template : dict
-        The streamer template, as in the cluster hjson (e.g.
-        snax_alu_streamer_template).
+        The streamer template, as the cluster hjson gives it (e.g.
+        snax_forge_streamer.hjson).
     """
     for key in template:
         if key not in TEMPLATE_KEYS:

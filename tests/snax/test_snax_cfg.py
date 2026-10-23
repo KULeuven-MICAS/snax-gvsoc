@@ -29,8 +29,7 @@ FORGE = ROOT / "forge"
 # forge/vecadd/'s cluster file, as sw/sync.py copies it from snax_cluster
 CLUSTER = CFG / "snax_forge" / "snax_forge.hjson"
 
-# The streamer of forge/vecadd/, vecmul/ and both snax_alu files (theirs with
-# snax_library_name)
+# The streamer of forge/vecadd/ and vecmul/
 STREAMER = {
     "data_reader_params": {
         "spatial_bounds": [[4], [4]],
@@ -67,8 +66,7 @@ class SwCfg(unittest.TestCase):
     """The cluster files of sw/cfg/."""
 
     def check_cluster(self, cfg, name):
-        """The cluster both forge/vecadd/'s and the snax_alu files describe; returns the
-        compute core's slot."""
+        """forge/vecadd/'s cluster; returns the compute core's slot."""
         self.assertEqual(cfg.name, name)
         self.assertEqual(cfg.boot_addr, 0x1000)
         self.assertEqual(cfg.base, 0x1000_0000)
@@ -97,17 +95,6 @@ class SwCfg(unittest.TestCase):
         self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
                          (None, None, [[12, 1]]))
 
-    def test_sparse(self):
-        cfg = snax_cfg.load(CFG / "snax_alu_cluster.hjson")
-        slot = self.check_cluster(cfg, "snax_alu_cluster")
-        self.assertEqual(slot.name, "snax_alu")
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 3, 2))
-        self.assertEqual(slot.streamer, {**STREAMER, "snax_library_name": "snax-alu"})
-        self.assertIsNone(slot.datapath)
-        self.assertTrue(cfg.tcdm.sparse_interconnect)
-        self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
-                         (None, None, [[12, 1]]))
-
     def test_snitch(self):
         cfg = snax_cfg.load(CFG / "snitch_cluster.hjson")
         self.assertEqual(cfg.name, "snitch_cluster")
@@ -119,7 +106,7 @@ class SwCfg(unittest.TestCase):
 
 
 class Fixtures(unittest.TestCase):
-    """forge/'s cluster files: snax_alu_cluster.hjson renamed snax_forge_cluster, its slot
+    """forge/'s cluster files: snax-forge's base cluster renamed snax_forge_cluster, its slot
     snax_forge set for the design."""
 
     def slot(self, design):

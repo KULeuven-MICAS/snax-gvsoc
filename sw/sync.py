@@ -16,16 +16,13 @@ SNAX_CLUSTER=<path>` (CI1, sw/README.md).
    every cluster) into sw/runtime/common/, made in the checkout by
    `make -C target/snitch_cluster`; for the clusters of STREAMERS, the
    streamer_csr_addr_map.h snaxgen writes (`make sw-snax-gen`, sbt) into
-   sw/generated/<cluster>/, without its "Generated at" line; for the
-   clusters of SAME_HEADERS, the same headers, only compared with another
-   cluster's (a difference fails the sync); sw/math/include/bits/alltypes.h with the sed rule of
-   snax_cluster's sw/math/Makefile.
+   sw/generated/<cluster>/, without its "Generated at" line;
+   sw/math/include/bits/alltypes.h with the sed rule of snax_cluster's
+   sw/math/Makefile.
 4. Writes the new pin (snax_cluster HEAD, the printf and riscv-opcodes
    submodule commits) into sw/README.md.
-5. Reports what changed in sw/, what changed upstream in the build files
-   sw/'s Makefiles mirror (MIRRORED), and whether the checkout's
-   streamer_csr_addr_map.h (written by the Chisel streamer in rtl-gen)
-   equals sw/generated/'s hand copy, which sync never writes.
+5. Reports what changed in sw/ and what changed upstream in the build files
+   sw/'s Makefiles mirror (MIRRORED).
 
 Paths: sw/X -> sw/X, target/snitch_cluster/sw/X -> sw/X,
 target/snitch_cluster/cfg/snax_forge/vecadd/X -> sw/cfg/snax_forge/X,
@@ -82,12 +79,6 @@ COPIED = [
         "putchar.c", "snitch_cluster_start.S", "snitch_cluster_start.c", "snrt.c", "snrt.h")),
     *(f"{TSW}/runtime/rtl/src/{n}" for n in (
         "putchar.c", "snitch_cluster_start.S", "snitch_cluster_start.c")),
-    f"{TSW}/apps/snax-alu/src/snax-alu.c",
-    f"{TSW}/apps/snax-alu/data/datagen.py",
-    f"{TSW}/snax/snax-alu/src/snax-alu-lib.c",
-    f"{TSW}/snax/snax-alu/include/snax-alu-lib.h",
-    "target/snitch_cluster/cfg/snax_alu_cluster.hjson",
-    "target/snitch_cluster/cfg/snax_alu_cluster_old.hjson",
     "target/snitch_cluster/cfg/snitch_cluster.hjson",
     # snax-forge's vecadd fixture, the cluster the apps build for
     *(f"target/snitch_cluster/cfg/{FORGE}/{n}.hjson"
@@ -102,20 +93,13 @@ MATH_SKIP = ("Makefile", ".gitignore", "include/bits/")
 
 # Each cluster's configuration, relative to target/snitch_cluster
 CLUSTERS = {"snitch_cluster": "cfg/snitch_cluster.hjson",
-            "snax_alu_cluster_old": "cfg/snax_alu_cluster_old.hjson",
             "snax_forge": f"cfg/{FORGE}/snax_forge.hjson"}
 # Clusters whose streamer header snaxgen writes, where it writes it
 STREAMERS = {"snax_forge": f"{TSW}/snax/snax_forge/include/streamer_csr_addr_map.h"}
-# Clusters whose headers must equal another's, so they share its generated/
-# folder and runtime: made and compared, not kept. The checkout is left on
-# the last one made.
-SAME_HEADERS = {"cfg/snax_alu_cluster.hjson": "snax_alu_cluster_old"}
 COMMON = f"{TSW}/runtime/common"
 CLUSTER_GEN = ["snitch_cluster_cfg.h", "snitch_cluster_addrmap.h"]
 PERIPHERAL = "snitch_cluster_peripheral.h"
 ALLTYPES = SW / "math/include/bits/alltypes.h"
-STREAMER_H = f"{TSW}/snax/snax-alu/include/streamer_csr_addr_map.h"
-STREAMER_COPY = SW / "generated/snax_alu_cluster_old/streamer_csr_addr_map.h"
 
 SUBMODULES = ["sw/deps/printf", "sw/deps/riscv-opcodes"]
 # Upstream paths sync reads: a tracked change there is refused.
@@ -125,7 +109,7 @@ CHECKED = ["LICENSE", "sw/snRuntime", "sw/math", "sw/deps", "sw/tests", "target/
 MIRRORED = [
     f"{TSW}/Makefile", f"{TSW}/runtime/common/common.mk", f"{TSW}/runtime/rtl-generic/Makefile",
     "sw/math/Makefile", f"{TSW}/math/Makefile", f"{TSW}/tests/Makefile", f"{TSW}/runtime.yaml",
-    f"{TSW}/standard-fp.yaml", f"{TSW}/apps/snax-alu/Makefile", f"{TSW}/snax/snax-alu/Makefile",
+    f"{TSW}/standard-fp.yaml",
 ]
 
 PIN_ROW = re.compile(r"^\| `(?P<what>[^`]+)` \| `(?P<commit>[0-9a-f]{40})` \|.*$", re.M)
@@ -197,8 +181,7 @@ def copy(checkout):
 
 
 def make_headers(checkout, cfg):
-    """Makes the headers of the cluster configuration cfg in the checkout; returns their text
-    by name."""
+    """Makes the headers of the cluster configuration cfg in the checkout."""
     common = checkout / COMMON
     names = CLUSTER_GEN + [PERIPHERAL]
     for n in names:
@@ -209,7 +192,6 @@ def make_headers(checkout, cfg):
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if p.returncode != 0:
         raise SystemExit(f"header generation failed for {cfg}:\n{p.stdout}")
-    return {n: (common / n).read_text() for n in names}
 
 
 def make_streamer(checkout, cluster, out):
@@ -228,9 +210,8 @@ def make_streamer(checkout, cluster, out):
 def generate(checkout):
     common = checkout / COMMON
     peripheral = None
-    made = {}
     for cluster, cfg in CLUSTERS.items():
-        made[cluster] = make_headers(checkout, cfg)
+        make_headers(checkout, cfg)
         out = SW / "generated" / cluster
         out.mkdir(parents=True, exist_ok=True)
         for n in CLUSTER_GEN:
@@ -241,11 +222,6 @@ def generate(checkout):
         if peripheral is not None and text != peripheral:
             raise SystemExit(f"{PERIPHERAL} differs between {next(iter(CLUSTERS))} and {cluster}")
         peripheral = text
-    for cfg, same in SAME_HEADERS.items():
-        headers = make_headers(checkout, cfg)
-        differ = [n for n in headers if headers[n] != made[same][n]]
-        if differ:
-            raise SystemExit(f"{cfg}: {', '.join(differ)} not equal to {same}'s")
     (SW / "runtime/common" / PERIPHERAL).write_text(peripheral)
     # sw/math/Makefile's rule for $(ALLTYPES_H)
     math = SW / "math"
@@ -271,17 +247,6 @@ def report(checkout, old, new):
     print(stat or "  no change")
     if stat:
         print("  Review sw/Makefile, sw/common.mk and sw/apps/*/Makefile against these.")
-    print("\n== streamer_csr_addr_map.h")
-    up = checkout / STREAMER_H
-    ours = STREAMER_COPY.relative_to(REPO)
-    if not up.is_file():
-        print(f"  the checkout has none (made by rtl-gen); {ours} not compared")
-    elif streamer_lines(up) == streamer_lines(STREAMER_COPY):
-        print(f"  the checkout's (from its last rtl-gen) equals {ours}, but for the"
-              " 'Generated at' line")
-    else:
-        print(f"  the checkout's (from its last rtl-gen, for the hjson it ran on) differs from"
-              f" {ours}:\n  diff {up} {STREAMER_COPY}")
 
 
 def main():
