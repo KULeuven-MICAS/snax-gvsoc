@@ -2,7 +2,7 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# What the programs in apps/ share (CI1): built for snax_forge (snax-forge's
+# What the programs in apps/ share: built for snax_forge (snax-forge's
 # vecadd fixture's cluster) against the runtime and math library of sw/,
 # with the include dirs, libraries, linker script and link flags of
 # snax_cluster's sw/apps/common.mk at the pin; the cluster's generated

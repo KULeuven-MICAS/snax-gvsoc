@@ -57,7 +57,7 @@ IDmaFeXdma::IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me)
     this->beat_size = beat_size ? beat_size->get_int() : 64;
     this->busy = false;
 
-    // SNAX, FLOW3's events
+    // SNAX events (docs/EVENTS.md)
     this->idma = idma;
     this->traces.new_trace("summary", &this->ev_summary, vp::INFO);
     this->traces.new_trace("events", &this->ev_events, vp::INFO);
@@ -172,7 +172,7 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
         transfer_id, transfer->src, transfer->dst, transfer->size, transfer->src_stride,
         transfer->dst_stride, transfer->reps, transfer->config);
 
-    // SNAX, FLOW3's events: the copy as the core issued it, its rows 1 for a 1D copy
+    // SNAX events (docs/EVENTS.md): the copy as the core issued it, its rows 1 for a 1D copy
     uint64_t rows = (transfer->config >> 1) & 1 ? transfer->reps : 1;
     this->transfers++;
     if (this->is_local(transfer->dst))
@@ -237,7 +237,7 @@ void IDmaFeXdma::update_busy()
     bool busy = this->next_transfer_id.get() - this->completed_id.get() != 1;
     if (busy != this->busy)
     {
-        // SNAX, FLOW3's events: the busy cycles, as DMA_BUSY counts them
+        // SNAX events (docs/EVENTS.md): the busy cycles, as DMA_BUSY counts them
         int64_t cycle = this->idma->clock.get_cycles();
         if (busy)
         {
@@ -332,7 +332,7 @@ bool IDmaFeXdma::is_local(uint64_t addr)
 
 
 
-// SNAX, FLOW3's events: the counts at the end of the simulation, a copy still running
+// SNAX events (docs/EVENTS.md): the counts at the end of the simulation, a copy still running
 // counted up to now
 void IDmaFeXdma::stop()
 {

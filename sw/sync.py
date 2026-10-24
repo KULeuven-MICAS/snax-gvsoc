@@ -3,7 +3,7 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 """Refreshes sw/ from a snax_cluster checkout: `make sync-snax-cluster
-SNAX_CLUSTER=<path>` (CI1, sw/README.md).
+SNAX_CLUSTER=<path>` (sw/README.md).
 
 1. Refuses a checkout with tracked changes in what sync reads (CHECKED);
    reads the old pin from sw/README.md.
@@ -83,7 +83,7 @@ COPIED = [
     # snax-forge's vecadd fixture, the cluster the apps build for
     *(f"target/snitch_cluster/cfg/{FORGE}/{n}.hjson"
       for n in ("snax_forge", "snax_forge_streamer", "snax_forge_acc")),
-    # The cluster hjson's schema, clustergen's check of it (LNK2a round 2)
+    # The cluster hjson's schema, clustergen's check of it
     "docs/schema/snitch_cluster.schema.json",
     "util/sim/data_utils.py",
 ]

@@ -2,7 +2,7 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Builds snax_cluster's software from the copy in sw/ (CI1, README.md) into
+# Builds snax_cluster's software from the copy in sw/ (README.md) into
 # build/sw/: libmath.a; per cluster, <cluster>/libsnRuntime.a; every plain
 # test in tests/ (the 17 of COPIED in sync.py) for snitch_cluster into
 # tests/. Flags from toolchain.mk; include order and link flags as

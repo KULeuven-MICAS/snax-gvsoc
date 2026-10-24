@@ -163,7 +163,7 @@ class Snitch(cpu.iss.riscv.RiscvCommon):
         self.add_c_flags([
             "-DPIPELINE_STAGES=1",
             "-DCONFIG_ISS_CORE=snitch",
-            # FLOW3's events from the shared exec code (snitch.cpp, docs/EVENTS.md)
+            # SNAX events (docs/EVENTS.md) from the shared exec code (snitch.cpp)
             "-DCONFIG_GVSOC_ISS_SNAX_EVENTS=1",
         ])
 

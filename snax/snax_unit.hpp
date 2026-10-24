@@ -25,7 +25,7 @@
 // input has a beat and the output has room, and pushes the result in the
 // same cycle (latency 0, II 1, rate 1); E is the firing that reaches count.
 //
-// pipelined, as snax-forge's snax_model/accel.py without its drain: a
+// pipelined, as a BRM's timing (L, II; D103) without its drain: a
 // join on the inputs, an L-stage pipeline that stalls as a whole when its
 // head cannot be pushed, at most one firing per II. A firing that gives a
 // result (every rate-th) puts it into the pipeline; the others put nothing.
