@@ -25,8 +25,9 @@ their num_int_outstanding_loads, boot_addr, cluster_base_addr, the TCDM
 (size, banks, data_width), cluster_periph_size and zero_mem_size, the DMA
 (dma_data_width, dma_req_fifo_depth as its transfer queue,
 dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
-crossbar's interconnect (tcdm.sparse_interconnect and each slot's
-sparse_interconnect_config). Each core's accelerator slot gets the standard
+crossbar's sparse interconnect (each slot's sparse_interconnect_config;
+tcdm.sparse_interconnect false is an error: the plain interconnect is not
+modelled). Each core's accelerator slot gets the standard
 composite (snax_unit_acc.py) from its datapath block (snax_datapath_cfg); a
 slot without one is an error.
 
@@ -150,7 +151,10 @@ class SnaxHjson:
         loads = _one(cfg, {i: core.num_int_outstanding_loads for i, core in enumerate(cores)},
             'num_int_outstanding_loads')
 
-        # The accelerators by core, and for the sparse interconnect their sparse ports
+        # The accelerators by core, and their sparse interconnect ports
+        if not cfg.tcdm.sparse_interconnect:
+            raise CfgTargetError(cfg.path, 'cluster.tcdm.sparse_interconnect',
+                'is false: only the sparse interconnect is modelled, not the plain one')
         self.snax_acc = {}
         sparse_config = {}
         for i, core in enumerate(cores):
@@ -164,11 +168,7 @@ class SnaxHjson:
                 self.snax_acc[i] = accelerator(cfg, slot)
                 if slot.sparse_config is not None:
                     sparse_config[i] = slot.sparse_config
-        if cfg.tcdm.sparse_interconnect:
-            self.interconnect = {'snax_interconnect': 'sparse',
-                'snax_sparse_config': sparse_config}
-        else:
-            self.interconnect = {'snax_interconnect': 'plain'}
+        self.interconnect = {'snax_sparse_config': sparse_config}
 
         # A DMA beat is one superbank: dma_data_width bits
         self.dma = {'tcdm_width': cfg.dma.data_width // 8,

@@ -83,11 +83,10 @@ if os.environ.get('USE_GVRUN') is None:
             self.use_spatz = properties.use_spatz
             self.spatz_nb_lanes = properties.spatz_nb_lanes
             self.isa = properties.isa
-            # SNAX accelerators, DMA arguments and the SNAX ports' interconnect, see the
+            # SNAX accelerators, DMA arguments and the SNAX ports' sparse config, see the
             # run-time ClusterArch below.
             self.snax_acc = getattr(properties, 'snax_acc', None)
             self.dma = getattr(properties, 'dma', None)
-            self.snax_interconnect = getattr(properties, 'snax_interconnect', 'plain')
             self.snax_sparse_config = getattr(properties, 'snax_sparse_config', None)
             self.snax_dma_data_width = getattr(properties, 'snax_dma_data_width', None)
 
@@ -105,8 +104,7 @@ else:
         def __init__(self, parent, name, base, first_hartid, auto_fetch=False,
                 boot_addr=0x0000_1000, nb_core_per_cluster=None, spatz=False, spatz_nb_lanes=4,
                 core_type='accurate', isa=None, alias_base=None, misa=None, snax_acc=None,
-                dma=None, core=None, core_latency=None, snax_interconnect='plain',
-                snax_sparse_config=None, snax_dma_data_width=None, tcdm_size=0x0002_0000,
+                dma=None, core=None, core_latency=None, snax_sparse_config=None, snax_dma_data_width=None, tcdm_size=0x0002_0000,
                 tcdm_banks=32, tcdm_bank_width=8, periph_size=0x0001_0000,
                 zero_mem_size=0x0001_0000):
             super().__init__(parent, name)
@@ -167,12 +165,10 @@ else:
             # core to the TCDM, and to everything outside the cluster through narrow_axi.
             # None adds none.
             self.core_latency = core_latency
-            # SNAX: the interconnect of the SNAX crossbar, 'plain' or 'sparse' (the hjson's
-            # tcdm.sparse_interconnect), and for sparse each accelerator's
+            # SNAX: the SNAX crossbar's sparse interconnect, each accelerator's
             # sparse_interconnect_config by core index, {core: [[width, granularity], ...]};
             # an accelerator without one is [[nb_tcdm_ports, 1]], as snaxgen does, and the
             # cores and AXI are [1, 1] each after them.
-            self.snax_interconnect = snax_interconnect
             self.snax_sparse_config = snax_sparse_config
             # SNAX: the DMA's data width in bits (the hjson's dma_data_width). With SNAX
             # ports, the DMA's TCDM accesses go through the SNAX crossbar, each beat taking
@@ -195,12 +191,12 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
 
     # SNAX: nb_snax_ports adds a crossbar with that many inputs in front of the same banks
     # (the accelerators' TCDM ports, then the cores and AXI), arbitrated per bank as
-    # snax_cluster's plain or sparse interconnect (snax/snax_tcdm_xbar); snax_holds says
+    # snax_cluster's sparse interconnect (snax/snax_tcdm_xbar); snax_holds says
     # per input whether it holds a losing request. With snax_superbank_banks too, the DMA
     # input goes to the crossbar's DMA port instead of DmaInterleaver, each beat taking a
     # superbank of that many banks.
     def __init__(self, parent, name, arch, nb_snax_ports=0, snax_port_names=None,
-            snax_holds=None, snax_interconnect='plain', snax_sparse_config=None,
+            snax_holds=None, snax_sparse_config=None,
             snax_superbank_banks=0):
         super().__init__(parent, name)
 
@@ -233,8 +229,7 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
             from snax_tcdm_xbar import SnaxTcdmXbar
             snax_xbar = SnaxTcdmXbar(self, 'snax_xbar', nb_inputs=nb_snax_ports,
                 nb_banks=nb_banks, bank_width=arch.bank_width, input_names=snax_port_names,
-                holds=snax_holds, interconnect=snax_interconnect,
-                sparse_config=snax_sparse_config,
+                holds=snax_holds, sparse_config=snax_sparse_config,
                 superbank_banks=snax_superbank_banks if dma_in_snax_xbar else 0)
             for i in range(0, nb_banks):
                 snax_xbar.o_BANK(i, banks[i].i_INPUT())
@@ -280,8 +275,7 @@ class SnitchCluster(gvsoc.systree.Component):
         # order as snax_cluster packs snax_tcdm_req_i
         snax_acc = getattr(arch, 'snax_acc', None) or {}
         snax_port_names = []
-        # and for the sparse interconnect, the ports [width, granularity] in that order
-        snax_interconnect = getattr(arch, 'snax_interconnect', 'plain')
+        # and the sparse interconnect's ports [width, granularity] in that order
         snax_sparse_config = []
         for core_id, make_acc in sorted(snax_acc.items()):
             nb_ports = getattr(make_acc, 'nb_tcdm_ports', 0)
@@ -315,9 +309,7 @@ class SnitchCluster(gvsoc.systree.Component):
         # L1 Memory
         tcdm = SnitchClusterTcdm(self, 'tcdm', arch.tcdm, nb_snax_ports=len(snax_port_names),
             snax_port_names=snax_port_names, snax_holds=snax_holds,
-            snax_interconnect=snax_interconnect,
-            snax_sparse_config=snax_sparse_config if snax_interconnect == 'sparse' else None,
-            snax_superbank_banks=snax_superbank_banks)
+            snax_sparse_config=snax_sparse_config, snax_superbank_banks=snax_superbank_banks)
 
         # Zero memory
         zero_mem = ZeroMem(self, 'zero_mem', size=arch.zero_mem.size)

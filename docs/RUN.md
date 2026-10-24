@@ -260,7 +260,7 @@ does not: make reads `-k` itself):
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader, `phases.py`, the class lines, and the composite's
+`snax_cfg.py`'s reader, the class lines, and the composite's
 CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 `make build`; skipped without it), with the image's Python:
 

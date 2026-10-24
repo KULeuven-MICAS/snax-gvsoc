@@ -8,7 +8,7 @@
 // block's datapath takes a start, fires and pushes, how its busy cycles are
 // classed, and what a lane computes. Plain C++, so the component
 // (snax_unit.cpp) and the standalone test (tests/snax/unit/) run the same
-// code, as snax_plain_arb.hpp.
+// code, as snax_sparse_arb.hpp.
 //
 // A run: a start offered in cycle s is taken only when the unit is idle in s
 // and its count and rate are not 0 (a count or rate of 0 is ignored: busy

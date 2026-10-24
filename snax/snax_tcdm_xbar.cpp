@@ -4,22 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The SNAX accelerators' ports into the TCDM banks, arbitrated per bank as one
-// of snax_cluster's two interconnects does, chosen by the property
-// interconnect:
-//   plain   snitch_tcdm_interconnect.sv (sparse_interconnect false): one
-//           stream_xbar, one rr_arb_tree per bank (FairArb, LockIn, no
-//           external priority: the priority bit is ignored), a winner
-//           refused by its bank locked in (snax_plain_arb.hpp). common_cells
-//           v1.40.0, src/rr_arb_tree.sv and src/stream_xbar.sv.
-//   sparse  the Chisel SparseInterconnect (sparse_interconnect true): per
-//           bank the highest priority first, then round robin from the last
-//           pick, restarting after a cycle with no request, and a winner
-//           refused by its bank keeps its turn (snax_sparse_arb.hpp). The
-//           property sparse_config lists its ports [width, granularity]; an
-//           input reaches only the banks its granularity allows, and a bank
-//           orders its inputs as SparseConfig does.
-// Read data comes one cycle after the grant in both.
+// The SNAX accelerators' ports into the TCDM banks, arbitrated per bank as
+// snax_cluster's sparse interconnect, the Chisel SparseInterconnect
+// (sparse_interconnect true), does: per bank the highest priority first, then
+// round robin from the last pick, restarting after a cycle with no request,
+// and a winner refused by its bank keeps its turn (snax_sparse_arb.hpp). The
+// property sparse_config lists its ports [width, granularity]; an input
+// reaches only the banks its granularity allows, and a bank orders its inputs
+// as SparseConfig does. Read data comes one cycle after the grant.
 //
 // A master sends a request of 1, 2, 4 or 8 bytes inside one bank word on its
 // input; the crossbar takes it (IO_REQ_PENDING) and arbitrates once per
@@ -47,8 +39,7 @@
 // The DMA (property superbank_banks, port dma) is not one of them: as on the
 // RTL (mem_wide_narrow_mux), a DMA beat takes every bank of its superbank in
 // its cycle and is answered at once, never refused, and a narrow winner on
-// those banks is refused by the bank and locked by its interconnect's rule
-// (bank_refuses()). A beat is a request inside one aligned superbank line; one
+// those banks is refused by the bank and keeps its turn (bank_refuses()). A beat is a request inside one aligned superbank line; one
 // that crosses a line is refused. The DMA's beat of a cycle comes before that
 // cycle's arbitration, which runs after every event queued before the cycle
 // (docs/plans/SG7.md); one that comes after it on a superbank already
@@ -87,7 +78,6 @@
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
 #include "snax_events.hpp"
-#include "snax_plain_arb.hpp"
 #include "snax_sparse_arb.hpp"
 
 
@@ -126,8 +116,8 @@ private:
     }
     // The inputs requesting in req_mask but winner, for the trace
     std::string others(uint64_t req_mask, int winner);
-    // An input's name for the trace; sparse, one asking with priority 1 is
-    // marked with !
+    // An input's name for the trace; one asking with priority 1 is marked
+    // with !
     std::string name(int input);
     // The inputs and the DMA the beat and stall lines are written for
     void trace_inputs_from(std::string value);
@@ -151,7 +141,6 @@ private:
     int nb_banks;
     int bank_bits;         // log2(nb_banks)
     int width_bits;        // log2 of the bank width in bytes
-    bool sparse;           // the sparse interconnect, else the plain one
     int superbank_banks;   // banks per DMA beat, 0 without a DMA port
 
     // Per input: whether it holds a losing request (else its master resends it)
@@ -160,16 +149,14 @@ private:
     std::vector<vp::IoReq *> pending;
     // Per input: its bank, decoded when the request arrives
     std::vector<int> pending_bank;
-    // Plain: per bank its arbitration tree
-    std::vector<SnaxPlainArb> plain_arbs;
     // Per bank: the inputs requesting it in this cycle, one bit each
     std::vector<uint64_t> bank_req;
     // Per input: its owner's name for the trace, in_<i> when none is given
     std::vector<std::string> names;
-    // Per input: the priority bit of its request in this cycle (sparse only)
+    // Per input: the priority bit of its request in this cycle
     std::vector<bool> priority;
 
-    // Sparse: the ports, and per bank its arbiter and its inputs in local order
+    // The ports, and per bank its arbiter and its inputs in local order
     SnaxSparseConfig sparse_config;
     std::vector<SnaxSparseArb> sparse_arbs;
     std::vector<std::vector<int>> bank_inputs;
@@ -226,10 +213,6 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
         "nb_inputs must be in (0, 64], got %d\n", this->nb_inputs);
 
     this->bank_bits = __builtin_ctz(this->nb_banks);
-    std::string interconnect = this->get_js_config()->get_child_str("interconnect");
-    vp_assert_always(interconnect == "plain" || interconnect == "sparse", &this->trace,
-        "interconnect must be plain or sparse, got %s\n", interconnect.c_str());
-    this->sparse = interconnect == "sparse";
     this->width_bits = __builtin_ctz(bank_width);
     js::Config *superbank = this->get_js_config()->get("superbank_banks");
     this->superbank_banks = superbank != NULL ? superbank->get_int() : 0;
@@ -278,27 +261,20 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     js::Config *trace_inputs = this->get_js_config()->get("trace_inputs");
     this->trace_inputs_from(trace_inputs != NULL ? trace_inputs->get_str() : "default");
 
-    if (this->sparse)
+    std::vector<SnaxSparsePort> ports;
+    for (js::Config *port : this->get_js_config()->get("sparse_config")->get_elems())
     {
-        std::vector<SnaxSparsePort> ports;
-        for (js::Config *port : this->get_js_config()->get("sparse_config")->get_elems())
-        {
-            std::vector<js::Config *> pair = port->get_elems();
-            ports.push_back({(int)pair[0]->get_int(), (int)pair[1]->get_int()});
-        }
-        this->sparse_config = SnaxSparseConfig(ports, this->nb_banks);
-        vp_assert_always(this->sparse_config.nb_inputs() == this->nb_inputs, &this->trace,
-            "sparse_config has %d inputs, the crossbar %d\n",
-            this->sparse_config.nb_inputs(), this->nb_inputs);
-        for (int bank = 0; bank < this->nb_banks; bank++)
-        {
-            this->bank_inputs.push_back(this->sparse_config.bank_inputs(bank));
-            this->sparse_arbs.push_back(SnaxSparseArb(this->sparse_config.inputs_per_bank()));
-        }
+        std::vector<js::Config *> pair = port->get_elems();
+        ports.push_back({(int)pair[0]->get_int(), (int)pair[1]->get_int()});
     }
-    else
+    this->sparse_config = SnaxSparseConfig(ports, this->nb_banks);
+    vp_assert_always(this->sparse_config.nb_inputs() == this->nb_inputs, &this->trace,
+        "sparse_config has %d inputs, the crossbar %d\n",
+        this->sparse_config.nb_inputs(), this->nb_inputs);
+    for (int bank = 0; bank < this->nb_banks; bank++)
     {
-        this->plain_arbs.assign(this->nb_banks, SnaxPlainArb(this->nb_inputs));
+        this->bank_inputs.push_back(this->sparse_config.bank_inputs(bank));
+        this->sparse_arbs.push_back(SnaxSparseArb(this->sparse_config.inputs_per_bank()));
     }
 
     for (int i = 0; i < this->nb_inputs; i++)
@@ -334,10 +310,6 @@ void SnaxTcdmXbar::reset(bool active)
     if (active)
     {
         this->pending.assign(this->nb_inputs, NULL);
-        for (SnaxPlainArb &arb : this->plain_arbs)
-        {
-            arb.reset();
-        }
         this->priority.assign(this->nb_inputs, false);
         this->arb_cycle = -1;
         for (SnaxSparseArb &arb : this->sparse_arbs)
@@ -412,7 +384,7 @@ vp::IoReqStatus SnaxTcdmXbar::req(vp::Block *__this, vp::IoReq *req, int id)
     }
 
     int bank = (addr >> _this->width_bits) & (_this->nb_banks - 1);
-    if (_this->sparse && !_this->sparse_config.reaches(id, bank))
+    if (!_this->sparse_config.reaches(id, bank))
     {
         // The RTL asserts on it
         _this->trace.force_warning("%s may not reach bank %d (its granularity); refused\n",
@@ -538,7 +510,7 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
 
 std::string SnaxTcdmXbar::name(int input)
 {
-    return this->names[input] + (this->sparse && this->priority[input] ? "!" : "");
+    return this->names[input] + (this->priority[input] ? "!" : "");
 }
 
 
@@ -654,8 +626,7 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
             continue;
         }
 
-        int winner = _this->sparse ? _this->sparse_pick(bank, req_mask, cycle)
-            : _this->plain_arbs[bank].pick(cycle, req_mask);
+        int winner = _this->sparse_pick(bank, req_mask, cycle);
         bool refuses = _this->bank_refuses(bank);
         for (int i = 0; i < _this->nb_inputs; i++)
         {
@@ -709,23 +680,12 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         }
         if (refuses)
         {
-            // Dropped with the losers; locked in, it wins again next cycle if
-            // it still competes
-            if (_this->sparse)
-            {
-                _this->sparse_arbs[bank].refused();
-            }
-            else
-            {
-                _this->plain_arbs[bank].refused();
-            }
+            // Dropped with the losers; it keeps its turn and wins again next
+            // cycle if it still competes
+            _this->sparse_arbs[bank].refused();
             _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Bank %d: refused %s (dma)%s\n", bank,
                 _this->name(winner).c_str(), _this->others(req_mask, winner).c_str());
             continue;
-        }
-        if (!_this->sparse)
-        {
-            _this->plain_arbs[bank].granted();
         }
 
         vp::IoReq *req = _this->pending[winner];

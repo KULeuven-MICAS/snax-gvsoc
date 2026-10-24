@@ -19,7 +19,7 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `snax/` | SNAX target and components: the streamer and the TCDM crossbar; `SnaxUnit` (a generic Chisel block's datapath) and `SnaxShell` (its CSR manager); the `snax_hjson` target, any cluster read from its hjson |
 | `forge/` | Generated accelerators from snax-forge, one design point per folder, checked in as fixtures (`forge/README.md`) |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
-| `tests/snax/` | The regression (`regress.py`), the phase script (`phases.py`), the arbiters' checks against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
+| `tests/snax/` | The regression (`regress.py`), the sparse arbiter's check against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
 | `docs/RUN.md` | How to run it, from the container to the regression, each command with its output |
 | `docs/EVENTS.md` | What the SNAX components write about a run (their `summary`, `events` and `beats` traces), line by line |
 | `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`, `FLOW3.md`) |
@@ -179,8 +179,8 @@ ELF=<elf>`; a generated accelerator's (`forge/`, snax-forge's bundles) is
 snax-forge's ELF on the bundle's RTL. GEN2b's runs and gaps are in
 `docs/plans/GEN2b.md`. Until CLN1 the cluster tests ran on snax_cluster
 built with its ALU clusters (`cfg/snax_alu_cluster_old.hjson`,
-`cfg/snax_alu_cluster.hjson`), and `tests/snax/phases.py` cut `snax-alu`'s
-runs on both sides into phases (SG5); `snax-alu` went in CLN1.
+`cfg/snax_alu_cluster.hjson`); `snax-alu` and the script that cut its runs
+into phases (SG5) went in CLN1.
 
 ## License
 
