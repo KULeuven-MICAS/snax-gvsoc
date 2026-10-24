@@ -255,7 +255,7 @@ private:
     bool tselect_access(bool is_write, iss_reg_t &value);
     bool time_access(bool is_write, iss_reg_t &value);
     bool mcycle_access(bool is_write, iss_reg_t &value);
-    // mcycle (0xB00) itself: mcycle_access, and with FLOW3's events the read's line
+    // mcycle (0xB00) itself: mcycle_access, and with SNAX events (docs/EVENTS.md) the read's line
     bool mcycle_csr_access(bool is_write, iss_reg_t &value);
 
     std::map<iss_reg_t, CsrAbtractReg *> regs;

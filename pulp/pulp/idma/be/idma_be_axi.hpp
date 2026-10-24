@@ -85,7 +85,7 @@ private:
     vp::IoMaster ico_itf;
     // Trace for this block, messages will be displayed with this block's name
     vp::Trace trace;
-    // SNAX: FLOW3's beats trace (docs/EVENTS.md): a burst line per request to AXI, written
+    // SNAX events (docs/EVENTS.md), the beats trace: a burst line per request to AXI, written
     // when its data is back (a read) or it is acknowledged (a write)
     vp::Trace beats;
     struct SentBurst

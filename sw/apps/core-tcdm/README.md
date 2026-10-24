@@ -4,8 +4,10 @@ The cores' TCDM accesses through the interconnect (SG7 round 3): the compute
 core's sub-word accesses, AMO and LR/SC on L1, and its loads against the
 streamer's readers on the same banks. One ELF per case, as `stream-timing`.
 The same ELFs run on snax_cluster's RTL with the plain interconnect
-(`cfg/snax_alu_cluster_old.hjson`) and on SNAX-GVSoC's `snax_alu` target, and
-with the sparse one (`cfg/snax_alu_cluster.hjson`) and on `snax_alu_sparse`.
+(`cfg/snax_alu_cluster_old.hjson`) and with the sparse one
+(`cfg/snax_alu_cluster.hjson`), on SNAX-GVSoC on `snax_hjson` with
+`forge/vecadd/snax_forge.hjson` (sparse; until CLN1 also on the `snax_alu`
+and `snax_alu_sparse` targets).
 Each case prints the value it compares, chosen not to depend on the core's
 timing (D123); `core_vs_reader` runs twice so that its measured run does not
 depend on the core's instruction fetch (below).
@@ -16,7 +18,7 @@ depend on the core's instruction fetch (below).
 | `core_vs_reader` | Readers A and B, 2 beats each, every lane on bank 0 (16 requests); right after the start write the core loads a word on bank 16, then one on bank 0. Twice: a first run, then the measured one | 977 of the measured run (the first run's shown) |
 | `after_stores` | The core's stores to the area are the last accesses to banks 0 to 3; then A (1 beat) and B (4 beats) on those banks | 977 |
 
-The streamer cases leave the ALU off, as `stream-timing` does, so each lane
+The streamer cases leave the accelerator off, as `stream-timing` does, so each lane
 reads its beats and stops. The area is 8 KiB from a 256 B boundary (bank 0),
 written by the core first; between those stores and the start write there
 are only CSR instructions (`core_vs_reader` adds its two loads in one `asm`
@@ -35,7 +37,7 @@ used.
   cycle: 18. Sparse: in the first run every reader request asks with
   priority 1 (queue counts 0 and 1) and the core, with 0, waits until the
   readers are done: 17. In the measured run each lane's queue still holds
-  the first run's 2 words (the ALU is off), so the readers ask with 0, as
+  the first run's 2 words (the accelerator is off), so the readers ask with 0, as
   the core, and the core gets its round-robin turn: 18, as plain.
 - `after_stores`: the plain interconnect's per-bank state is left at core
   0's input (12) by its stores, from which `rr_arb_tree` takes B first:
@@ -70,7 +72,8 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from
     make -C sw/apps/core-tcdm
     source sourceme.sh
     for c in subword core_vs_reader after_stores; do
-      gvrun --target snax_alu --work-dir build/work/ct-$c \
+      gvrun --target snax_hjson --work-dir build/work/ct-$c \
+        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/core-tcdm/core-tcdm-$c.elf run
     done
 

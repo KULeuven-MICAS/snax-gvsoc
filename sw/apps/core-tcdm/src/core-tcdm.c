@@ -20,8 +20,9 @@
 //                    core; then A (1 beat) and B (4 beats) on those banks;
 //                    prints 977
 //
-// The streamer cases leave the ALU off, as stream-timing does; between the
-// core's stores and the start write there are only CSR instructions.
+// The streamer cases leave the accelerator off, as stream-timing does;
+// between the core's stores and the start write there are only CSR
+// instructions.
 
 #include "snrt.h"
 

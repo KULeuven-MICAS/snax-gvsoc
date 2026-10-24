@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""What every SNAX accelerator composite shares (snax_alu_acc.py, snax_unit_acc.py): the CSR
+"""What every SNAX accelerator composite shares (snax_unit_acc.py): the CSR
 range the core sends out, the part of it an accelerator may use, and the ports the cluster
 binds."""
 

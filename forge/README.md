@@ -19,8 +19,9 @@ compares it byte for byte.
 Each folder holds:
 
 - `snax_forge.hjson`, the cluster file, named after the base platform: its
-  source (snax-forge's `platforms/snax_alu_cluster.hjson`, a copy of
-  `sw/cfg/snax_alu_cluster.hjson`, the sparse interconnect) with the
+  source (snax-forge's base cluster `platforms/snax_forge_cluster.hjson`,
+  taken from snax_cluster's `cfg/snax_alu_cluster.hjson`, the sparse
+  interconnect) with the
   platform's values written back, the cluster renamed `snax_forge_cluster`
   (`name` and its entry in `bender_target`) and the compute core's only
   slot set for the design: `snax_acc_name: snax_forge` (the platform's
@@ -83,6 +84,7 @@ file:
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
 The reader resolves the `$ref`s (relative to the cluster file), the slot's
-datapath block gets the standard composite on the installed components, and
-since its components are not those of the target's default file, gvrun
-warns that the platform tree does not match and runs it on the JSON config.
+datapath block gets the standard composite on the installed components.
+The target's default file is `vecadd/`'s cluster (`sw/cfg/snax_forge/`), so
+`vecadd/` runs on the build's platform tree; for the others gvrun warns that
+the platform tree does not match and runs them on the JSON config.

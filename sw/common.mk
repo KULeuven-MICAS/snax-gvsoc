@@ -2,28 +2,21 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# What the programs in apps/ share (CI1): built for snax_alu_cluster_old
-# against the runtime and math library of sw/, with the include dirs,
-# libraries, linker script and link flags of snax_cluster's sw/apps/common.mk
-# at the pin; the cluster's generated headers come first. An app sets APP
-# and, before including this file, its own INCDIRS, LIB_OBJS (objects
-# linked first, as snax_cluster's app Makefile puts snax-alu-lib.o) and
-# ELFS when it makes more than $(ELF); it gets APP_DIR (its folder),
+# What the programs in apps/ share: built for snax_forge (snax-forge's
+# vecadd fixture's cluster) against the runtime and math library of sw/,
+# with the include dirs, libraries, linker script and link flags of
+# snax_cluster's sw/apps/common.mk at the pin; the cluster's generated
+# headers come first. An app sets APP and, before including this file, its
+# own INCDIRS and ELFS when it makes more than $(ELF); it gets APP_DIR (its folder),
 # BUILDDIR (build/sw/apps/$(APP)), LIBS and the rules for them and the
 # dumps. The libraries are made by `make -C sw`, so `make -C sw/apps/<name>`
 # works on its own.
 
 APP_DIR := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
 SW      := $(abspath $(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
-CLUSTER  = snax_alu_cluster_old
+CLUSTER  = snax_forge
 SW_BUILD = $(abspath $(SW)/../build/sw)
 BUILDDIR ?= $(SW_BUILD)/apps/$(APP)
-
-# snax-alu's library and headers, for the apps that use them
-ALU_INCDIR = $(SW)/snax/snax-alu/include
-ALU_LIB    = $(SW_BUILD)/$(CLUSTER)/snax-alu-lib.o
-
-RISCV_LDFLAGS += $(LIB_OBJS)
 
 include $(SW)/toolchain.mk
 
@@ -60,7 +53,7 @@ all: $(ELFS) $(ELFS:.elf=.dump)
 
 # sw/Makefile decides whether they are up to date; a program relinks only
 # when one changed.
-$(LIBS) $(ALU_LIB): FORCE
+$(LIBS): FORCE
 	$(MAKE) -s --no-print-directory -C $(SW) $@
 
 $(BUILDDIR):

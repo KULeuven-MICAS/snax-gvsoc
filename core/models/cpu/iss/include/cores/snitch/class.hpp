@@ -156,7 +156,7 @@ public:
     vp::IoReq snax_csr_req;
     uint32_t snax_csr_data;
 
-    // FLOW3's events (snax-gvsoc docs/EVENTS.md): the summary, events and beats traces,
+    // SNAX events (docs/EVENTS.md): the summary, events and beats traces,
     // the SNAX CSR accesses (reads of one CSR with one value folded into a poll), the
     // barrier waits, the state (run or sleep, from Exec::busy_enter and busy_exit), the
     // function the PC is in (from Exec::insn_exec_profiling) and every read of mcycle or
@@ -190,7 +190,7 @@ private:
     vp::Trace trace_iss;
     CsrReg csr_ssr;
 
-    // FLOW3's events: the open run of reads, a held write, an open barrier, the state and
+    // SNAX events (docs/EVENTS.md): the open run of reads, a held write, an open barrier, the state and
     // the function written last, the SNAX CSR counts
     void snax_read(iss_reg_t pc, uint32_t csr, uint32_t value);
     void snax_reads_flush();

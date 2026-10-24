@@ -35,7 +35,7 @@ environment sets `CC` and `CXX` to conda's gcc.
 ## 2. Build GVSoC and the software
 
 GVSoC for the targets the programs run on, the Makefile's `SNAX_TARGETS`
-(`snitch;snax_alu;snax_alu_sparse;snax_hjson`). The single quotes matter:
+(`snitch;snax_hjson`). The single quotes matter:
 make expands `$(SNAX_TARGETS)`, the shell must not. The first build takes a
 few minutes; a second one with nothing changed compiles nothing.
 
@@ -60,29 +60,31 @@ tests from the copy in `sw/` into `build/sw/`:
     1 warning generated.
     make[1]: Leaving directory '$ROOT/snax-gvsoc/sw'
 
-## 3. A program on a hand-written target: snax-alu on snax_alu
+## 3. A cluster test: snax-csr on snax_hjson
 
-`snax-alu` is snax_cluster's own app, built into
-`build/sw/apps/snax-alu/100/` (`DATA_LEN` 100):
+The cluster tests in `sw/apps/` (`snax-csr`, `dma-timing`, `stream-timing`,
+`core-tcdm`, `dma-tcdm`) run on `snax_hjson` with `forge/vecadd/`'s cluster
+file, whose streamer and shell they drive. `snax-csr` checks the compute
+core's SNAX CSRs:
 
-    make -C sw/apps/snax-alu
+    make -C sw/apps/snax-csr
 
     ...
-    llvm-objdump -D $ROOT/snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.elf > $ROOT/snax-gvsoc/build/sw/apps/snax-alu/100/snax-alu.dump
-    make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/snax-alu'
+    llvm-objdump -D $ROOT/snax-gvsoc/build/sw/apps/snax-csr/snax-csr.elf > $ROOT/snax-gvsoc/build/sw/apps/snax-csr/snax-csr.dump
+    make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/snax-csr'
 
-    gvrun --target snax_alu --work-dir build/work/snax-alu \
-        --param chip/soc/binary=$PWD/build/sw/apps/snax-alu/100/snax-alu.elf run
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+        --work-dir build/work/snax-csr \
+        --param chip/soc/binary=$PWD/build/sw/apps/snax-csr/snax-csr.elf run
 
-    Accelerator Done! 
-    Accelerator Cycles: 25 
-    Number of errors: 0 
+    csrw/csrr: 0 errors
+    csrrw: 0 errors
+    set/clear/imm: 0 errors
+    read-only: 0 errors
 
     echo "exit $?"
 
     exit 0
-
-These are the RTL's three lines; the run exits 0.
 
 ## 4. A generated accelerator: forge/vecadd on snax_hjson
 
@@ -105,7 +107,6 @@ slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
-    Warning: installed platform tree $ROOT/snax-gvsoc/install/lib/libplatform_tree_snax_hjson.so does not match the live system tree, falling back to the JSON config path (rebuild the target to regenerate the tree).
     forge cycles: 226
     forge data: 0 errors (64 words)
     forge counter add_acc: 19
@@ -121,10 +122,11 @@ slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
 
     exit 0
 
-It exits 0. The first line is expected: `make build` made `snax_hjson`'s
-platform tree from its default file (`sw/cfg/snax_alu_cluster.hjson`, with
-snax_cluster's ALU in the slot). This file puts another accelerator there,
-so the tree does not match and gvrun builds the system from its JSON
+It exits 0. `make build` made `snax_hjson`'s platform tree from its default
+file, `sw/cfg/snax_forge/snax_forge.hjson`, the cluster of `forge/vecadd/`,
+so this run uses that tree. Another fixture's cluster file (`vecmul`,
+`vsum`) puts another accelerator in the slot: gvrun then warns that the
+installed platform tree does not match and builds the system from its JSON
 configuration instead, on the same installed components. Nothing is
 compiled for a design point.
 
@@ -203,8 +205,8 @@ snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd`
 ## 6. The regression
 
 `make regress` runs `SnaxUnit`'s and `SnaxShell`'s rules on their cases, builds `sw/` and every
-program, and runs them all: the SNAX programs on `snax_alu` and
-`snax_alu_sparse`, snax-shell and every `forge/` folder on `snax_hjson`
+program, and runs them all: the cluster tests, snax-shell and every
+`forge/` folder on `snax_hjson`
 (their counters checked as in section 5), and the plain tests on `snitch`.
 About two minutes:
 
@@ -215,8 +217,8 @@ About two minutes:
       1 run
     SnaxShell's rule (tests/snax/shell)
       1 run
-    SNAX programs on snax_alu, snax_alu_sparse
-      40 run
+    cluster tests on snax_hjson, forge/vecadd/'s cluster file
+      13 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       1 run
     forge/'s accelerators: forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree, forge-reduce.vsum-r16
@@ -238,7 +240,7 @@ does not: make reads `-k` itself):
       0 run
     SnaxShell's rule (tests/snax/shell)
       0 run
-    SNAX programs on snax_alu, snax_alu_sparse
+    cluster tests on snax_hjson, forge/vecadd/'s cluster file
       0 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       0 run
@@ -258,15 +260,15 @@ does not: make reads `-k` itself):
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader, `phases.py`, the class lines, and the composite's
+`snax_cfg.py`'s reader, the class lines, and the composite's
 CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 `make build`; skipped without it), with the image's Python:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    .............................................
+    ............................................
     ----------------------------------------------------------------------
-    Ran 45 tests in 0.157s
+    Ran 44 tests in 0.305s
 
     OK
 

@@ -7,7 +7,8 @@
 // CASE_<name>; each prints the counter it compares, chosen not to depend on
 // the cores' timing (D123).
 //
-//   dma_vs_reader   A, B and O of the ALU (add, 256 beats) each on its own
+//   dma_vs_reader   A, B and O of the accelerator of forge/vecadd/ (add, 256
+//                   beats) each on its own
 //                   four banks, every beat in the next 256 B row: A on banks
 //                   0 to 3 (superbank 0), B on 8 to 11, O on 16 to 19. While
 //                   they stream, the DMA core copies four 64 B blocks from
@@ -24,7 +25,7 @@
 
 #include "snrt.h"
 
-#include "snax-alu-lib.h"
+#include "acc_csr.h"
 #include "streamer_csr_addr_map.h"
 
 // One beat: 4 lanes of 64 bit
@@ -39,7 +40,7 @@
 
 #if defined(CASE_dma_vs_reader)
 static const char *name = "dma_vs_reader";
-// The movers' beats, one row each, and the ALU's length
+// The movers' beats, one row each, and the accelerator's loop count
 #define BEATS 256
 // The DMA's copies, one 64 B beat each, one row apart, after the movers'
 // rows; and the cycles the DMA core waits after the barrier before the
@@ -63,8 +64,8 @@ static uint64_t src_l2[COPIES * SUPERBANK / 8] __attribute__((aligned(SUPERBANK)
 
 // One run's results, in L1 for both cores
 typedef struct {
-    uint32_t counter;      // 977
-    uint32_t alu_counter;  // 982
+    uint32_t counter;      // STREAMER_PERFORMANCE_COUNTER_CSR
+    uint32_t acc_counter;  // ACC_RO_PERF_COUNT
     uint32_t errors;
 } result_t;
 
@@ -93,20 +94,32 @@ static __attribute__((noinline)) void run(uint32_t area, uint32_t dma_offset,
         for (uint32_t i = 0; i < COPIES * SUPERBANK / 8; i++)
             *copy_word(copies, i) = 0;
         asm volatile("fence" ::: "memory");
-        configure_streamer_a(area + A_OFFSET, 0, 8, BEATS, ROW);
-        configure_streamer_b(area + B_OFFSET, 0, 8, BEATS, ROW);
-        configure_streamer_o(area + O_OFFSET, 0, 8, BEATS, ROW);
-        configure_alu(0, BEATS);
+        csrw_ss(BASE_PTR_READER_0_LOW, area + A_OFFSET);
+        csrw_ss(BASE_PTR_READER_0_HIGH, 0);
+        csrw_ss(S_STRIDE_READER_0_0, 8);
+        csrw_ss(T_BOUND_READER_0_0, BEATS);
+        csrw_ss(T_STRIDE_READER_0_0, ROW);
+        csrw_ss(BASE_PTR_READER_1_LOW, area + B_OFFSET);
+        csrw_ss(BASE_PTR_READER_1_HIGH, 0);
+        csrw_ss(S_STRIDE_READER_1_0, 8);
+        csrw_ss(T_BOUND_READER_1_0, BEATS);
+        csrw_ss(T_STRIDE_READER_1_0, ROW);
+        csrw_ss(BASE_PTR_WRITER_0_LOW, area + O_OFFSET);
+        csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
+        csrw_ss(S_STRIDE_WRITER_0_0, 8);
+        csrw_ss(T_BOUND_WRITER_0_0, BEATS);
+        csrw_ss(T_STRIDE_WRITER_0_0, ROW);
+        csrw_ss(ACC_RW_LOOP_COUNT, BEATS);
     }
 
     snrt_cluster_hw_barrier();
 
     if (snrt_is_compute_core()) {
-        start_alu();
-        start_streamer();
-        while (read_busy_alu()) {
+        csrw_ss(ACC_RW_START, 1);
+        csrw_ss(STREAMER_START_CSR, 1);
+        while (csrr_ss(ACC_RO_BUSY)) {
         }
-        while (read_busy_streamer()) {
+        while (csrr_ss(STREAMER_BUSY_CSR)) {
         }
     } else if (snrt_is_dm_core()) {
         uint32_t t0 = snrt_mcycle();
@@ -130,7 +143,7 @@ static __attribute__((noinline)) void run(uint32_t area, uint32_t dma_offset,
         for (uint32_t i = 0; i < COPIES * SUPERBANK / 8; i++)
             errors += *copy_word(copies, i) != src_l2[i];
         r->counter = csrr_ss(STREAMER_PERFORMANCE_COUNTER_CSR);
-        r->alu_counter = csrr_ss(ALU_RO_PERF_COUNT);
+        r->acc_counter = csrr_ss(ACC_RO_PERF_COUNT);
         r->errors = errors;
     }
 }
@@ -157,8 +170,8 @@ int main() {
 
     if (!snrt_is_compute_core()) return 0;
     uint32_t errors = results[0].errors + results[1].errors;
-    printf("dma-tcdm %s: counter %u (first run %u), alu counter %u (first run %u), errors %u\n",
-           name, results[1].counter, results[0].counter, results[1].alu_counter,
-           results[0].alu_counter, errors);
+    printf("dma-tcdm %s: counter %u (first run %u), acc counter %u (first run %u), errors %u\n",
+           name, results[1].counter, results[0].counter, results[1].acc_counter,
+           results[0].acc_counter, errors);
     return errors;
 }

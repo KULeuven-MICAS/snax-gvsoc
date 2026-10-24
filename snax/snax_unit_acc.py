@@ -32,8 +32,8 @@ UNITS = ['SnaxUnit']
 
 def compile_components():
     """Has the build compile SnaxShell and SnaxUnit, as it would for a target whose tree holds
-    them: a cluster file with a datapath block runs on the installed components, and no built
-    target's default file has one. The build path only (gvsoc.systree's registry)."""
+    them: a cluster file with a datapath block runs on the installed components, whatever a
+    built target's default file holds. The build path only (gvsoc.systree's registry)."""
     for sources in (SnaxShell.SOURCES, SnaxUnit.SOURCES):
         gvsoc.systree.get_generated_component(list(sources), [], [])
 
@@ -88,7 +88,7 @@ class SnaxUnitAcc(SnaxAcc):
             csr_base=shell_csr_first)
 
         # The streamer's range, then everything to the last SNAX CSR to the
-        # shell, as snax_alu_acc.py does for the ALU
+        # shell
         streamer_base = 4 * SNAX_CSR_FIRST
         shell_base = 4 * shell_csr_first
         csr_mux.o_MAP(streamer.i_INPUT(), base=streamer_base,

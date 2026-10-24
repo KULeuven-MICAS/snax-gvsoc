@@ -26,7 +26,7 @@ def main():
     print()
     print(f"#define SRC_BYTES {SRC_BYTES}")
     print()
-    print("// In .data, which base.ld places in DRAM (its L3, called L2 in SG2).")
+    print("// In .data, which base.ld places in DRAM (its L3, the program's L2).")
     print("// 64 B is one DMA beat.")
     print("uint32_t src_l2[SRC_BYTES / 4] __attribute__((aligned(64))) = {")
     for i in range(0, len(words), 8):

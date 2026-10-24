@@ -1,14 +1,16 @@
 # stream-timing
 
-The streamer's timing on its own (SG3): the compute core sets up `snax_alu`'s
-two readers, leaves the writer's temporal bound at 0, starts the streamer,
-polls its busy CSR (976) and prints the streamer's counter (977). The same
+The streamer's timing on its own (SG3): the compute core sets up the
+streamer's two readers, leaves the writer's temporal bound at 0, starts the
+streamer, polls its busy CSR (976) and prints the streamer's counter (977).
+The same
 ELFs run on snax_cluster's RTL with the plain interconnect
-(`cfg/snax_alu_cluster_old.hjson`) and on SNAX-GVSoC's `snax_alu` target, and
-with the sparse interconnect (`cfg/snax_alu_cluster.hjson`) and on
-`snax_alu_sparse` (SG7); the counter is the value to compare.
+(`cfg/snax_alu_cluster_old.hjson`) and with the sparse interconnect
+(`cfg/snax_alu_cluster.hjson`, SG7), on SNAX-GVSoC on `snax_hjson` with
+`forge/vecadd/snax_forge.hjson` (sparse; until CLN1 also on the `snax_alu`
+and `snax_alu_sparse` targets); the counter is the value to compare.
 
-The ALU is never started, so nothing takes the readers' beats. Each lane
+The accelerator is never started, so nothing takes the readers' beats. Each lane
 reads at most `fifo_depth` (8) beats and the reader is done; the beats stay
 in its queues and hold its credit, and the RTL does not clear them at start.
 So each case is an ELF of its own. SG7's two cases use that: a first run
@@ -49,7 +51,8 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from
     make -C sw/apps/stream-timing
     source sourceme.sh
     for c in zero_bound a_alone ab_other_banks ab_same_banks a_stride0 prio_queued idle_restart; do
-      gvrun --target snax_alu --work-dir build/work/st-$c \
+      gvrun --target snax_hjson --work-dir build/work/st-$c \
+        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/stream-timing/stream-timing-$c.elf run
     done
 

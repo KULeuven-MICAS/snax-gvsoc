@@ -98,11 +98,11 @@ private:
     vp::WireMaster<int> w_beats_itf;
     // Last value sent on the busy wire
     bool busy;
-    // SNAX, FLOW3: the busy wire as a VCD signal (snitch_cc.sv's dma_busy), for gtkwave
+    // SNAX: the busy wire as a VCD signal (snitch_cc.sv's dma_busy), for gtkwave
     vp::Signal<bool> dma_busy;
     // Bytes per AXI beat (64 for the 512-bit DMA)
     uint64_t beat_size;
-    // SNAX, FLOW3's events (snax-gvsoc docs/EVENTS.md): the summary, events and beats
+    // SNAX events (docs/EVENTS.md): the summary, events and beats
     // traces, and the counts the summary gives at stop. A copy's bytes go to L1 when its
     // destination is in the local area (loc_base, loc_size), from L1 when its source is.
     vp::Component *idma;

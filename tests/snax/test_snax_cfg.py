@@ -5,13 +5,14 @@
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-Reads the three cluster files of sw/cfg/ and forge/'s fixtures, then
-broken copies of snax_alu_cluster.hjson (written as JSON into a temporary
-folder) and a cluster file with its slot's streamer and datapath in an
-accelerator file.
+Reads the cluster files of sw/cfg/ and forge/'s fixtures, then broken
+copies of sw/cfg/snax_forge/snax_forge.hjson, forge/vecadd/'s cluster
+(written as JSON into a temporary folder), and a cluster file with its
+slot's streamer and datapath in an accelerator file.
 """
 
 import copy
+import dataclasses
 import json
 import sys
 import tempfile
@@ -25,9 +26,11 @@ import snax_cfg  # noqa: E402
 
 CFG = ROOT / "sw" / "cfg"
 FORGE = ROOT / "forge"
+# forge/vecadd/'s cluster file, as sw/sync.py copies it from snax_cluster
+CLUSTER = CFG / "snax_forge" / "snax_forge.hjson"
 
-# snax_alu_streamer_template of both snax_alu files, as the hjson has it
-SNAX_ALU_STREAMER = {
+# The streamer of forge/vecadd/ and vecmul/
+STREAMER = {
     "data_reader_params": {
         "spatial_bounds": [[4], [4]],
         "temporal_dim": [1, 1],
@@ -40,22 +43,31 @@ SNAX_ALU_STREAMER = {
         "num_channel": [4],
         "fifo_depth": [8],
     },
-    "snax_library_name": "snax-alu",
 }
+# forge/vecadd/'s datapath block
+VECADD_DATAPATH = snax_cfg.Datapath(
+    "SnaxUnit", ["a", "b"], ["out"], 4, 64, 0, True, "counted", "lockstep", 0, 1, ["count"],
+    ["loopCount"])
 
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
 
 
-def sparse():
-    """snax_alu_cluster.hjson, parsed, $refs not resolved."""
-    return hjson.loads((CFG / "snax_alu_cluster.hjson").read_text())
+def cluster():
+    """CLUSTER, parsed, with its slot's streamer and datapath files in place of their $refs,
+    so that a copy reads on its own."""
+    d = hjson.loads(CLUSTER.read_text())
+    slot = d["snax_alu_core_template"]["snax_acc_cfg"][0]
+    for key in ("snax_streamer_cfg", "snax_datapath_cfg"):
+        slot[key] = hjson.loads((CLUSTER.parent / slot[key]["$ref"]).read_text())
+    return d
 
 
 class SwCfg(unittest.TestCase):
-    """The three cluster files of sw/cfg/."""
+    """The cluster files of sw/cfg/."""
 
-    def check_snax_alu(self, cfg):
-        self.assertEqual(cfg.name, "snax_alu_cluster")
+    def check_cluster(self, cfg, name):
+        """forge/vecadd/'s cluster; returns the compute core's slot."""
+        self.assertEqual(cfg.name, name)
         self.assertEqual(cfg.boot_addr, 0x1000)
         self.assertEqual(cfg.base, 0x1000_0000)
         self.assertEqual((cfg.tcdm.size, cfg.tcdm.banks, cfg.tcdm.bank_width),
@@ -70,23 +82,16 @@ class SwCfg(unittest.TestCase):
         self.assertEqual((dma.isa, dma.xdma, dma.accelerators), ("rv32ima", True, []))
         self.assertEqual(compute.misa, MISA_RV32IMA)
         (slot,) = compute.accelerators
-        self.assertEqual(slot.name, "snax_alu")
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 3, 2))
-        self.assertEqual(slot.streamer, SNAX_ALU_STREAMER)
-        self.assertIsNone(slot.datapath)
         return slot
 
-    def test_old(self):
-        cfg = snax_cfg.load(CFG / "snax_alu_cluster_old.hjson")
-        slot = self.check_snax_alu(cfg)
-        self.assertFalse(cfg.tcdm.sparse_interconnect)
-        self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
-                         (12, 0, None))
-
-    def test_sparse(self):
-        cfg = snax_cfg.load(CFG / "snax_alu_cluster.hjson")
-        slot = self.check_snax_alu(cfg)
+    def test_forge(self):
+        cfg = snax_cfg.load(CLUSTER)
+        slot = self.check_cluster(cfg, "snax_forge_cluster")
         self.assertTrue(cfg.tcdm.sparse_interconnect)
+        self.assertEqual(slot.name, "snax_forge")
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 2, 2))
+        self.assertEqual(slot.streamer, STREAMER)
+        self.assertEqual(slot.datapath, VECADD_DATAPATH)
         self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
                          (None, None, [[12, 1]]))
 
@@ -101,7 +106,7 @@ class SwCfg(unittest.TestCase):
 
 
 class Fixtures(unittest.TestCase):
-    """forge/'s cluster files: snax_alu_cluster.hjson renamed snax_forge_cluster, its slot
+    """forge/'s cluster files: snax-forge's base cluster renamed snax_forge_cluster, its slot
     snax_forge set for the design."""
 
     def slot(self, design):
@@ -117,11 +122,8 @@ class Fixtures(unittest.TestCase):
             slot = self.slot(design)
             self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr),
                              (12, [[12, 1]], 2))
-            self.assertEqual(slot.streamer, {k: v for k, v in SNAX_ALU_STREAMER.items()
-                                             if k != "snax_library_name"})
-            self.assertEqual(slot.datapath, snax_cfg.Datapath(
-                "SnaxUnit", ["a", "b"], ["out"], 4, 64, op, True, "counted", "lockstep", 0, 1,
-                ["count"], ["loopCount"]))
+            self.assertEqual(slot.streamer, STREAMER)
+            self.assertEqual(slot.datapath, dataclasses.replace(VECADD_DATAPATH, op=op))
 
     def test_vsum(self):
         slot = self.slot("vsum")
@@ -142,7 +144,7 @@ class Misa(unittest.TestCase):
 
 
 class Broken(unittest.TestCase):
-    """Copies of snax_alu_cluster.hjson with one thing wrong, each a named error."""
+    """Copies of CLUSTER with one thing wrong, each a named error."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -174,75 +176,76 @@ class Broken(unittest.TestCase):
             snax_cfg.load(self.dir / "none.hjson")
 
     def test_ref_missing_key(self):
-        d = sparse()
+        d = cluster()
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "#/no_such_template"}
         self.fails(snax_cfg.CfgRefError, d, "snax_acc_cfg[0].snax_streamer_cfg",
                    "no 'no_such_template'")
 
     def test_ref_missing_file(self):
-        d = sparse()
+        d = cluster()
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "acc.hjson#/snax_streamer_cfg"}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "no file")
 
     def test_ref_malformed(self):
-        d = sparse()
-        self.slot(d)["snax_streamer_cfg"] = {"$ref": "#/snax_alu_streamer_template", "x": 1}
+        d = cluster()
+        d["streamer_template"] = self.slot(d)["snax_streamer_cfg"]
+        self.slot(d)["snax_streamer_cfg"] = {"$ref": "#/streamer_template", "x": 1}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "is not")
         # A key without #/ is a whole file's name: no such file
-        self.slot(d)["snax_streamer_cfg"] = {"$ref": "snax_alu_streamer_template"}
+        self.slot(d)["snax_streamer_cfg"] = {"$ref": "streamer_template"}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "no file")
-        self.slot(d)["snax_streamer_cfg"] = {"$ref": "#snax_alu_streamer_template"}
+        self.slot(d)["snax_streamer_cfg"] = {"$ref": "#streamer_template"}
         self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "must start with /")
 
     def test_ref_cycle(self):
-        d = sparse()
+        d = cluster()
         d["loop"] = {"a": {"$ref": "#/loop"}}
         self.slot(d)["snax_streamer_cfg"] = {"$ref": "#/loop"}
         self.fails(snax_cfg.CfgRefError, d, "loop", "refers to itself")
 
     def test_missing_key(self):
-        d = sparse()
+        d = cluster()
         del d["cluster"]["tcdm"]["banks"]
         self.fails(snax_cfg.CfgKeyError, d, "cluster.tcdm.banks", "missing")
-        d = sparse()
+        d = cluster()
         del self.slot(d)["snax_num_rw_csr"]
         self.fails(snax_cfg.CfgKeyError, d, "cluster.hives[0].cores[0].snax_acc_cfg[0]"
                    ".snax_num_rw_csr", "missing")
 
     def test_wrong_type(self):
-        d = sparse()
+        d = cluster()
         d["cluster"]["tcdm"]["banks"] = "32"
         self.fails(snax_cfg.CfgTypeError, d, "cluster.tcdm.banks", "an integer")
-        d = sparse()
+        d = cluster()
         d["cluster"]["dma_data_width"] = True
         self.fails(snax_cfg.CfgTypeError, d, "cluster.dma_data_width", "an integer")
-        d = sparse()
+        d = cluster()
         d["cluster"]["tcdm"]["sparse_interconnect"] = 1
         self.fails(snax_cfg.CfgTypeError, d, "cluster.tcdm.sparse_interconnect", "a boolean")
-        d = sparse()
+        d = cluster()
         self.slot(d)["sparse_interconnect_config"] = [[12]]
         self.fails(snax_cfg.CfgTypeError, d, "sparse_interconnect_config[0]",
                    "[width, granularity]")
-        d = sparse()
+        d = cluster()
         d["cluster"]["hives"][0]["cores"][1] = "dma"
         self.fails(snax_cfg.CfgTypeError, d, "cluster.hives[0].cores[1]", "an object")
 
     def test_slot_ports(self):
-        d = sparse()
+        d = cluster()
         self.slot(d)["snax_tcdm_ports"] = 8
         self.fails(snax_cfg.CfgSlotError, d, "snax_tcdm_ports", "12 channels")
-        d = sparse()
+        d = cluster()
         self.slot(d)["sparse_interconnect_config"] = [[8, 1], [8, 1]]
         self.fails(snax_cfg.CfgSlotError, d, "sparse_interconnect_config", "add up to 16")
-        d = sparse()
+        d = cluster()
         self.slot(d)["snax_narrow_tcdm_ports"] = 8
         self.slot(d)["snax_wide_tcdm_ports"] = 0
         self.fails(snax_cfg.CfgSlotError, d, "snax_narrow_tcdm_ports", "narrow 8 + wide 0")
 
     def test_reader_writer_refused(self):
         """snax_cluster's data_reader_writer_params: no mover of the model's streamer."""
-        d = sparse()
-        d["snax_alu_streamer_template"]["data_reader_writer_params"] = {
+        d = cluster()
+        self.slot(d)["snax_streamer_cfg"]["data_reader_writer_params"] = {
             "spatial_bounds": [[4]], "temporal_dim": [1], "num_channel": [4], "fifo_depth": [8]}
         self.fails(snax_cfg.CfgTargetError, d, "snax_streamer_cfg.data_reader_writer_params",
                    "not modelled")
@@ -258,13 +261,12 @@ class AccFile(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        self.cluster = sparse()
+        self.cluster = cluster()
         slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
-        slot["snax_streamer_cfg"] = {"$ref": "acc/snax_alu_acc.hjson#/snax_streamer_cfg"}
-        slot["snax_datapath_cfg"] = {"$ref": "acc/snax_alu_acc.hjson#/datapath"}
-        slot["snax_num_rw_csr"] = 2
+        slot["snax_streamer_cfg"] = {"$ref": "acc/acc.hjson#/snax_streamer_cfg"}
+        slot["snax_datapath_cfg"] = {"$ref": "acc/acc.hjson#/datapath"}
         # The accelerator file's own ref resolves in that file
-        self.acc = {"template": copy.deepcopy(SNAX_ALU_STREAMER),
+        self.acc = {"template": copy.deepcopy(STREAMER),
                     "snax_streamer_cfg": {"$ref": "#/template"},
                     "datapath": copy.deepcopy(self.DATAPATH)}
 
@@ -273,13 +275,13 @@ class AccFile(unittest.TestCase):
 
     def load(self):
         (self.dir / "acc").mkdir(exist_ok=True)
-        (self.dir / "acc" / "snax_alu_acc.hjson").write_text(json.dumps(self.acc))
-        (self.dir / "snax_alu.hjson").write_text(json.dumps(self.cluster))
-        return snax_cfg.load(self.dir / "snax_alu.hjson")
+        (self.dir / "acc" / "acc.hjson").write_text(json.dumps(self.acc))
+        (self.dir / "cluster.hjson").write_text(json.dumps(self.cluster))
+        return snax_cfg.load(self.dir / "cluster.hjson")
 
     def test_resolved(self):
         (slot,) = self.load().cores[0].accelerators
-        self.assertEqual(slot.streamer, SNAX_ALU_STREAMER)
+        self.assertEqual(slot.streamer, STREAMER)
         self.assertEqual(slot.datapath, snax_cfg.Datapath(**self.DATAPATH, config=["count"]))
 
     def fails(self, error, path_part, why_part=""):
@@ -328,13 +330,13 @@ class AccFile(unittest.TestCase):
         """snax-forge's writer: the streamer file and the accelerator file, each the whole
         file, with or without a trailing #."""
         slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
-        slot["snax_streamer_cfg"] = {"$ref": "acc/snax_alu_streamer.hjson"}
-        slot["snax_datapath_cfg"] = {"$ref": "acc/snax_alu_acc.hjson#"}
+        slot["snax_streamer_cfg"] = {"$ref": "acc/streamer.hjson"}
+        slot["snax_datapath_cfg"] = {"$ref": "acc/acc.hjson#"}
         (self.dir / "acc").mkdir(exist_ok=True)
-        (self.dir / "acc" / "snax_alu_streamer.hjson").write_text(json.dumps(SNAX_ALU_STREAMER))
+        (self.dir / "acc" / "streamer.hjson").write_text(json.dumps(STREAMER))
         self.acc = self.DATAPATH
         (slot_cfg,) = self.load().cores[0].accelerators
-        self.assertEqual(slot_cfg.streamer, SNAX_ALU_STREAMER)
+        self.assertEqual(slot_cfg.streamer, STREAMER)
         self.assertEqual(slot_cfg.datapath, snax_cfg.Datapath(**self.DATAPATH, config=["count"]))
 
     def test_bad_whole_file_refs(self):
@@ -347,10 +349,10 @@ class AccFile(unittest.TestCase):
 
     def test_bad_pointer(self):
         self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]["snax_datapath_cfg"] = \
-            {"$ref": "acc/snax_alu_acc.hjson#/no_datapath"}
+            {"$ref": "acc/acc.hjson#/no_datapath"}
         with self.assertRaises(snax_cfg.CfgRefError) as ctx:
             self.load()
-        self.assertIn("snax_alu_acc.hjson", ctx.exception.why)
+        self.assertIn("acc.hjson", ctx.exception.why)
 
 
 if __name__ == "__main__":

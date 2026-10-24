@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Streamer timing program: the same ELFs run on snax_cluster's RTL and
-// on SNAX-GVSoC. The compute core sets up snax_alu's two readers, leaves the
+// on SNAX-GVSoC. The compute core sets up the streamer's two readers, leaves the
 // writer's bound at 0, starts the streamer and polls its busy CSR; it prints
 // the streamer's counter (977) and the mcycle span.
 //
-// The ALU is never started, so nothing takes the readers' beats: each lane
-// reads at most fifo_depth (8) beats, then the reader is done. The beats stay
+// The accelerator is never started, so nothing takes the readers' beats:
+// each lane reads at most fifo_depth (8) beats, then the reader is done. The beats stay
 // in the reader's queues and keep its credit after the run; the RTL does not
 // clear them at start. So each case is its own ELF, chosen with CASE_<name>.
 //

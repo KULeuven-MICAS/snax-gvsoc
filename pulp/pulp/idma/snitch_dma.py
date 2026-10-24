@@ -89,7 +89,7 @@ class SnitchDma(gvsoc.systree.Component):
             "one_cycle_per_stage": one_cycle_per_stage,
         })
 
-    # SNAX, FLOW3: the busy wire's VCD signal (idma_fe_xdma.cpp), tagged snax, for gvrun's
+    # SNAX: the busy wire's VCD signal (idma_fe_xdma.cpp), tagged snax, for gvrun's
     # --vcd and view.gtkw
     def gen_gtkw(self, tree, comp_traces):
         tree.add_trace(self, 'dma_busy', 'fe/dma_busy', tag='snax')

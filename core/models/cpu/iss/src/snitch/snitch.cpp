@@ -139,7 +139,7 @@ bool Iss::barrier_update(bool is_write, iss_reg_t &value)
 // address 4 * CSR number. The block behind the port answers at once (IO_REQ_OK); its
 // latency is counted as stall cycles. A block refuses an access with IO_REQ_INVALID, after
 // a warning in its own trace. A write may be held (IO_REQ_PENDING, a start while the
-// accelerator is busy, GEN3): the core stalls until the block's response, as the LSU does
+// accelerator is busy): the core stalls until the block's response, as the LSU does
 // for a pending access (Lsu::data_req_aligned, Lsu::data_response). Reads are answered at
 // once; a pending read is not supported.
 bool Iss::snax_csr_request(iss_reg_t address, bool is_write, iss_reg_t &value)
@@ -500,7 +500,7 @@ void Iss::handle_wait_acc_ready(vp::Block *__this, vp::ClockEvent *event)
 }
 
 
-// FLOW3's events (snax-gvsoc docs/EVENTS.md). A SNAX CSR read joins the open run when it
+// SNAX events (docs/EVENTS.md). A SNAX CSR read joins the open run when it
 // reads the run's CSR and gets its value; any other access writes the run out first: two
 // reads or more as a poll, one as a csr line, both with the run's first cycle.
 void Iss::snax_read(iss_reg_t pc, uint32_t csr, uint32_t value)

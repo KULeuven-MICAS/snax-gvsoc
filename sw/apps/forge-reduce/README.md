@@ -14,7 +14,7 @@ reduction, a fixture in `forge/<design>/` (`forge/README.md`) whose unit is
 a fold (SnaxUnit with one input and a `rate`, snax-forge's Accumulator). It
 uses only the fixture's headers, `streamer_csr_addr_map.h` and `acc_csr.h`
 (its `include/` comes before `sw/generated/`), and snRuntime's `csrw_ss`
-and `csrr_ss`; no snax-alu library.
+and `csrr_ss`.
 
 It follows the design point's derived task list (snax-forge
 `snax_forge/lower/derive.py`), with the bases replaced by L1 pointers:

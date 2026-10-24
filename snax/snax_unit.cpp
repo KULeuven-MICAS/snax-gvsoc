@@ -43,7 +43,7 @@
 // Ports:
 //   <input>, <output>  io masters to the streamer's reader_<i> and writer_<j>:
 //                      a probe (size 0) of every port, then the beats moved
-//                      (snax_alu_shell.cpp's way), so nothing moves unless the
+//                      (the ALU shell's way, before CLN1), so nothing moves unless the
 //                      rule says so
 //   ctrl               io slave: a write of the configuration words in CSR
 //                      order starts a run in that cycle; refused (DENIED, after
@@ -54,7 +54,7 @@
 //                      taken (busy from the next), false in the run's last
 //                      cycle (idle from the next)
 //
-// Its event runs every busy cycle, scheduled as snax_alu_shell.cpp's, so it
+// Its event runs every busy cycle, scheduled as the ALU shell's was, so it
 // runs before the streamer's step in a cycle.
 //
 // Events (docs/EVENTS.md, snax_events.hpp): `start` (count, rate) in the cycle

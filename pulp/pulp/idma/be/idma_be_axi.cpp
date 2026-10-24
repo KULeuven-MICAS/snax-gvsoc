@@ -42,7 +42,7 @@ IDmaBeAxi::IDmaBeAxi(vp::Component *idma, std::string itf_name, IdmaBeProducer *
 
     // Declare our own trace so that we can individually activate traces
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
-    // SNAX: FLOW3's beats trace
+    // SNAX events (docs/EVENTS.md): the beats trace
     this->traces.new_trace("beats", &this->beats, vp::INFO);
 
     // Get the top parameter giving the maximum number of outstanding bursts to AXI interconnect

@@ -4,7 +4,7 @@
 
 #define SRC_BYTES 8192
 
-// In .data, which base.ld places in DRAM (its L3, called L2 in SG2).
+// In .data, which base.ld places in DRAM (its L3, the program's L2).
 // 64 B is one DMA beat.
 uint32_t src_l2[SRC_BYTES / 4] __attribute__((aligned(64))) = {
     0x8c7f0aac, 0x97c4aa2f, 0xb716a675, 0xd821ccc0, 0x9a4eb343, 0xdba252fb, 0x8b7d76c3, 0xd8e57d67,

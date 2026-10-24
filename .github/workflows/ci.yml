@@ -60,14 +60,14 @@ jobs:
           make build TARGETS='$(SNAX_TARGETS)' CMAKE_FLAGS=-j$(nproc)
           ccache -s
 
-      # phases.py's and snax_cfg.py's tests, with the image's Python as is (hjson in it).
+      # snax_cfg.py's and the other tests/snax tests, with the image's Python as is (hjson in it).
       - name: Unit tests
         run: python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
       # SnaxUnit's rule on its cases, then sw/ and the programs built, each
-      # run to exit 0 (20 SNAX runs on each of snax_alu and snax_alu_sparse,
-      # snax-shell on snax_hjson, every folder of forge/ with its program and
-      # forge-reduce on vsum, 17 plain).
+      # run to exit 0 (13 cluster tests and snax-shell on snax_hjson with
+      # forge/vecadd/'s cluster file, every folder of forge/ with its program
+      # and forge-reduce on vsum, 17 plain).
       - name: Regress
         run: make regress
 

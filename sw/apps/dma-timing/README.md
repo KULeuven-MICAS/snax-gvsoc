@@ -1,8 +1,9 @@
 # dma-timing
 
 The SG2 DMA timing program (`docs/plans/SG2.md`). The same ELF runs on
-snax_cluster's RTL and on SNAX-GVSoC's `snax_alu` target, cluster
-`cfg/snax_alu_cluster_old.hjson` at snax_cluster `b2672f8`.
+snax_cluster's RTL, cluster `cfg/snax_alu_cluster_old.hjson` at
+snax_cluster `b2672f8`, and on SNAX-GVSoC on `snax_hjson` with
+`forge/vecadd/snax_forge.hjson` (until CLN1 on the `snax_alu` target).
 
 The DMA core copies between DRAM (L2) and L1. For each case it clears the
 destination, resets and enables the cluster's perf counters 0 to 5, reads one
@@ -62,10 +63,11 @@ generated, from this folder:
 
 ## Run
 
-On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_alu` and
+On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_hjson` and
 `source sourceme.sh`:
 
-    gvrun --target snax_alu --work-dir build/work/dma-timing \
+    gvrun --target snax_hjson --work-dir build/work/dma-timing \
+        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/dma-timing/dma-timing.elf run
 
 On the RTL built from the same hjson (Verilator here; `.vsim` and `.vcs`
