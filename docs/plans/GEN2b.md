@@ -3,19 +3,8 @@
 GEN2b is a task of M14 in snax-forge (D123 and D140 there): the program
 snax-forge generates for a design point runs on SNAX-GVSoC and on
 snax_cluster's RTL, the one ELF on both, and the printed lines are compared
-by hand. Acceptance below.
-
-This file is the checklist; `docs/notes/NOTES.md` is the log.
-
-## How the steps are run
-
-- On the MICAS server, by Claude Code: snax-forge's flows, bundles, ELFs and
-  SNAX-GVSoC in snax-forge's image (`ghcr.io/kuleuven-micas/snax-forge:main`);
-  snax_cluster's `rtl-gen` and `vsim_preparation` in its development image
-  (`c5db84ad7bce`), its Verilator builds in its pixi environment, Questa
-  2022.4 on the host (snax-forge `docs/RUN.md` section 8).
-- One commit per step on `ry/gen2b` in snax_cluster, snax-gvsoc and
-  snax-forge; no pull request until the round ends.
+by hand. Branch `ry/gen2b` in all three repos; how each part runs:
+snax-forge `docs/RUN.md` section 8 (Questa 2022.4 on the host).
 
 ## The bar
 
@@ -27,40 +16,33 @@ data`, `forge counter`, `forge errors`):
 - `forge counter` equal to SNAX-GVSoC's;
 - the window within 10% of the RTL's: |w_gvsoc − w_rtl| / w_rtl ≤ 0.10.
 
+Met for vecadd and vsum at N = 64 and 512 (Runs).
+
 ## Where things live
 
 - snax-forge never runs RTL (D140): it makes the bundle and builds the
-  comparison ELF from it (`gvsoc/Makefile`'s `make sw`), the one SNAX-GVSoC
-  runs; this repo's `sw/` is pinned at snax_cluster `cf4b0002`, and the
-  runtime it links (`snax_alu_cluster_old`) differs from a bundle's cluster
+  comparison ELF, the one SNAX-GVSoC runs; the runtime it linked
+  (`sw/`'s build for `snax_alu_cluster_old`, since `snax_forge`'s) differed
+  from a bundle's cluster
   file only in fields the runtime does not read.
-- snax_cluster owns the RTL builds and runs: `target/snitch_cluster/snax_forge.mk`
-  (`snax-forge-sim`, `snax-forge-sw`, `snax-forge-run`; `SIM=vlt|vsim`, the
-  bundle's cluster file as `CFG_OVERRIDE`, `ELF=` the comparison ELF), and
-  `sw/apps/snax-forge`, which builds a fixture's own copy of the program for
-  CI's pass/fail only. `snax-forge-sw` checks the bundle's
-  `include/streamer_csr_addr_map.h` against the one snaxgen wrote (their
-  `#define` lines).
-- snax_cluster keeps vecadd and vsum as fixtures
-  (`target/snitch_cluster/cfg/snax_forge/<design>/`, the program files
-  included); its `snax-forge-ci.yml` builds each with Verilator, runs its
-  program and checks the counter line its README expects.
+- snax_cluster owns the RTL builds and runs
+  (`target/snitch_cluster/snax_forge.mk`, RUN.md section 8) and the vecadd
+  and vsum fixtures in `target/snitch_cluster/cfg/snax_forge/`, which its
+  `snax-forge-ci.yml` builds with Verilator, checking each counter line.
 
 ## The shell rule and its cases (snax-forge open item 84)
 
 `SnaxShell`'s rule (start, a start held while busy and answered in E + 1,
-busy, the counter) was written twice: in `snax_shell.cpp`, and by hand in
+busy, the counter) was written twice, in `snax_shell.cpp` and by hand in
 snax-forge's `ShellCasesSpec`. It is now `SnaxShellRule` in
-`snax/snax_shell.hpp`, plain C++ as `snax_unit.hpp` (`snax_shell.cpp` keeps
-the ports, the CSR block and the event that sends a held start), and
-`tests/snax/shell/` checks it, stepped with `SnaxUnitRule` as GVSoC wires
-them, against hand-worked cases (`tests/snax/shell/README.md`): `make
-regress` runs it as `shell`. snax-forge's `ShellCasesSpec` drives vecadd's
-Chisel shell wrapper (`CsrManager`, `CtrlAdapter`,
-`ElementwiseTiledSpatial`) through the same files
-(`SNAX_GVSOC_SHELL_CASES`), checking every access's result and the unit's
-busy every cycle. The hardware is the reference; both sides agree on all
-eight cases, so no rule changed and no `make regress` result moved.
+`snax/snax_shell.hpp`, plain C++ (`snax_shell.cpp` keeps the ports, the CSR
+block and the event that sends a held start), checked by `tests/snax/shell/`
+(`make regress`'s `shell`), stepped with `SnaxUnitRule`, against hand-worked
+cases; `ShellCasesSpec` drives vecadd's Chisel shell wrapper (`CsrManager`,
+`CtrlAdapter`, `ElementwiseTiledSpatial`) through the same files
+(`SNAX_GVSOC_SHELL_CASES`), every access's result and the busy every cycle.
+The hardware is the reference; both sides agree on all eight cases, so no
+rule changed and no `make regress` result moved.
 
 | Case | What |
 |---|---|
@@ -104,18 +86,9 @@ default's RTL and one build runs both ELFs.
 
 ## Steps
 
-| # | Step | Status |
-|---|---|---|
-| R1 | snax_cluster #660: `StreamerGen` reads its params from the JSON (snax-forge open item 87) | done |
-| R2 | vecadd: `snax_forge.mk`, `sw/apps/snax-forge`, the fixture's program, CI's run; the bar at both N | done |
-| A1 | `SnaxShellRule` in `snax/snax_shell.hpp`; `snax_shell.cpp` calls it; `make regress` as main's (every run and trace log equal) | done |
-| A2 | `tests/snax/shell/`: `tb.cpp`, `run.sh`, eight cases; `shell` in `make regress` | done |
-| A3 | snax-forge: `SnaxShellCases`, `ShellCasesSpec` on the case files, `SNAX_GVSOC_SHELL_CASES` in CI | done |
-| A4 | Disagreements between the two sides: none | done |
-| B1 | vsum's flows, bundles and ELFs (default N and `N=512`) | done |
-| B2 | snax_cluster's vsum fixture; `snax-forge-ci.yml` a matrix over vecadd and vsum | done |
-| B3 | vsum on Verilator and Questa: the bar at both N | done |
-| B4 | vsum's expected counter (67) in its README and CI | done |
+All done: R1 snax_cluster #660 (`StreamerGen` reads its params from the
+JSON, open item 87), R2 vecadd on the RTL; A1 to A4 the shell rule and its
+cases; B1 to B4 vsum's bundles, fixture, CI matrix and runs.
 
 ## Deferred
 
