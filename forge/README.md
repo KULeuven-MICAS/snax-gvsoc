@@ -4,7 +4,7 @@ Accelerators from snax-forge's design points, one folder per design point,
 as SNAX-GVSoC reads them since LNK2a (`docs/plans/LNK2a.md`, snax-forge
 D134): three hjson files in snax_cluster's form, the hjson being the
 contract, run on the installed `snax_hjson` target. A folder is the fixture
-of snax-forge's D128: it lets this repo's regression run a design point
+of snax-forge's D134: it lets this repo's regression run a design point
 without snax-forge. Each is snax-forge's generator's output, checked in
 untouched; snax-forge's `tests/gen/test_fixture.py` writes it again and
 compares it byte for byte.
@@ -20,7 +20,7 @@ Each folder holds:
 
 - `snax_forge.hjson`, the cluster file, named after the base platform: its
   source (snax-forge's base cluster `platforms/snax_forge_cluster.hjson`,
-  taken from snax_cluster's `cfg/snax_alu_cluster.hjson`, the sparse
+  a copy of snax_cluster's `cfg/snax_alu_cluster.hjson`, the sparse
   interconnect) with the
   platform's values written back, the cluster renamed `snax_forge_cluster`
   (`name` and its entry in `bender_target`) and the compute core's only
@@ -75,7 +75,7 @@ runs every folder with the generic app, so a new folder needs nothing else.
 
 ## How it runs
 
-Never through `TARGETS`: no model is compiled (D128). The program is built
+Never through `TARGETS`: no model is compiled (D134). The program is built
 by the generic app, and gvrun runs the installed `snax_hjson` on the cluster
 file:
 

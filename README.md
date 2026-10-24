@@ -3,7 +3,8 @@
 SNAX-GVSoC is a GVSoC model of the SNAX cluster
 ([snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)) in which a
 Snitch core runs the real program. It is part of
-[SNAX-FORGE](https://github.com/KULeuven-MICAS/snax-forge) (M16).
+[SNAX-FORGE](https://github.com/KULeuven-MICAS/snax-forge), its model (D116
+there), checked against snax_cluster's RTL by one ELF on both (D123).
 
 It starts as a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at
 `93cedc4`. `UPSTREAM.md` lists the upstream commits, the license and every
@@ -19,10 +20,10 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | `snax/` | SNAX target and components: the streamer and the TCDM crossbar; `SnaxUnit` (a generic Chisel block's datapath) and `SnaxShell` (its CSR manager); the `snax_hjson` target, any cluster read from its hjson |
 | `forge/` | Generated accelerators from snax-forge, one design point per folder, checked in as fixtures (`forge/README.md`) |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
-| `tests/snax/` | The regression (`regress.py`), the sparse arbiter's check against the RTL and `SnaxUnit`'s rule against hand-worked cases (`unit/`) |
+| `tests/snax/` | The regression (`regress.py`), the sparse arbiter's check against the RTL (`sparse_arb/`), and `SnaxUnit`'s and `SnaxShell`'s rules against hand-worked cases (`unit/`, `shell/`) |
 | `docs/RUN.md` | How to run it, from the container to the regression, each command with its output |
-| `docs/EVENTS.md` | What the SNAX components write about a run (their `summary`, `events` and `beats` traces), line by line |
-| `docs/plans/` | One checklist per task (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`, `FLOW3.md`, `GEN2b.md`) |
+| `docs/EVENTS.md` | What the SNAX components write about a run (their `summary`, `events`, `beats` and `stalls` traces), line by line |
+| `docs/plans/` | One plan per task, what it built and found (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`, `FLOW3.md`, `GEN2b.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
@@ -60,8 +61,8 @@ interconnect the crossbar takes the streamer's priority bit first, then
 round robin from the last pick (SG7, `docs/plans/SG7.md`); the cores and
 AXI ask with priority 0. A DMA beat takes the whole superbank (8 banks) it
 writes or reads in its cycle, and a narrow request there is refused and
-keeps its turn. Until CLN1 the `snax_alu` and `snax_alu_sparse` targets
-were this target fixed to snax_cluster's ALU clusters.
+keeps its turn. Only the sparse interconnect is modelled: a cluster file
+with `tcdm.sparse_interconnect` false is refused.
 
 Each program of `sw/apps/` builds with `make -C sw/apps/<name>` into
 `build/sw/apps/<name>/`. Adding
@@ -161,8 +162,8 @@ moved, to be reviewed and committed with the new pin.
 ## Comparing with the RTL (by hand)
 
 Cycles are compared with the RTL by hand, on demand, from fresh runs of one
-ELF on both sides (only `dma-timing` checks its DMA counters itself), against SG5's target (`docs/plans/SG5.md`, "The target";
-D123 in snax-forge). Only the RTL needs a snax_cluster checkout: clone it
+ELF on both sides (only `dma-timing` checks its DMA counters itself; D123
+in snax-forge). Only the RTL needs a snax_cluster checkout: clone it
 next to this repo at the pin in `sw/README.md`, with its submodules:
 
     PIN=$(sed -n 's/^| `snax_cluster` | `\([0-9a-f]*\)`.*/\1/p' sw/README.md)
@@ -177,10 +178,7 @@ SIM=vlt` (or `vsim`), as snax-forge's `docs/RUN.md` section 8 says. A
 cluster test's ELF, built here, runs on it with `snax-forge-run SIM=vlt
 ELF=<elf>`; a generated accelerator's (`forge/`, snax-forge's bundles) is
 snax-forge's ELF on the bundle's RTL. GEN2b's runs and gaps are in
-`docs/plans/GEN2b.md`. Until CLN1 the cluster tests ran on snax_cluster
-built with its ALU clusters (`cfg/snax_alu_cluster_old.hjson`,
-`cfg/snax_alu_cluster.hjson`); `snax-alu` and the script that cut its runs
-into phases (SG5) went in CLN1.
+`docs/plans/GEN2b.md`.
 
 ## License
 

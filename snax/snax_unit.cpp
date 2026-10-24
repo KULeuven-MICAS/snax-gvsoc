@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxUnit (D128 in snax-forge): the datapath of one of snax-forge's Chisel
+// SnaxUnit (D134 in snax-forge): the datapath of one of snax-forge's Chisel
 // blocks, generic, every number a property read at run time (get_js_config),
 // so a design point compiles nothing. The cycle rule and the op table are in
 // snax_unit.hpp; this file is the component around them.

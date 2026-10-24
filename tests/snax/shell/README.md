@@ -1,6 +1,6 @@
 # SnaxShell's rule
 
-GEN2b round 3 (`docs/plans/GEN2b.md`, snax-forge open item 84): the rule of
+GEN2b round 3 (`docs/plans/GEN2b.md`, snax-forge C§17): the rule of
 `snax/snax_shell.hpp`, the code `SnaxShell` (`snax/snax_shell.cpp`) runs (the
 CSRs, a start, a start held while busy, busy, the counter), against
 hand-worked cases, with g++ only. `make regress` runs it after `unit`, as

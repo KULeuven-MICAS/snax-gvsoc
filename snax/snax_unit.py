@@ -8,7 +8,7 @@
 
 The rule (lockstep, pipelined) and the op table are in snax_unit.hpp. The
 C++ checks every property and stops on a bad one, naming it; this class only
-passes them on, so a design point compiles nothing (D128 in snax-forge).
+passes them on, so a design point compiles nothing (D134 in snax-forge).
 """
 
 import gvsoc.systree

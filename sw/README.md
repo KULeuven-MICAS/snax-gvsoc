@@ -27,7 +27,7 @@ into `build/sw/apps/<name>/`, building the libraries first when needed:
 
 | What | Commit | |
 |---|---|---|
-| `snax_cluster` | `b9e475b4693ae899b3c982e8a751fb6dda9a62fe` | 2026-10-23, Run snax-forge bundles' programs on the RTL: snax_forge.mk, sw/apps/snax-forge, vecadd and vsum fixtures (#661) |
+| `snax_cluster` | `ccc7688f69c5e99fd1e8db4c6fd2195bb8a0d07a` | 2026-10-24, CLN1 R2b step 8: snax-forge-ci.yml without Build Software (F212); vecadd and vsum fixtures refreshed from snax-forge 35662d5 (#662) |
 | `sw/deps/printf` | `d3b984684bb8a8bdc48cc7a1abecb93ce59bbe3e` | 2020-01-01, chore(readme): 2020 announcement |
 | `sw/deps/riscv-opcodes` | `94caf0e0fefff1009ba144bccb6d8f7d425ea2f5` | 2023-10-03, Add custom HW barrier CSR (#9) |
 

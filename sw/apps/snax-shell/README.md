@@ -2,12 +2,13 @@
 
 `SnaxShell` and `SnaxUnit` (a lockstep add of 4 lanes of 64 bit behind
 the streamer), driven by hand on `snax_hjson` with
-`forge/vecadd/snax_forge.hjson`. snax_cluster's `snax-alu` DMA and streamer
-setup, written out with the CSRs of `forge/vecadd/include/`
+`forge/vecadd/snax_forge.hjson`: a DMA and streamer setup written out with
+the CSRs of `forge/vecadd/include/`
 (`streamer_csr_addr_map.h`, `acc_csr.h`): `loopCount` 978, start 979, busy
 980, the counter 981. `data.h` is `data/datagen.py` at 192 words, seed 0:
-the data snax_cluster's `snax-alu` `datagen.py` gives for an add. snax_cluster has
-no such accelerator yet, so there is no RTL run to compare with.
+the data snax_cluster's ALU `datagen.py` gives for an add. snax_cluster
+builds this accelerator from snax-forge's vecadd bundle, but this program
+has not been run on that RTL.
 
 One streamer run of 48 beats feeds three unit runs of 16 beats
 (`RUN_BEATS`). It checks only what does not depend on code layout, and
@@ -50,5 +51,5 @@ SI + SO the counter), then those of runs 1 and 2, and
     snax-shell loopCount 0: busy 0, counter 0
     snax-shell errors: 0
 
-and exits 0. N and S follow the core's timing: 17 (`run index=0 firings=16
-busy=16 stall_in=1 stall_out=0 flush=0`) and 19.
+and exits 0. N and S follow the core's timing: 19 (`run index=0 firings=16
+busy=16 stall_in=3 stall_out=0 flush=0`) and 28.
