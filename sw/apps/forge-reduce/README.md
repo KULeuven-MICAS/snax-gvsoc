@@ -70,7 +70,9 @@ draws it, and `OUT` the sums; it depends on the manifest and the Makefile.
 
 ## Run
 
-In the container, from snax-gvsoc, with GVSoC built and the program made:
+In the container, from snax-gvsoc, with GVSoC built and the program made
+(`make -C sw/apps/forge-reduce DESIGN=vsum`; `make regress` builds only
+`vsum-r16`):
 
     source sourceme.sh
     gvrun --target snax_hjson --param hjson=$PWD/forge/vsum/snax_forge.hjson \
@@ -80,6 +82,7 @@ In the container, from snax-gvsoc, with GVSoC built and the program made:
 It warns that the platform tree does not match (LNK2a: the cluster file's
 components are not `snax_hjson`'s default's), prints the unit's lines,
 among them `run index=0 firings=64 busy=64 stall_in=2 stall_out=0 flush=1`
-(GEN3 round 4's build; the core's timing can move the stalls), then
+(the core's timing can move the stalls), then
 `forge-reduce data: 0 errors (1 sums)`, the counter (67, busy + stall_in +
 stall_out + flush of that line) and `forge-reduce errors: 0`, and exits 0.
+`vsum-r16` prints `forge-reduce data: 0 errors (4 sums)` and counter 67.

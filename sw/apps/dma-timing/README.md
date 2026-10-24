@@ -1,9 +1,9 @@
 # dma-timing
 
-The SG2 DMA timing program (`docs/plans/SG2.md`). The same ELF runs on
-snax_cluster's RTL, cluster `cfg/snax_alu_cluster_old.hjson` at
-snax_cluster `b2672f8`, and on SNAX-GVSoC on `snax_hjson` with
-`forge/vecadd/snax_forge.hjson` (until CLN1 on the `snax_alu` target).
+The SG2 DMA timing program (`docs/plans/SG2.md`), on SNAX-GVSoC on
+`snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on
+snax_cluster's RTL (SG2 at `b2672f8`, SG7 at `9fbf35d`); the DMA's values
+do not depend on the cluster's accelerator.
 
 The DMA core copies between DRAM (L2) and L1. For each case it clears the
 destination, resets and enables the cluster's perf counters 0 to 5, reads one
@@ -18,7 +18,7 @@ prints one line per case.
 |---|---|
 | `idle` | none: the cost of the marks and of a wait on an idle DMA |
 | `l2l1 1x64` to `1x8192` | one L2 to L1 copy of 64 B, 256 B, 800 B, 4 KiB, 8 KiB |
-| `l2l1 2x800` | two copies back to back, at +0 and +800 B, as `snax-alu` does |
+| `l2l1 2x800` | two copies back to back, at +0 and +800 B |
 | `l2l1 4x800` | four copies back to back, at +0, +800, +1600, +2400 B |
 | `l1l2 1x800` | one L1 to L2 copy |
 
@@ -70,11 +70,11 @@ On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_hjson` and
         --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/dma-timing/dma-timing.elf run
 
-On the RTL built from the same hjson (Verilator here; `.vsim` and `.vcs`
-take the same argument):
+On the RTL built from snax-forge's vecadd bundle (README, "Comparing with
+the RTL"), from snax_cluster:
 
-    cd snax_cluster/target/snitch_cluster
-    bin/snitch_cluster.vlt <snax-gvsoc>/build/sw/apps/dma-timing/dma-timing.elf
+    make -C target/snitch_cluster snax-forge-run SIM=vlt CFG_OVERRIDE=<bundle>/snax_forge.hjson \
+        ELF=<snax-gvsoc>/build/sw/apps/dma-timing/dma-timing.elf
 
 Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from
 that folder (the iDMA's own trace, hart 1), and the iDMA commit Bender

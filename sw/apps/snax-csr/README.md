@@ -26,8 +26,7 @@ run here (the RTL's manager asserts on it), so they pass only if nothing is
 written. Before SG6, `priv.hpp` wrote the value read back for these three
 forms, and the run stopped at the first one.
 
-The streamer and the shell see 105 accesses: 66 reads and 39 writes (110
-with the ALU's 17 read-write CSRs, 98 before SG6).
+The streamer and the shell see 105 accesses: 66 reads and 39 writes.
 
 Every form follows Zicsr (D120 in snax-forge) on both sides: `csrrw` and
 `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`,

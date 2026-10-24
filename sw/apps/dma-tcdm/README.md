@@ -7,8 +7,7 @@ case, as `core-tcdm`. It starts `forge/vecadd/`'s accelerator (a lockstep
 add) through `forge/vecadd/include/`'s headers; the same ELFs run on
 `snax_hjson` with `forge/vecadd/snax_forge.hjson` and on snax_cluster's RTL
 built from snax-forge's vecadd bundle (snax-forge `docs/RUN.md` section 8).
-Until CLN1 they started the ALU through `snax-alu-lib`, on the RTL with the
-plain and the sparse interconnect and on the two ALU targets. Each case
+Each case
 prints the value it compares, chosen not to depend on the cores' timing
 (D123), and runs twice: a first run, then the measured one, from a warm
 instruction cache.
@@ -23,8 +22,7 @@ instruction cache.
   refuses A's four lanes in its cycle; A then sends again, one beat late,
   and the accelerator, which takes a beat of A and of B in every cycle,
   fires a cycle later each time: 264. A is alone on its banks, so the lock makes it
-  win again in the next cycle on both interconnects, and the two give the
-  same. From source, the beats land some 65 to 90 cycles after the DMA
+  win again in the next cycle. From source, the beats land some 65 to 90 cycles after the DMA
   core leaves the barrier and the movers ask from 2 to 257 cycles after
   the start write, a few cycles after the compute core leaves it: the
   counter holds while the two cores leave the barrier within about 60
