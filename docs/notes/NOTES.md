@@ -995,3 +995,12 @@ once, where it first appears.
 - 2026-10-23. GEN2b round 3: `SnaxShellRule` in `snax/snax_shell.hpp`,
   `tests/snax/shell/` (8 cases) in `make regress`; logs equal main's; the
   same cases pass snax-forge's `ShellCasesSpec`.
+
+### M13 B0 round 6: forge-reduce retired (snax-forge)
+
+- 2026-10-26. `forge-reduce` retired in snax-forge's M13 B0: its hand-set
+  `len` is replaced by the `rowsum_serial` fixture (T = 16, four sums), and
+  snax-forge's open item 81 is closed. `forge/rowsum/` (W 4, M 8, N 64: 128
+  beats, `len` 16, eight sums): counter 131. `forge/rowsum_serial/` (W 1,
+  M 4, N 16: 64 beats, `len` 16): counter 67, `run 0: firings 64 busy 64
+  stall_in 2 stall_out 0 flush 1`, as `vsum-r16`'s.

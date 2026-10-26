@@ -15,13 +15,16 @@ compares it byte for byte.
 | `vecmul/` | `recipes/vecmul.json` (W = 4, N = 64, `elementwise_mul`) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
 | `vsum/` | `recipes/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_accumulator`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
 | `vsum_tree/` | `recipes/vsum_tree.json` (W = 4, N = 64, `accumulate`'s `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
+| `matadd/` | `recipes/matadd.json` (W = 4, M = 8, N = 16, the first 2-D bind: the row loop and the column beats, two temporal loops per streamer) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
+| `rowsum/` | `recipes/rowsum.json` (W = 4, M = 8, N = 64, `accumulate`'s `chisel_adder_tree`, T = N / W = 16: a restart every row, eight sums) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
+| `rowsum_serial/` | `recipes/rowsum_serial.json` (W = 1, M = 4, N = 16, `accumulate`'s `chisel_accumulator`, T = N = 16: four sums of 16) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
 
 Each folder holds:
 
 - `snax_forge.hjson`, the cluster file, named after the base platform: its
   source (snax-forge's base cluster `platforms/snax_forge_cluster.hjson`,
-  a copy of snax_cluster's `cfg/snax_alu_cluster.hjson`, the sparse
-  interconnect) with the
+  from snax_cluster's `cfg/snax_alu_cluster.hjson`, its names snax-forge's,
+  the sparse interconnect) with the
   platform's values written back, the cluster renamed `snax_forge_cluster`
   (`name` and its entry in `bender_target`) and the compute core's only
   slot set for the design: `snax_acc_name: snax_forge` (the platform's
@@ -39,7 +42,10 @@ Each folder holds:
   standard composite takes (`snax/snax_cfg.py` lists its fields,
   `snax/snax_unit_acc.py` builds it).
 - `include/`: the headers a program drives it with
-  (`streamer_csr_addr_map.h` and `<instance>_csr.h`).
+  (`streamer_csr_addr_map.h` and `<instance>_csr.h`), and the runtime's
+  view of the cluster (`snitch_cluster_cfg.h` and
+  `snitch_cluster_addrmap.h`, as snax_cluster's templates render them from
+  the cluster file).
 - `main.c` (GEN2a, FLOW3, snax-forge D135): the program, the design point's
   task list on snRuntime: `mcycle` read at main's entry, each step on the
   core that owns its component, a barrier where another core goes on, each
@@ -69,15 +75,18 @@ a fixture"), the folder cleared first:
     pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_forge.json
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
-(the same with `vecmul`, `vsum` or `vsum_tree`), then commit the folder as written and
+(the same with `vecmul`, `vsum` or `vsum_tree`; the recipes of `matadd`, `rowsum` and
+`rowsum_serial` have three steps, so their design step reads
+`out/sandbox/<design>/3_bind.snaxdfg`), then commit the folder as written and
 bump snax-forge's submodule so its test compares against it. `make regress`
 runs every folder with the generic app, so a new folder needs nothing else.
 
 ## How it runs
 
-Never through `TARGETS`: no model is compiled (D134). The program is built
-by the generic app, and gvrun runs the installed `snax_hjson` on the cluster
-file:
+Never through `TARGETS`: no model is compiled (D134). The generic app
+builds the program and its own runtime (`libsnRuntime.a`, beside the ELF)
+against the folder's two cluster headers, so the stacks sit at the end of
+the design's L1; gvrun runs the installed `snax_hjson` on the cluster file:
 
     make -C sw/apps/forge DESIGN=vecadd
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \

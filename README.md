@@ -102,8 +102,6 @@ standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and
 `SnaxUnit`) in the slot, on the installed components (but for vecadd's,
 gvrun warns that the platform tree does not match). The generic app `sw/apps/forge/` builds the
 fixture's `main.c` (`DESIGN=<design>`); `docs/RUN.md` runs `vecadd`.
-`sw/apps/forge-reduce/` stays for `vsum` with its len overridden by hand
-(`RATE_OVERRIDE=16`, four sums per run).
 
 ### Regression
 
@@ -114,9 +112,7 @@ cluster tests on `snax_hjson` with `forge/vecadd/`'s cluster file, named
 `<program>.snax_hjson`: `dma-timing`,
 `snax-csr`, the `stream-timing` cases, the `core-tcdm` cases and the
 `dma-tcdm` case; then `snax-shell` on `snax_hjson` with `forge/vecadd/`'s cluster file and the unit's trace on, then
-every folder of `forge/` with the generic app (`forge.<design>`) and
-`forge-reduce.vsum-r16` (vsum with its len overridden to 16, four sums;
-`FORGE_REDUCE` in `tests/snax/regress.py`), then
+every folder of `forge/` with the generic app (`forge.<design>`), then
 snax_cluster's 17 plain tests on `snitch`. A program passes when it exits 0
 within its timeout: each SNAX program returns its error count,
 `stream-timing` and the `core-tcdm` cases but `subword` return 0, and a
@@ -125,7 +121,7 @@ compared (SG6), but `dma-timing` holds the RTL's DMA counters `busy`, `r`
 and `w` and fails when they move (SG7), and `snax-shell`'s printed counter
 must equal its unit's first run line, busy + stall_in + stall_out + flush,
 that run firing its beats (`check_counter` in `tests/snax/regress.py`,
-GEN3); so must `forge-reduce`'s, and a generated program's
+GEN3); so must a generated program's
 `forge counter <task>:` line per accelerator task, matched to the unit's
 run line for that run (`check_counters`). A `forge/` entry is read from its
 `manifest.json` with plain json: its cluster file, run on `snax_hjson`

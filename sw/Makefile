@@ -8,7 +8,10 @@
 # tests/. Flags from toolchain.mk; include order and link flags as
 # snax_cluster's sw/math/Makefile, runtime/common/common.mk and
 # tests/Makefile at the pin. Each cluster's generated headers
-# (generated/<cluster>/) come before the other include dirs. The apps are
+# (generated/<cluster>/) come before the other include dirs. `make runtime
+# RUNTIME_INC=<dir> RUNTIME_BUILD=<dir>` builds one more libsnRuntime.a, from
+# the same sources against the cluster headers in RUNTIME_INC, into
+# RUNTIME_BUILD (apps/forge: a design point's own runtime). The apps are
 # built by apps/<name>/Makefile (common.mk).
 
 MK_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -81,6 +84,34 @@ $(BUILD)/$(1)/libsnRuntime.a: $(addprefix $(BUILD)/$(1)/,$(RUNTIME_OBJS))
 	$$(RISCV_AR) $$(RISCV_ARFLAGS) $$@ $$^
 endef
 $(foreach c,$(CLUSTERS),$(eval $(call cluster_rules,$(c))))
+
+# One runtime against the cluster headers in RUNTIME_INC
+# (snitch_cluster_cfg.h, snitch_cluster_addrmap.h; the rest of
+# generated/snax_forge/ is not the runtime's), in cluster_rules' include
+# order, into RUNTIME_BUILD; its objects rebuild when either header changes
+RUNTIME_HEADERS = $(addprefix $(RUNTIME_INC)/,snitch_cluster_cfg.h snitch_cluster_addrmap.h)
+
+ifneq ($(filter runtime,$(MAKECMDGOALS)),)
+ifeq ($(and $(RUNTIME_INC),$(RUNTIME_BUILD)),)
+$(error make runtime: set RUNTIME_INC and RUNTIME_BUILD)
+endif
+endif
+
+.PHONY: runtime
+runtime: $(RUNTIME_BUILD)/libsnRuntime.a
+
+ifneq ($(and $(RUNTIME_INC),$(RUNTIME_BUILD)),)
+$(RUNTIME_BUILD)/%.o: INCDIRS = $(RUNTIME_INC) $(RUNTIME_INCDIRS)
+$(RUNTIME_BUILD)/%.o: $(RUNTIME_DIR)/src/%.S $(RUNTIME_HEADERS)
+	@mkdir -p $(@D)
+	$(RISCV_CC) $(RISCV_CFLAGS) $(DEPFLAGS) -c $< -o $@
+$(RUNTIME_BUILD)/%.o: $(RUNTIME_DIR)/src/%.c $(RUNTIME_HEADERS)
+	@mkdir -p $(@D)
+	$(RISCV_CC) $(RISCV_CFLAGS) $(DEPFLAGS) -c $< -o $@
+$(RUNTIME_BUILD)/libsnRuntime.a: $(addprefix $(RUNTIME_BUILD)/,$(RUNTIME_OBJS))
+	$(RISCV_AR) $(RISCV_ARFLAGS) $@ $^
+-include $(wildcard $(RUNTIME_BUILD)/*.d)
+endif
 
 ###############
 # Plain tests #

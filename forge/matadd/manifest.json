@@ -1,0 +1,17 @@
+{
+ "design": "matadd",
+ "design_point": "out/design/matadd/design_point.json",
+ "symbols": {"M": 8, "N": 16},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "snax_forge_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0/unit",
+ "csrs": {
+  "streamer": {"first": 960, "last": 983},
+  "fields": {"loopCount": 984},
+  "start": 985,
+  "busy": 986,
+  "counter": 987
+ },
+ "tasks": [{"name": "add_acc", "beats": 32, "csrs": {"loopCount": 32}}]
+}

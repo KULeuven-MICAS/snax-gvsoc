@@ -1,0 +1,17 @@
+{
+ "design": "rowsum",
+ "design_point": "out/design/rowsum/design_point.json",
+ "symbols": {"M": 8, "N": 64},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "snax_forge_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0/unit",
+ "csrs": {
+  "streamer": {"first": 960, "last": 974},
+  "fields": {"loopCount": 975, "len": 976},
+  "start": 977,
+  "busy": 978,
+  "counter": 979
+ },
+ "tasks": [{"name": "sum_acc", "beats": 128, "csrs": {"loopCount": 128, "len": 16}}]
+}
