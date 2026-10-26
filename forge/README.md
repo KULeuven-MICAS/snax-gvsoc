@@ -15,6 +15,7 @@ compares it byte for byte.
 | `vecmul/` | `recipes/vecmul.json` (W = 4, N = 64, `elementwise_mul`) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
 | `vsum/` | `recipes/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_accumulator`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
 | `vsum_tree/` | `recipes/vsum_tree.json` (W = 4, N = 64, `accumulate`'s `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
+| `matadd/` | `recipes/matadd.json` (W = 4, M = 8, N = 16, the first 2-D bind: the row loop and the column beats, two temporal loops per streamer) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
 
 Each folder holds:
 
@@ -72,7 +73,8 @@ a fixture"), the folder cleared first:
     pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_forge.json
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
-(the same with `vecmul`, `vsum` or `vsum_tree`), then commit the folder as written and
+(the same with `vecmul`, `vsum` or `vsum_tree`; `matadd`'s recipe has three steps, so its
+design step reads `out/sandbox/matadd/3_bind.snaxdfg`), then commit the folder as written and
 bump snax-forge's submodule so its test compares against it. `make regress`
 runs every folder with the generic app, so a new folder needs nothing else.
 
