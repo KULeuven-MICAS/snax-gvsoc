@@ -447,30 +447,23 @@ void SnaxUnit::move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words
 }
 
 
-// The op per lane on the beats taken: lane i is bits [i * w, (i + 1) * w)
+// The op per lane on the beats taken (snax_unit_elementwise)
 void SnaxUnit::compute(std::vector<uint64_t> &out)
 {
-    int w = this->data_width;
-    uint64_t mask = w == 64 ? ~(uint64_t)0 : ((uint64_t)1 << w) - 1;
-    out.assign(this->beat_words, 0);
-    for (int lane = 0; lane < this->lanes; lane++)
-    {
-        int word = lane * w / 64;
-        int shift = lane * w % 64;
-        uint64_t a = (this->beat_in[0][word] >> shift) & mask;
-        uint64_t b = (this->beat_in[1][word] >> shift) & mask;
-        out[word] |= snax_unit_compute(this->op, this->is_signed, w, a, b) << shift;
-    }
+    SnaxUnitType t = {this->data_width, this->is_signed};
+    out.assign(this->out_words, 0);
+    snax_unit_elementwise(this->op, this->lanes, t, t, t, this->beat_in[0].data(),
+        this->beat_in[1].data(), out.data());
 }
 
 
 // A fold's firing: the beat taken, its lanes through the tree, starts the
-// output's value or is folded into it (64-bit elements, one per word)
+// output's value or is folded into it (snax_unit_fold)
 void SnaxUnit::fold(bool first)
 {
-    uint64_t x = snax_unit_tree(this->op, this->is_signed, 64, this->beat_in[0].data(),
-        this->lanes);
-    this->acc[0] = first ? x : snax_unit_compute(this->op, this->is_signed, 64, this->acc[0], x);
+    SnaxUnitType t = {this->data_width, this->is_signed};
+    this->acc[0] = snax_unit_fold(this->op, this->lanes, t, t, this->beat_in[0].data(), first,
+        this->acc[0]);
 }
 
 

@@ -8,8 +8,8 @@
 // output's ready and the expected fire, push and busy; the tb drives
 // snax_unit.hpp's rule with them and compares every cycle and the trace line
 // at the end of each run, whose busy, stall_in, stall_out and flush must add
-// up to the run's busy cycles in the case file. It also checks the op table
-// and a fold's tree on fixed vectors.
+// up to the run's busy cycles in the case file. It also checks the op table,
+// a fold's tree, NumPy's result types and whole beats on fixed vectors.
 //
 //   tb CASE...
 //
@@ -291,35 +291,35 @@ static int run(const Case &c)
 // The op table on fixed vectors: wrapping, and min and max signed or not
 static int check_ops(int *count)
 {
-    struct Vector { int op; bool is_signed; int width; uint64_t a, b, r; };
+    struct Vector { int op; SnaxUnitType t; uint64_t a, b, r; };
     static const Vector vectors[] = {
-        {UNIT_ADD, false, 8, 0xFF, 0x01, 0x00},
-        {UNIT_ADD, false, 64, ~0ull, 2, 1},
-        {UNIT_SUB, false, 8, 0x00, 0x01, 0xFF},
-        {UNIT_SUB, false, 32, 5, 7, 0xFFFFFFFE},
-        {UNIT_MUL, false, 16, 0x100, 0x100, 0x0000},
-        {UNIT_MUL, false, 64, 0x100000000ull, 0x100000001ull, 0x100000000ull},
-        {UNIT_AND, false, 8, 0xF0, 0x3C, 0x30},
-        {UNIT_OR, false, 8, 0xF0, 0x3C, 0xFC},
-        {UNIT_XOR, false, 8, 0xF0, 0x3C, 0xCC},
-        {UNIT_MIN, false, 8, 0x80, 0x01, 0x01},
-        {UNIT_MIN, true, 8, 0x80, 0x01, 0x80},
-        {UNIT_MAX, false, 32, 0xFFFFFFFF, 1, 0xFFFFFFFF},
-        {UNIT_MAX, true, 32, 0xFFFFFFFF, 1, 1},
-        {UNIT_MIN, true, 64, 0x8000000000000000ull, 0, 0x8000000000000000ull},
-        {UNIT_MAX, true, 16, 0x7FFF, 0x8000, 0x7FFF},
+        {UNIT_ADD, {8, false}, 0xFF, 0x01, 0x00},
+        {UNIT_ADD, {64, false}, ~0ull, 2, 1},
+        {UNIT_SUB, {8, false}, 0x00, 0x01, 0xFF},
+        {UNIT_SUB, {32, false}, 5, 7, 0xFFFFFFFE},
+        {UNIT_MUL, {16, false}, 0x100, 0x100, 0x0000},
+        {UNIT_MUL, {64, false}, 0x100000000ull, 0x100000001ull, 0x100000000ull},
+        {UNIT_AND, {8, false}, 0xF0, 0x3C, 0x30},
+        {UNIT_OR, {8, false}, 0xF0, 0x3C, 0xFC},
+        {UNIT_XOR, {8, false}, 0xF0, 0x3C, 0xCC},
+        {UNIT_MIN, {8, false}, 0x80, 0x01, 0x01},
+        {UNIT_MIN, {8, true}, 0x80, 0x01, 0x80},
+        {UNIT_MAX, {32, false}, 0xFFFFFFFF, 1, 0xFFFFFFFF},
+        {UNIT_MAX, {32, true}, 0xFFFFFFFF, 1, 1},
+        {UNIT_MIN, {64, true}, 0x8000000000000000ull, 0, 0x8000000000000000ull},
+        {UNIT_MAX, {16, true}, 0x7FFF, 0x8000, 0x7FFF},
         // Operands wider than width are cut to it first
-        {UNIT_ADD, false, 8, 0x1FF, 0x101, 0x00},
+        {UNIT_ADD, {8, false}, 0x1FF, 0x101, 0x00},
     };
     int errors = 0;
     *count = sizeof(vectors) / sizeof(vectors[0]);
     for (const Vector &v : vectors)
     {
-        uint64_t r = snax_unit_compute(v.op, v.is_signed, v.width, v.a, v.b);
+        uint64_t r = snax_unit_compute(v.op, v.t, v.a, v.b);
         if (r != v.r)
         {
-            printf("ops: %s%s w%d 0x%lx 0x%lx = 0x%lx, expected 0x%lx\n",
-                snax_unit_op_names[v.op], v.is_signed ? " signed" : "", v.width,
+            printf("ops: %s %s 0x%lx 0x%lx = 0x%lx, expected 0x%lx\n",
+                snax_unit_op_names[v.op], snax_unit_type_name(v.t).c_str(),
                 (unsigned long)v.a, (unsigned long)v.b, (unsigned long)r, (unsigned long)v.r);
             errors++;
         }
@@ -330,28 +330,157 @@ static int check_ops(int *count)
 // A fold's tree on fixed vectors: halves first, wrapping, one lane as it is
 static int check_tree(int *count)
 {
-    struct Vector { int op; bool is_signed; int width; std::vector<uint64_t> lanes; uint64_t r; };
+    struct Vector { int op; SnaxUnitType t; std::vector<uint64_t> lanes; uint64_t r; };
     static const Vector vectors[] = {
-        {UNIT_ADD, false, 64, {7}, 7},
-        {UNIT_ADD, false, 64, {1, 2, 3, 4}, 10},
-        {UNIT_ADD, false, 64, {~0ull, 1, 2, 3}, 5},
-        {UNIT_ADD, false, 8, {0x80, 0x80, 0x01, 0x02}, 0x03},
-        {UNIT_ADD, false, 64, {1, 2, 3}, 6},
+        {UNIT_ADD, {64, false}, {7}, 7},
+        {UNIT_ADD, {64, false}, {1, 2, 3, 4}, 10},
+        {UNIT_ADD, {64, false}, {~0ull, 1, 2, 3}, 5},
+        {UNIT_ADD, {8, false}, {0x80, 0x80, 0x01, 0x02}, 0x03},
+        {UNIT_ADD, {64, false}, {1, 2, 3}, 6},
         // (a0 - a1) - (a2 - a3): the order of the halves
-        {UNIT_SUB, false, 64, {10, 4, 3, 1}, 4},
-        {UNIT_MIN, true, 64, {5, ~0ull, 3, 2}, ~0ull},
-        {UNIT_MAX, false, 64, {5, ~0ull, 3, 2}, ~0ull},
+        {UNIT_SUB, {64, false}, {10, 4, 3, 1}, 4},
+        {UNIT_MIN, {64, true}, {5, ~0ull, 3, 2}, ~0ull},
+        {UNIT_MAX, {64, false}, {5, ~0ull, 3, 2}, ~0ull},
     };
     int errors = 0;
     *count = sizeof(vectors) / sizeof(vectors[0]);
     for (const Vector &v : vectors)
     {
-        uint64_t r = snax_unit_tree(v.op, v.is_signed, v.width, v.lanes.data(), v.lanes.size());
+        uint64_t r = snax_unit_tree(v.op, v.t, v.lanes.data(), v.lanes.size());
         if (r != v.r)
         {
-            printf("tree: %s%s w%d over %zu lanes = 0x%lx, expected 0x%lx\n",
-                snax_unit_op_names[v.op], v.is_signed ? " signed" : "", v.width, v.lanes.size(),
+            printf("tree: %s %s over %zu lanes = 0x%lx, expected 0x%lx\n",
+                snax_unit_op_names[v.op], snax_unit_type_name(v.t).c_str(), v.lanes.size(),
                 (unsigned long)r, (unsigned long)v.r);
+            errors++;
+        }
+    }
+    return errors;
+}
+
+// NumPy's result types (np.result_type) on fixed pairs; ok false, refused
+static int check_types(int *count)
+{
+    struct Vector { SnaxUnitType a, b; bool ok; SnaxUnitType r; };
+    static const Vector vectors[] = {
+        {{8, true}, {8, false}, true, {16, true}},
+        {{32, true}, {32, false}, true, {64, true}},
+        {{16, true}, {8, false}, true, {16, true}},
+        {{8, true}, {32, true}, true, {32, true}},
+        {{8, false}, {16, false}, true, {16, false}},
+        // NumPy gives float64
+        {{64, true}, {64, false}, false, {0, false}},
+    };
+    int errors = 0;
+    *count = sizeof(vectors) / sizeof(vectors[0]);
+    for (const Vector &v : vectors)
+    {
+        SnaxUnitType r;
+        bool ok = snax_unit_result_type(v.a, v.b, &r);
+        if (ok != v.ok || (ok && (r.width != v.r.width || r.is_signed != v.r.is_signed)))
+        {
+            printf("types: %s, %s = %s, expected %s\n", snax_unit_type_name(v.a).c_str(),
+                snax_unit_type_name(v.b).c_str(),
+                ok ? snax_unit_type_name(r).c_str() : "refused",
+                v.ok ? snax_unit_type_name(v.r).c_str() : "refused");
+            errors++;
+        }
+    }
+    return errors;
+}
+
+// Whole beats on fixed vectors, the 64-bit channel words lane 0 lowest: an
+// elementwise op (a op b at their result type, cast to out), or a fold
+// (folds firings of the same beat a into one output word)
+static int check_beats(int *count)
+{
+    struct Vector
+    {
+        const char *name;
+        int op;
+        int lanes;
+        int folds;          // 0: elementwise
+        SnaxUnitType a_t, b_t, out_t;
+        std::vector<uint64_t> a, b, out;
+    };
+    const SnaxUnitType i8 = {8, true}, u8 = {8, false}, i16 = {16, true}, i32 = {32, true},
+        i64 = {64, true};
+    const std::vector<uint64_t> add2_a = {0x00000005fffffffdull, 0xffffffff00000007ull,
+        0x7fffffff00000064ull, 0x0000000080000000ull};
+    const std::vector<uint64_t> ones32(4, 0x0000000100000001ull);
+    const Vector vectors[] = {
+        {"1 mul int32 -> int64", UNIT_MUL, 4, 0, i32, i32, i64,
+            {0xfffffffe00000003ull, 0xfffffffb7fffffffull},
+            {0x0000000700000004ull, 0xffffffff00000002ull},
+            {0x000000000000000cull, 0xfffffffffffffff2ull, 0xfffffffffffffffeull,
+                0x0000000000000005ull}},
+        {"2a add int32 -> int32", UNIT_ADD, 8, 0, i32, i32, i32, add2_a, ones32,
+            {0x00000006fffffffeull, 0x0000000000000008ull, 0x8000000000000065ull,
+                0x0000000180000001ull}},
+        {"2b add int32 -> int64", UNIT_ADD, 8, 0, i32, i32, i64, add2_a, ones32,
+            {0xfffffffffffffffeull, 0x6, 0x8, 0x0, 0x65, 0xffffffff80000000ull,
+                0xffffffff80000001ull, 0x1}},
+        {"3 mul int8 -> int32", UNIT_MUL, 8, 0, i8, i8, i32,
+            {0x000000000780fd64ull}, {0x00000000fe800503ull},
+            {0xfffffff10000002cull, 0xfffffff200000000ull, 0x0, 0x0}},
+        {"4a fold add int32 -> int64", UNIT_ADD, 4, 1, i32, {}, i64,
+            {0x000000017fffffffull, 0xfffffffe00000005ull}, {}, {0x0000000080000003ull}},
+        {"4b fold add int32 -> int64, twice", UNIT_ADD, 4, 2, i32, {}, i64,
+            {0x000000017fffffffull, 0xfffffffe00000005ull}, {}, {0x0000000100000006ull}},
+        {"5 fold add int8 -> int32", UNIT_ADD, 8, 1, i8, {}, i32,
+            {0x00000000f200f12cull}, {}, {0x000000000000000full}},
+        {"6a fold add int8 -> int32", UNIT_ADD, 8, 1, i8, {}, i32,
+            {0x00000000000005fdull}, {}, {0x2}},
+        {"6b fold add uint8 -> int32", UNIT_ADD, 8, 1, u8, {}, i32,
+            {0x00000000000005fdull}, {}, {0x102}},
+        {"7a max int8 -> int32", UNIT_MAX, 8, 0, i8, i8, i32, {0x90}, {0x0},
+            {0x0, 0x0, 0x0, 0x0}},
+        {"7b max uint8 -> int32", UNIT_MAX, 8, 0, u8, u8, i32, {0x90}, {0x0},
+            {0x90, 0x0, 0x0, 0x0}},
+        {"7c fold max int8 -> int16", UNIT_MAX, 8, 1, i8, {}, i16,
+            {0x0000000000001090ull}, {}, {0x10}},
+        {"7d fold max uint8 -> int16", UNIT_MAX, 8, 1, u8, {}, i16,
+            {0x0000000000001090ull}, {}, {0x90}},
+        {"8 add int8 + uint8 -> int16", UNIT_ADD, 8, 0, i8, u8, i16,
+            {0xffffffffffffffffull}, {0xffffffffffffffffull},
+            {0x00fe00fe00fe00feull, 0x00fe00fe00fe00feull}},
+        {"9 add int32 -> int16", UNIT_ADD, 4, 0, i32, i32, i16,
+            {0xffffffff00011170ull, 0x7fffffff00000005ull}, ones32,
+            {0x0000000600001171ull}},
+    };
+    int errors = 0;
+    *count = sizeof(vectors) / sizeof(vectors[0]);
+    for (const Vector &v : vectors)
+    {
+        std::vector<uint64_t> out;
+        if (v.folds == 0)
+        {
+            out.assign(v.lanes * v.out_t.width / 64, 0);
+            snax_unit_elementwise(v.op, v.lanes, v.a_t, v.b_t, v.out_t, v.a.data(), v.b.data(),
+                out.data());
+        }
+        else
+        {
+            uint64_t acc = 0;
+            for (int n = 0; n < v.folds; n++)
+            {
+                acc = snax_unit_fold(v.op, v.lanes, v.a_t, v.out_t, v.a.data(), n == 0, acc);
+            }
+            out.assign(1, acc);
+        }
+        if (out != v.out)
+        {
+            printf("beats: %s =", v.name);
+            for (uint64_t w : out)
+            {
+                printf(" 0x%016lx", (unsigned long)w);
+            }
+            printf(", expected");
+            for (uint64_t w : v.out)
+            {
+                printf(" 0x%016lx", (unsigned long)w);
+            }
+            printf("\n");
             errors++;
         }
     }
@@ -376,6 +505,16 @@ int main(int argc, char **argv)
     printf("%s tree: %d vectors\n", tree_errors ? "FAIL" : "PASS", nb_trees);
     failed += tree_errors != 0;
     passed += tree_errors == 0;
+    int nb_types;
+    int type_errors = check_types(&nb_types);
+    printf("%s types: %d vectors\n", type_errors ? "FAIL" : "PASS", nb_types);
+    failed += type_errors != 0;
+    passed += type_errors == 0;
+    int nb_beats;
+    int beat_errors = check_beats(&nb_beats);
+    printf("%s beats: %d vectors\n", beat_errors ? "FAIL" : "PASS", nb_beats);
+    failed += beat_errors != 0;
+    passed += beat_errors == 0;
 
     for (int i = 1; i < argc; i++)
     {
