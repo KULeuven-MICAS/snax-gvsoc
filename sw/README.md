@@ -67,7 +67,7 @@ upstream's own rules, in the checkout:
 
 | File | Made by |
 |---|---|
-| `generated/<cluster>/snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` | `make -C target/snitch_cluster CFG_OVERRIDE=<cluster's cfg>` (clustergen and the `.h.tpl` templates), for `snitch_cluster` and `snax_forge` (`cfg/snax_forge/vecadd/snax_forge.hjson`, snax-forge's vecadd fixture, the cluster `common.mk` builds the apps for) |
+| `generated/<cluster>/snitch_cluster_cfg.h`, `snitch_cluster_addrmap.h` | `make -C target/snitch_cluster CFG_OVERRIDE=<cluster's cfg>` (clustergen and the `.h.tpl` templates), for `snitch_cluster` and `snax_forge` (`cfg/snax_forge/vecadd/snax_forge.hjson`, snax-forge's vecadd fixture, the cluster `common.mk` builds the hand-written apps for). A forge design's program and runtime use the fixture's own two headers, which snax-forge writes per design point (`make -C sw runtime`, snax-forge D126) |
 | `generated/snax_forge/streamer_csr_addr_map.h` | `make -C target/snitch_cluster CFG_OVERRIDE=cfg/snax_forge/vecadd/snax_forge.hjson sw-snax-gen` (snaxgen's SW-only path, sbt), without its `Generated at` line (`STREAMERS`) |
 | `runtime/common/snitch_cluster_peripheral.h` | the same `make` (regtool from `snitch_cluster_peripheral_reg.hjson`, then clang-format); the same for every cluster, which `sync.py` checks |
 | `math/include/bits/alltypes.h` | `sed -f math/tools/mkalltypes.sed` on the two `alltypes.h.in`, the rule of snax_cluster's `sw/math/Makefile` |

@@ -39,7 +39,10 @@ Each folder holds:
   standard composite takes (`snax/snax_cfg.py` lists its fields,
   `snax/snax_unit_acc.py` builds it).
 - `include/`: the headers a program drives it with
-  (`streamer_csr_addr_map.h` and `<instance>_csr.h`).
+  (`streamer_csr_addr_map.h` and `<instance>_csr.h`), and the runtime's
+  view of the cluster (`snitch_cluster_cfg.h` and
+  `snitch_cluster_addrmap.h`, as snax_cluster's templates render them from
+  the cluster file).
 - `main.c` (GEN2a, FLOW3, snax-forge D135): the program, the design point's
   task list on snRuntime: `mcycle` read at main's entry, each step on the
   core that owns its component, a barrier where another core goes on, each
@@ -75,9 +78,10 @@ runs every folder with the generic app, so a new folder needs nothing else.
 
 ## How it runs
 
-Never through `TARGETS`: no model is compiled (D134). The program is built
-by the generic app, and gvrun runs the installed `snax_hjson` on the cluster
-file:
+Never through `TARGETS`: no model is compiled (D134). The generic app
+builds the program and its own runtime (`libsnRuntime.a`, beside the ELF)
+against the folder's two cluster headers, so the stacks sit at the end of
+the design's L1; gvrun runs the installed `snax_hjson` on the cluster file:
 
     make -C sw/apps/forge DESIGN=vecadd
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
