@@ -379,6 +379,59 @@ class AccFile(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_signed",
                    "int64 with uint64 has no integer result type")
 
+    def channels(self, readers, writers):
+        """The streamer with these num_channel per reader and writer, each its one spatial
+        bound, and the slot's ports to match."""
+        template = self.acc["template"]
+        for params, channels in (("data_reader_params", readers),
+                                 ("data_writer_params", writers)):
+            n = len(channels)
+            template[params] = {"spatial_bounds": [[c] for c in channels],
+                                "temporal_dim": [1] * n, "num_channel": list(channels),
+                                "fifo_depth": [8] * n}
+        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot["snax_tcdm_ports"] = sum(readers) + sum(writers)
+        slot["sparse_interconnect_config"] = [[slot["snax_tcdm_ports"], 1]]
+
+    def test_spatial_product(self):
+        """snax_cluster's StreamerParam: the spatial bounds' product is num_channel."""
+        self.acc["template"]["data_reader_params"]["spatial_bounds"] = [[2], [4]]
+        self.fails(snax_cfg.CfgSlotError,
+                   "snax_streamer_cfg.data_reader_params.spatial_bounds[0]",
+                   "[2] unroll 2 channels, but num_channel is 4: snax_cluster's StreamerParam")
+
+    def test_words_per_input(self):
+        """int32 x int64 into int64 at 4 lanes: a takes 2 words, b and out 4."""
+        self.typed(lanes=4, in_widths=[32, 64], in_signed=[True, True], out_widths=[64],
+                   out_signed=[True])
+        self.channels([2, 4], [4])
+        (slot,) = self.load().cores[0].accelerators
+        self.assertEqual((slot.tcdm_ports, slot.datapath.in_widths), (10, [32, 64]))
+        self.channels([4, 4], [4])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_widths[0]",
+                   "lanes 4 x 32 bits is 2 64-bit words per beat, but data_reader_params[0] "
+                   "has num_channel 4")
+        self.channels([2, 4], [2])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.out_widths[0]",
+                   "is 4 64-bit words per beat, but data_writer_params[0] has num_channel 2")
+
+    def test_words_shorthand(self):
+        self.acc["datapath"]["lanes"] = 2
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.data_width",
+                   "lanes 2 x 64 bits is 2 64-bit words per beat")
+
+    def test_words_fold(self):
+        """A fold's output is one word, whatever its width."""
+        self.typed(inputs=["a"], lanes=8, in_widths=[32], in_signed=[True], out_widths=[64],
+                   out_signed=[True])
+        self.channels([4], [1])
+        (slot,) = self.load().cores[0].accelerators
+        self.assertEqual(slot.datapath.out_widths, [64])
+        self.channels([4], [2])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs",
+                   "a fold's output is one 64-bit word per beat, but data_writer_params[0] has "
+                   "num_channel 2")
+
     def test_rw_csrs(self):
         self.acc["datapath"]["fields"] = ["loopCount", "len"]
         with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
@@ -394,6 +447,7 @@ class AccFile(unittest.TestCase):
 
     def test_channels(self):
         self.acc["template"]["data_writer_params"]["num_channel"] = [2]
+        self.acc["template"]["data_writer_params"]["spatial_bounds"] = [[2]]
         with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
             self.load()
         self.assertIn("10 channels", ctx.exception.why)

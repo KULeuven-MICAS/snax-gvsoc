@@ -79,6 +79,7 @@ type), CfgSlotError (slot counts that disagree with the accelerator file);
 a target refuses what it cannot model with CfgTargetError.
 """
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -364,6 +365,17 @@ def misa(isa: str) -> int:
     return value
 
 
+def spatial_mismatch(spatial_bounds: list, num_channel: int):
+    """Why a mover's spatial bounds do not fit its channels, or None: snax_cluster's
+    StreamerParam requires their product to be num_channel."""
+    product = math.prod(spatial_bounds)
+    if product == num_channel:
+        return None
+    return (f'spatial bounds {spatial_bounds} unroll {product} channels, but num_channel is '
+            f'{num_channel}: snax_cluster\'s StreamerParam requires spatialBounds.product == '
+            'numChannel')
+
+
 def streamer_channels(template: dict) -> int:
     """The streamer's TCDM ports: num_channel summed over its movers."""
     return sum(sum(template.get(mover, {}).get('num_channel', [])) for mover in MOVERS)
@@ -495,6 +507,13 @@ def _check_slot(acc: _Node, slot: AccSlot):
             if mover in slot.streamer:
                 raise CfgTargetError(acc.file, acc.where(f'snax_streamer_cfg.{mover}'),
                     f'not modelled: the streamer has {", ".join(MOVERS)}')
+        for mover in MOVERS:
+            params = slot.streamer.get(mover, {})
+            for i, (bounds, channels) in enumerate(zip(params.get('spatial_bounds', []),
+                                                       params.get('num_channel', []))):
+                why = spatial_mismatch(bounds, channels)
+                if why is not None:
+                    fail(f'snax_streamer_cfg.{mover}.spatial_bounds[{i}]', why)
         channels = streamer_channels(slot.streamer)
         if channels != slot.tcdm_ports:
             fail('snax_tcdm_ports', f'{slot.tcdm_ports}, but the streamer has {channels} '
@@ -519,12 +538,45 @@ def _check_slot(acc: _Node, slot: AccSlot):
             if len(names) != movers:
                 fail(f'snax_datapath_cfg.{ports}', f'{names}, but the streamer has {movers} '
                     f'{mover}: one port each, in order')
+        _check_words(acc, slot)
         if slot.num_rw_csr != len(fields) + 1:
             fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but the datapath has '
                 f'{len(fields)} shell fields {fields} and start')
         if slot.num_ro_csr != SHELL_RO_CSRS:
             fail('snax_num_ro_csr', f'{slot.num_ro_csr}, but a shell has {SHELL_RO_CSRS} '
                 '(busy and the counter)')
+
+
+def _check_words(acc: _Node, slot: AccSlot):
+    """Each datapath port's words per beat against its mover's num_channel: SnaxUnit has no
+    FIFO slicer, so they must match (the streamer would refuse the beat's size mid-run)."""
+    datapath = slot.datapath
+    shorthand = 'in_widths' not in acc.value['snax_datapath_cfg']
+
+    def fail(key, why):
+        raise CfgSlotError(acc.file, acc.where(f'snax_datapath_cfg.{key}'), why)
+
+    ports = [(f'in_widths[{i}]', width, 'data_reader_params', i)
+             for i, width in enumerate(datapath.in_widths)]
+    ports += [(f'out_widths[{j}]', width, 'data_writer_params', j)
+              for j, width in enumerate(datapath.out_widths)]
+    fold = len(datapath.inputs) == 1
+    for key, width, mover, i in ports:
+        channels = slot.streamer[mover]['num_channel'][i]
+        key = 'data_width' if shorthand else key
+        if fold and mover == 'data_writer_params':
+            if channels != 1:
+                fail('outputs', f"a fold's output is one 64-bit word per beat, but "
+                     f'{mover}[{i}] has num_channel {channels}')
+            continue
+        bits = datapath.lanes * width
+        if bits % 64 != 0:
+            fail(key, f'lanes {datapath.lanes} x {width} bits is not a whole number of 64-bit '
+                 'channel words')
+        if bits // 64 != channels:
+            fail(key, f'lanes {datapath.lanes} x {width} bits is {bits // 64} 64-bit words per '
+                 f'beat, but {mover}[{i}] has num_channel {channels}: SnaxUnit has no FIFO '
+                 'slicer, so they must match')
 
 
 def _core(core: _Node) -> Core:

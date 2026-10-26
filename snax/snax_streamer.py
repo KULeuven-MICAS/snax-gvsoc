@@ -9,7 +9,7 @@
 import math
 
 import gvsoc.systree
-from snax_cfg import MOVERS
+from snax_cfg import MOVERS, spatial_mismatch
 
 
 # The keys of a mover group in the hjson's streamer template that the model
@@ -53,9 +53,9 @@ def movers_of(template: dict) -> list[dict]:
         for i in range(0, len(params['num_channel'])):
             spatial_bounds = list(params['spatial_bounds'][i])
             num_channel = params['num_channel'][i]
-            if math.prod(spatial_bounds) > num_channel:
-                raise RuntimeError(f'{group}[{i}]: spatial bounds {spatial_bounds} need more '
-                    f'than {num_channel} channels')
+            why = spatial_mismatch(spatial_bounds, num_channel)
+            if why is not None:
+                raise RuntimeError(f'{group}[{i}]: {why}')
             movers.append({
                 'name': f'{kind}{i}',
                 'is_reader': is_reader,
