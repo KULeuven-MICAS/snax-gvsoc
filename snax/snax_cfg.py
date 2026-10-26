@@ -52,9 +52,19 @@ the slot's unit and shell from, SnaxUnit's arguments by name:
     unit           the unit kind: SnaxUnit
     inputs         the unit's input ports in order, one per streamer reader
     outputs        its output ports in order, one per streamer writer
-    lanes, data_width, op, signed, control, wait, latency, ii
+    lanes, op, control, wait, latency, ii
+    in_widths, in_signed, out_widths, out_signed
+                   each port's element type: its width (8, 16, 32 or 64)
+                   and signedness, one per input and one per output; all
+                   four or none
+    data_width, signed
+                   without the four: every port's width and signedness
+                   (Datapath holds the four lists either way)
     config         the role of each configuration word (optional; [count])
     fields         the shell's configuration CSRs in order; start follows
+
+An elementwise datapath's inputs need an integer result type (NumPy's
+result_type): a signed type with uint64 has none (NumPy gives float64).
 
 The slot's counts must agree with what its refs give: snax_tcdm_ports is the
 streamer's num_channel summed over its movers, and the narrow and wide ports
@@ -116,6 +126,10 @@ MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
 # The read-only CSRs of a shell: busy and the counter
 SHELL_RO_CSRS = 2
+# A datapath port's element widths
+ELEMENT_WIDTHS = (8, 16, 32, 64)
+# A datapath port's type lists: all four or none (data_width and signed then)
+TYPE_KEYS = ('in_widths', 'in_signed', 'out_widths', 'out_signed')
 
 
 # =============================================================================
@@ -267,9 +281,11 @@ class Datapath:
     inputs: list
     outputs: list
     lanes: int
-    data_width: int
+    in_widths: list
+    in_signed: list
+    out_widths: list
+    out_signed: list
     op: int
-    signed: bool
     control: str
     wait: str
     latency: int
@@ -361,15 +377,78 @@ def _names(node: _Node, key, default=...) -> list:
     return values
 
 
+def type_name(width: int, signed: bool) -> str:
+    """NumPy's name of an integer type: int32, uint8, ..."""
+    return f'{"int" if signed else "uint"}{width}'
+
+
+def result_type(a: tuple, b: tuple):
+    """NumPy's result type of two integer types (width, signed), as snax_unit.hpp's
+    snax_unit_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
+    if a[1] == b[1]:
+        return max(a[0], b[0]), a[1]
+    s, u = (a, b) if a[1] else (b, a)
+    if s[0] > u[0]:
+        return s
+    return (2 * u[0], True) if 2 * u[0] <= 64 else None
+
+
+def _typed_list(node: _Node, key, kind) -> list:
+    """A list of integers or of booleans."""
+    values = node.get(key, list)
+    if not all(isinstance(v, kind) and (kind is bool or not isinstance(v, bool))
+               for v in values):
+        raise CfgTypeError(node.file, node.where(key),
+            f'must be a list of {"booleans" if kind is bool else "integers"}, got {values!r}')
+    return values
+
+
+def _port_types(node: _Node, inputs: list, outputs: list) -> dict:
+    """The four type lists: given, or data_width and signed for every port; checked."""
+    given = [key for key in TYPE_KEYS if key in node.value]
+    if not given:
+        width, signed = node.get('data_width', int), node.get('signed', bool)
+        types = {'in_widths': [width] * len(inputs), 'in_signed': [signed] * len(inputs),
+                 'out_widths': [width] * len(outputs), 'out_signed': [signed] * len(outputs)}
+        if width not in ELEMENT_WIDTHS:
+            raise CfgTypeError(node.file, node.where('data_width'),
+                f'{width}, must be 8, 16, 32 or 64')
+        return types
+    if len(given) != len(TYPE_KEYS):
+        missing = next(key for key in TYPE_KEYS if key not in given)
+        raise CfgKeyError(node.file, node.where(missing),
+            f'missing: {", ".join(TYPE_KEYS)} go together (without them, data_width and signed '
+            'give every port)')
+    types = {key: _typed_list(node, key, bool if key.endswith('signed') else int)
+             for key in TYPE_KEYS}
+    for key in TYPE_KEYS:
+        ports, what = (inputs, 'input') if key.startswith('in_') else (outputs, 'output')
+        if len(types[key]) != len(ports):
+            raise CfgSlotError(node.file, node.where(key),
+                f'{len(types[key])} values, one per {what} ({len(ports)}: {ports})')
+    for key in ('in_widths', 'out_widths'):
+        for i, width in enumerate(types[key]):
+            if width not in ELEMENT_WIDTHS:
+                raise CfgTypeError(node.file, f'{node.where(key)}[{i}]',
+                    f'{width}, must be 8, 16, 32 or 64')
+    if len(inputs) == 2:
+        a, b = zip(types['in_widths'], types['in_signed'])
+        if result_type(a, b) is None:
+            raise CfgTypeError(node.file, node.where('in_signed'),
+                f'{type_name(*a)} with {type_name(*b)} has no integer result type (NumPy gives '
+                'float64)')
+    return types
+
+
 def _datapath(node: _Node) -> Datapath:
+    inputs, outputs = _names(node, 'inputs'), _names(node, 'outputs')
     return Datapath(
         unit=node.get('unit', str),
-        inputs=_names(node, 'inputs'),
-        outputs=_names(node, 'outputs'),
+        inputs=inputs,
+        outputs=outputs,
         lanes=node.get('lanes', int),
-        data_width=node.get('data_width', int),
+        **_port_types(node, inputs, outputs),
         op=node.get('op', int),
-        signed=node.get('signed', bool),
         control=node.get('control', str),
         wait=node.get('wait', str),
         latency=node.get('latency', int),

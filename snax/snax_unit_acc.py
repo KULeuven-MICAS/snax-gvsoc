@@ -82,8 +82,9 @@ class SnaxUnitAcc(SnaxAcc):
             csr_base=SNAX_CSR_FIRST, tcdm_size=self.tcdm_size)
         shell = SnaxShell(self, 'shell', csr_base=shell_csr_first, fields=datapath.fields)
         unit = SnaxUnit(self, 'unit', inputs=datapath.inputs, outputs=datapath.outputs,
-            lanes=datapath.lanes, data_width=datapath.data_width, op=datapath.op,
-            signed=datapath.signed, control=datapath.control, config=datapath.config,
+            lanes=datapath.lanes, op=datapath.op, in_widths=datapath.in_widths,
+            in_signed=datapath.in_signed, out_widths=datapath.out_widths,
+            out_signed=datapath.out_signed, control=datapath.control, config=datapath.config,
             wait=datapath.wait, latency=datapath.latency, ii=datapath.ii,
             csr_base=shell_csr_first)
 
