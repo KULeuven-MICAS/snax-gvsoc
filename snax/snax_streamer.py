@@ -42,7 +42,9 @@ def check_template(template: dict):
 
 
 def movers_of(template: dict) -> list[dict]:
-    """The template's movers, readers first then writers, as the streamer orders them."""
+    """The template's movers, readers first then writers, as the streamer orders them; each
+    mover's spatial bounds must multiply to its num_channel, as snax_cluster's StreamerParam
+    requires (snax_cfg.spatial_mismatch)."""
     check_template(template)
     movers = []
     for group, is_reader, kind in [('data_reader_params', True, 'reader'),

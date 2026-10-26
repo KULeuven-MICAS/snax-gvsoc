@@ -52,7 +52,9 @@
 //   csr_base         the shell's first CSR, for the trace
 //
 // Ports:
-//   <input>, <output>  io masters to the streamer's reader_<i> and writer_<j>:
+//   <input>, <output>  io masters to the streamer's reader_<i> and writer_<j>,
+//                      each beat its port's words (the reader's or writer's
+//                      num_channel must match: no FIFO slicer here):
 //                      a probe (size 0) of every port, then the beats moved
 //                      (the ALU shell's way, before CLN1), so nothing moves unless the
 //                      rule says so

@@ -266,9 +266,9 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    ............................................
+    ...........................................
     ----------------------------------------------------------------------
-    Ran 44 tests in 0.305s
+    Ran 43 tests in 0.252s
 
     OK
 
@@ -279,6 +279,8 @@ regression's `unit`):
 
     PASS ops: 16 vectors
     PASS tree: 8 vectors
+    PASS types: 6 vectors
+    PASS beats: 15 vectors
     PASS lockstep_count_zero: 6 cycles, 1 run(s)
     PASS lockstep_input_missing: 8 cycles, 1 run(s)
     PASS lockstep_no_stalls: 9 cycles, 2 run(s)
@@ -296,7 +298,7 @@ regression's `unit`):
     PASS pipelined_rate_zero: 7 cycles, 1 run(s)
     PASS pipelined_tree_t4: 18 cycles, 2 run(s)
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
-    19 passed, 0 failed
+    21 passed, 0 failed
 
 `SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against
 its hand-worked cases, with g++ (the regression's `shell`,

@@ -6,9 +6,10 @@
 
 """SnaxUnit (snax_unit.cpp): a Chisel block's datapath, every number a property.
 
-The rule (lockstep, pipelined) and the op table are in snax_unit.hpp. The
-C++ checks every property and stops on a bad one, naming it; this class only
-passes them on, so a design point compiles nothing (D134 in snax-forge).
+The rule (lockstep, pipelined), the op table and NumPy's arithmetic on each
+port's type are in snax_unit.hpp. The C++ checks every property and stops on
+a bad one, naming it; this class only passes them on, so a design point
+compiles nothing (D134 in snax-forge).
 """
 
 import gvsoc.systree

@@ -66,11 +66,14 @@ the slot's unit and shell from, SnaxUnit's arguments by name:
 An elementwise datapath's inputs need an integer result type (NumPy's
 result_type): a signed type with uint64 has none (NumPy gives float64).
 
-The slot's counts must agree with what its refs give: snax_tcdm_ports is the
-streamer's num_channel summed over its movers, and the narrow and wide ports
-or the sparse config's widths add up to it; with a datapath block,
-snax_num_rw_csr is the shell's fields plus start, and snax_num_ro_csr 2
-(busy and the counter).
+The slot's counts must agree with what its refs give: each mover's
+spatial_bounds multiply to its num_channel (snax_cluster's StreamerParam);
+snax_tcdm_ports is the streamer's num_channel summed over its movers, and the
+narrow and wide ports or the sparse config's widths add up to it; with a
+datapath block, each input's words per beat (lanes * its width / 64) are its
+reader's num_channel and the output's (the same, or 1 for a fold) its
+writer's, since SnaxUnit has no FIFO slicer; snax_num_rw_csr is the shell's
+fields plus start, and snax_num_ro_csr 2 (busy and the counter).
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not

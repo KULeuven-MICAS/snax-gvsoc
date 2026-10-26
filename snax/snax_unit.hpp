@@ -6,9 +6,21 @@
 
 // SnaxUnit's cycle rule and op table: when a Chisel
 // block's datapath takes a start, fires and pushes, how its busy cycles are
-// classed, and what a lane computes. Plain C++, so the component
+// classed, and what a lane and a beat compute. Plain C++, so the component
 // (snax_unit.cpp) and the standalone test (tests/snax/unit/) run the same
 // code, as snax_sparse_arb.hpp.
+//
+// The arithmetic is NumPy's on integer types (SnaxUnitType: 8 to 64 bits,
+// signed or not), each port with its own (PACK0). A port of W lanes of b bits
+// takes W * b / 64 channel words, lane l at bits [l * b, (l + 1) * b) of them
+// side by side (the wire slice). An elementwise op runs per lane at T, the
+// result type of its two inputs' types (snax_unit_result_type; none for a
+// signed type with uint64), each operand extended to T by its own
+// signedness; the result wraps at T and is cast to the output's type (its
+// low bits, or extended by T's signedness). A fold casts each lane from the
+// input's type to the output's, and runs its tree and acc at the output's
+// type; its output beat is one word. min and max compare by the signedness
+// of the type they run at.
 //
 // A run: a start offered in cycle s is taken only when the unit is idle in s
 // and its count and rate are not 0 (a count or rate of 0 is ignored: busy

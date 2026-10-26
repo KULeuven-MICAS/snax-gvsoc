@@ -1004,3 +1004,28 @@ once, where it first appears.
   beats, `len` 16, eight sums): counter 131. `forge/rowsum_serial/` (W 1,
   M 4, N 16: 64 beats, `len` 16): counter 67, `run 0: firings 64 busy 64
   stall_in 2 stall_out 0 flush 1`, as `vsum-r16`'s.
+
+### PACK0 round 1: per-port widths, NumPy arithmetic (snax-gvsoc)
+
+- 2026-10-26. `SnaxUnit` takes each port's element type: `in_widths`,
+  `in_signed`, `out_widths`, `out_signed` (all four, or none: `data_width`
+  and `signed` for every port, so today's hjson loads unchanged). Each input
+  of b bits takes lanes * b / 64 words; an elementwise output likewise, a
+  fold's one word for any width (the 64-bit fold check is gone). The lane
+  and beat arithmetic moved into `snax_unit.hpp`
+  (`snax_unit_result_type`, `snax_unit_cast`, `snax_unit_elementwise`,
+  `snax_unit_fold`): an op at NumPy's result type of its inputs, then cast to
+  the output's; a fold's lanes cast to the output's type before its tree. A
+  signed type with uint64 is refused (NumPy gives float64).
+- `snax_cfg.py`: `Datapath` holds the four lists (the shorthand expanded);
+  their lengths, widths and the uint64 refusal checked at load; each mover's
+  spatial bounds must multiply to its num_channel (snax_cluster's
+  StreamerParam; `movers_of` refused only a larger product), and each
+  datapath port's words must equal its mover's num_channel.
+- Tests: `tests/snax/unit/run.sh` 21 passed (19; `types` 6 and `beats` 15
+  vectors new), the unittests 43 (33). `make regress` on a fresh build
+  passes; its trace.log files (unit and streamer summary lines, the unit's
+  beats) equal main's (`6c917eec`) for every forge/ fixture and
+  snax-shell.
+- The forge/ fixtures still use the shorthand (int64) until R2 brings
+  snax-forge R3's int32 and int8 fixtures to this branch.
