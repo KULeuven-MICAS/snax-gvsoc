@@ -221,8 +221,8 @@ About two minutes:
       13 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       1 run
-    forge/'s accelerators: forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree, forge-reduce.vsum-r16
-      5 run
+    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_serial, forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree
+      7 run
     plain tests on snitch (build/sw/tests)
       17 run
     regression passed
@@ -244,8 +244,8 @@ does not: make reads `-k` itself):
       0 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       0 run
-    forge/'s accelerators: forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree, forge-reduce.vsum-r16
-      5 run
+    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_serial, forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree
+      7 run
     plain tests on snitch (build/sw/tests)
       0 run
     regression passed

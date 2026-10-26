@@ -18,9 +18,7 @@ only); then `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file
 (SHELL_DESIGN: SnaxShell and SnaxUnit, a lockstep add), with the unit's
 trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
-(snax-forge's generated main.c and data.h), named forge.<design>, and
-`forge-reduce.vsum-r16` (FORGE_REDUCE: vsum with its len overridden to 16 by
-hand, four sums, since no kernel gives T < n, snax-forge open item 81): the
+(snax-forge's generated main.c and data.h), named forge.<design>: the
 fixture's manifest.json gives its cluster file, the unit's trace path and
 each accelerator task's beats (the unit's `summary`, `events` and `beats`
 traces under the trace path are on); it runs on `snax_hjson` with
@@ -41,10 +39,10 @@ The counter check (check_counter): a program on SnaxShell and
 SnaxUnit prints the shell's counter after a unit run; it passes when the
 counter is busy + stall_in + stall_out + flush of the unit's summary line
 for that run (`run index=<k> ...` in trace.log, docs/EVENTS.md) and that run
-fired the task's beats. A
-hand-written program (snax-shell, forge-reduce) prints
-`<program> counter: <n>` for run 0, its beats snax-shell's SHELL_BEATS or
-the fixture's first task's; a generated one (check_counters) prints
+fired the task's beats. The
+hand-written snax-shell prints
+`<program> counter: <n>` for run 0, its beats SHELL_BEATS; a generated
+program (check_counters) prints
 `forge counter <task>: <n>` per accelerator task of its manifest, the k-th
 task matched to run k.
 
@@ -102,10 +100,6 @@ CLUSTER_TESTS = ["dma-timing", "snax-csr"]
 # RUN_BEATS, DATA_LEN 192 / 4 lanes / 3 runs
 SHELL_DESIGN = "vecadd"
 SHELL_BEATS = 16
-# The hand-written forge-reduce on a fixture with its len overridden: (design,
-# RATE_OVERRIDE). len 16 for vsum's T = N = 64, 4 sums per run, the
-# multi-output path, which no kernel gives yet (T < n, snax-forge open item 81)
-FORGE_REDUCE = [("vsum", 16)]
 # The unit's traces a forge/ run writes below its manifest's trace path, and
 # the streamers' for the class check, one --trace each (GVSoC compiles them as
 # POSIX basic regexes: no +, no |): docs/EVENTS.md's only, not the components'
@@ -341,7 +335,6 @@ def main():
     count = check.count
     designs = sorted(d.name for d in FORGE_DIR.iterdir() if (d / "manifest.json").is_file())
     names = [f"{FORGE_APP}.{d}" for d in designs]
-    names += [f"forge-reduce.{d}-r{r}" for d, r in FORGE_REDUCE]
     print(f"forge/'s accelerators: {', '.join(names)}")
     for design in designs:
         check.run_fixture(f"{FORGE_APP}.{design}", design, FORGE_APP,
@@ -349,13 +342,6 @@ def main():
                           [f"DESIGN={design}"],
                           lambda log, runs, manifest: check_counters(log, runs,
                                                                      manifest["tasks"]))
-    for design, rate in FORGE_REDUCE:
-        prog, variant = "forge-reduce", f"{design}-r{rate}"
-        check.run_fixture(f"{prog}.{variant}", design, prog,
-                          BUILD / "apps" / prog / variant / f"{prog}.elf",
-                          [f"DESIGN={design}", f"RATE_OVERRIDE={rate}"],
-                          lambda log, runs, manifest: check_counter(
-                              "forge-reduce", log, runs, manifest["tasks"][0]["beats"]))
     print(f"  {check.count - count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")
