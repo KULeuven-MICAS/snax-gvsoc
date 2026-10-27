@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 // A: input, 128 elements, 128 padded to beats
-const int64_t A[128] __attribute__((aligned(64))) = {
+const int32_t A[128] __attribute__((aligned(64))) = {
     701, 273, 22, -461, -385, -919, -850, -967,
     -650, 626, 298, 825, 7, 213, 941, 458,
     264, 87, 119, 870, -446, 631, 341, -995,
@@ -28,7 +28,7 @@ const int64_t A[128] __attribute__((aligned(64))) = {
 };
 
 // B: input, 128 elements, 128 padded to beats
-const int64_t B[128] __attribute__((aligned(64))) = {
+const int32_t B[128] __attribute__((aligned(64))) = {
     797, -403, 804, 343, 780, -601, 516, 884,
     -903, -270, 273, -790, 20, 258, 527, 854,
     -181, -120, -52, 909, -609, -1, -901, -150,
@@ -48,10 +48,10 @@ const int64_t B[128] __attribute__((aligned(64))) = {
 };
 
 // C: output, 128 elements, 128 padded to beats
-int64_t C[128] __attribute__((aligned(64))) = {0};
+int32_t C[128] __attribute__((aligned(64))) = {0};
 
 // C: golden, 128 elements, 128 padded to beats
-const int64_t C_golden[128] __attribute__((aligned(64))) = {
+const int32_t C_golden[128] __attribute__((aligned(64))) = {
     1498, -130, 826, -118, 395, -1520, -334, -83,
     -1553, 356, 571, 35, 27, 471, 1468, 1312,
     83, -33, 67, 1779, -1055, 630, -560, -1145,

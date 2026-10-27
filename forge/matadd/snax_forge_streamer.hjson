@@ -5,15 +5,15 @@
 // port order, writers the output ports.
 {
  "data_reader_params": {
-  "spatial_bounds": [[4], [4]],
+  "spatial_bounds": [[2], [2]],
   "temporal_dim": [2, 2],
-  "num_channel": [4, 4],
+  "num_channel": [2, 2],
   "fifo_depth": [8, 8]
  },
  "data_writer_params": {
-  "spatial_bounds": [[4]],
+  "spatial_bounds": [[2]],
   "temporal_dim": [2],
-  "num_channel": [4],
+  "num_channel": [2],
   "fifo_depth": [8]
  }
 }

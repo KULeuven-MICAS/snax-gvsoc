@@ -23,22 +23,22 @@ static __attribute__((noinline)) int forge_core_0(void) {
     csrw_ss(S_STRIDE_READER_0_0, 8);
     csrw_ss(T_BOUND_READER_0_0, 4);
     csrw_ss(T_BOUND_READER_0_1, 8);
-    csrw_ss(T_STRIDE_READER_0_0, 32);
-    csrw_ss(T_STRIDE_READER_0_1, 128);
-    csrw_ss(BASE_PTR_READER_1_LOW, 0x10000400);
+    csrw_ss(T_STRIDE_READER_0_0, 16);
+    csrw_ss(T_STRIDE_READER_0_1, 64);
+    csrw_ss(BASE_PTR_READER_1_LOW, 0x10000200);
     csrw_ss(BASE_PTR_READER_1_HIGH, 0);
     csrw_ss(S_STRIDE_READER_1_0, 8);
     csrw_ss(T_BOUND_READER_1_0, 4);
     csrw_ss(T_BOUND_READER_1_1, 8);
-    csrw_ss(T_STRIDE_READER_1_0, 32);
-    csrw_ss(T_STRIDE_READER_1_1, 128);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10000800);
+    csrw_ss(T_STRIDE_READER_1_0, 16);
+    csrw_ss(T_STRIDE_READER_1_1, 64);
+    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10000400);
     csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
     csrw_ss(S_STRIDE_WRITER_0_0, 8);
     csrw_ss(T_BOUND_WRITER_0_0, 4);
     csrw_ss(T_BOUND_WRITER_0_1, 8);
-    csrw_ss(T_STRIDE_WRITER_0_0, 32);
-    csrw_ss(T_STRIDE_WRITER_0_1, 128);
+    csrw_ss(T_STRIDE_WRITER_0_0, 16);
+    csrw_ss(T_STRIDE_WRITER_0_1, 64);
     csrw_ss(ACC_RW_LOOP_COUNT, 32);
     snrt_cluster_hw_barrier();
     csrw_ss(STREAMER_START_CSR, 1);
@@ -55,12 +55,12 @@ static __attribute__((noinline)) int forge_core_0(void) {
 
 // Core 1: the DMA
 static __attribute__((noinline)) int forge_core_1(void) {
-    snrt_dma_start_1d((void *)0x10000000, A, 1024);
-    snrt_dma_start_1d((void *)0x10000400, B, 1024);
+    snrt_dma_start_1d((void *)0x10000000, A, 512);
+    snrt_dma_start_1d((void *)0x10000200, B, 512);
     snrt_dma_wait_all();
     snrt_cluster_hw_barrier();
     snrt_cluster_hw_barrier();
-    snrt_dma_start_1d(C, (void *)0x10000800, 1024);
+    snrt_dma_start_1d(C, (void *)0x10000400, 512);
     snrt_dma_wait_all();
     snrt_cluster_hw_barrier();
     return 0;
@@ -73,7 +73,7 @@ static __attribute__((noinline)) int forge_check(uint32_t t0) {
     int err = 0;
     int data_errors = 0;
     for (uint32_t i = 0; i < 128; i++) {
-        if (((volatile int64_t *)C)[i] != C_golden[i]) {
+        if (((volatile int32_t *)C)[i] != C_golden[i]) {
             data_errors++;
         }
     }

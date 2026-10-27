@@ -11,13 +11,21 @@ compares it byte for byte.
 
 | Folder | Design point | Slot |
 |---|---|---|
-| `vecadd/` | `recipes/vecadd.json` (W = 4, N = 64) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
+| `vecadd/` | `recipes/vecadd.json` (W = 4, N = 64, int64) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
 | `vecmul/` | `recipes/vecmul.json` (W = 4, N = 64, `elementwise_mul`) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
 | `vsum/` | `recipes/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_accumulator`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
 | `vsum_tree/` | `recipes/vsum_tree.json` (W = 4, N = 64, `accumulate`'s `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
-| `matadd/` | `recipes/matadd.json` (W = 4, M = 8, N = 16, the first 2-D bind: the row loop and the column beats, two temporal loops per streamer) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
+| `matadd/` | `recipes/matadd.json` (W = 4, M = 8, N = 16, int32 since PACK0 R3, two per word, the first 2-D bind: the row loop and the column beats, two temporal loops per streamer) on `platforms/snax_forge.json` | 6 TCDM ports, `loopCount` |
 | `rowsum/` | `recipes/rowsum.json` (W = 4, M = 8, N = 64, `accumulate`'s `chisel_adder_tree`, T = N / W = 16: a restart every row, eight sums) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
 | `rowsum_serial/` | `recipes/rowsum_serial.json` (W = 1, M = 4, N = 16, `accumulate`'s `chisel_accumulator`, T = N = 16: four sums of 16) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
+| `vecadd_i32/` | `recipes/vecadd_i32.json` (W = 4, N = 64, A, B, C int32: two per word) on `platforms/snax_forge.json` | 6 TCDM ports, `loopCount` |
+| `vecmul_i32/` | `recipes/vecmul_i32.json` (W = 4, N = 64, A, B, C int32, `elementwise_mul`) on `platforms/snax_forge.json` | 6 TCDM ports, `loopCount` |
+| `vsum_tree_i32/` | `recipes/vsum_tree_i32.json` (W = 4, N = 64, A int32 into out int64, `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 3 TCDM ports, `loopCount`, `len` |
+| `vecadd_i8/` | `recipes/vecadd_i8.json` (W = 8, N = 64, A, B, C int8: eight per word) on `platforms/snax_forge.json` | 3 TCDM ports, `loopCount` |
+| `vsum_tree_i8/` | `recipes/vsum_tree_i8.json` (W = 8, N = 64, A int8 into out int64, `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
+| `vecadd_n7/` | `recipes/vecadd_n7.json` (W = 4, N = 7, int64: a tail, two firings, A, B and C padded to 8, D144) on `platforms/snax_forge.json` | 12 TCDM ports, `loopCount` |
+| `vsum_tree_n21/` | `recipes/vsum_tree_n21.json` (W = 4, N = 21, int64, `chisel_adder_tree`: six firings, A padded to 24 with zeros) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
+| `rowsum_3x7/` | `recipes/rowsum_3x7.json` (W = 4, M = 3, N = 7, int64, `chisel_adder_tree`, T = 2: each row padded to 8) on `platforms/snax_forge.json` | 5 TCDM ports, `loopCount`, `len` |
 
 Each folder holds:
 
@@ -37,10 +45,13 @@ Each folder holds:
   ignores both), and two `$ref`s to the whole of the other two files.
 - `snax_forge_streamer.hjson`, the streamer file, named after the slot: the
   streamer template lowered for the design point (readers the input ports
-  in the BRM's port order, writers the output ports).
+  in the BRM's port order, writers the output ports), each mover's
+  `spatial_bounds` in 64-bit words (`[S_0 / k, S_1, ...]`, k the elements
+  of the port's dtype a word holds) and its `num_channel` their product.
 - `snax_forge_acc.hjson`, the accelerator file: the datapath block the
   standard composite takes (`snax/snax_cfg.py` lists its fields,
-  `snax/snax_unit_acc.py` builds it).
+  `snax/snax_unit_acc.py` builds it), each port's element type in the four
+  lists `in_widths`, `in_signed`, `out_widths` and `out_signed`.
 - `include/`: the headers a program drives it with
   (`streamer_csr_addr_map.h` and `<instance>_csr.h`), and the runtime's
   view of the cluster (`snitch_cluster_cfg.h` and
@@ -75,9 +86,10 @@ a fixture"), the folder cleared first:
     pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_forge.json
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
-(the same with `vecmul`, `vsum` or `vsum_tree`; the recipes of `matadd`, `rowsum` and
-`rowsum_serial` have three steps, so their design step reads
-`out/sandbox/<design>/3_bind.snaxdfg`), then commit the folder as written and
+(the same with every folder's recipe; the design step reads the sandbox's
+last step, `out/sandbox/<design>/<n>_bind.snaxdfg`: the recipes of `matadd`,
+`rowsum`, `rowsum_serial` and `rowsum_3x7` have three steps), then commit the
+folder as written and
 bump snax-forge's submodule so its test compares against it. `make regress`
 runs every folder with the generic app, so a new folder needs nothing else.
 
