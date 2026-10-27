@@ -46,20 +46,15 @@ STREAMER = {
 
 
 def datapath(d, **changes):
-    """The Datapath of a datapath block d with changes: data_width and signed, if given, as
-    the four type lists; config [count] by default."""
-    d = {"config": ["count"], **d, **changes}
-    if "data_width" in d:
-        width, signed = d.pop("data_width"), d.pop("signed")
-        d.update(in_widths=[width] * len(d["inputs"]), in_signed=[signed] * len(d["inputs"]),
-                 out_widths=[width], out_signed=[signed])
-    return snax_cfg.Datapath(**d)
+    """The Datapath of a datapath block d with changes; config [count] by default."""
+    return snax_cfg.Datapath(**{"config": ["count"], **d, **changes})
 
 
 # forge/vecadd/'s datapath block
 VECADD = {"unit": "SnaxUnit", "inputs": ["a", "b"], "outputs": ["out"], "lanes": 4,
-          "data_width": 64, "op": 0, "signed": True, "control": "counted", "wait": "lockstep",
-          "latency": 0, "ii": 1, "fields": ["loopCount"]}
+          "in_widths": [64, 64], "in_signed": [True, True], "out_widths": [64],
+          "out_signed": [True], "op": 0, "control": "counted", "wait": "lockstep", "latency": 0,
+          "ii": 1, "fields": ["loopCount"]}
 VECADD_DATAPATH = datapath(VECADD)
 
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
@@ -69,7 +64,7 @@ def cluster():
     """CLUSTER, parsed, with its slot's streamer and datapath files in place of their $refs,
     so that a copy reads on its own."""
     d = hjson.loads(CLUSTER.read_text())
-    slot = d["snax_alu_core_template"]["snax_acc_cfg"][0]
+    slot = d["snax_forge_core_template"]["snax_acc_cfg"][0]
     for key in ("snax_streamer_cfg", "snax_datapath_cfg"):
         slot[key] = hjson.loads((CLUSTER.parent / slot[key]["$ref"]).read_text())
     return d
@@ -142,8 +137,8 @@ class Fixtures(unittest.TestCase):
         slot = self.slot("vsum")
         self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr), (2, [[2, 1]], 3))
         self.assertEqual(slot.datapath, datapath(
-            VECADD, inputs=["a"], lanes=1, wait="pipelined", latency=1,
-            config=["count", "rate"], fields=["loopCount", "len"]))
+            VECADD, inputs=["a"], in_widths=[64], in_signed=[True], lanes=1, wait="pipelined",
+            latency=1, config=["count", "rate"], fields=["loopCount", "len"]))
 
 
 class Misa(unittest.TestCase):
@@ -180,7 +175,7 @@ class Broken(unittest.TestCase):
         return ctx.exception
 
     def slot(self, d):
-        return d["snax_alu_core_template"]["snax_acc_cfg"][0]
+        return d["snax_forge_core_template"]["snax_acc_cfg"][0]
 
     def test_parse(self):
         self.fails(snax_cfg.CfgParseError, "{ cluster: ", "")
@@ -276,7 +271,7 @@ class AccFile(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.cluster = cluster()
-        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
         slot["snax_streamer_cfg"] = {"$ref": "acc/acc.hjson#/snax_streamer_cfg"}
         slot["snax_datapath_cfg"] = {"$ref": "acc/acc.hjson#/datapath"}
         # The accelerator file's own ref resolves in that file
@@ -305,27 +300,27 @@ class AccFile(unittest.TestCase):
         self.assertIn(why_part, ctx.exception.why)
 
     def test_datapath_ports(self):
-        self.acc["datapath"]["inputs"] = ["a"]
+        self.acc["datapath"].update(inputs=["a"], in_widths=[64], in_signed=[True])
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "2 data_reader_params")
-        self.acc["datapath"]["inputs"] = ["a", "b"]
-        self.acc["datapath"]["outputs"] = ["out", "out2"]
+        self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
+        self.acc["datapath"].update(outputs=["out", "out2"], out_widths=[64, 64],
+                                    out_signed=[True, True])
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs", "1 data_writer_params")
 
     def test_datapath_keys(self):
         del self.acc["datapath"]["wait"]
         self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.wait", "missing")
         self.acc["datapath"]["wait"] = "lockstep"
-        self.acc["datapath"]["signed"] = "yes"
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.signed", "a boolean")
-        self.acc["datapath"]["signed"] = True
+        self.acc["datapath"]["lanes"] = "4"
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.lanes", "an integer")
+        self.acc["datapath"]["lanes"] = 4
         self.acc["datapath"]["fields"] = ["loopCount", 3]
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.fields", "list of strings")
 
     def typed(self, **types):
-        """DATAPATH with 8 lanes and TYPES (changed by types) for data_width and signed, as
-        the accelerator file's datapath block."""
+        """DATAPATH with 8 lanes and TYPES (changed by types), as the accelerator file's
+        datapath block."""
         d = copy.deepcopy(self.DATAPATH)
-        del d["data_width"], d["signed"]
         d.update({"lanes": 8, **self.TYPES, **types})
         self.acc["datapath"] = d
         return d
@@ -338,33 +333,25 @@ class AccFile(unittest.TestCase):
                           slot.datapath.out_widths, slot.datapath.out_signed),
                          ([32, 32], [True, False], [32], [False]))
 
-    def test_type_shorthand(self):
-        """Without the lists, data_width and signed give every port."""
-        (slot,) = self.load().cores[0].accelerators
-        self.assertEqual((slot.datapath.in_widths, slot.datapath.in_signed,
-                          slot.datapath.out_widths, slot.datapath.out_signed),
-                         ([64, 64], [True, True], [64], [True]))
-        del self.acc["datapath"]["signed"]
-        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.signed", "missing")
-
     def test_type_lists_partial(self):
         del self.typed()["out_signed"]
-        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.out_signed", "go together")
+        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.out_signed",
+                   "missing: in_widths, in_signed, out_widths, out_signed give each port its type")
         self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
-        self.acc["datapath"]["in_widths"] = [64, 64]
-        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.in_signed", "go together")
+        del self.acc["datapath"]["in_signed"]
+        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.in_signed", "missing")
 
-    def mixed(self, key, value):
-        """key of the shorthand beside the four lists: two sources for a port's type."""
-        self.typed()[key] = value
-        self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
-                   "the four lists replace data_width and signed, so give one or the other")
-
-    def test_type_lists_with_data_width(self):
-        self.mixed("data_width", 32)
-
-    def test_type_lists_with_signed(self):
-        self.mixed("signed", True)
+    def test_type_shorthand_refused(self):
+        """data_width and signed, the shorthand the four lists replaced, with or without them."""
+        for key, value in (("data_width", 64), ("signed", True)):
+            for lists in (True, False):
+                self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
+                if not lists:
+                    for k in snax_cfg.TYPE_KEYS:
+                        del self.acc["datapath"][k]
+                self.acc["datapath"][key] = value
+                self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
+                           "replaced by in_widths, in_signed, out_widths and out_signed")
 
     def test_type_widths(self):
         self.typed(in_widths=[32, 12])
@@ -375,9 +362,6 @@ class AccFile(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_widths", "list of integers")
         self.typed(out_signed=[1])
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.out_signed", "list of booleans")
-        self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
-        self.acc["datapath"]["data_width"] = 24
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.data_width", "24, must be 8, 16")
 
     def test_type_list_lengths(self):
         self.typed(in_signed=[True])
@@ -401,7 +385,7 @@ class AccFile(unittest.TestCase):
             template[params] = {"spatial_bounds": [[c] for c in channels],
                                 "temporal_dim": [1] * n, "num_channel": list(channels),
                                 "fifo_depth": [8] * n}
-        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
         slot["snax_tcdm_ports"] = sum(readers) + sum(writers)
         slot["sparse_interconnect_config"] = [[slot["snax_tcdm_ports"], 1]]
 
@@ -427,9 +411,9 @@ class AccFile(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.out_widths[0]",
                    "is 4 64-bit words per beat, but data_writer_params[0] has num_channel 2")
 
-    def test_words_shorthand(self):
+    def test_words_lanes(self):
         self.acc["datapath"]["lanes"] = 2
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.data_width",
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_widths[0]",
                    "lanes 2 x 64 bits is 2 64-bit words per beat")
 
     def test_words_fold(self):
@@ -452,7 +436,7 @@ class AccFile(unittest.TestCase):
         self.assertIn("2 shell fields", ctx.exception.why)
 
     def test_ro_csrs(self):
-        self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]["snax_num_ro_csr"] = 3
+        self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]["snax_num_ro_csr"] = 3
         with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
             self.load()
         self.assertIn("snax_num_ro_csr", ctx.exception.path)
@@ -467,7 +451,7 @@ class AccFile(unittest.TestCase):
     def test_whole_files(self):
         """snax-forge's writer: the streamer file and the accelerator file, each the whole
         file, with or without a trailing #."""
-        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
         slot["snax_streamer_cfg"] = {"$ref": "acc/streamer.hjson"}
         slot["snax_datapath_cfg"] = {"$ref": "acc/acc.hjson#"}
         (self.dir / "acc").mkdir(exist_ok=True)
@@ -478,7 +462,7 @@ class AccFile(unittest.TestCase):
         self.assertEqual(slot_cfg.datapath, datapath(self.DATAPATH))
 
     def test_bad_whole_file_refs(self):
-        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
         for ref, why in (("acc/none.hjson", "no file"), ("#", "is not"), ("", "is not")):
             slot["snax_datapath_cfg"] = {"$ref": ref}
             with self.assertRaises(snax_cfg.CfgRefError) as ctx:
@@ -486,7 +470,7 @@ class AccFile(unittest.TestCase):
             self.assertIn(why, ctx.exception.why)
 
     def test_bad_pointer(self):
-        self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]["snax_datapath_cfg"] = \
+        self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]["snax_datapath_cfg"] = \
             {"$ref": "acc/acc.hjson#/no_datapath"}
         with self.assertRaises(snax_cfg.CfgRefError) as ctx:
             self.load()

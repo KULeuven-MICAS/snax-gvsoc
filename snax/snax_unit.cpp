@@ -22,8 +22,7 @@
 //                    each port's element type (snax_unit.hpp's
 //                    SnaxUnitType): its width, 8, 16, 32 or 64, and whether
 //                    it is signed (bools), one per input in inputs' order
-//                    and one per output (snax_cfg.py expands its data_width
-//                    and signed shorthand into them). An input of width b takes
+//                    and one per output. An input of width b takes
 //                    lanes * b / 64 channel words, which must be whole, and
 //                    the inputs may differ; an elementwise output of width
 //                    b_o lanes * b_o / 64, also whole; a fold's output one
