@@ -1036,3 +1036,27 @@ once, where it first appears.
   snax-shell.
 - The forge/ fixtures still use the shorthand (int64) until R2 brings
   snax-forge R3's int32 and int8 fixtures to this branch.
+
+### PACK0 round 2: narrow and padded fixtures, the shorthand dropped
+
+- 2026-10-27. forge/ refreshed from snax-forge `89ca208` (tag `pack0-r3`)
+  with forge/README.md's commands, each folder cleared first. The six int64
+  folders (vecadd, vecmul, vsum, vsum_tree, rowsum, rowsum_serial) change in
+  `snax_forge_acc.hjson` only: the four type lists in place of `data_width`
+  and `signed`. matadd is int32 again (two per word, 6 TCDM ports): all but
+  `include/` and `manifest.json` change. Eight folders are new: vecadd_i32,
+  vecmul_i32 (6 ports), vsum_tree_i32 (int32 into int64), vecadd_i8 (3),
+  vsum_tree_i8 (int8 into int64, 2), and the padded tails vecadd_n7 (12),
+  vsum_tree_n21 and rowsum_3x7 (5).
+- `make regress` on a fresh build passes with all fifteen folders; the six
+  int64 folders' forge cycles, counter and summary lines equal main's
+  (`6c917eec`). The new ones, each `forge data: 0 errors`: matadd 239
+  cycles (add_acc 35), vecadd_i32 214 (19), vecmul_i32 214 (19),
+  vsum_tree_i32 211 (19), vecadd_i8 200 (10), vsum_tree_i8 199 (11),
+  vecadd_n7 220 (4), vsum_tree_n21 191 (9), rowsum_3x7 191 (9).
+- The shorthand is not dropped after all: `snax_cfg` keeps expanding
+  `data_width` and `signed`, and refusing them beside the four lists, because
+  `sw/cfg/snax_forge/` (the `snax_hjson` target's default file) is synced
+  verbatim from snax_cluster `ccc7688f`, whose `cfg/snax_forge` fixtures
+  still use it. It goes once snax_cluster's cfg/snax_forge fixtures are
+  refreshed from the PACK0 R4 bundle and sw/ is re-synced to that commit.
