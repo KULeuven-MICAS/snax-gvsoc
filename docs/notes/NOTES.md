@@ -1037,7 +1037,7 @@ once, where it first appears.
 - The forge/ fixtures still use the shorthand (int64) until R2 brings
   snax-forge R3's int32 and int8 fixtures to this branch.
 
-### PACK0 round 2: narrow and padded fixtures, the shorthand dropped
+### PACK0 round 2: narrow and padded fixtures
 
 - 2026-10-27. forge/ refreshed from snax-forge `89ca208` (tag `pack0-r3`)
   with forge/README.md's commands, each folder cleared first. The six int64
