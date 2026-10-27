@@ -354,6 +354,18 @@ class AccFile(unittest.TestCase):
         self.acc["datapath"]["in_widths"] = [64, 64]
         self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.in_signed", "go together")
 
+    def mixed(self, key, value):
+        """key of the shorthand beside the four lists: two sources for a port's type."""
+        self.typed()[key] = value
+        self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
+                   "the four lists replace data_width and signed, so give one or the other")
+
+    def test_type_lists_with_data_width(self):
+        self.mixed("data_width", 32)
+
+    def test_type_lists_with_signed(self):
+        self.mixed("signed", True)
+
     def test_type_widths(self):
         self.typed(in_widths=[32, 12])
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_widths[1]", "12, must be 8, 16")

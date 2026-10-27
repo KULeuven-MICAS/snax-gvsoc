@@ -434,6 +434,11 @@ def _port_types(node: _Node, inputs: list, outputs: list) -> dict:
         raise CfgKeyError(node.file, node.where(missing),
             f'missing: {", ".join(TYPE_KEYS)} go together (without them, data_width and signed '
             'give every port)')
+    for key in ('data_width', 'signed'):
+        if key in node.value:
+            raise CfgTypeError(node.file, node.where(key),
+                f'given with {", ".join(TYPE_KEYS)}: the four lists replace data_width and '
+                'signed, so give one or the other')
     types = {key: _typed_list(node, key, bool if key.endswith('signed') else int)
              for key in TYPE_KEYS}
     for key in TYPE_KEYS:
