@@ -56,13 +56,8 @@ the slot's unit and shell from, SnaxUnit's arguments by name:
     in_widths, in_signed, out_widths, out_signed
                    each port's element type: its width (8, 16, 32 or 64)
                    and signedness, one per input and one per output; all
-                   four or none
-    data_width, signed
-                   without the four: every port's width and signedness;
-                   with them, refused (one source for a port's type). This
-                   shorthand is the reader's alone, until PACK0 R2
-                   regenerates forge/'s fixtures: Datapath holds the four
-                   lists either way, and SnaxUnit takes only the lists
+                   four required. data_width and signed, the shorthand
+                   they replaced, are refused at their key
     config         the role of each configuration word (optional; [count])
     fields         the shell's configuration CSRs in order; start follows
 
@@ -135,8 +130,10 @@ UNMODELLED_MOVERS = ('data_reader_writer_params',)
 SHELL_RO_CSRS = 2
 # A datapath port's element widths
 ELEMENT_WIDTHS = (8, 16, 32, 64)
-# A datapath port's type lists: all four, or none (data_width and signed then, never both)
+# A datapath port's type lists, all four required
 TYPE_KEYS = ('in_widths', 'in_signed', 'out_widths', 'out_signed')
+# The shorthand the four lists replaced: refused at its key
+REPLACED_KEYS = ('data_width', 'signed')
 
 
 # =============================================================================
@@ -422,26 +419,15 @@ def _typed_list(node: _Node, key, kind) -> list:
 
 
 def _port_types(node: _Node, inputs: list, outputs: list) -> dict:
-    """The four type lists: given, or data_width and signed for every port; checked."""
-    given = [key for key in TYPE_KEYS if key in node.value]
-    if not given:
-        width, signed = node.get('data_width', int), node.get('signed', bool)
-        types = {'in_widths': [width] * len(inputs), 'in_signed': [signed] * len(inputs),
-                 'out_widths': [width] * len(outputs), 'out_signed': [signed] * len(outputs)}
-        if width not in ELEMENT_WIDTHS:
-            raise CfgTypeError(node.file, node.where('data_width'),
-                f'{width}, must be 8, 16, 32 or 64')
-        return types
-    if len(given) != len(TYPE_KEYS):
-        missing = next(key for key in TYPE_KEYS if key not in given)
-        raise CfgKeyError(node.file, node.where(missing),
-            f'missing: {", ".join(TYPE_KEYS)} go together (without them, data_width and signed '
-            'give every port)')
-    for key in ('data_width', 'signed'):
+    """The four type lists, checked."""
+    for key in REPLACED_KEYS:
         if key in node.value:
             raise CfgTypeError(node.file, node.where(key),
-                f'given with {", ".join(TYPE_KEYS)}: the four lists replace data_width and '
-                'signed, so give one or the other')
+                'replaced by in_widths, in_signed, out_widths and out_signed')
+    for key in TYPE_KEYS:
+        if key not in node.value:
+            raise CfgKeyError(node.file, node.where(key),
+                f'missing: {", ".join(TYPE_KEYS)} give each port its type')
     types = {key: _typed_list(node, key, bool if key.endswith('signed') else int)
              for key in TYPE_KEYS}
     for key in TYPE_KEYS:
@@ -562,7 +548,6 @@ def _check_words(acc: _Node, slot: AccSlot):
     """Each datapath port's words per beat against its mover's num_channel: SnaxUnit has no
     FIFO slicer, so they must match (the streamer would refuse the beat's size mid-run)."""
     datapath = slot.datapath
-    shorthand = 'in_widths' not in acc.value['snax_datapath_cfg']
 
     def fail(key, why):
         raise CfgSlotError(acc.file, acc.where(f'snax_datapath_cfg.{key}'), why)
@@ -574,7 +559,6 @@ def _check_words(acc: _Node, slot: AccSlot):
     fold = len(datapath.inputs) == 1
     for key, width, mover, i in ports:
         channels = slot.streamer[mover]['num_channel'][i]
-        key = 'data_width' if shorthand else key
         if fold and mover == 'data_writer_params':
             if channels != 1:
                 fail('outputs', f"a fold's output is one 64-bit word per beat, but "

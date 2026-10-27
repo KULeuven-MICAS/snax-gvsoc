@@ -1054,9 +1054,36 @@ once, where it first appears.
   cycles (add_acc 35), vecadd_i32 214 (19), vecmul_i32 214 (19),
   vsum_tree_i32 211 (19), vecadd_i8 200 (10), vsum_tree_i8 199 (11),
   vecadd_n7 220 (4), vsum_tree_n21 191 (9), rowsum_3x7 191 (9).
-- The shorthand is not dropped after all: `snax_cfg` keeps expanding
-  `data_width` and `signed`, and refusing them beside the four lists, because
-  `sw/cfg/snax_forge/` (the `snax_hjson` target's default file) is synced
-  verbatim from snax_cluster `ccc7688f`, whose `cfg/snax_forge` fixtures
-  still use it. It goes once snax_cluster's cfg/snax_forge fixtures are
-  refreshed from the PACK0 R4 bundle and sw/ is re-synced to that commit.
+- The shorthand stayed in this round, because `sw/cfg/snax_forge/` (the
+  `snax_hjson` target's default file) was synced from snax_cluster
+  `ccc7688f`, whose `cfg/snax_forge` fixtures still used it. PACK0 round 3
+  dropped it.
+
+### PACK0 round 3: sw/ at snax_cluster 4bd582d2, the shorthand dropped, vecmul_i32_i64
+
+- 2026-10-27. `make sync-snax-cluster` from snax_cluster `4bd582d2` (#663,
+  its snax-forge fixtures refreshed from snax-forge `0f9fb5f`): the pin row,
+  `sw/cfg/snax_forge/snax_forge_acc.hjson`'s four type lists in place of
+  `data_width` and `signed`, and in `snax_forge.hjson` the core template
+  renamed `snax_alu_core_template` to `snax_forge_core_template` (snax-forge's
+  base cluster since its M13 B0). The mirrored Makefiles did not move. The
+  headers sync regenerates from the cluster files (`snitch_cluster_cfg.h`,
+  `snitch_cluster_addrmap.h`, `streamer_csr_addr_map.h`, the peripheral
+  header, `alltypes.h`) are byte-identical to before; `make sw` builds from
+  an empty `build/sw`. The sync ran snaxgen's sbt with snax_cluster's two
+  Chisel `target/` folders on container tmpfs: on the NFS home its JDK hangs
+  copying into them (`copy_file_range`).
+- `snax_cfg`: `data_width` or `signed` in a datapath block is a CfgTypeError
+  at that key, "replaced by in_widths, in_signed, out_widths and
+  out_signed"; the four lists are required. The copied vecadd cluster loads
+  through them. `tests/snax`: 43 run, OK (the three shorthand cases one
+  refusal).
+- forge/vecmul_i32_i64 from snax-forge `0f9fb5f` (tag `pack0-r4b`): A and B
+  int32 into C int64, the product at int32 (the op type) sign-extended into
+  C, 8 TCDM ports (2 + 2 + 4).
+- `make regress` on fresh builds of main (`6347d51e`) and this branch: both
+  pass, here with sixteen forge folders. Every test of main's (unit, shell,
+  the cluster tests, snax-csr, snax-shell, the plain tests and the fifteen
+  forge folders) has the same `run.log`, and its `trace.log` where it has
+  one: the template rename changed nothing. vecmul_i32_i64: 224 cycles,
+  `forge data: 0 errors (64 words)`, mult_acc 19, as on snax-forge's flow.

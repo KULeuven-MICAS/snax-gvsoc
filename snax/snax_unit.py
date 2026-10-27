@@ -40,8 +40,7 @@ class SnaxUnit(gvsoc.systree.Component):
         multiple of 64) and signedness, in inputs' order.
     out_widths, out_signed : list
         The output's, one each; lanes * width a multiple of 64 unless a fold
-        (one word). snax_cfg.py expands a datapath block's data_width and
-        signed shorthand into the four lists; the unit takes the lists only.
+        (one word).
     control : str
         counted: the unit counts its firings.
     config : list[str]
