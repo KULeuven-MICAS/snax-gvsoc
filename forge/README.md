@@ -20,6 +20,7 @@ compares it byte for byte.
 | `rowsum_serial/` | `recipes/rowsum_serial.json` (W = 1, M = 4, N = 16, `accumulate`'s `chisel_accumulator`, T = N = 16: four sums of 16) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
 | `vecadd_i32/` | `recipes/vecadd_i32.json` (W = 4, N = 64, A, B, C int32: two per word) on `platforms/snax_forge.json` | 6 TCDM ports, `loopCount` |
 | `vecmul_i32/` | `recipes/vecmul_i32.json` (W = 4, N = 64, A, B, C int32, `elementwise_mul`) on `platforms/snax_forge.json` | 6 TCDM ports, `loopCount` |
+| `vecmul_i32_i64/` | `recipes/vecmul_i32_i64.json` (W = 4, N = 64, A, B int32 into C int64, `elementwise_mul`: the product at int32, the op type, sign-extended into C) on `platforms/snax_forge.json` | 8 TCDM ports (2 + 2 + 4), `loopCount` |
 | `vsum_tree_i32/` | `recipes/vsum_tree_i32.json` (W = 4, N = 64, A int32 into out int64, `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 3 TCDM ports, `loopCount`, `len` |
 | `vecadd_i8/` | `recipes/vecadd_i8.json` (W = 8, N = 64, A, B, C int8: eight per word) on `platforms/snax_forge.json` | 3 TCDM ports, `loopCount` |
 | `vsum_tree_i8/` | `recipes/vsum_tree_i8.json` (W = 8, N = 64, A int8 into out int64, `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `loopCount`, `len` |
