@@ -266,9 +266,9 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    ...........................................
+    .............................................
     ----------------------------------------------------------------------
-    Ran 43 tests in 0.252s
+    Ran 45 tests in 0.242s
 
     OK
 

@@ -22,8 +22,8 @@
 //                    each port's element type (snax_unit.hpp's
 //                    SnaxUnitType): its width, 8, 16, 32 or 64, and whether
 //                    it is signed (bools), one per input in inputs' order
-//                    and one per output. All four, or none: then data_width
-//                    and signed give every port. An input of width b takes
+//                    and one per output (snax_cfg.py expands its data_width
+//                    and signed shorthand into them). An input of width b takes
 //                    lanes * b / 64 channel words, which must be whole, and
 //                    the inputs may differ; an elementwise output of width
 //                    b_o lanes * b_o / 64, also whole; a fold's output one
@@ -31,8 +31,6 @@
 //                    streamer's beats are whole 64-bit channel words, lane
 //                    0 first (snax_streamer.cpp); the elements are packed in
 //                    them b bits apart, lane 0 lowest, as Chisel packs a Vec
-//   data_width       without the four: every port's width
-//   signed           without the four: every port's signedness (bool)
 //   op               ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3,
 //                    or 4, xor 5, min 6, max 7; integers, as NumPy: an
 //                    elementwise op at the inputs' result type T (a
@@ -299,67 +297,23 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
 }
 
 
-// The ports' types: in_widths, in_signed, out_widths and out_signed, or
-// data_width and signed for every port; then each port's words
+// The ports' types, in_widths, in_signed, out_widths and out_signed, checked;
+// then each port's words. snax_cfg.py checks the same at load time first.
 void SnaxUnit::types_prop(size_t nb_inputs)
 {
-    static const char *const keys[] = {"in_widths", "in_signed", "out_widths", "out_signed"};
-    int given = 0;
-    for (const char *key : keys)
+    std::vector<int> in_widths = this->ints_prop("in_widths");
+    std::vector<bool> in_signed = this->bools_prop("in_signed");
+    std::vector<int> out_widths = this->ints_prop("out_widths");
+    std::vector<bool> out_signed = this->bools_prop("out_signed");
+    for (auto [key, n, want, what] : {
+        std::make_tuple("in_widths", in_widths.size(), nb_inputs, "input"),
+        std::make_tuple("in_signed", in_signed.size(), nb_inputs, "input"),
+        std::make_tuple("out_widths", out_widths.size(), (size_t)1, "output"),
+        std::make_tuple("out_signed", out_signed.size(), (size_t)1, "output")})
     {
-        given += this->get_js_config()->get(key) != nullptr;
-    }
-    if (given != 0 && given != 4)
-    {
-        for (const char *key : keys)
+        if (n != want)
         {
-            if (this->get_js_config()->get(key) == nullptr)
-            {
-                this->trace.fatal("Property %s: missing; in_widths, in_signed, out_widths and "
-                    "out_signed go together (without them, data_width and signed give every "
-                    "port)\n", key);
-            }
-        }
-    }
-
-    // The property a port's width or signedness came from, for the messages
-    bool shorthand = given == 0;
-    auto width_key = [&](bool out, size_t i) {
-        return shorthand ? std::string("data_width")
-            : std::string(out ? "out_widths[" : "in_widths[") + std::to_string(i) + "]";
-    };
-    std::vector<int> in_widths, out_widths;
-    std::vector<bool> in_signed, out_signed;
-    if (shorthand)
-    {
-        int width = this->int_prop("data_width");
-        js::Config *is_signed = this->prop("signed");
-        if (dynamic_cast<js::ConfigBool *>(is_signed) == nullptr)
-        {
-            this->trace.fatal("Property signed: not a bool\n");
-        }
-        in_widths.assign(nb_inputs, width);
-        in_signed.assign(nb_inputs, is_signed->get_bool());
-        out_widths.assign(1, width);
-        out_signed.assign(1, is_signed->get_bool());
-    }
-    else
-    {
-        in_widths = this->ints_prop("in_widths");
-        in_signed = this->bools_prop("in_signed");
-        out_widths = this->ints_prop("out_widths");
-        out_signed = this->bools_prop("out_signed");
-        for (auto [key, n, want, what] : {
-            std::make_tuple("in_widths", in_widths.size(), nb_inputs, "input"),
-            std::make_tuple("in_signed", in_signed.size(), nb_inputs, "input"),
-            std::make_tuple("out_widths", out_widths.size(), (size_t)1, "output"),
-            std::make_tuple("out_signed", out_signed.size(), (size_t)1, "output")})
-        {
-            if (n != want)
-            {
-                this->trace.fatal("Property %s: %ld values, one per %s (%ld)\n", key, n, what,
-                    want);
-            }
+            this->trace.fatal("Property %s: %ld values, one per %s (%ld)\n", key, n, what, want);
         }
     }
 
@@ -367,7 +321,8 @@ void SnaxUnit::types_prop(size_t nb_inputs)
     {
         bool out = i == nb_inputs;
         int width = out ? out_widths[0] : in_widths[i];
-        std::string key = width_key(out, out ? 0 : i);
+        std::string key = std::string(out ? "out_widths[" : "in_widths[") +
+            std::to_string(out ? 0 : i) + "]";
         if (width != 8 && width != 16 && width != 32 && width != 64)
         {
             this->trace.fatal("Property %s: %d, must be 8, 16, 32 or 64\n", key.c_str(), width);

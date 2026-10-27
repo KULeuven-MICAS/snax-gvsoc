@@ -30,21 +30,18 @@ class SnaxUnit(gvsoc.systree.Component):
         Output port names (one).
     lanes : int
         Elements per input beat.
-    data_width : int
-        Without the four lists below: every port's width, 8, 16, 32 or 64.
     op : int
         ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3, or 4, xor 5,
         min 6, max 7; at NumPy's types (snax_unit.hpp): an elementwise op at
         the inputs' result type, cast to the output's; a fold's lanes cast to
         the output's type, the tree and acc at it.
-    signed : bool
-        Without the four lists: every port's signedness.
     in_widths, in_signed : list
         Each input's element width (8, 16, 32 or 64; lanes * width a
         multiple of 64) and signedness, in inputs' order.
     out_widths, out_signed : list
         The output's, one each; lanes * width a multiple of 64 unless a fold
-        (one word). All four lists or none.
+        (one word). snax_cfg.py expands a datapath block's data_width and
+        signed shorthand into the four lists; the unit takes the lists only.
     control : str
         counted: the unit counts its firings.
     config : list[str]
@@ -73,23 +70,22 @@ class SnaxUnit(gvsoc.systree.Component):
     SOURCES = ['snax_unit.cpp']
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, inputs: list,
-            outputs: list, lanes: int, op: int, data_width: int = None, signed: bool = False,
-            control: str = 'counted', wait: str = 'lockstep', latency: int = 0, ii: int = 1,
-            csr_base: int = 0, config: list = None, in_widths: list = None,
-            in_signed: list = None, out_widths: list = None, out_signed: list = None):
+            outputs: list, lanes: int, op: int, in_widths: list, in_signed: list,
+            out_widths: list, out_signed: list, control: str = 'counted',
+            wait: str = 'lockstep', latency: int = 0, ii: int = 1, csr_base: int = 0,
+            config: list = None):
         super().__init__(parent, name)
 
         self.add_sources(self.SOURCES)
 
-        # Only the types given: the C++ refuses a partial set of the lists
-        types = {'data_width': data_width, 'signed': signed, 'in_widths': in_widths,
-            'in_signed': in_signed, 'out_widths': out_widths, 'out_signed': out_signed}
-        self.add_properties({key: list(value) if isinstance(value, (list, tuple)) else value
-            for key, value in types.items() if value is not None})
         self.add_properties({
             'inputs': list(inputs),
             'outputs': list(outputs),
             'lanes': lanes,
+            'in_widths': list(in_widths),
+            'in_signed': list(in_signed),
+            'out_widths': list(out_widths),
+            'out_signed': list(out_signed),
             'op': op,
             'control': control,
             'config': list(config) if config is not None else ['count'],

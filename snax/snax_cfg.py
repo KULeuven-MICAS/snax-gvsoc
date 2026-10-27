@@ -58,8 +58,11 @@ the slot's unit and shell from, SnaxUnit's arguments by name:
                    and signedness, one per input and one per output; all
                    four or none
     data_width, signed
-                   without the four: every port's width and signedness
-                   (Datapath holds the four lists either way)
+                   without the four: every port's width and signedness;
+                   with them, refused (one source for a port's type). This
+                   shorthand is the reader's alone, until PACK0 R2
+                   regenerates forge/'s fixtures: Datapath holds the four
+                   lists either way, and SnaxUnit takes only the lists
     config         the role of each configuration word (optional; [count])
     fields         the shell's configuration CSRs in order; start follows
 
@@ -132,7 +135,7 @@ UNMODELLED_MOVERS = ('data_reader_writer_params',)
 SHELL_RO_CSRS = 2
 # A datapath port's element widths
 ELEMENT_WIDTHS = (8, 16, 32, 64)
-# A datapath port's type lists: all four or none (data_width and signed then)
+# A datapath port's type lists: all four, or none (data_width and signed then, never both)
 TYPE_KEYS = ('in_widths', 'in_signed', 'out_widths', 'out_signed')
 
 
