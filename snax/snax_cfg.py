@@ -52,15 +52,31 @@ the slot's unit and shell from, SnaxUnit's arguments by name:
     unit           the unit kind: SnaxUnit
     inputs         the unit's input ports in order, one per streamer reader
     outputs        its output ports in order, one per streamer writer
-    lanes, data_width, op, signed, control, wait, latency, ii
+    lanes, op, control, wait, latency, ii
+    in_widths, in_signed, out_widths, out_signed
+                   each port's element type: its width (8, 16, 32 or 64)
+                   and signedness, one per input and one per output; all
+                   four or none
+    data_width, signed
+                   without the four: every port's width and signedness;
+                   with them, refused (one source for a port's type). This
+                   shorthand is the reader's alone, until PACK0 R2
+                   regenerates forge/'s fixtures: Datapath holds the four
+                   lists either way, and SnaxUnit takes only the lists
     config         the role of each configuration word (optional; [count])
     fields         the shell's configuration CSRs in order; start follows
 
-The slot's counts must agree with what its refs give: snax_tcdm_ports is the
-streamer's num_channel summed over its movers, and the narrow and wide ports
-or the sparse config's widths add up to it; with a datapath block,
-snax_num_rw_csr is the shell's fields plus start, and snax_num_ro_csr 2
-(busy and the counter).
+An elementwise datapath's inputs need an integer result type (NumPy's
+result_type): a signed type with uint64 has none (NumPy gives float64).
+
+The slot's counts must agree with what its refs give: each mover's
+spatial_bounds multiply to its num_channel (snax_cluster's StreamerParam);
+snax_tcdm_ports is the streamer's num_channel summed over its movers, and the
+narrow and wide ports or the sparse config's widths add up to it; with a
+datapath block, each input's words per beat (lanes * its width / 64) are its
+reader's num_channel and the output's (the same, or 1 for a fold) its
+writer's, since SnaxUnit has no FIFO slicer; snax_num_rw_csr is the shell's
+fields plus start, and snax_num_ro_csr 2 (busy and the counter).
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
@@ -69,6 +85,7 @@ type), CfgSlotError (slot counts that disagree with the accelerator file);
 a target refuses what it cannot model with CfgTargetError.
 """
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -116,6 +133,10 @@ MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
 # The read-only CSRs of a shell: busy and the counter
 SHELL_RO_CSRS = 2
+# A datapath port's element widths
+ELEMENT_WIDTHS = (8, 16, 32, 64)
+# A datapath port's type lists: all four, or none (data_width and signed then, never both)
+TYPE_KEYS = ('in_widths', 'in_signed', 'out_widths', 'out_signed')
 
 
 # =============================================================================
@@ -267,9 +288,11 @@ class Datapath:
     inputs: list
     outputs: list
     lanes: int
-    data_width: int
+    in_widths: list
+    in_signed: list
+    out_widths: list
+    out_signed: list
     op: int
-    signed: bool
     control: str
     wait: str
     latency: int
@@ -348,6 +371,17 @@ def misa(isa: str) -> int:
     return value
 
 
+def spatial_mismatch(spatial_bounds: list, num_channel: int):
+    """Why a mover's spatial bounds do not fit its channels, or None: snax_cluster's
+    StreamerParam requires their product to be num_channel."""
+    product = math.prod(spatial_bounds)
+    if product == num_channel:
+        return None
+    return (f'spatial bounds {spatial_bounds} unroll {product} channels, but num_channel is '
+            f'{num_channel}: snax_cluster\'s StreamerParam requires spatialBounds.product == '
+            'numChannel')
+
+
 def streamer_channels(template: dict) -> int:
     """The streamer's TCDM ports: num_channel summed over its movers."""
     return sum(sum(template.get(mover, {}).get('num_channel', [])) for mover in MOVERS)
@@ -361,15 +395,83 @@ def _names(node: _Node, key, default=...) -> list:
     return values
 
 
+def type_name(width: int, signed: bool) -> str:
+    """NumPy's name of an integer type: int32, uint8, ..."""
+    return f'{"int" if signed else "uint"}{width}'
+
+
+def result_type(a: tuple, b: tuple):
+    """NumPy's result type of two integer types (width, signed), as snax_unit.hpp's
+    snax_unit_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
+    if a[1] == b[1]:
+        return max(a[0], b[0]), a[1]
+    s, u = (a, b) if a[1] else (b, a)
+    if s[0] > u[0]:
+        return s
+    return (2 * u[0], True) if 2 * u[0] <= 64 else None
+
+
+def _typed_list(node: _Node, key, kind) -> list:
+    """A list of integers or of booleans."""
+    values = node.get(key, list)
+    if not all(isinstance(v, kind) and (kind is bool or not isinstance(v, bool))
+               for v in values):
+        raise CfgTypeError(node.file, node.where(key),
+            f'must be a list of {"booleans" if kind is bool else "integers"}, got {values!r}')
+    return values
+
+
+def _port_types(node: _Node, inputs: list, outputs: list) -> dict:
+    """The four type lists: given, or data_width and signed for every port; checked."""
+    given = [key for key in TYPE_KEYS if key in node.value]
+    if not given:
+        width, signed = node.get('data_width', int), node.get('signed', bool)
+        types = {'in_widths': [width] * len(inputs), 'in_signed': [signed] * len(inputs),
+                 'out_widths': [width] * len(outputs), 'out_signed': [signed] * len(outputs)}
+        if width not in ELEMENT_WIDTHS:
+            raise CfgTypeError(node.file, node.where('data_width'),
+                f'{width}, must be 8, 16, 32 or 64')
+        return types
+    if len(given) != len(TYPE_KEYS):
+        missing = next(key for key in TYPE_KEYS if key not in given)
+        raise CfgKeyError(node.file, node.where(missing),
+            f'missing: {", ".join(TYPE_KEYS)} go together (without them, data_width and signed '
+            'give every port)')
+    for key in ('data_width', 'signed'):
+        if key in node.value:
+            raise CfgTypeError(node.file, node.where(key),
+                f'given with {", ".join(TYPE_KEYS)}: the four lists replace data_width and '
+                'signed, so give one or the other')
+    types = {key: _typed_list(node, key, bool if key.endswith('signed') else int)
+             for key in TYPE_KEYS}
+    for key in TYPE_KEYS:
+        ports, what = (inputs, 'input') if key.startswith('in_') else (outputs, 'output')
+        if len(types[key]) != len(ports):
+            raise CfgSlotError(node.file, node.where(key),
+                f'{len(types[key])} values, one per {what} ({len(ports)}: {ports})')
+    for key in ('in_widths', 'out_widths'):
+        for i, width in enumerate(types[key]):
+            if width not in ELEMENT_WIDTHS:
+                raise CfgTypeError(node.file, f'{node.where(key)}[{i}]',
+                    f'{width}, must be 8, 16, 32 or 64')
+    if len(inputs) == 2:
+        a, b = zip(types['in_widths'], types['in_signed'])
+        if result_type(a, b) is None:
+            raise CfgTypeError(node.file, node.where('in_signed'),
+                f'{type_name(*a)} with {type_name(*b)} has no integer result type (NumPy gives '
+                'float64)')
+    return types
+
+
 def _datapath(node: _Node) -> Datapath:
+    inputs, outputs = _names(node, 'inputs'), _names(node, 'outputs')
     return Datapath(
         unit=node.get('unit', str),
-        inputs=_names(node, 'inputs'),
-        outputs=_names(node, 'outputs'),
+        inputs=inputs,
+        outputs=outputs,
         lanes=node.get('lanes', int),
-        data_width=node.get('data_width', int),
+        **_port_types(node, inputs, outputs),
         op=node.get('op', int),
-        signed=node.get('signed', bool),
         control=node.get('control', str),
         wait=node.get('wait', str),
         latency=node.get('latency', int),
@@ -416,6 +518,13 @@ def _check_slot(acc: _Node, slot: AccSlot):
             if mover in slot.streamer:
                 raise CfgTargetError(acc.file, acc.where(f'snax_streamer_cfg.{mover}'),
                     f'not modelled: the streamer has {", ".join(MOVERS)}')
+        for mover in MOVERS:
+            params = slot.streamer.get(mover, {})
+            for i, (bounds, channels) in enumerate(zip(params.get('spatial_bounds', []),
+                                                       params.get('num_channel', []))):
+                why = spatial_mismatch(bounds, channels)
+                if why is not None:
+                    fail(f'snax_streamer_cfg.{mover}.spatial_bounds[{i}]', why)
         channels = streamer_channels(slot.streamer)
         if channels != slot.tcdm_ports:
             fail('snax_tcdm_ports', f'{slot.tcdm_ports}, but the streamer has {channels} '
@@ -440,12 +549,45 @@ def _check_slot(acc: _Node, slot: AccSlot):
             if len(names) != movers:
                 fail(f'snax_datapath_cfg.{ports}', f'{names}, but the streamer has {movers} '
                     f'{mover}: one port each, in order')
+        _check_words(acc, slot)
         if slot.num_rw_csr != len(fields) + 1:
             fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but the datapath has '
                 f'{len(fields)} shell fields {fields} and start')
         if slot.num_ro_csr != SHELL_RO_CSRS:
             fail('snax_num_ro_csr', f'{slot.num_ro_csr}, but a shell has {SHELL_RO_CSRS} '
                 '(busy and the counter)')
+
+
+def _check_words(acc: _Node, slot: AccSlot):
+    """Each datapath port's words per beat against its mover's num_channel: SnaxUnit has no
+    FIFO slicer, so they must match (the streamer would refuse the beat's size mid-run)."""
+    datapath = slot.datapath
+    shorthand = 'in_widths' not in acc.value['snax_datapath_cfg']
+
+    def fail(key, why):
+        raise CfgSlotError(acc.file, acc.where(f'snax_datapath_cfg.{key}'), why)
+
+    ports = [(f'in_widths[{i}]', width, 'data_reader_params', i)
+             for i, width in enumerate(datapath.in_widths)]
+    ports += [(f'out_widths[{j}]', width, 'data_writer_params', j)
+              for j, width in enumerate(datapath.out_widths)]
+    fold = len(datapath.inputs) == 1
+    for key, width, mover, i in ports:
+        channels = slot.streamer[mover]['num_channel'][i]
+        key = 'data_width' if shorthand else key
+        if fold and mover == 'data_writer_params':
+            if channels != 1:
+                fail('outputs', f"a fold's output is one 64-bit word per beat, but "
+                     f'{mover}[{i}] has num_channel {channels}')
+            continue
+        bits = datapath.lanes * width
+        if bits % 64 != 0:
+            fail(key, f'lanes {datapath.lanes} x {width} bits is not a whole number of 64-bit '
+                 'channel words')
+        if bits // 64 != channels:
+            fail(key, f'lanes {datapath.lanes} x {width} bits is {bits // 64} 64-bit words per '
+                 f'beat, but {mover}[{i}] has num_channel {channels}: SnaxUnit has no FIFO '
+                 'slicer, so they must match')
 
 
 def _core(core: _Node) -> Core:

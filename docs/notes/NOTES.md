@@ -1004,3 +1004,59 @@ once, where it first appears.
   beats, `len` 16, eight sums): counter 131. `forge/rowsum_serial/` (W 1,
   M 4, N 16: 64 beats, `len` 16): counter 67, `run 0: firings 64 busy 64
   stall_in 2 stall_out 0 flush 1`, as `vsum-r16`'s.
+
+### PACK0 round 1: per-port widths, NumPy arithmetic (snax-gvsoc)
+
+- 2026-10-26. `SnaxUnit` takes each port's element type: `in_widths`,
+  `in_signed`, `out_widths`, `out_signed`, all four required (2026-10-27,
+  the review: the component's `data_width`/`signed` shorthand removed, dead
+  since `SnaxUnitAcc` always passes the lists). Each input
+  of b bits takes lanes * b / 64 words; an elementwise output likewise, a
+  fold's one word for any width (the 64-bit fold check is gone). The lane
+  and beat arithmetic moved into `snax_unit.hpp`
+  (`snax_unit_result_type`, `snax_unit_cast`, `snax_unit_elementwise`,
+  `snax_unit_fold`): an op at NumPy's result type of its inputs, then cast to
+  the output's; a fold's lanes cast to the output's type before its tree. A
+  signed type with uint64 is refused (NumPy gives float64).
+- `snax_cfg.py`: `Datapath` holds the four lists. The shorthand lives here
+  only, until R2: a datapath block without the lists gives every port its
+  `data_width` and `signed`, so today's hjson loads unchanged; with the
+  lists, a `data_width` or `signed` beside them is refused (one source for a
+  port's type). The lists' lengths, widths and the uint64 refusal are
+  checked at load; each mover's
+  spatial bounds must multiply to its num_channel (snax_cluster's
+  StreamerParam; `movers_of` refused only a larger product), and each
+  datapath port's words must equal its mover's num_channel. These are the
+  tested checks; the C++ refusals are a second check behind them, and only
+  the regress exercises the C++ path (with valid lists).
+- Tests: `tests/snax/unit/run.sh` 21 passed (19; `types` 6 and `beats` 15
+  vectors new), the unittests 45 (33). `make regress` on a fresh build
+  passes; its trace.log files (unit and streamer summary lines, the unit's
+  beats) equal main's (`6c917eec`) for every forge/ fixture and
+  snax-shell.
+- The forge/ fixtures still use the shorthand (int64) until R2 brings
+  snax-forge R3's int32 and int8 fixtures to this branch.
+
+### PACK0 round 2: narrow and padded fixtures
+
+- 2026-10-27. forge/ refreshed from snax-forge `89ca208` (tag `pack0-r3`)
+  with forge/README.md's commands, each folder cleared first. The six int64
+  folders (vecadd, vecmul, vsum, vsum_tree, rowsum, rowsum_serial) change in
+  `snax_forge_acc.hjson` only: the four type lists in place of `data_width`
+  and `signed`. matadd is int32 again (two per word, 6 TCDM ports): all but
+  `include/` and `manifest.json` change. Eight folders are new: vecadd_i32,
+  vecmul_i32 (6 ports), vsum_tree_i32 (int32 into int64), vecadd_i8 (3),
+  vsum_tree_i8 (int8 into int64, 2), and the padded tails vecadd_n7 (12),
+  vsum_tree_n21 and rowsum_3x7 (5).
+- `make regress` on a fresh build passes with all fifteen folders; the six
+  int64 folders' forge cycles, counter and summary lines equal main's
+  (`6c917eec`). The new ones, each `forge data: 0 errors`: matadd 239
+  cycles (add_acc 35), vecadd_i32 214 (19), vecmul_i32 214 (19),
+  vsum_tree_i32 211 (19), vecadd_i8 200 (10), vsum_tree_i8 199 (11),
+  vecadd_n7 220 (4), vsum_tree_n21 191 (9), rowsum_3x7 191 (9).
+- The shorthand is not dropped after all: `snax_cfg` keeps expanding
+  `data_width` and `signed`, and refusing them beside the four lists, because
+  `sw/cfg/snax_forge/` (the `snax_hjson` target's default file) is synced
+  verbatim from snax_cluster `ccc7688f`, whose `cfg/snax_forge` fixtures
+  still use it. It goes once snax_cluster's cfg/snax_forge fixtures are
+  refreshed from the PACK0 R4 bundle and sw/ is re-synced to that commit.

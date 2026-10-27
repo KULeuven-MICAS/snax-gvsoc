@@ -1,6 +1,7 @@
 # SnaxUnit's rule
 
-GEN3 step 1 (`docs/plans/GEN3.md`): the cycle rule and the op table of
+GEN3 step 1 (`docs/plans/GEN3.md`): the cycle rule, the op table and
+(PACK0) the per-type arithmetic of
 `snax/snax_unit.hpp`, the code `SnaxUnit` (`snax/snax_unit.cpp`) runs,
 against hand-worked cases, with g++ only. `make regress` runs it first, as
 `unit`.
@@ -10,8 +11,12 @@ against hand-worked cases, with g++ only. `make regress` runs it first, as
   and the summary line at the end of every run (`SnaxUnitRule::run_line`, the
   line the component prints), whose busy, stall_in, stall_out and flush must
   add up to the run's busy cycles in the case file. It also checks the op table on fixed vectors
-  (wrapping at 8 to 64 bits, signed and unsigned min and max), and a fold's tree over a beat's
-  lanes (`snax_unit_tree`: halves first, wrapping).
+  (wrapping at 8 to 64 bits, signed and unsigned min and max), a fold's tree over a beat's
+  lanes (`snax_unit_tree`: halves first, wrapping), NumPy's result types
+  (`snax_unit_result_type`, `types`: int64 with uint64 refused), and whole beats (`beats`:
+  `snax_unit_elementwise` and `snax_unit_fold` on 64-bit channel words, lane 0 lowest, with
+  int8, uint8, int16, int32 and int64 ports: the op at the inputs' result type, then cast to
+  the output's; a fold's lanes cast to the output's type first).
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/unit`) and runs
   it on every `cases/*.txt`; exit 1 on any difference.
 
@@ -59,4 +64,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/unit/run.sh
 
-It prints `PASS` per case (and `ops` and `tree`) and ends with `19 passed, 0 failed`.
+It prints `PASS` per case (and `ops`, `tree`, `types` and `beats`) and ends with `21 passed, 0 failed`.

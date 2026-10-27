@@ -12,7 +12,6 @@ slot's streamer and datapath in an accelerator file.
 """
 
 import copy
-import dataclasses
 import json
 import sys
 import tempfile
@@ -44,10 +43,24 @@ STREAMER = {
         "fifo_depth": [8],
     },
 }
+
+
+def datapath(d, **changes):
+    """The Datapath of a datapath block d with changes: data_width and signed, if given, as
+    the four type lists; config [count] by default."""
+    d = {"config": ["count"], **d, **changes}
+    if "data_width" in d:
+        width, signed = d.pop("data_width"), d.pop("signed")
+        d.update(in_widths=[width] * len(d["inputs"]), in_signed=[signed] * len(d["inputs"]),
+                 out_widths=[width], out_signed=[signed])
+    return snax_cfg.Datapath(**d)
+
+
 # forge/vecadd/'s datapath block
-VECADD_DATAPATH = snax_cfg.Datapath(
-    "SnaxUnit", ["a", "b"], ["out"], 4, 64, 0, True, "counted", "lockstep", 0, 1, ["count"],
-    ["loopCount"])
+VECADD = {"unit": "SnaxUnit", "inputs": ["a", "b"], "outputs": ["out"], "lanes": 4,
+          "data_width": 64, "op": 0, "signed": True, "control": "counted", "wait": "lockstep",
+          "latency": 0, "ii": 1, "fields": ["loopCount"]}
+VECADD_DATAPATH = datapath(VECADD)
 
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
 
@@ -123,14 +136,14 @@ class Fixtures(unittest.TestCase):
             self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr),
                              (12, [[12, 1]], 2))
             self.assertEqual(slot.streamer, STREAMER)
-            self.assertEqual(slot.datapath, dataclasses.replace(VECADD_DATAPATH, op=op))
+            self.assertEqual(slot.datapath, datapath(VECADD, op=op))
 
     def test_vsum(self):
         slot = self.slot("vsum")
         self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr), (2, [[2, 1]], 3))
-        self.assertEqual(slot.datapath, snax_cfg.Datapath(
-            "SnaxUnit", ["a"], ["out"], 1, 64, 0, True, "counted", "pipelined", 1, 1,
-            ["count", "rate"], ["loopCount", "len"]))
+        self.assertEqual(slot.datapath, datapath(
+            VECADD, inputs=["a"], lanes=1, wait="pipelined", latency=1,
+            config=["count", "rate"], fields=["loopCount", "len"]))
 
 
 class Misa(unittest.TestCase):
@@ -254,9 +267,10 @@ class Broken(unittest.TestCase):
 class AccFile(unittest.TestCase):
     """A slot's streamer and datapath in an accelerator file next to the cluster file."""
 
-    DATAPATH = {"unit": "SnaxUnit", "inputs": ["a", "b"], "outputs": ["out"], "lanes": 4,
-                "data_width": 64, "op": 0, "signed": True, "control": "counted",
-                "wait": "lockstep", "latency": 0, "ii": 1, "fields": ["loopCount"]}
+    DATAPATH = VECADD
+    # int32 + uint32 (int64) into uint32, 8 lanes: four words per port, as STREAMER's
+    TYPES = {"in_widths": [32, 32], "in_signed": [True, False], "out_widths": [32],
+             "out_signed": [False]}
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -282,7 +296,7 @@ class AccFile(unittest.TestCase):
     def test_resolved(self):
         (slot,) = self.load().cores[0].accelerators
         self.assertEqual(slot.streamer, STREAMER)
-        self.assertEqual(slot.datapath, snax_cfg.Datapath(**self.DATAPATH, config=["count"]))
+        self.assertEqual(slot.datapath, datapath(self.DATAPATH))
 
     def fails(self, error, path_part, why_part=""):
         with self.assertRaises(error) as ctx:
@@ -307,6 +321,129 @@ class AccFile(unittest.TestCase):
         self.acc["datapath"]["fields"] = ["loopCount", 3]
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.fields", "list of strings")
 
+    def typed(self, **types):
+        """DATAPATH with 8 lanes and TYPES (changed by types) for data_width and signed, as
+        the accelerator file's datapath block."""
+        d = copy.deepcopy(self.DATAPATH)
+        del d["data_width"], d["signed"]
+        d.update({"lanes": 8, **self.TYPES, **types})
+        self.acc["datapath"] = d
+        return d
+
+    def test_type_lists(self):
+        d = self.typed()
+        (slot,) = self.load().cores[0].accelerators
+        self.assertEqual(slot.datapath, datapath(d))
+        self.assertEqual((slot.datapath.in_widths, slot.datapath.in_signed,
+                          slot.datapath.out_widths, slot.datapath.out_signed),
+                         ([32, 32], [True, False], [32], [False]))
+
+    def test_type_shorthand(self):
+        """Without the lists, data_width and signed give every port."""
+        (slot,) = self.load().cores[0].accelerators
+        self.assertEqual((slot.datapath.in_widths, slot.datapath.in_signed,
+                          slot.datapath.out_widths, slot.datapath.out_signed),
+                         ([64, 64], [True, True], [64], [True]))
+        del self.acc["datapath"]["signed"]
+        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.signed", "missing")
+
+    def test_type_lists_partial(self):
+        del self.typed()["out_signed"]
+        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.out_signed", "go together")
+        self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
+        self.acc["datapath"]["in_widths"] = [64, 64]
+        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.in_signed", "go together")
+
+    def mixed(self, key, value):
+        """key of the shorthand beside the four lists: two sources for a port's type."""
+        self.typed()[key] = value
+        self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
+                   "the four lists replace data_width and signed, so give one or the other")
+
+    def test_type_lists_with_data_width(self):
+        self.mixed("data_width", 32)
+
+    def test_type_lists_with_signed(self):
+        self.mixed("signed", True)
+
+    def test_type_widths(self):
+        self.typed(in_widths=[32, 12])
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_widths[1]", "12, must be 8, 16")
+        self.typed(out_widths=[128])
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.out_widths[0]", "128, must be")
+        self.typed(in_widths=[32, True])
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_widths", "list of integers")
+        self.typed(out_signed=[1])
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.out_signed", "list of booleans")
+        self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
+        self.acc["datapath"]["data_width"] = 24
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.data_width", "24, must be 8, 16")
+
+    def test_type_list_lengths(self):
+        self.typed(in_signed=[True])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_signed", "1 values, one per input")
+        self.typed(out_widths=[32, 32])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.out_widths",
+                   "2 values, one per output")
+
+    def test_type_int64_uint64(self):
+        self.typed(lanes=4, in_widths=[64, 64], in_signed=[True, False], out_widths=[64])
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_signed",
+                   "int64 with uint64 has no integer result type")
+
+    def channels(self, readers, writers):
+        """The streamer with these num_channel per reader and writer, each its one spatial
+        bound, and the slot's ports to match."""
+        template = self.acc["template"]
+        for params, channels in (("data_reader_params", readers),
+                                 ("data_writer_params", writers)):
+            n = len(channels)
+            template[params] = {"spatial_bounds": [[c] for c in channels],
+                                "temporal_dim": [1] * n, "num_channel": list(channels),
+                                "fifo_depth": [8] * n}
+        slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]
+        slot["snax_tcdm_ports"] = sum(readers) + sum(writers)
+        slot["sparse_interconnect_config"] = [[slot["snax_tcdm_ports"], 1]]
+
+    def test_spatial_product(self):
+        """snax_cluster's StreamerParam: the spatial bounds' product is num_channel."""
+        self.acc["template"]["data_reader_params"]["spatial_bounds"] = [[2], [4]]
+        self.fails(snax_cfg.CfgSlotError,
+                   "snax_streamer_cfg.data_reader_params.spatial_bounds[0]",
+                   "[2] unroll 2 channels, but num_channel is 4: snax_cluster's StreamerParam")
+
+    def test_words_per_input(self):
+        """int32 x int64 into int64 at 4 lanes: a takes 2 words, b and out 4."""
+        self.typed(lanes=4, in_widths=[32, 64], in_signed=[True, True], out_widths=[64],
+                   out_signed=[True])
+        self.channels([2, 4], [4])
+        (slot,) = self.load().cores[0].accelerators
+        self.assertEqual((slot.tcdm_ports, slot.datapath.in_widths), (10, [32, 64]))
+        self.channels([4, 4], [4])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_widths[0]",
+                   "lanes 4 x 32 bits is 2 64-bit words per beat, but data_reader_params[0] "
+                   "has num_channel 4")
+        self.channels([2, 4], [2])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.out_widths[0]",
+                   "is 4 64-bit words per beat, but data_writer_params[0] has num_channel 2")
+
+    def test_words_shorthand(self):
+        self.acc["datapath"]["lanes"] = 2
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.data_width",
+                   "lanes 2 x 64 bits is 2 64-bit words per beat")
+
+    def test_words_fold(self):
+        """A fold's output is one word, whatever its width."""
+        self.typed(inputs=["a"], lanes=8, in_widths=[32], in_signed=[True], out_widths=[64],
+                   out_signed=[True])
+        self.channels([4], [1])
+        (slot,) = self.load().cores[0].accelerators
+        self.assertEqual(slot.datapath.out_widths, [64])
+        self.channels([4], [2])
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs",
+                   "a fold's output is one 64-bit word per beat, but data_writer_params[0] has "
+                   "num_channel 2")
+
     def test_rw_csrs(self):
         self.acc["datapath"]["fields"] = ["loopCount", "len"]
         with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
@@ -322,6 +459,7 @@ class AccFile(unittest.TestCase):
 
     def test_channels(self):
         self.acc["template"]["data_writer_params"]["num_channel"] = [2]
+        self.acc["template"]["data_writer_params"]["spatial_bounds"] = [[2]]
         with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
             self.load()
         self.assertIn("10 channels", ctx.exception.why)
@@ -337,7 +475,7 @@ class AccFile(unittest.TestCase):
         self.acc = self.DATAPATH
         (slot_cfg,) = self.load().cores[0].accelerators
         self.assertEqual(slot_cfg.streamer, STREAMER)
-        self.assertEqual(slot_cfg.datapath, snax_cfg.Datapath(**self.DATAPATH, config=["count"]))
+        self.assertEqual(slot_cfg.datapath, datapath(self.DATAPATH))
 
     def test_bad_whole_file_refs(self):
         slot = self.cluster["snax_alu_core_template"]["snax_acc_cfg"][0]

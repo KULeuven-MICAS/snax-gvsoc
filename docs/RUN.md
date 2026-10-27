@@ -221,8 +221,8 @@ About two minutes:
       13 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       1 run
-    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_serial, forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree
-      7 run
+    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      15 run
     plain tests on snitch (build/sw/tests)
       17 run
     regression passed
@@ -244,8 +244,8 @@ does not: make reads `-k` itself):
       0 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       0 run
-    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_serial, forge.vecadd, forge.vecmul, forge.vsum, forge.vsum_tree
-      7 run
+    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      15 run
     plain tests on snitch (build/sw/tests)
       0 run
     regression passed
@@ -266,9 +266,9 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    ............................................
+    .............................................
     ----------------------------------------------------------------------
-    Ran 44 tests in 0.305s
+    Ran 45 tests in 0.242s
 
     OK
 
@@ -279,6 +279,8 @@ regression's `unit`):
 
     PASS ops: 16 vectors
     PASS tree: 8 vectors
+    PASS types: 6 vectors
+    PASS beats: 15 vectors
     PASS lockstep_count_zero: 6 cycles, 1 run(s)
     PASS lockstep_input_missing: 8 cycles, 1 run(s)
     PASS lockstep_no_stalls: 9 cycles, 2 run(s)
@@ -296,7 +298,7 @@ regression's `unit`):
     PASS pipelined_rate_zero: 7 cycles, 1 run(s)
     PASS pipelined_tree_t4: 18 cycles, 2 run(s)
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
-    19 passed, 0 failed
+    21 passed, 0 failed
 
 `SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against
 its hand-worked cases, with g++ (the regression's `shell`,

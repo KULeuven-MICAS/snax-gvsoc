@@ -18,17 +18,26 @@
 //                    over the firings of one output, acc starting from the
 //                    first x; the output one element)
 //   lanes            elements per input beat (> 0)
-//   data_width       bits per element: 8, 16, 32 or 64, and lanes *
-//                    data_width a multiple of 64; 64 for a fold, whose
-//                    output beat is one element. The streamer's beats are
-//                    whole 64-bit channel words, lane 0 first
-//                    (snax_streamer.cpp); the elements are packed in them
-//                    data_width bits apart, lane 0 lowest, as Chisel packs a
-//                    Vec
+//   in_widths, in_signed, out_widths, out_signed
+//                    each port's element type (snax_unit.hpp's
+//                    SnaxUnitType): its width, 8, 16, 32 or 64, and whether
+//                    it is signed (bools), one per input in inputs' order
+//                    and one per output (snax_cfg.py expands its data_width
+//                    and signed shorthand into them). An input of width b takes
+//                    lanes * b / 64 channel words, which must be whole, and
+//                    the inputs may differ; an elementwise output of width
+//                    b_o lanes * b_o / 64, also whole; a fold's output one
+//                    word for any b_o, the element in its low b_o bits. The
+//                    streamer's beats are whole 64-bit channel words, lane
+//                    0 first (snax_streamer.cpp); the elements are packed in
+//                    them b bits apart, lane 0 lowest, as Chisel packs a Vec
 //   op               ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3,
-//                    or 4, xor 5, min 6, max 7; integers, wrapping to
-//                    data_width
-//   signed           min and max compare as two's complement (bool)
+//                    or 4, xor 5, min 6, max 7; integers, as NumPy: an
+//                    elementwise op at the inputs' result type T (a
+//                    signed type with uint64 has none and is refused;
+//                    NumPy gives float64), wrapping, then
+//                    cast to the output's type; a fold's lanes cast to the
+//                    output's type, the tree and acc at it (snax_unit.hpp)
 //   control          counted: the unit counts its firings
 //   config           the role of each 32-bit configuration word the shell
 //                    sends, in order: count (the firings of the run, once)
@@ -41,7 +50,9 @@
 //   csr_base         the shell's first CSR, for the trace
 //
 // Ports:
-//   <input>, <output>  io masters to the streamer's reader_<i> and writer_<j>:
+//   <input>, <output>  io masters to the streamer's reader_<i> and writer_<j>,
+//                      each beat its port's words (the reader's or writer's
+//                      num_channel must match: no FIFO slicer here):
 //                      a probe (size 0) of every port, then the beats moved
 //                      (the ALU shell's way, before CLN1), so nothing moves unless the
 //                      rule says so
@@ -72,6 +83,7 @@
 // 2 stall_in, 3 stall_out, 4 flush; snax_unit.hpp's classes plus one).
 
 #include <deque>
+#include <tuple>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -95,6 +107,9 @@ private:
     int int_prop(const char *name);
     std::string str_prop(const char *name);
     std::vector<std::string> names_prop(const char *name);
+    std::vector<int> ints_prop(const char *name);
+    std::vector<bool> bools_prop(const char *name);
+    void types_prop(size_t nb_inputs);
     bool probe(vp::IoMaster &port, bool is_write);
     void move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words);
     void compute(std::vector<uint64_t> &out);
@@ -115,12 +130,12 @@ private:
     SnaxSignal sig_class;
 
     int lanes;
-    int data_width;
     int op;
-    bool is_signed;
     bool is_fold;               // one input
-    int beat_words;             // 64-bit words per input beat
-    int out_words;              // per output beat: beat_words, 1 for a fold
+    std::vector<SnaxUnitType> in_types;     // per input
+    SnaxUnitType out_type;
+    std::vector<int> in_words;  // 64-bit words per beat, per input
+    int out_words;              // per output beat: lanes * its width / 64, 1 for a fold
     int nb_config_words;        // the ctrl write's words
     int count_word;             // the count's word in it
     int rate_word;              // the rate's, -1 without one
@@ -176,24 +191,7 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     {
         this->trace.fatal("Property lanes: %d, must be positive\n", this->lanes);
     }
-    this->data_width = this->int_prop("data_width");
-    if (this->data_width != 8 && this->data_width != 16 && this->data_width != 32 &&
-        this->data_width != 64)
-    {
-        this->trace.fatal("Property data_width: %d, must be 8, 16, 32 or 64\n", this->data_width);
-    }
-    if (this->lanes * this->data_width % 64 != 0)
-    {
-        this->trace.fatal("Property data_width: lanes %d x %d bits is not a whole number of the "
-            "streamer's 64-bit channel words\n", this->lanes, this->data_width);
-    }
-    this->beat_words = this->lanes * this->data_width / 64;
-    if (this->is_fold && this->data_width != 64)
-    {
-        this->trace.fatal("Property data_width: %d, a fold's output is one element, so 64 bits "
-            "for a whole channel word\n", this->data_width);
-    }
-    this->out_words = this->is_fold ? 1 : this->beat_words;
+    this->types_prop(inputs.size());
 
     this->op = this->int_prop("op");
     if (this->op < 0 || this->op >= UNIT_NB_OPS)
@@ -201,12 +199,6 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
         this->trace.fatal("Property op: %d, not an ElementwiseOp encoding (0 to %d)\n", this->op,
             UNIT_NB_OPS - 1);
     }
-    js::Config *is_signed = this->prop("signed");
-    if (dynamic_cast<js::ConfigBool *>(is_signed) == nullptr)
-    {
-        this->trace.fatal("Property signed: not a bool\n");
-    }
-    this->is_signed = is_signed->get_bool();
 
     std::string control = this->str_prop("control");
     if (control != "counted")
@@ -275,7 +267,11 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     }
     this->csr_base = this->int_prop("csr_base");
 
-    this->beat_in.assign(inputs.size(), std::vector<uint64_t>(this->beat_words));
+    this->beat_in.resize(inputs.size());
+    for (size_t i = 0; i < inputs.size(); i++)
+    {
+        this->beat_in[i].assign(this->in_words[i], 0);
+    }
     this->acc.assign(this->out_words, 0);
 
     // Sized once, before any port is registered: never resized after
@@ -289,9 +285,73 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     this->new_slave_port("ctrl", &this->ctrl_itf);
     this->new_master_port("busy", &this->busy_itf);
 
-    this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s%s, %d lanes of %d bits, %s, latency %d, ii %d\n",
-        snax_unit_op_names[this->op], this->is_fold ? " fold" : "", this->lanes,
-        this->data_width, wait.c_str(), latency, ii);
+    std::string types;
+    for (SnaxUnitType t : this->in_types)
+    {
+        types += (types.empty() ? "" : " x ") + snax_unit_type_name(t);
+    }
+    types += " -> " + snax_unit_type_name(this->out_type);
+    this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s%s, %d lanes, %s, %s, latency %d, ii %d\n",
+        snax_unit_op_names[this->op], this->is_fold ? " fold" : "", this->lanes, types.c_str(),
+        wait.c_str(), latency, ii);
+}
+
+
+// The ports' types, in_widths, in_signed, out_widths and out_signed, checked;
+// then each port's words. snax_cfg.py checks the same at load time first.
+void SnaxUnit::types_prop(size_t nb_inputs)
+{
+    std::vector<int> in_widths = this->ints_prop("in_widths");
+    std::vector<bool> in_signed = this->bools_prop("in_signed");
+    std::vector<int> out_widths = this->ints_prop("out_widths");
+    std::vector<bool> out_signed = this->bools_prop("out_signed");
+    for (auto [key, n, want, what] : {
+        std::make_tuple("in_widths", in_widths.size(), nb_inputs, "input"),
+        std::make_tuple("in_signed", in_signed.size(), nb_inputs, "input"),
+        std::make_tuple("out_widths", out_widths.size(), (size_t)1, "output"),
+        std::make_tuple("out_signed", out_signed.size(), (size_t)1, "output")})
+    {
+        if (n != want)
+        {
+            this->trace.fatal("Property %s: %ld values, one per %s (%ld)\n", key, n, what, want);
+        }
+    }
+
+    for (size_t i = 0; i <= nb_inputs; i++)
+    {
+        bool out = i == nb_inputs;
+        int width = out ? out_widths[0] : in_widths[i];
+        std::string key = std::string(out ? "out_widths[" : "in_widths[") +
+            std::to_string(out ? 0 : i) + "]";
+        if (width != 8 && width != 16 && width != 32 && width != 64)
+        {
+            this->trace.fatal("Property %s: %d, must be 8, 16, 32 or 64\n", key.c_str(), width);
+        }
+        // A fold's output is one word, whatever its width
+        if (!(out && this->is_fold) && this->lanes * width % 64 != 0)
+        {
+            this->trace.fatal("Property %s: lanes %d x %d bits is not a whole number of the "
+                "streamer's 64-bit channel words\n", key.c_str(), this->lanes, width);
+        }
+    }
+
+    this->in_types.clear();
+    this->in_words.clear();
+    for (size_t i = 0; i < nb_inputs; i++)
+    {
+        this->in_types.push_back({in_widths[i], in_signed[i]});
+        this->in_words.push_back(this->lanes * in_widths[i] / 64);
+    }
+    this->out_type = {out_widths[0], out_signed[0]};
+    this->out_words = this->is_fold ? 1 : this->lanes * out_widths[0] / 64;
+
+    SnaxUnitType t;
+    if (!this->is_fold && !snax_unit_result_type(this->in_types[0], this->in_types[1], &t))
+    {
+        this->trace.fatal("Property in_signed: %s with %s has no integer result type (NumPy "
+            "gives float64)\n", snax_unit_type_name(this->in_types[0]).c_str(),
+            snax_unit_type_name(this->in_types[1]).c_str());
+    }
 }
 
 
@@ -358,6 +418,46 @@ std::vector<std::string> SnaxUnit::names_prop(const char *name)
         names.push_back(elem->get_str());
     }
     return names;
+}
+
+
+std::vector<int> SnaxUnit::ints_prop(const char *name)
+{
+    js::Config *config = this->prop(name);
+    if (dynamic_cast<js::ConfigArray *>(config) == nullptr)
+    {
+        this->trace.fatal("Property %s: not a list of numbers\n", name);
+    }
+    std::vector<int> values;
+    for (js::Config *elem : config->get_elems())
+    {
+        if (dynamic_cast<js::ConfigNumber *>(elem) == nullptr)
+        {
+            this->trace.fatal("Property %s: not a list of numbers\n", name);
+        }
+        values.push_back(elem->get_int());
+    }
+    return values;
+}
+
+
+std::vector<bool> SnaxUnit::bools_prop(const char *name)
+{
+    js::Config *config = this->prop(name);
+    if (dynamic_cast<js::ConfigArray *>(config) == nullptr)
+    {
+        this->trace.fatal("Property %s: not a list of bools\n", name);
+    }
+    std::vector<bool> values;
+    for (js::Config *elem : config->get_elems())
+    {
+        if (dynamic_cast<js::ConfigBool *>(elem) == nullptr)
+        {
+            this->trace.fatal("Property %s: not a list of bools\n", name);
+        }
+        values.push_back(elem->get_bool());
+    }
+    return values;
 }
 
 
@@ -447,30 +547,21 @@ void SnaxUnit::move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words
 }
 
 
-// The op per lane on the beats taken: lane i is bits [i * w, (i + 1) * w)
+// The op per lane on the beats taken (snax_unit_elementwise)
 void SnaxUnit::compute(std::vector<uint64_t> &out)
 {
-    int w = this->data_width;
-    uint64_t mask = w == 64 ? ~(uint64_t)0 : ((uint64_t)1 << w) - 1;
-    out.assign(this->beat_words, 0);
-    for (int lane = 0; lane < this->lanes; lane++)
-    {
-        int word = lane * w / 64;
-        int shift = lane * w % 64;
-        uint64_t a = (this->beat_in[0][word] >> shift) & mask;
-        uint64_t b = (this->beat_in[1][word] >> shift) & mask;
-        out[word] |= snax_unit_compute(this->op, this->is_signed, w, a, b) << shift;
-    }
+    out.assign(this->out_words, 0);
+    snax_unit_elementwise(this->op, this->lanes, this->in_types[0], this->in_types[1],
+        this->out_type, this->beat_in[0].data(), this->beat_in[1].data(), out.data());
 }
 
 
 // A fold's firing: the beat taken, its lanes through the tree, starts the
-// output's value or is folded into it (64-bit elements, one per word)
+// output's value or is folded into it (snax_unit_fold)
 void SnaxUnit::fold(bool first)
 {
-    uint64_t x = snax_unit_tree(this->op, this->is_signed, 64, this->beat_in[0].data(),
-        this->lanes);
-    this->acc[0] = first ? x : snax_unit_compute(this->op, this->is_signed, 64, this->acc[0], x);
+    this->acc[0] = snax_unit_fold(this->op, this->lanes, this->in_types[0], this->out_type,
+        this->beat_in[0].data(), first, this->acc[0]);
 }
 
 
@@ -508,7 +599,7 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             for (size_t i = 0; i < _this->in_itf.size(); i++)
             {
                 _this->move(_this->in_itf[i], false, _this->beat_in[i].data(),
-                    _this->beat_words);
+                    _this->in_words[i]);
                 if (!traced)
                 {
                     continue;

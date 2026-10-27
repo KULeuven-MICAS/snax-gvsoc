@@ -6,9 +6,10 @@
 
 """SnaxUnit (snax_unit.cpp): a Chisel block's datapath, every number a property.
 
-The rule (lockstep, pipelined) and the op table are in snax_unit.hpp. The
-C++ checks every property and stops on a bad one, naming it; this class only
-passes them on, so a design point compiles nothing (D134 in snax-forge).
+The rule (lockstep, pipelined), the op table and NumPy's arithmetic on each
+port's type are in snax_unit.hpp. The C++ checks every property and stops on
+a bad one, naming it; this class only passes them on, so a design point
+compiles nothing (D134 in snax-forge).
 """
 
 import gvsoc.systree
@@ -29,14 +30,18 @@ class SnaxUnit(gvsoc.systree.Component):
         Output port names (one).
     lanes : int
         Elements per input beat.
-    data_width : int
-        Bits per element: 8, 16, 32 or 64, lanes * data_width a multiple of 64;
-        64 for a fold.
     op : int
         ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3, or 4, xor 5,
-        min 6, max 7.
-    signed : bool
-        Min and max compare as two's complement.
+        min 6, max 7; at NumPy's types (snax_unit.hpp): an elementwise op at
+        the inputs' result type, cast to the output's; a fold's lanes cast to
+        the output's type, the tree and acc at it.
+    in_widths, in_signed : list
+        Each input's element width (8, 16, 32 or 64; lanes * width a
+        multiple of 64) and signedness, in inputs' order.
+    out_widths, out_signed : list
+        The output's, one each; lanes * width a multiple of 64 unless a fold
+        (one word). snax_cfg.py expands a datapath block's data_width and
+        signed shorthand into the four lists; the unit takes the lists only.
     control : str
         counted: the unit counts its firings.
     config : list[str]
@@ -65,9 +70,10 @@ class SnaxUnit(gvsoc.systree.Component):
     SOURCES = ['snax_unit.cpp']
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, inputs: list,
-            outputs: list, lanes: int, data_width: int, op: int, signed: bool = False,
-            control: str = 'counted', wait: str = 'lockstep', latency: int = 0, ii: int = 1,
-            csr_base: int = 0, config: list = None):
+            outputs: list, lanes: int, op: int, in_widths: list, in_signed: list,
+            out_widths: list, out_signed: list, control: str = 'counted',
+            wait: str = 'lockstep', latency: int = 0, ii: int = 1, csr_base: int = 0,
+            config: list = None):
         super().__init__(parent, name)
 
         self.add_sources(self.SOURCES)
@@ -76,9 +82,11 @@ class SnaxUnit(gvsoc.systree.Component):
             'inputs': list(inputs),
             'outputs': list(outputs),
             'lanes': lanes,
-            'data_width': data_width,
+            'in_widths': list(in_widths),
+            'in_signed': list(in_signed),
+            'out_widths': list(out_widths),
+            'out_signed': list(out_signed),
             'op': op,
-            'signed': signed,
             'control': control,
             'config': list(config) if config is not None else ['count'],
             'wait': wait,
