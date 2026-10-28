@@ -5,10 +5,12 @@
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-Reads the cluster files of sw/cfg/ and forge/'s fixtures, then broken
-copies of sw/cfg/snax_forge/snax_forge.hjson, forge/vecadd/'s cluster
-(written as JSON into a temporary folder), and a cluster file with its
-slot's streamer and datapath in an accelerator file.
+Reads sw/cfg/snitch_cluster.hjson and forge/'s fixtures, then broken copies
+of forge/vecadd/'s cluster (its streamer file and accelerator.json inlined,
+written as JSON into a temporary folder), broken accelerator.json files
+beside it, and a hand-written two-group accelerator (dot 1, snax-forge C§17's
+table: groups mul and sum). snax_cluster's copy in sw/cfg/snax_forge/ is never
+read (snax-forge D126).
 """
 
 import copy
@@ -22,11 +24,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "snax"))
 import hjson  # noqa: E402
 import snax_cfg  # noqa: E402
+from snax_cfg import Accelerator, Csr, Group, Port, Unit  # noqa: E402
 
 CFG = ROOT / "sw" / "cfg"
 FORGE = ROOT / "forge"
-# forge/vecadd/'s cluster file, as sw/sync.py copies it from snax_cluster
-CLUSTER = CFG / "snax_forge" / "snax_forge.hjson"
+# forge/vecadd/'s cluster file, the snax_hjson target's default
+CLUSTER = FORGE / "vecadd" / "snax_forge.hjson"
 
 # The streamer of forge/vecadd/ and vecmul/
 STREAMER = {
@@ -45,63 +48,50 @@ STREAMER = {
 }
 
 
-def datapath(d, **changes):
-    """The Datapath of a datapath block d with changes; config [count] by default."""
-    return snax_cfg.Datapath(**{"config": ["count"], **d, **changes})
+def group_csrs(base: int, between: int = 0) -> list:
+    """A group's own CSRs from offset base, with between unit CSRs after JOBS."""
+    return [Csr("START", "rw", base, 32), Csr("JOBS", "rw", base + 1, 32),
+            Csr("STATUS", "ro", base + 2 + between), Csr("COUNTER", "ro", base + 3 + between)]
 
 
-# forge/vecadd/'s datapath block
-VECADD = {"unit": "SnaxUnit", "inputs": ["a", "b"], "outputs": ["out"], "lanes": 4,
-          "in_widths": [64, 64], "in_signed": [True, True], "out_widths": [64],
-          "out_signed": [True], "op": 0, "control": "counted", "wait": "lockstep", "latency": 0,
-          "ii": 1, "fields": ["loopCount"]}
-VECADD_DATAPATH = datapath(VECADD)
+def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
+    return Unit(name, brm or f"elementwise_{op}", "ElementwiseLanes",
+                {p: Port(p, dtype, 4) for p in ("a", "b", "out")}, dtype, {"op": op}, 0, 1, [])
+
+
+def fold(name: str, base: int, in_dtype: str = "int64", lanes: int = 1) -> Unit:
+    return Unit(name, "accumulate", "TreeAccumulate",
+                {"a": Port("in", in_dtype, lanes), "out": Port("out", "int64", 1)}, None, {},
+                1, 1, [Csr("JOB_BEATS", "rw", base + 2, 32)])
+
+
+def accelerator(design: str, unit: Unit, between: int = 0) -> Accelerator:
+    """A design's accelerator of one group of one unit, named acc, from forge/."""
+    ins = [k for k in unit.ports if k != "out"]
+    return Accelerator("acc", f"out/design/{design}/design_point.json", "snax_forge",
+                       [f"acc.{k}" for k in ins], ["acc.out"],
+                       [Group("acc", group_csrs(0, between), [unit], [])])
+
+
+# forge/vecadd/'s accelerator.json, parsed
+VECADD = accelerator("vecadd", elementwise("acc", "add"))
 
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
 
 
 def cluster():
-    """CLUSTER, parsed, with its slot's streamer and datapath files in place of their $refs,
-    so that a copy reads on its own."""
+    """CLUSTER, parsed, with its slot's streamer file and accelerator.json in place of their
+    $refs, so that a copy reads on its own."""
     d = hjson.loads(CLUSTER.read_text())
     slot = d["snax_forge_core_template"]["snax_acc_cfg"][0]
     for key in ("snax_streamer_cfg", "snax_datapath_cfg"):
-        slot[key] = hjson.loads((CLUSTER.parent / slot[key]["$ref"]).read_text())
-    return d
+        slot[key] = json.loads(json.dumps(hjson.loads((CLUSTER.parent / slot[key]["$ref"])
+                                                      .read_text())))
+    return json.loads(json.dumps(d))
 
 
 class SwCfg(unittest.TestCase):
-    """The cluster files of sw/cfg/."""
-
-    def check_cluster(self, cfg, name):
-        """forge/vecadd/'s cluster; returns the compute core's slot."""
-        self.assertEqual(cfg.name, name)
-        self.assertEqual(cfg.boot_addr, 0x1000)
-        self.assertEqual(cfg.base, 0x1000_0000)
-        self.assertEqual((cfg.tcdm.size, cfg.tcdm.banks, cfg.tcdm.bank_width),
-                         (128 * 1024, 32, 8))
-        self.assertEqual((cfg.periph_size, cfg.zero_mem_size), (64 * 1024, 64 * 1024))
-        self.assertEqual(cfg.dma, snax_cfg.Dma(512, 3, 3))
-        self.assertEqual(cfg.dram, snax_cfg.Dram(0x8000_0000, 0x8000_0000))
-        self.assertEqual(len(cfg.hives), 1)
-        compute, dma = cfg.cores
-        self.assertEqual((compute.isa, compute.xdma, compute.num_int_outstanding_loads),
-                         ("rv32ima", False, 1))
-        self.assertEqual((dma.isa, dma.xdma, dma.accelerators), ("rv32ima", True, []))
-        self.assertEqual(compute.misa, MISA_RV32IMA)
-        (slot,) = compute.accelerators
-        return slot
-
-    def test_forge(self):
-        cfg = snax_cfg.load(CLUSTER)
-        slot = self.check_cluster(cfg, "snax_forge_cluster")
-        self.assertTrue(cfg.tcdm.sparse_interconnect)
-        self.assertEqual(slot.name, "snax_forge")
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 2, 2))
-        self.assertEqual(slot.streamer, STREAMER)
-        self.assertEqual(slot.datapath, VECADD_DATAPATH)
-        self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
-                         (None, None, [[12, 1]]))
+    """snax_cluster's plain cluster in sw/cfg/."""
 
     def test_snitch(self):
         cfg = snax_cfg.load(CFG / "snitch_cluster.hjson")
@@ -115,7 +105,7 @@ class SwCfg(unittest.TestCase):
 
 class Fixtures(unittest.TestCase):
     """forge/'s cluster files: snax-forge's base cluster renamed snax_forge_cluster, its slot
-    snax_forge set for the design."""
+    snax_forge set for the design, its accelerator.json read."""
 
     def slot(self, design):
         cfg = snax_cfg.load(FORGE / design / "snax_forge.hjson")
@@ -125,20 +115,51 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(slot.name, "snax_forge")
         return slot
 
-    def test_vecadd_vecmul(self):
-        for design, op in (("vecadd", 0), ("vecmul", 2)):
-            slot = self.slot(design)
-            self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr),
-                             (12, [[12, 1]], 2))
-            self.assertEqual(slot.streamer, STREAMER)
-            self.assertEqual(slot.datapath, datapath(VECADD, op=op))
+    def test_vecadd_cluster(self):
+        """forge/vecadd/: the snax_hjson target's default."""
+        cfg = snax_cfg.load(CLUSTER)
+        self.assertEqual(cfg.boot_addr, 0x1000)
+        self.assertEqual(cfg.base, 0x1000_0000)
+        self.assertEqual((cfg.tcdm.size, cfg.tcdm.banks, cfg.tcdm.bank_width),
+                         (128 * 1024, 32, 8))
+        self.assertEqual((cfg.periph_size, cfg.zero_mem_size), (64 * 1024, 64 * 1024))
+        self.assertEqual(cfg.dma, snax_cfg.Dma(512, 3, 3))
+        self.assertEqual(cfg.dram, snax_cfg.Dram(0x8000_0000, 0x8000_0000))
+        compute, dma = cfg.cores
+        self.assertEqual((compute.isa, compute.xdma, compute.num_int_outstanding_loads),
+                         ("rv32ima", False, 1))
+        self.assertEqual((dma.isa, dma.xdma, dma.accelerators), ("rv32ima", True, []))
+        self.assertEqual(compute.misa, MISA_RV32IMA)
+        slot = self.slot("vecadd")
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 2, 2))
+        self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
+                         (None, None, [[12, 1]]))
+        self.assertEqual(slot.streamer, STREAMER)
+        self.assertEqual(slot.accelerator, VECADD)
 
-    def test_vsum(self):
-        slot = self.slot("vsum")
-        self.assertEqual((slot.tcdm_ports, slot.sparse_config, slot.num_rw_csr), (2, [[2, 1]], 3))
-        self.assertEqual(slot.datapath, datapath(
-            VECADD, inputs=["a"], in_widths=[64], in_signed=[True], lanes=1, wait="pipelined",
-            latency=1, config=["count", "rate"], fields=["loopCount", "len"]))
+    def test_vecmul(self):
+        slot = self.slot("vecmul")
+        self.assertEqual(slot.streamer, STREAMER)
+        self.assertEqual(slot.accelerator,
+                         accelerator("vecmul", elementwise("acc", "mul")))
+
+    def test_vsum_tree_i32(self):
+        """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
+        slot = self.slot("vsum_tree_i32")
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (3, 3, 2))
+        self.assertEqual(slot.accelerator,
+                         accelerator("vsum_tree_i32", fold("acc", 0, "int32", 4), between=1))
+        self.assertEqual([c.name for c in slot.accelerator.csrs],
+                         ["START", "JOBS", "JOB_BEATS", "STATUS", "COUNTER"])
+        self.assertEqual(slot.accelerator.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
+
+    def test_every_fixture_reads(self):
+        for folder in sorted(p for p in FORGE.iterdir() if p.is_dir()):
+            with self.subTest(folder.name):
+                slot = self.slot(folder.name)
+                self.assertEqual(slot.accelerator.design_point,
+                                 f"out/design/{folder.name}/design_point.json")
+                self.assertEqual(slot.num_ro_csr, 2)
 
 
 class Misa(unittest.TestCase):
@@ -259,222 +280,245 @@ class Broken(unittest.TestCase):
                    "not modelled")
 
 
-class AccFile(unittest.TestCase):
-    """A slot's streamer and datapath in an accelerator file next to the cluster file."""
+def acc_json(acc: Accelerator) -> dict:
+    """An Accelerator as accelerator.json writes it (snax-forge's gen/accelerator.py)."""
+    def csr(c):
+        d = {"name": c.name, "access": c.access, "offset": c.offset}
+        if c.width is not None:
+            d["width"] = c.width
+        return d
 
-    DATAPATH = VECADD
-    # int32 + uint32 (int64) into uint32, 8 lanes: four words per port, as STREAMER's
-    TYPES = {"in_widths": [32, 32], "in_signed": [True, False], "out_widths": [32],
-             "out_signed": [False]}
+    def unit(u):
+        d = {"name": u.name, "brm": u.brm, "datapath": u.datapath,
+             "ports": {k: {"port": p.port, "dtype": p.dtype, "lanes": p.lanes}
+                       for k, p in u.ports.items()}}
+        if u.op_type is not None:
+            d["opType"] = u.op_type
+        d.update({"params": dict(u.params), "timing": {"latency": u.latency, "ii": u.ii},
+                  "csrs": [csr(c) for c in u.csrs]})
+        return d
+
+    return {"name": acc.name, "design_point": acc.design_point, "tag": acc.tag,
+            "inputs": list(acc.inputs), "outputs": list(acc.outputs),
+            "groups": [{"name": g.name, "csrs": [csr(c) for c in g.csrs],
+                        "units": [unit(u) for u in g.units], "links": list(g.links)}
+                       for g in acc.groups]}
+
+
+# dot 1 (snax-forge C§17's table): accelerator dot, group mul (an ElementwiseLanes unit:
+# START 0, JOBS 1, STATUS 2, COUNTER 3) and group sum (a TreeAccumulate unit: START 4,
+# JOBS 5, JOB_BEATS 6, STATUS 7, COUNTER 8); readers mul.a, mul.b, sum.a, writers mul.out,
+# sum.out
+DOT = Accelerator(
+    "dot", "out/design/dot/design_point.json", "snax_forge",
+    ["mul.a", "mul.b", "sum.a"], ["mul.out", "sum.out"],
+    [Group("mul", group_csrs(0), [elementwise("mul", "mul")], []),
+     Group("sum", group_csrs(4, 1), [fold("sum", 4, lanes=4)], [])])
+DOT_STREAMER = {
+    "data_reader_params": {"spatial_bounds": [[4], [4], [4]], "temporal_dim": [1, 1, 1],
+                           "num_channel": [4, 4, 4], "fifo_depth": [8, 8, 8]},
+    "data_writer_params": {"spatial_bounds": [[4], [1]], "temporal_dim": [1, 1],
+                           "num_channel": [4, 1], "fifo_depth": [8, 8]},
+}
+
+
+def write_design(folder: Path, acc: dict, streamer: dict, rw: int, ro: int) -> Path:
+    """forge/vecadd/'s cluster file in folder with its slot set for streamer and acc (the
+    streamer file and accelerator.json beside it, as snax-forge writes them); its path."""
+    d = hjson.loads(CLUSTER.read_text())
+    slot = d["snax_forge_core_template"]["snax_acc_cfg"][0]
+    ports = snax_cfg.streamer_channels(streamer)
+    slot.update(snax_tcdm_ports=ports, sparse_interconnect_config=[[ports, 1]],
+                snax_num_rw_csr=rw, snax_num_ro_csr=ro,
+                snax_streamer_cfg={"$ref": "snax_forge_streamer.hjson"},
+                snax_datapath_cfg={"$ref": "accelerator.json"})
+    (folder / "snax_forge_streamer.hjson").write_text(json.dumps(streamer))
+    (folder / "accelerator.json").write_text(json.dumps(acc))
+    path = folder / "snax_forge.hjson"
+    path.write_text(json.dumps(d))
+    return path
+
+
+def dot_cluster(folder: Path) -> Path:
+    """The two-group dot 1 design in folder (DOT, DOT_STREAMER); its cluster file."""
+    return write_design(folder, acc_json(DOT), DOT_STREAMER, 5, 4)
+
+
+class AccJson(unittest.TestCase):
+    """accelerator.json beside the cluster file: what it holds, and each thing wrong in it a
+    named error at its key."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        self.cluster = cluster()
-        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
-        slot["snax_streamer_cfg"] = {"$ref": "acc/acc.hjson#/snax_streamer_cfg"}
-        slot["snax_datapath_cfg"] = {"$ref": "acc/acc.hjson#/datapath"}
-        # The accelerator file's own ref resolves in that file
-        self.acc = {"template": copy.deepcopy(STREAMER),
-                    "snax_streamer_cfg": {"$ref": "#/template"},
-                    "datapath": copy.deepcopy(self.DATAPATH)}
+        self.acc = acc_json(VECADD)
+        self.streamer = copy.deepcopy(STREAMER)
+        self.rw, self.ro = 2, 2
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def load(self):
-        (self.dir / "acc").mkdir(exist_ok=True)
-        (self.dir / "acc" / "acc.hjson").write_text(json.dumps(self.acc))
-        (self.dir / "cluster.hjson").write_text(json.dumps(self.cluster))
-        return snax_cfg.load(self.dir / "cluster.hjson")
-
-    def test_resolved(self):
-        (slot,) = self.load().cores[0].accelerators
-        self.assertEqual(slot.streamer, STREAMER)
-        self.assertEqual(slot.datapath, datapath(self.DATAPATH))
+        path = write_design(self.dir, self.acc, self.streamer, self.rw, self.ro)
+        (slot,) = snax_cfg.load(path).cores[0].accelerators
+        return slot
 
     def fails(self, error, path_part, why_part=""):
         with self.assertRaises(error) as ctx:
             self.load()
         self.assertIn(path_part, ctx.exception.path)
         self.assertIn(why_part, ctx.exception.why)
+        return ctx.exception
 
-    def test_datapath_ports(self):
-        self.acc["datapath"].update(inputs=["a"], in_widths=[64], in_signed=[True])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "2 data_reader_params")
-        self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
-        self.acc["datapath"].update(outputs=["out", "out2"], out_widths=[64, 64],
-                                    out_signed=[True, True])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs", "1 data_writer_params")
+    def unit(self, group=0):
+        return self.acc["groups"][group]["units"][0]
 
-    def test_datapath_keys(self):
-        del self.acc["datapath"]["wait"]
-        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.wait", "missing")
-        self.acc["datapath"]["wait"] = "lockstep"
-        self.acc["datapath"]["lanes"] = "4"
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.lanes", "an integer")
-        self.acc["datapath"]["lanes"] = 4
-        self.acc["datapath"]["fields"] = ["loopCount", 3]
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.fields", "list of strings")
+    def test_resolved(self):
+        self.assertEqual(self.load().accelerator, VECADD)
+        self.assertEqual(acc_json(VECADD), json.loads((FORGE / "vecadd" / "accelerator.json")
+                                                      .read_text()))
 
-    def typed(self, **types):
-        """DATAPATH with 8 lanes and TYPES (changed by types), as the accelerator file's
-        datapath block."""
-        d = copy.deepcopy(self.DATAPATH)
-        d.update({"lanes": 8, **self.TYPES, **types})
-        self.acc["datapath"] = d
-        return d
+    def test_the_old_datapath_block_is_refused(self):
+        for key in ("unit", "control", "config", "wait", "fields"):
+            self.acc = acc_json(VECADD)
+            self.acc[key] = "x"
+            self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
+                       "accelerator.json replaced")
 
-    def test_type_lists(self):
-        d = self.typed()
-        (slot,) = self.load().cores[0].accelerators
-        self.assertEqual(slot.datapath, datapath(d))
-        self.assertEqual((slot.datapath.in_widths, slot.datapath.in_signed,
-                          slot.datapath.out_widths, slot.datapath.out_signed),
-                         ([32, 32], [True, False], [32], [False]))
+    def test_offsets_contiguous(self):
+        self.acc["groups"][0]["csrs"][2]["offset"] = 3
+        self.acc["groups"][0]["csrs"][3]["offset"] = 4
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.groups",
+                   "STATUS has offset 3, but is CSR 2 in CSR order")
 
-    def test_type_lists_partial(self):
-        del self.typed()["out_signed"]
-        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.out_signed",
-                   "missing: in_widths, in_signed, out_widths, out_signed give each port its type")
-        self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
-        del self.acc["datapath"]["in_signed"]
-        self.fails(snax_cfg.CfgKeyError, "snax_datapath_cfg.in_signed", "missing")
+    def test_group_csrs_in_order(self):
+        csrs = self.acc["groups"][0]["csrs"]
+        csrs[0], csrs[1] = csrs[1], csrs[0]
+        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, COUNTER")
+        self.acc = acc_json(VECADD)
+        del self.acc["groups"][0]["csrs"][3]
+        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, COUNTER")
 
-    def test_type_shorthand_refused(self):
-        """data_width and signed, the shorthand the four lists replaced, with or without them."""
-        for key, value in (("data_width", 64), ("signed", True)):
-            for lists in (True, False):
-                self.acc["datapath"] = copy.deepcopy(self.DATAPATH)
-                if not lists:
-                    for k in snax_cfg.TYPE_KEYS:
-                        del self.acc["datapath"][k]
-                self.acc["datapath"][key] = value
-                self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
-                           "replaced by in_widths, in_signed, out_widths and out_signed")
+    def test_csr_fields(self):
+        del self.acc["groups"][0]["csrs"][1]["width"]
+        self.fails(snax_cfg.CfgKeyError, "groups[0].csrs[1].width", "a read-write CSR has a width")
+        self.acc = acc_json(VECADD)
+        self.acc["groups"][0]["csrs"][2]["width"] = 32
+        self.fails(snax_cfg.CfgTypeError, "groups[0].csrs[2].width", "a read-only CSR has no width")
+        self.acc = acc_json(VECADD)
+        self.acc["groups"][0]["csrs"][0]["access"] = "wo"
+        self.fails(snax_cfg.CfgTypeError, "groups[0].csrs[0].access", "rw or ro")
 
-    def test_type_widths(self):
-        self.typed(in_widths=[32, 12])
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_widths[1]", "12, must be 8, 16")
-        self.typed(out_widths=[128])
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.out_widths[0]", "128, must be")
-        self.typed(in_widths=[32, True])
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_widths", "list of integers")
-        self.typed(out_signed=[1])
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.out_signed", "list of booleans")
+    def test_csr_counts(self):
+        self.rw = 3
+        self.fails(snax_cfg.CfgSlotError, "snax_num_rw_csr", "accelerator.json has 2 read-write")
+        self.rw, self.ro = 2, 1
+        self.fails(snax_cfg.CfgSlotError, "snax_num_ro_csr", "2 read-only")
 
-    def test_type_list_lengths(self):
-        self.typed(in_signed=[True])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_signed", "1 values, one per input")
-        self.typed(out_widths=[32, 32])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.out_widths",
-                   "2 values, one per output")
+    def test_datapath(self):
+        self.unit()["datapath"] = "Gemm"
+        self.fails(snax_cfg.CfgTargetError, "units[0].datapath", "not a datapath SnaxUnit models")
 
-    def test_type_int64_uint64(self):
-        self.typed(lanes=4, in_widths=[64, 64], in_signed=[True, False], out_widths=[64])
-        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.in_signed",
+    def test_links_and_units(self):
+        self.acc["groups"][0]["links"] = [{"name": "l"}]
+        self.fails(snax_cfg.CfgTargetError, "groups[0].links", "not modelled yet")
+        self.acc = acc_json(VECADD)
+        self.acc["groups"][0]["units"].append(copy.deepcopy(self.unit()))
+        self.fails(snax_cfg.CfgTargetError, "groups[0].units", "2 units")
+
+    def test_ports_name_the_movers(self):
+        self.acc["inputs"] = ["acc.a"]
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "neither inputs nor outputs")
+        self.acc["inputs"] = ["acc.a", "acc.c"]
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs[1]", "names no port")
+        self.acc["inputs"] = ["acc.a", "acc.a"]
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs[1]", "twice")
+        self.acc = acc_json(VECADD)
+        self.streamer["data_reader_params"] = {k: v[:1] for k, v in
+                                               STREAMER["data_reader_params"].items()}
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "1 data_reader_params")
+
+    def test_words_per_beat(self):
+        """int32 a at 4 lanes is 2 words: its reader must have num_channel 2."""
+        self.unit()["ports"]["a"]["dtype"] = "int32"
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs[0]",
+                   "acc.a: lanes 4 x 32 bits is 2 64-bit words per beat, but data_reader_params[0] "
+                   "has num_channel 4")
+        self.streamer["data_reader_params"]["num_channel"][0] = 2
+        self.streamer["data_reader_params"]["spatial_bounds"][0] = [2]
+        self.load()  # int32 with int64: int64, as opType says
+        self.unit()["ports"]["a"]["lanes"] = 3
+        self.fails(snax_cfg.CfgTargetError, "snax_datapath_cfg.inputs", "one lane count")
+
+    def test_op_type(self):
+        self.unit()["opType"] = "int32"
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.groups",
+                   "opType int32, but its inputs' result type is int64")
+        del self.unit()["opType"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].opType", "missing")
+        self.acc = acc_json(VECADD)
+        self.unit()["ports"]["b"]["dtype"] = "uint64"
+        self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.groups",
                    "int64 with uint64 has no integer result type")
 
-    def channels(self, readers, writers):
-        """The streamer with these num_channel per reader and writer, each its one spatial
-        bound, and the slot's ports to match."""
-        template = self.acc["template"]
-        for params, channels in (("data_reader_params", readers),
-                                 ("data_writer_params", writers)):
-            n = len(channels)
-            template[params] = {"spatial_bounds": [[c] for c in channels],
-                                "temporal_dim": [1] * n, "num_channel": list(channels),
-                                "fifo_depth": [8] * n}
-        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
-        slot["snax_tcdm_ports"] = sum(readers) + sum(writers)
-        slot["sparse_interconnect_config"] = [[slot["snax_tcdm_ports"], 1]]
+    def test_dtype_and_op(self):
+        self.unit()["ports"]["out"]["dtype"] = "float64"
+        self.fails(snax_cfg.CfgTypeError, "units[0].ports.out.dtype", "not a NumPy integer type")
+        self.acc = acc_json(VECADD)
+        self.unit()["params"]["op"] = "nand"
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.op", "not an op")
+        del self.unit()["params"]["op"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.op", "needs an op")
 
-    def test_spatial_product(self):
-        """snax_cluster's StreamerParam: the spatial bounds' product is num_channel."""
-        self.acc["template"]["data_reader_params"]["spatial_bounds"] = [[2], [4]]
-        self.fails(snax_cfg.CfgSlotError,
-                   "snax_streamer_cfg.data_reader_params.spatial_bounds[0]",
-                   "[2] unroll 2 channels, but num_channel is 4: snax_cluster's StreamerParam")
+    def test_unit_csrs(self):
+        """ElementwiseLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
+        modelled."""
+        self.unit()["csrs"] = [{"name": "JOB_BEATS", "access": "rw", "offset": 2, "width": 32}]
+        self.acc["groups"][0]["csrs"][2]["offset"] = 3
+        self.acc["groups"][0]["csrs"][3]["offset"] = 4
+        self.rw, self.ro = 3, 2
+        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "an ElementwiseLanes unit none")
+        self.unit()["csrs"][0]["name"] = "SCALE"
+        self.fails(snax_cfg.CfgTargetError, "units[0].csrs[0]", "SCALE (rw)")
 
-    def test_words_per_input(self):
-        """int32 x int64 into int64 at 4 lanes: a takes 2 words, b and out 4."""
-        self.typed(lanes=4, in_widths=[32, 64], in_signed=[True, True], out_widths=[64],
-                   out_signed=[True])
-        self.channels([2, 4], [4])
-        (slot,) = self.load().cores[0].accelerators
-        self.assertEqual((slot.tcdm_ports, slot.datapath.in_widths), (10, [32, 64]))
-        self.channels([4, 4], [4])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_widths[0]",
-                   "lanes 4 x 32 bits is 2 64-bit words per beat, but data_reader_params[0] "
-                   "has num_channel 4")
-        self.channels([2, 4], [2])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.out_widths[0]",
-                   "is 4 64-bit words per beat, but data_writer_params[0] has num_channel 2")
-
-    def test_words_lanes(self):
-        self.acc["datapath"]["lanes"] = 2
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.in_widths[0]",
-                   "lanes 2 x 64 bits is 2 64-bit words per beat")
-
-    def test_words_fold(self):
-        """A fold's output is one word, whatever its width."""
-        self.typed(inputs=["a"], lanes=8, in_widths=[32], in_signed=[True], out_widths=[64],
-                   out_signed=[True])
-        self.channels([4], [1])
-        (slot,) = self.load().cores[0].accelerators
-        self.assertEqual(slot.datapath.out_widths, [64])
-        self.channels([4], [2])
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs",
+    def test_fold(self):
+        """vsum_tree_i32's accelerator: a fold's output one word, whatever its lanes' type."""
+        self.acc = acc_json(accelerator("vsum_tree_i32", fold("acc", 0, "int32", 4), between=1))
+        self.streamer = {
+            "data_reader_params": {"spatial_bounds": [[2]], "temporal_dim": [1],
+                                   "num_channel": [2], "fifo_depth": [8]},
+            "data_writer_params": {"spatial_bounds": [[2]], "temporal_dim": [1],
+                                   "num_channel": [2], "fifo_depth": [8]}}
+        self.rw = 3
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.outputs[0]",
                    "a fold's output is one 64-bit word per beat, but data_writer_params[0] has "
                    "num_channel 2")
+        self.streamer["data_writer_params"].update(spatial_bounds=[[1]], num_channel=[1])
+        self.assertEqual(self.load().accelerator.groups[0].units[0].ports["a"].lanes, 4)
+        self.unit()["opType"] = "int64"
+        self.fails(snax_cfg.CfgTypeError, "units[0].opType", "a TreeAccumulate unit has none")
+        del self.unit()["opType"]
+        self.unit()["csrs"] = []
+        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "a TreeAccumulate unit has JOB_BEATS")
 
-    def test_rw_csrs(self):
-        self.acc["datapath"]["fields"] = ["loopCount", "len"]
-        with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
-            self.load()
-        self.assertIn("snax_num_rw_csr", ctx.exception.path)
-        self.assertIn("2 shell fields", ctx.exception.why)
 
-    def test_ro_csrs(self):
-        self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]["snax_num_ro_csr"] = 3
-        with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
-            self.load()
-        self.assertIn("snax_num_ro_csr", ctx.exception.path)
+class TwoGroups(unittest.TestCase):
+    """dot 1 as one accelerator of two groups (snax-forge D148, C§17's table)."""
 
-    def test_channels(self):
-        self.acc["template"]["data_writer_params"]["num_channel"] = [2]
-        self.acc["template"]["data_writer_params"]["spatial_bounds"] = [[2]]
-        with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
-            self.load()
-        self.assertIn("10 channels", ctx.exception.why)
-
-    def test_whole_files(self):
-        """snax-forge's writer: the streamer file and the accelerator file, each the whole
-        file, with or without a trailing #."""
-        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
-        slot["snax_streamer_cfg"] = {"$ref": "acc/streamer.hjson"}
-        slot["snax_datapath_cfg"] = {"$ref": "acc/acc.hjson#"}
-        (self.dir / "acc").mkdir(exist_ok=True)
-        (self.dir / "acc" / "streamer.hjson").write_text(json.dumps(STREAMER))
-        self.acc = self.DATAPATH
-        (slot_cfg,) = self.load().cores[0].accelerators
-        self.assertEqual(slot_cfg.streamer, STREAMER)
-        self.assertEqual(slot_cfg.datapath, datapath(self.DATAPATH))
-
-    def test_bad_whole_file_refs(self):
-        slot = self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]
-        for ref, why in (("acc/none.hjson", "no file"), ("#", "is not"), ("", "is not")):
-            slot["snax_datapath_cfg"] = {"$ref": ref}
-            with self.assertRaises(snax_cfg.CfgRefError) as ctx:
-                self.load()
-            self.assertIn(why, ctx.exception.why)
-
-    def test_bad_pointer(self):
-        self.cluster["snax_forge_core_template"]["snax_acc_cfg"][0]["snax_datapath_cfg"] = \
-            {"$ref": "acc/acc.hjson#/no_datapath"}
-        with self.assertRaises(snax_cfg.CfgRefError) as ctx:
-            self.load()
-        self.assertIn("acc.hjson", ctx.exception.why)
+    def test_dot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (slot,) = snax_cfg.load(dot_cluster(Path(tmp))).cores[0].accelerators
+        acc = slot.accelerator
+        self.assertEqual(acc, DOT)
+        self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports), (5, 4, 17))
+        self.assertEqual([(c.name, c.offset) for c in acc.csrs],
+                         [("START", 0), ("JOBS", 1), ("STATUS", 2), ("COUNTER", 3),
+                          ("START", 4), ("JOBS", 5), ("JOB_BEATS", 6), ("STATUS", 7),
+                          ("COUNTER", 8)])
+        self.assertEqual([g.rw for g in acc.groups], [["START", "JOBS"],
+                                                      ["START", "JOBS", "JOB_BEATS"]])
+        self.assertEqual(acc.ports_of("sum", acc.inputs), [(2, "a")])
+        self.assertEqual(acc.ports_of("sum", acc.outputs), [(1, "out")])
 
 
 if __name__ == "__main__":

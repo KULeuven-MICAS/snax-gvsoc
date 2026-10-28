@@ -1,23 +1,19 @@
-# A start while the unit is busy is held, then sent and answered in E + 1.
+# A start while the unit is busy is held, then accepted and answered in E + 1.
 # c1's start is accepted (the unit idle), busy from c2. The inputs are valid
 # from c5, so the run of 2 fires in c5 and c6: E = 6. The start offered in c2
-# finds the unit busy: held (`.` lines) through c7 = E + 1, when it is sent
-# and answered; its run is busy from c8, fires in c8 and c9 (E = 9), idle in
-# c10.
-fields loopCount
-config count
-wait lockstep
-inputs 2
+# finds the unit busy: held (`.` lines) through c7 = E + 1, when it is
+# accepted and answered (STATUS 2 in c7: done, cleared from c8); its run is
+# busy from c8, fires in c8 and c9 (E = 9), done in c10.
 cycles
-# a b out  access   result  busy
-0 0 1      w 0 2    0       0     # 0: loopCount 2
-0 0 1      w 1 1    1       0     # 1: start accepted; busy from 2
-0 0 1      w 1 1    7       1     # 2: busy: held until E + 1 = 7
+# a b out  access   result  status
+0 0 1      w 1 2    0       0     # 0: JOBS 2
+0 0 1      w 0 1    1       0     # 1: start accepted; busy from 2
+0 0 1      w 0 1    7       1     # 2: busy: held until E + 1 = 7
 0 0 1      .        -       1     # 3: no input
 0 0 1      .        -       1     # 4
 1 1 1      .        -       1     # 5: fires
 1 1 1      .        -       1     # 6: fires, E
-1 1 1      .        -       0     # 7: E + 1: sent, answered; busy from 8
+1 1 1      .        -       2     # 7: E + 1: done; accepted, answered; busy from 8
 1 1 1      r 2      1       1     # 8: fires
 1 1 1      r 2      1       1     # 9: fires, E of the second run
-1 1 1      r 2      0       0     # 10: idle
+1 1 1      r 2      2       2     # 10: idle, done

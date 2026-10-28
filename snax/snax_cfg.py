@@ -10,11 +10,11 @@
 
 The hjson is the contract: snax_cluster's clustergen and snaxgen read the
 same file. A design is three files: the cluster file, named after its base
-platform (snax_forge.hjson), the streamer file and the accelerator file, named
-after its slot (snax_forge_streamer.hjson, the streamer template, and
-snax_forge_acc.hjson, the datapath block). The cluster's snax_acc_cfg entry
-(the slot) keeps the slot keys; its snax_streamer_cfg and snax_datapath_cfg
-are $refs to the other two, each the whole file.
+platform (snax_forge.hjson), the streamer file, named after its slot
+(snax_forge_streamer.hjson, the streamer template), and accelerator.json,
+the accelerator's one description (snax-forge C§17, D145). The cluster's
+snax_acc_cfg entry (the slot) keeps the slot keys; its snax_streamer_cfg and
+snax_datapath_cfg are $refs to the other two, each the whole file.
 
 $ref: {$ref: "#/a/b"} is the value at /a/b of the file it is in;
 {$ref: "other.hjson#/a/b"} the value at /a/b of other.hjson, a path relative
@@ -44,40 +44,50 @@ What is read, and how a target uses it:
 A slot (AccSlot): snax_acc_name, snax_tcdm_ports, snax_narrow_tcdm_ports and
 snax_wide_tcdm_ports or sparse_interconnect_config, snax_num_rw_csr,
 snax_num_ro_csr, snax_streamer_cfg (the streamer template, as the hjson has
-it) and snax_datapath_cfg (the datapath block, optional; Datapath).
+it) and snax_datapath_cfg (accelerator.json, optional; Accelerator).
 
-The datapath block: what the standard composite (snax_unit_acc.py) builds
-the slot's unit and shell from, SnaxUnit's arguments by name:
+accelerator.json (snax-forge C§17), what the standard composite
+(snax_unit_acc.py) builds the slot's shells and units from:
 
-    unit           the unit kind: SnaxUnit
-    inputs         the unit's input ports in order, one per streamer reader
-    outputs        its output ports in order, one per streamer writer
-    lanes, op, control, wait, latency, ii
-    in_widths, in_signed, out_widths, out_signed
-                   each port's element type: its width (8, 16, 32 or 64)
-                   and signedness, one per input and one per output; all
-                   four required. data_width and signed, the shorthand
-                   they replaced, are refused at their key
-    config         the role of each configuration word (optional; [count])
-    fields         the shell's configuration CSRs in order; start follows
+    name, design_point, tag   Accelerator.name (the header's <ACC>), ...
+    inputs, outputs           the outer ports, "<unit>.<port>", in the
+                              streamer's reader and writer order
+    groups[]                  Group: name, csrs (START, JOBS, STATUS,
+                              COUNTER), units, links ([]: links come with
+                              snax-forge's B3)
+    groups[].units[]          Unit: name, brm, datapath (ElementwiseLanes or
+                              TreeAccumulate), ports (per BRM port: port, the
+                              datapath's; dtype, NumPy's name; lanes), opType
+                              (ElementwiseLanes only), params (op), timing
+                              (latency, ii), csrs (its R/W ones: JOB_BEATS, a
+                              TreeAccumulate's)
+    a CSR                     Csr: name, access (rw, ro), offset (from the
+                              accelerator's first CSR), width (rw only), pin
 
-An elementwise datapath's inputs need an integer result type (NumPy's
-result_type): a signed type with uint64 has none (NumPy gives float64).
+Per group the CSRs in CSR order are START, JOBS, its units' R/W CSRs, STATUS,
+COUNTER, and the offsets over all groups in that order are contiguous from 0:
+they are read, never computed (a group's window starts at its START).
 
 The slot's counts must agree with what its refs give: each mover's
 spatial_bounds multiply to its num_channel (snax_cluster's StreamerParam);
 snax_tcdm_ports is the streamer's num_channel summed over its movers, and the
-narrow and wide ports or the sparse config's widths add up to it; with a
-datapath block, each input's words per beat (lanes * its width / 64) are its
-reader's num_channel and the output's (the same, or 1 for a fold) its
-writer's, since SnaxUnit has no FIFO slicer; snax_num_rw_csr is the shell's
-fields plus start, and snax_num_ro_csr 2 (busy and the counter).
+narrow and wide ports or the sparse config's widths add up to it; with
+accelerator.json, inputs and outputs are the streamer's readers and writers
+in number, each naming a port of a unit once; each port's words per beat
+(lanes * its dtype's bits / 64) are its mover's num_channel (a fold's
+one-lane output: 1), since SnaxUnit has no FIFO slicer; snax_num_rw_csr and
+snax_num_ro_csr are the file's R/W and R/O CSRs. An ElementwiseLanes unit's
+opType is its inputs' NumPy result type (snax_unit.hpp's
+snax_unit_result_type: a signed type with uint64 has none).
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
 resolve), CfgKeyError (a key missing), CfgTypeError (a value of the wrong
-type), CfgSlotError (slot counts that disagree with the accelerator file);
-a target refuses what it cannot model with CfgTargetError.
+type), CfgSlotError (slot counts or CSRs that disagree with the files); a
+target refuses what it cannot model with CfgTargetError (a datapath other
+than the two, links, a unit CSR other than a fold's JOB_BEATS, a group of
+more than one unit). The datapath block before accelerator.json
+(<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key.
 """
 
 import math
@@ -126,14 +136,18 @@ class CfgTargetError(SnaxCfgError):
 # refused
 MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
-# The read-only CSRs of a shell: busy and the counter
-SHELL_RO_CSRS = 2
-# A datapath port's element widths
-ELEMENT_WIDTHS = (8, 16, 32, 64)
-# A datapath port's type lists, all four required
-TYPE_KEYS = ('in_widths', 'in_signed', 'out_widths', 'out_signed')
-# The shorthand the four lists replaced: refused at its key
-REPLACED_KEYS = ('data_width', 'signed')
+# The datapaths SnaxUnit models (snax-forge's catalogue, D147)
+DATAPATHS = ('ElementwiseLanes', 'TreeAccumulate')
+# A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
+# read-only, last (C§17)
+GROUP_RW = ('START', 'JOBS')
+GROUP_RO = ('STATUS', 'COUNTER')
+# The unit CSRs modelled: a fold's JOB_BEATS
+UNIT_RW = ('JOB_BEATS',)
+# The op names (snax_unit.hpp's snax_unit_op_names)
+OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
+# The keys of the datapath block accelerator.json replaced: refused at their key
+OLD_DATAPATH_KEYS = ('unit', 'control', 'config', 'wait', 'fields')
 
 
 # =============================================================================
@@ -278,30 +292,114 @@ class Dram:
 
 
 @dataclass(frozen=True)
-class Datapath:
-    """A slot's datapath block; see the module doc."""
+class Csr:
+    """A CSR of accelerator.json: its offset from the accelerator's first CSR, its width
+    (rw only) and a scalar's datapath pin (None)."""
 
-    unit: str
-    inputs: list
-    outputs: list
+    name: str
+    access: str
+    offset: int
+    width: int = None
+    pin: str = None
+
+
+@dataclass(frozen=True)
+class Port:
+    """A unit's BRM port: the datapath's port, its dtype (NumPy's name) and its lanes."""
+
+    port: str
+    dtype: str
     lanes: int
-    in_widths: list
-    in_signed: list
-    out_widths: list
-    out_signed: list
-    op: int
-    control: str
-    wait: str
+
+    @property
+    def width(self) -> int:
+        return DTYPES[self.dtype][0]
+
+    @property
+    def signed(self) -> bool:
+        return DTYPES[self.dtype][1]
+
+
+@dataclass(frozen=True)
+class Unit:
+    """A unit of a group: its datapath, its ports by BRM port (in the BRM's order), its op
+    type (ElementwiseLanes; None for a fold), params, timing and its R/W CSRs."""
+
+    name: str
+    brm: str
+    datapath: str
+    ports: dict
+    op_type: str
+    params: dict
     latency: int
     ii: int
-    config: list
-    fields: list
+    csrs: list
+
+    @property
+    def op(self) -> str:
+        """The op its lanes compute: params.op, add for a fold."""
+        return self.params.get('op', 'add')
+
+
+@dataclass(frozen=True)
+class Group:
+    """A group: its own CSRs (START, JOBS, STATUS, COUNTER), its units and links."""
+
+    name: str
+    csrs: list
+    units: list
+    links: list
+
+    @property
+    def window(self) -> list:
+        """Its CSRs in CSR order: START, JOBS, its units' R/W CSRs, STATUS, COUNTER."""
+        own = {c.name: c for c in self.csrs}
+        return ([own[n] for n in GROUP_RW] + [c for u in self.units for c in u.csrs]
+                + [own[n] for n in GROUP_RO])
+
+    @property
+    def rw(self) -> list:
+        """Its read-write CSRs' names in CSR order: START, JOBS, the units'."""
+        return [c.name for c in self.window if c.access == 'rw']
+
+
+@dataclass(frozen=True)
+class Accelerator:
+    """accelerator.json; see the module doc."""
+
+    name: str
+    design_point: str
+    tag: str
+    inputs: list
+    outputs: list
+    groups: list
+
+    @property
+    def csrs(self) -> list:
+        """Every CSR in CSR order."""
+        return [c for g in self.groups for c in g.window]
+
+    @property
+    def num_rw(self) -> int:
+        return sum(c.access == 'rw' for c in self.csrs)
+
+    @property
+    def num_ro(self) -> int:
+        return sum(c.access == 'ro' for c in self.csrs)
+
+    def unit(self, name: str) -> Unit:
+        return next(u for g in self.groups for u in g.units if u.name == name)
+
+    def ports_of(self, unit: str, outer: list) -> list:
+        """The (index, BRM port) of each of outer's entries ("<unit>.<port>") that name unit."""
+        return [(i, entry.split('.', 1)[1]) for i, entry in enumerate(outer)
+                if entry.split('.', 1)[0] == unit]
 
 
 @dataclass(frozen=True)
 class AccSlot:
     """One snax_acc_cfg entry of a core: the slot's keys, the streamer template as the hjson
-    has it, and the datapath block when the slot has one (None otherwise)."""
+    has it, and its accelerator.json when the slot has one (None otherwise)."""
 
     name: str
     tcdm_ports: int
@@ -311,7 +409,7 @@ class AccSlot:
     num_rw_csr: int
     num_ro_csr: int
     streamer: dict
-    datapath: Datapath
+    accelerator: Accelerator
     at: str
 
 
@@ -397,6 +495,10 @@ def type_name(width: int, signed: bool) -> str:
     return f'{"int" if signed else "uint"}{width}'
 
 
+# NumPy's integer type names -> (width, signed)
+DTYPES = {type_name(w, s): (w, s) for w in (8, 16, 32, 64) for s in (True, False)}
+
+
 def result_type(a: tuple, b: tuple):
     """NumPy's result type of two integer types (width, signed), as snax_unit.hpp's
     snax_unit_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
@@ -408,63 +510,168 @@ def result_type(a: tuple, b: tuple):
     return (2 * u[0], True) if 2 * u[0] <= 64 else None
 
 
-def _typed_list(node: _Node, key, kind) -> list:
-    """A list of integers or of booleans."""
-    values = node.get(key, list)
-    if not all(isinstance(v, kind) and (kind is bool or not isinstance(v, bool))
-               for v in values):
-        raise CfgTypeError(node.file, node.where(key),
-            f'must be a list of {"booleans" if kind is bool else "integers"}, got {values!r}')
-    return values
+def _csr(node: _Node) -> Csr:
+    access = node.get('access', str)
+    if access not in ('rw', 'ro'):
+        raise CfgTypeError(node.file, node.where('access'), f'{access!r}, must be rw or ro')
+    width = node.get('width', int, None)
+    if access == 'rw' and width is None:
+        raise CfgKeyError(node.file, node.where('width'), 'missing: a read-write CSR has a width')
+    if access == 'ro' and width is not None:
+        raise CfgTypeError(node.file, node.where('width'), 'a read-only CSR has no width')
+    if width is not None and not 1 <= width <= 32:
+        raise CfgTypeError(node.file, node.where('width'), f'{width}, must be 1 to 32 bits')
+    offset = node.get('offset', int)
+    if offset < 0:
+        raise CfgTypeError(node.file, node.where('offset'), f'{offset}, must be 0 or more')
+    return Csr(name=node.get('name', str), access=access, offset=offset, width=width,
+               pin=node.get('pin', str, None))
 
 
-def _port_types(node: _Node, inputs: list, outputs: list) -> dict:
-    """The four type lists, checked."""
-    for key in REPLACED_KEYS:
+def _port(node: _Node) -> Port:
+    dtype = node.get('dtype', str)
+    if dtype not in DTYPES:
+        raise CfgTypeError(node.file, node.where('dtype'),
+            f'{dtype!r}, not a NumPy integer type ({", ".join(DTYPES)})')
+    lanes = node.get('lanes', int)
+    if lanes < 1:
+        raise CfgTypeError(node.file, node.where('lanes'), f'{lanes}, must be 1 or more')
+    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes)
+
+
+def _unit(node: _Node) -> Unit:
+    datapath = node.get('datapath', str)
+    if datapath not in DATAPATHS:
+        raise CfgTargetError(node.file, node.where('datapath'),
+            f'{datapath!r}, not a datapath SnaxUnit models ({", ".join(DATAPATHS)})')
+    ports = node.node('ports')
+    if not ports.value:
+        raise CfgTypeError(node.file, node.where('ports'), 'no port')
+    timing = node.node('timing')
+    latency, ii = timing.get('latency', int), timing.get('ii', int)
+    if latency < 0:
+        raise CfgTypeError(node.file, timing.where('latency'), f'{latency}, must be 0 or more')
+    if ii < 1:
+        raise CfgTypeError(node.file, timing.where('ii'), f'{ii}, must be 1 or more')
+    params = node.node('params')
+    op = params.get('op', str, None)
+    fold = datapath == 'TreeAccumulate'
+    if op is None and not fold:
+        raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
+    if op is not None and (op not in OPS or (fold and op != 'add')):
+        why = 'TreeAccumulate adds' if fold else f'not an op ({", ".join(OPS)})'
+        raise CfgTypeError(node.file, params.where('op'), f'{op!r}, {why}')
+    op_type = node.get('opType', str, None)
+    if fold and op_type is not None:
+        raise CfgTypeError(node.file, node.where('opType'), 'a TreeAccumulate unit has none')
+    if not fold and op_type is None:
+        raise CfgKeyError(node.file, node.where('opType'),
+            'missing: an ElementwiseLanes unit runs its op at its inputs\' result type')
+    if op_type is not None and op_type not in DTYPES:
+        raise CfgTypeError(node.file, node.where('opType'), f'{op_type!r}, not a NumPy integer type')
+    csrs = [_csr(c) for c in node.nodes('csrs')]
+    for i, c in enumerate(csrs):
+        if c.name not in UNIT_RW or c.access != 'rw':
+            raise CfgTargetError(node.file, f'{node.where("csrs")}[{i}]',
+                f'{c.name} ({c.access}): the unit CSRs modelled are {", ".join(UNIT_RW)} (rw)')
+    if fold != (('JOB_BEATS' in [c.name for c in csrs])):
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'{[c.name for c in csrs]}: a TreeAccumulate unit has JOB_BEATS, an ElementwiseLanes '
+            'unit none')
+    return Unit(name=node.get('name', str), brm=node.get('brm', str), datapath=datapath,
+                ports={key: _port(ports.node(key)) for key in ports.value},
+                op_type=op_type, params=dict(params.value), latency=latency, ii=ii, csrs=csrs)
+
+
+def _group(node: _Node) -> Group:
+    links = node.get('links', list)
+    if links:
+        raise CfgTargetError(node.file, node.where('links'),
+            f'{len(links)} links: not modelled yet (snax-forge B3)')
+    units = [_unit(u) for u in node.nodes('units')]
+    if len(units) != 1:
+        raise CfgTargetError(node.file, node.where('units'),
+            f'{len(units)} units: without links a group is one unit')
+    csrs = [_csr(c) for c in node.nodes('csrs')]
+    own = [(c.name, c.access) for c in csrs]
+    want = [(n, 'rw') for n in GROUP_RW] + [(n, 'ro') for n in GROUP_RO]
+    if own != want:
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'{[c.name for c in csrs]}: a group\'s own CSRs are START, JOBS (rw), STATUS, COUNTER '
+            '(ro), in that order')
+    return Group(name=node.get('name', str), csrs=csrs, units=units, links=links)
+
+
+def _accelerator(node: _Node) -> Accelerator:
+    """accelerator.json, checked on its own (the slot's checks: _check_slot)."""
+    for key in OLD_DATAPATH_KEYS:
         if key in node.value:
-            raise CfgTypeError(node.file, node.where(key),
-                'replaced by in_widths, in_signed, out_widths and out_signed')
-    for key in TYPE_KEYS:
-        if key not in node.value:
-            raise CfgKeyError(node.file, node.where(key),
-                f'missing: {", ".join(TYPE_KEYS)} give each port its type')
-    types = {key: _typed_list(node, key, bool if key.endswith('signed') else int)
-             for key in TYPE_KEYS}
-    for key in TYPE_KEYS:
-        ports, what = (inputs, 'input') if key.startswith('in_') else (outputs, 'output')
-        if len(types[key]) != len(ports):
-            raise CfgSlotError(node.file, node.where(key),
-                f'{len(types[key])} values, one per {what} ({len(ports)}: {ports})')
-    for key in ('in_widths', 'out_widths'):
-        for i, width in enumerate(types[key]):
-            if width not in ELEMENT_WIDTHS:
-                raise CfgTypeError(node.file, f'{node.where(key)}[{i}]',
-                    f'{width}, must be 8, 16, 32 or 64')
-    if len(inputs) == 2:
-        a, b = zip(types['in_widths'], types['in_signed'])
-        if result_type(a, b) is None:
-            raise CfgTypeError(node.file, node.where('in_signed'),
-                f'{type_name(*a)} with {type_name(*b)} has no integer result type (NumPy gives '
-                'float64)')
-    return types
-
-
-def _datapath(node: _Node) -> Datapath:
-    inputs, outputs = _names(node, 'inputs'), _names(node, 'outputs')
-    return Datapath(
-        unit=node.get('unit', str),
-        inputs=inputs,
-        outputs=outputs,
-        lanes=node.get('lanes', int),
-        **_port_types(node, inputs, outputs),
-        op=node.get('op', int),
-        control=node.get('control', str),
-        wait=node.get('wait', str),
-        latency=node.get('latency', int),
-        ii=node.get('ii', int),
-        config=_names(node, 'config', ['count']),
-        fields=_names(node, 'fields'),
+            raise CfgTypeError(node.file, node.where(key), 'a key of the datapath block, which '
+                'accelerator.json replaced (snax-forge C§17, D145): regenerate the design point')
+    acc = Accelerator(
+        name=node.get('name', str),
+        design_point=node.get('design_point', str),
+        tag=node.get('tag', str),
+        inputs=_names(node, 'inputs'),
+        outputs=_names(node, 'outputs'),
+        groups=[_group(g) for g in node.nodes('groups')],
     )
+    if not acc.groups:
+        raise CfgTypeError(node.file, node.where('groups'), 'no group')
+
+    # The offsets in CSR order, contiguous from 0: read, never computed
+    for i, csr in enumerate(acc.csrs):
+        if csr.offset != i:
+            group = next(g.name for g in acc.groups if csr in g.window)
+            raise CfgSlotError(node.file, node.where('groups'),
+                f'group {group}\'s {csr.name} has offset {csr.offset}, but is CSR {i} in CSR '
+                'order (per group START, JOBS, the units\' R/W CSRs, STATUS, COUNTER): the '
+                'offsets must be contiguous from 0')
+
+    # The outer ports: every unit's ports once, the datapath's shape
+    units = {u.name: u for g in acc.groups for u in g.units}
+    seen = set()
+    for key in ('inputs', 'outputs'):
+        for i, entry in enumerate(getattr(acc, key)):
+            unit, _, port = entry.partition('.')
+            if unit not in units or port not in units[unit].ports:
+                raise CfgSlotError(node.file, f'{node.where(key)}[{i}]',
+                    f'{entry!r} names no port of a unit ({", ".join(units)})')
+            if entry in seen:
+                raise CfgSlotError(node.file, f'{node.where(key)}[{i}]', f'{entry!r} twice')
+            seen.add(entry)
+    for u in units.values():
+        missing = [p for p in u.ports if f'{u.name}.{p}' not in seen]
+        if missing:
+            raise CfgSlotError(node.file, node.where('inputs'),
+                f'unit {u.name}\'s ports {missing} are in neither inputs nor outputs')
+        ins = [u.ports[p] for _, p in acc.ports_of(u.name, acc.inputs)]
+        outs = [u.ports[p] for _, p in acc.ports_of(u.name, acc.outputs)]
+        n_in = 1 if u.datapath == 'TreeAccumulate' else 2
+        if (len(ins), len(outs)) != (n_in, 1):
+            raise CfgTargetError(node.file, node.where('inputs'),
+                f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
+                f'{n_in} and 1')
+        if u.datapath == 'TreeAccumulate':
+            if outs[0].lanes != 1:
+                raise CfgTargetError(node.file, node.where('outputs'),
+                    f'unit {u.name}: a fold\'s output has 1 lane, not {outs[0].lanes}')
+        else:
+            if len({p.lanes for p in (*ins, *outs)}) != 1:
+                raise CfgTargetError(node.file, node.where('inputs'),
+                    f'unit {u.name}: lanes {[p.lanes for p in (*ins, *outs)]}; ElementwiseLanes '
+                    'has one lane count on every port')
+            a, b = ((p.width, p.signed) for p in ins)
+            t = result_type(a, b)
+            if t is None:
+                raise CfgTypeError(node.file, node.where('groups'),
+                    f'unit {u.name}: {type_name(*a)} with {type_name(*b)} has no integer result '
+                    'type (NumPy gives float64)')
+            if u.op_type != type_name(*t):
+                raise CfgSlotError(node.file, node.where('groups'),
+                    f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
+                    f'{type_name(*t)} (snax_unit_result_type)')
+    return acc
 
 
 def _slot(acc: _Node) -> AccSlot:
@@ -477,7 +684,7 @@ def _slot(acc: _Node) -> AccSlot:
                 raise CfgTypeError(acc.file, f'{acc.where("sparse_interconnect_config")}[{i}]',
                     f'must be [width, granularity], got {entry!r}')
     streamer = acc.get('snax_streamer_cfg', dict, None)
-    datapath = acc.node('snax_datapath_cfg', None)
+    accelerator = acc.node('snax_datapath_cfg', None)
     slot = AccSlot(
         name=acc.get('snax_acc_name', str),
         tcdm_ports=ports,
@@ -487,7 +694,7 @@ def _slot(acc: _Node) -> AccSlot:
         num_rw_csr=acc.get('snax_num_rw_csr', int),
         num_ro_csr=acc.get('snax_num_ro_csr', int),
         streamer=streamer,
-        datapath=None if datapath is None else _datapath(datapath),
+        accelerator=None if accelerator is None else _accelerator(accelerator),
         at=acc.at,
     )
     _check_slot(acc, slot)
@@ -525,53 +732,51 @@ def _check_slot(acc: _Node, slot: AccSlot):
         if widths != slot.tcdm_ports:
             fail('sparse_interconnect_config', f'widths add up to {widths}, not '
                 f'snax_tcdm_ports {slot.tcdm_ports}')
-    if slot.datapath is not None:
-        fields = slot.datapath.fields
-        if slot.streamer is None:
-            fail('snax_streamer_cfg', 'missing: a datapath block needs the streamer it is fed by')
-        for ports, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
-            names = getattr(slot.datapath, ports)
-            movers = len(slot.streamer.get(mover, {}).get('num_channel', []))
-            if len(names) != movers:
-                fail(f'snax_datapath_cfg.{ports}', f'{names}, but the streamer has {movers} '
-                    f'{mover}: one port each, in order')
-        _check_words(acc, slot)
-        if slot.num_rw_csr != len(fields) + 1:
-            fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but the datapath has '
-                f'{len(fields)} shell fields {fields} and start')
-        if slot.num_ro_csr != SHELL_RO_CSRS:
-            fail('snax_num_ro_csr', f'{slot.num_ro_csr}, but a shell has {SHELL_RO_CSRS} '
-                '(busy and the counter)')
+    if slot.accelerator is not None:
+        _check_accelerator(acc, slot)
 
 
-def _check_words(acc: _Node, slot: AccSlot):
-    """Each datapath port's words per beat against its mover's num_channel: SnaxUnit has no
-    FIFO slicer, so they must match (the streamer would refuse the beat's size mid-run)."""
-    datapath = slot.datapath
+def _check_accelerator(acc: _Node, slot: AccSlot):
+    """accelerator.json against the slot: its outer ports against the streamer's movers, each
+    port's words per beat against its mover's num_channel (SnaxUnit has no FIFO slicer, so
+    they must match: the streamer would refuse the beat's size mid-run), and the CSR counts."""
+    accelerator = slot.accelerator
 
     def fail(key, why):
-        raise CfgSlotError(acc.file, acc.where(f'snax_datapath_cfg.{key}'), why)
+        raise CfgSlotError(acc.file, acc.where(key), why)
 
-    ports = [(f'in_widths[{i}]', width, 'data_reader_params', i)
-             for i, width in enumerate(datapath.in_widths)]
-    ports += [(f'out_widths[{j}]', width, 'data_writer_params', j)
-              for j, width in enumerate(datapath.out_widths)]
-    fold = len(datapath.inputs) == 1
-    for key, width, mover, i in ports:
-        channels = slot.streamer[mover]['num_channel'][i]
-        if fold and mover == 'data_writer_params':
-            if channels != 1:
-                fail('outputs', f"a fold's output is one 64-bit word per beat, but "
-                     f'{mover}[{i}] has num_channel {channels}')
-            continue
-        bits = datapath.lanes * width
-        if bits % 64 != 0:
-            fail(key, f'lanes {datapath.lanes} x {width} bits is not a whole number of 64-bit '
-                 'channel words')
-        if bits // 64 != channels:
-            fail(key, f'lanes {datapath.lanes} x {width} bits is {bits // 64} 64-bit words per '
-                 f'beat, but {mover}[{i}] has num_channel {channels}: SnaxUnit has no FIFO '
-                 'slicer, so they must match')
+    if slot.streamer is None:
+        fail('snax_streamer_cfg', 'missing: accelerator.json needs the streamer it is fed by')
+    for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
+        names = getattr(accelerator, key)
+        channels = slot.streamer.get(mover, {}).get('num_channel', [])
+        if len(names) != len(channels):
+            fail(f'snax_datapath_cfg.{key}', f'{names}, but the streamer has {len(channels)} '
+                 f'{mover}: one port each, in order')
+        for i, entry in enumerate(names):
+            unit, _, name = entry.partition('.')
+            u = accelerator.unit(unit)
+            port = u.ports[name]
+            if u.datapath == 'TreeAccumulate' and key == 'outputs':
+                if channels[i] != 1:
+                    fail(f'snax_datapath_cfg.{key}[{i}]', f"{entry}: a fold's output is one "
+                         f'64-bit word per beat, but {mover}[{i}] has num_channel {channels[i]}')
+                continue
+            bits = port.lanes * port.width
+            if bits % 64 != 0:
+                fail(f'snax_datapath_cfg.{key}[{i}]', f'{entry}: lanes {port.lanes} x '
+                     f'{port.width} bits is not a whole number of 64-bit channel words')
+            if bits // 64 != channels[i]:
+                fail(f'snax_datapath_cfg.{key}[{i}]', f'{entry}: lanes {port.lanes} x '
+                     f'{port.width} bits is {bits // 64} 64-bit words per beat, but {mover}[{i}] '
+                     f'has num_channel {channels[i]}: SnaxUnit has no FIFO slicer, so they must '
+                     'match')
+    if slot.num_rw_csr != accelerator.num_rw:
+        fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but accelerator.json has '
+             f'{accelerator.num_rw} read-write CSRs')
+    if slot.num_ro_csr != accelerator.num_ro:
+        fail('snax_num_ro_csr', f'{slot.num_ro_csr}, but accelerator.json has '
+             f'{accelerator.num_ro} read-only CSRs (STATUS and COUNTER per group)')
 
 
 def _core(core: _Node) -> Core:

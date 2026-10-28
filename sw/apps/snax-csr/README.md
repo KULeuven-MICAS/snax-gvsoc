@@ -8,7 +8,7 @@ instruction, the forms that must not write leave a read-only CSR alone, and
 the read-only CSRs read 0, as nothing is started. Only the compute core runs
 it; it returns the number of errors.
 
-The two start CSRs, the streamer's (975) and the shell's (979), are left out:
+The two start CSRs, the streamer's (975) and the group's START (978), are left out:
 every pattern has bit 0 set, which starts the block behind it.
 
 | Part | Instructions | Path in the core (`src/snitch/snitch.cpp`) |
@@ -20,7 +20,7 @@ every pattern has bit 0 set, which starts the block behind it.
 | | `csrrc` with `x0`, `csrrsi` and `csrrci` with 0 on CSR 981: each returns 0 | the callback, read only (`priv.hpp`) |
 | 4 | `csrr` of the 4 read-only CSRs | the callback |
 
-Part 3's no-write forms run on 981, the shell's read-only performance counter
+Part 3's no-write forms run on 981, the group's read-only COUNTER
 (0, as nothing ran): a write to a read-only SNAX CSR is refused and stops the
 run here (the RTL's manager asserts on it), so they pass only if nothing is
 written. Before SG6, `priv.hpp` wrote the value read back for these three

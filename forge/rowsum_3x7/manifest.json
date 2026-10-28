@@ -3,15 +3,18 @@
  "design_point": "out/design/rowsum_3x7/design_point.json",
  "symbols": {"M": 3, "N": 7},
  "cluster": "snax_forge.hjson",
- "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "snax_forge_acc.hjson", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "accelerator.json", "include/streamer_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
  "program": "main.c",
  "trace": "snax_acc0/unit",
  "csrs": {
   "streamer": {"first": 960, "last": 974},
-  "fields": {"loopCount": 975, "len": 976},
-  "start": 977,
-  "busy": 978,
-  "counter": 979
+  "accelerator": {
+   "ACC_RW_START": 975,
+   "ACC_RW_JOBS": 976,
+   "ACC_RW_JOB_BEATS": 977,
+   "ACC_RO_STATUS": 978,
+   "ACC_RO_COUNTER": 979
+  }
  },
- "tasks": [{"name": "sum_acc", "beats": 6, "csrs": {"loopCount": 6, "len": 2}}]
+ "tasks": [{"name": "sum_acc", "beats": 6, "csrs": {"JOBS": 3, "JOB_BEATS": 2}}]
 }

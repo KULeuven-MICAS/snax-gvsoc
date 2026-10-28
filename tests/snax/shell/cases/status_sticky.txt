@@ -1,0 +1,21 @@
+# STATUS bit 1 (done) is sticky: the done pulse in E sets it, so it reads 1
+# from E + 1, and only an accepted start clears it (it reads 0 from the cycle
+# after the start); writes to JOBS or to START with bit 0 clear leave it.
+# c1's start (JOBS 2): busy c2, c3 (E = 3), done from c4. c6 writes JOBS 1,
+# c8 START with bit 0 clear: done stays. c10's start is accepted: STATUS 2 in
+# c10, 1 in c11 (busy, done cleared), the run of 1 ends in c11, done in c12.
+cycles
+# a b out  access   result  status
+1 1 1      w 1 2    0       0     # 0: JOBS 2
+1 1 1      w 0 1    1       0     # 1: start accepted; busy from 2
+1 1 1      r 2      1       1     # 2: fires
+1 1 1      r 2      1       1     # 3: fires, E: the done pulse
+1 1 1      r 2      2       2     # 4: E + 1: done
+1 1 1      r 2      2       2     # 5: held
+1 1 1      w 1 1    6       2     # 6: JOBS 1: done stays
+1 1 1      r 2      2       2     # 7
+1 1 1      w 0 2    8       2     # 8: START with bit 0 clear: no start, done stays
+1 1 1      r 2      2       2     # 9
+1 1 1      w 0 1    10      2     # 10: start accepted: done cleared from 11
+1 1 1      r 2      1       1     # 11: busy, not done; fires, E
+1 1 1      r 2      2       2     # 12: done again

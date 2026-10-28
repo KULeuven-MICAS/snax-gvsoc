@@ -157,7 +157,7 @@ inline uint64_t snax_unit_compute(int op, SnaxUnitType t, uint64_t a, uint64_t b
 }
 
 
-// A fold's tree (snax-forge's Accumulator with lanes): the n lanes of a
+// A fold's tree (snax-forge's TreeAccumulate): the n lanes of a
 // beat, already of type t, reduced to one by op at t, halves first, so for n
 // a power of two the pairs of Chisel's reduceTree. One lane gives that lane.
 inline uint64_t snax_unit_tree(int op, SnaxUnitType t, const uint64_t *lanes, int n)

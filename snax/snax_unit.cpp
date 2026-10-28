@@ -4,19 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxUnit (D134 in snax-forge): the datapath of one of snax-forge's Chisel
-// blocks, generic, every number a property read at run time (get_js_config),
-// so a design point compiles nothing. The cycle rule and the op table are in
-// snax_unit.hpp; this file is the component around them.
+// SnaxUnit (D134, D147 in snax-forge): one unit of accelerator.json, a
+// datapath under its nest controller, generic, every number a property read
+// at run time (get_js_config), so a design point compiles nothing. The cycle
+// rule and the op table are in snax_unit.hpp; this file is the component
+// around them.
 //
 // Properties (a missing one, a wrong type or a bad value is a fatal error
 // naming it):
-//   inputs, outputs  port names (lists of strings): one output, and two
-//                    inputs (the op on each pair of beats) or one (a fold:
-//                    x is the beat's lanes reduced by op through a tree,
+//   datapath         ElementwiseLanes (two inputs, the op on each pair of
+//                    beats) or TreeAccumulate (one input, a fold: x is the
+//                    beat's lanes reduced by add through a tree,
 //                    snax_unit_tree, and the output's value is op(acc, x)
-//                    over the firings of one output, acc starting from the
+//                    over the firings of one job, acc starting from the
 //                    first x; the output one element)
+//   inputs, outputs  port names (lists of strings), the datapath's number
+//                    of inputs and one output
 //   lanes            elements per input beat (> 0)
 //   in_widths, in_signed, out_widths, out_signed
 //                    each port's element type (snax_unit.hpp's
@@ -30,23 +33,16 @@
 //                    streamer's beats are whole 64-bit channel words, lane
 //                    0 first (snax_streamer.cpp); the elements are packed in
 //                    them b bits apart, lane 0 lowest, as Chisel packs a Vec
-//   op               ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3,
-//                    or 4, xor 5, min 6, max 7; integers, as NumPy: an
-//                    elementwise op at the inputs' result type T (a
-//                    signed type with uint64 has none and is refused;
-//                    NumPy gives float64), wrapping, then
-//                    cast to the output's type; a fold's lanes cast to the
-//                    output's type, the tree and acc at it (snax_unit.hpp)
-//   control          counted: the unit counts its firings
-//   config           the role of each 32-bit configuration word the shell
-//                    sends, in order: count (the firings of the run, once)
-//                    and rate (firings per output, at most once; 1 without
-//                    it). A start with count or rate 0 is ignored; a count
-//                    not a multiple of the rate is a fatal error. rate needs
-//                    a fold and pipelined
-//   wait             lockstep or pipelined (snax_unit.hpp)
-//   latency, ii      pipelined: L >= 0 and II >= 1; lockstep: 0 and 1
-//   csr_base         the shell's first CSR, for the trace
+//   op               the op's name (add, sub, mul, and, or, xor, min, max;
+//                    a fold's is add); integers, as NumPy: an elementwise
+//                    op at the inputs' result type T (a signed type with
+//                    uint64 has none and is refused; NumPy gives float64),
+//                    wrapping, then cast to the output's type; a fold's
+//                    lanes cast to the output's type, the tree and acc at it
+//                    (snax_unit.hpp)
+//   latency, ii      L >= 0 and II >= 1 (snax_unit.hpp; L = 0, II 1 is
+//                    lockstep)
+//   csr_base         the group's first CSR, for the trace
 //
 // Ports:
 //   <input>, <output>  io masters to the streamer's reader_<i> and writer_<j>,
@@ -55,10 +51,13 @@
 //                      a probe (size 0) of every port, then the beats moved
 //                      (the ALU shell's way, before CLN1), so nothing moves unless the
 //                      rule says so
-//   ctrl               io slave: a write of the configuration words in CSR
-//                      order starts a run in that cycle; refused (DENIED, after
-//                      a warning) while busy. A count or rate of 0 is answered
-//                      and ignored
+//   ctrl               io slave: a write of two 32-bit words, jobs and
+//                      job_beats, starts a run of jobs * job_beats firings, a
+//                      result every job_beats-th, in that cycle; refused
+//                      (DENIED, after a warning) while busy. Either 0 (the
+//                      empty run, which the shell never sends) is answered and
+//                      ignored; job_beats other than 1 for ElementwiseLanes, or
+//                      a product past 32 bits, is a fatal error
 //   busy               wire<bool> master, driven on every change, in the cycle
 //                      the change is decided: true in the cycle a start is
 //                      taken (busy from the next), false in the run's last
@@ -67,8 +66,9 @@
 // Its event runs every busy cycle, scheduled as the ALU shell's was, so it
 // runs before the streamer's step in a cycle.
 //
-// Events (docs/EVENTS.md, snax_events.hpp): `start` (count, rate) in the cycle
-// a start is taken; `done` (firings, the first and last firing's cycles) in
+// Events (docs/EVENTS.md, snax_events.hpp): `start` (count, the run's
+// jobs * job_beats firings, and rate, its job_beats) in the cycle a start is
+// taken; `done` (firings, the first and last firing's cycles) in
 // the run's last busy cycle; there too, the summary's `run` line
 // (SnaxUnitRule::run_line), the classes adding up to the run's busy cycles.
 // Beats: `fire` per firing (its index n in the run, each input's beat b as
@@ -128,16 +128,14 @@ private:
     SnaxSignal sig_push;
     SnaxSignal sig_class;
 
+    std::string datapath;
     int lanes;
     int op;
-    bool is_fold;               // one input
+    bool is_fold;               // TreeAccumulate: one input
     std::vector<SnaxUnitType> in_types;     // per input
     SnaxUnitType out_type;
     std::vector<int> in_words;  // 64-bit words per beat, per input
     int out_words;              // per output beat: lanes * its width / 64, 1 for a fold
-    int nb_config_words;        // the ctrl write's words
-    int count_word;             // the count's word in it
-    int rate_word;              // the rate's, -1 without one
     uint32_t csr_base;
     SnaxUnitRule rule;
     int64_t first_fire;         // the run's first and last firing, for its done line
@@ -171,14 +169,20 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
 
+    this->datapath = this->str_prop("datapath");
+    if (this->datapath != "ElementwiseLanes" && this->datapath != "TreeAccumulate")
+    {
+        this->trace.fatal("Property datapath: unknown \"%s\" (ElementwiseLanes, "
+            "TreeAccumulate)\n", this->datapath.c_str());
+    }
+    this->is_fold = this->datapath == "TreeAccumulate";
     std::vector<std::string> inputs = this->names_prop("inputs");
     std::vector<std::string> outputs = this->names_prop("outputs");
-    if (inputs.size() != 1 && inputs.size() != 2)
+    if (inputs.size() != (this->is_fold ? 1u : 2u))
     {
-        this->trace.fatal("Property inputs: %ld names, one (a fold) or two (the op table)\n",
-            inputs.size());
+        this->trace.fatal("Property inputs: %ld names, %s takes %d\n", inputs.size(),
+            this->datapath.c_str(), this->is_fold ? 1 : 2);
     }
-    this->is_fold = inputs.size() == 1;
     if (outputs.size() != 1)
     {
         this->trace.fatal("Property outputs: %ld names, the op table gives one output\n",
@@ -192,78 +196,29 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
     }
     this->types_prop(inputs.size());
 
-    this->op = this->int_prop("op");
-    if (this->op < 0 || this->op >= UNIT_NB_OPS)
+    std::string op = this->str_prop("op");
+    this->op = -1;
+    for (int i = 0; i < UNIT_NB_OPS; i++)
     {
-        this->trace.fatal("Property op: %d, not an ElementwiseOp encoding (0 to %d)\n", this->op,
-            UNIT_NB_OPS - 1);
+        this->op = op == snax_unit_op_names[i] ? i : this->op;
+    }
+    if (this->op == -1 || (this->is_fold && this->op != UNIT_ADD))
+    {
+        this->trace.fatal("Property op: \"%s\", %s\n", op.c_str(), this->is_fold
+            ? "TreeAccumulate adds" : "not an op (add, sub, mul, and, or, xor, min, max)");
     }
 
-    std::string control = this->str_prop("control");
-    if (control != "counted")
-    {
-        this->trace.fatal("Property control: unknown kind \"%s\" (counted)\n", control.c_str());
-    }
-    std::vector<std::string> roles = this->names_prop("config");
-    this->nb_config_words = roles.size();
-    this->count_word = this->rate_word = -1;
-    for (size_t i = 0; i < roles.size(); i++)
-    {
-        int *word = roles[i] == "count" ? &this->count_word :
-            roles[i] == "rate" ? &this->rate_word : nullptr;
-        if (word == nullptr)
-        {
-            this->trace.fatal("Property config: unknown role \"%s\" (count, rate)\n",
-                roles[i].c_str());
-        }
-        if (*word != -1)
-        {
-            this->trace.fatal("Property config: \"%s\" twice\n", roles[i].c_str());
-        }
-        *word = i;
-    }
-    if (this->count_word == -1)
-    {
-        this->trace.fatal("Property config: no \"count\"\n");
-    }
-
-    std::string wait = this->str_prop("wait");
     int latency = this->int_prop("latency");
     int ii = this->int_prop("ii");
-    if (wait == "lockstep")
+    if (latency < 0)
     {
-        if (latency != 0)
-        {
-            this->trace.fatal("Property latency: %d, lockstep has latency 0\n", latency);
-        }
-        if (ii != 1)
-        {
-            this->trace.fatal("Property ii: %d, lockstep has II 1\n", ii);
-        }
-        this->rule.configure(0, 1);
+        this->trace.fatal("Property latency: %d, must be 0 or more\n", latency);
     }
-    else if (wait == "pipelined")
+    if (ii < 1)
     {
-        if (latency < 0)
-        {
-            this->trace.fatal("Property latency: %d, must be 0 or more\n", latency);
-        }
-        if (ii < 1)
-        {
-            this->trace.fatal("Property ii: %d, must be 1 or more\n", ii);
-        }
-        this->rule.configure(latency, ii);
+        this->trace.fatal("Property ii: %d, must be 1 or more\n", ii);
     }
-    else
-    {
-        this->trace.fatal("Property wait: unknown kind \"%s\" (lockstep, pipelined)\n",
-            wait.c_str());
-    }
-    if (this->rate_word != -1 && (!this->is_fold || wait != "pipelined"))
-    {
-        this->trace.fatal("Property config: \"rate\" needs a fold (one input) and wait "
-            "pipelined\n");
-    }
+    this->rule.configure(latency, ii);
     this->csr_base = this->int_prop("csr_base");
 
     this->beat_in.resize(inputs.size());
@@ -290,9 +245,9 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
         types += (types.empty() ? "" : " x ") + snax_unit_type_name(t);
     }
     types += " -> " + snax_unit_type_name(this->out_type);
-    this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s%s, %d lanes, %s, %s, latency %d, ii %d\n",
-        snax_unit_op_names[this->op], this->is_fold ? " fold" : "", this->lanes, types.c_str(),
-        wait.c_str(), latency, ii);
+    this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s, %s, %d lanes, %s, latency %d, ii %d\n",
+        this->datapath.c_str(), snax_unit_op_names[this->op], this->lanes, types.c_str(),
+        latency, ii);
 }
 
 
@@ -460,30 +415,35 @@ std::vector<bool> SnaxUnit::bools_prop(const char *name)
 }
 
 
-// A start: the configuration words, in CSR order, written by the shell
+// A start: jobs and job_beats, written by the shell
 vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
 {
     SnaxUnit *_this = (SnaxUnit *)__this;
     int64_t cycle = _this->clock.get_cycles();
 
-    if (!req->get_is_write() || req->get_size() != (uint64_t)(4 * _this->nb_config_words))
+    if (!req->get_is_write() || req->get_size() != 8)
     {
         _this->trace.force_warning("Unexpected access on ctrl (size: %ld, is_write: %d): a "
-            "start is a write of %d words\n", req->get_size(), req->get_is_write(),
-            _this->nb_config_words);
+            "start is a write of 2 words, jobs and job_beats\n", req->get_size(),
+            req->get_is_write());
         return vp::IO_REQ_INVALID;
     }
     uint32_t *words = (uint32_t *)req->get_data();
-    uint32_t count = words[_this->count_word];
-    uint32_t rate = _this->rate_word == -1 ? 1 : words[_this->rate_word];
-    if (count != 0 && rate != 0 && count % rate != 0)
+    uint32_t jobs = words[0];
+    uint32_t job_beats = words[1];
+    if (!_this->is_fold && job_beats > 1)
     {
-        _this->trace.fatal("Start at cycle %ld: count %u is not a multiple of rate %u\n", cycle,
-            count, rate);
+        _this->trace.fatal("Start at cycle %ld: job_beats %u; ElementwiseLanes gives a result "
+            "every firing (1)\n", cycle, job_beats);
     }
+    if ((uint64_t)jobs * job_beats > UINT32_MAX)
+    {
+        _this->trace.fatal("Start at cycle %ld: jobs %u x job_beats %u firings is past 32 bits\n",
+            cycle, jobs, job_beats);
+    }
+    uint32_t count = jobs * job_beats;
 
-    // count firings, a result every rate: jobs = count / rate of job_beats = rate
-    switch (_this->rule.start(cycle, rate == 0 ? count : count / rate, rate))
+    switch (_this->rule.start(cycle, jobs, job_beats))
     {
         case SnaxUnitRule::REFUSED:
             _this->trace.force_warning("Start (shell CSRs from %d) refused at cycle %ld: busy\n",
@@ -493,22 +453,14 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
         case SnaxUnitRule::IGNORED:
             _this->trace.msg(vp::Trace::LEVEL_DEBUG,
                 "Start at cycle %ld with %s 0: ignored, not busy\n", cycle,
-                count == 0 ? "count" : "rate");
+                jobs == 0 ? "jobs" : "job_beats");
             return vp::IO_REQ_OK;
 
         default:
-            if (_this->rate_word == -1)
-            {
-                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: count %u\n", cycle,
-                    count);
-            }
-            else
-            {
-                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: count %u, rate %u\n",
-                    cycle, count, rate);
-            }
+            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: jobs %u, job_beats %u\n",
+                cycle, jobs, job_beats);
             _this->ev.events.msg(vp::Trace::LEVEL_INFO, "%ld start count=%u rate=%u\n",
-                (long)cycle, count, rate);
+                (long)cycle, count, job_beats);
             _this->first_fire = _this->last_fire = -1;
             _this->pushes = 0;
             _this->line_class = -1;
