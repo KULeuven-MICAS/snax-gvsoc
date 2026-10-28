@@ -8,9 +8,10 @@ the installed `snax_hjson` target. A folder is the fixture of snax-forge's
 D134: it lets this repo's regression run a design point without snax-forge.
 Each is snax-forge's generator's output, checked in untouched; snax-forge's
 `tests/gen/test_fixture.py` writes it again and compares it byte for byte.
-All sixteen are snax-forge's branch `ry/blk1` at `2df6270` (M13 B1 R1:
-`accelerator.json` and the per-group CSRs START, JOBS, JOB_BEATS, STATUS,
-COUNTER).
+All seventeen are snax-forge's branch `ry/blk1-2` at `a81a9d2` (M13 B1 R3:
+`accelerator.json` with the per-group CSRs START, JOBS, JOB_BEATS, STATUS,
+COUNTER, a TreeAccumulate's `params.op` `add`, and `dot_1/`, one
+accelerator of two groups).
 
 | Folder | Design point | Slot |
 |---|---|---|
@@ -30,6 +31,7 @@ COUNTER).
 | `vecadd_n7/` | `recipes/vecadd_n7.json` (W = 4, N = 7, int64: a tail, two firings, A, B and C padded to 8, D144) on `platforms/snax_forge.json` | 12 TCDM ports, `START`, `JOBS` |
 | `vsum_tree_n21/` | `recipes/vsum_tree_n21.json` (W = 4, N = 21, int64, `chisel_adder_tree`: six firings, A padded to 24 with zeros) on `platforms/snax_forge.json` | 5 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
 | `rowsum_3x7/` | `recipes/rowsum_3x7.json` (W = 4, M = 3, N = 7, int64, `chisel_adder_tree`, T = 2: each row padded to 8) on `platforms/snax_forge.json` | 5 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
+| `dot_1/` | `recipes/dot_1.json` (W = 4, N = 64, int64: `elementwise_mul` into `tmp0` in L1, then `chisel_adder_tree` over it, T = N / W; `encapsulate` puts both into the accelerator `dot`, snax-forge D148) on `platforms/snax_forge.json` | 17 TCDM ports (readers mul.a, mul.b, sum.a, writers mul.out, sum.out); groups `mul` (`START`, `JOBS`, `STATUS`, `COUNTER`) and `sum` (with `JOB_BEATS`), a task each, the other group's movers at temporal bound 0 |
 
 Each folder holds:
 
@@ -63,7 +65,8 @@ Each folder holds:
 - `include/`: the headers a program drives it with
   (`streamer_csr_addr_map.h` and `<name>_csr.h`, every CSR by its C§17
   name, `ACC_RW_START`, `ACC_RW_JOBS`, `ACC_RW_JOB_BEATS`, `ACC_RO_STATUS`,
-  `ACC_RO_COUNTER`), and the runtime's
+  `ACC_RO_COUNTER`; with several groups the group's name after the access,
+  `DOT_RW_MUL_START` ... `DOT_RO_SUM_COUNTER`), and the runtime's
   view of the cluster (`snitch_cluster_cfg.h` and
   `snitch_cluster_addrmap.h`, as snax_cluster's templates render them from
   the cluster file).
@@ -82,8 +85,11 @@ Each folder holds:
   DMA beats and aligned to one.
 - `manifest.json`: the design, the design point, the bound graph's symbols,
   the cluster file (`cluster`), the files, the program (`main.c`), the
-  unit's trace path, the CSR layout (each CSR's header name -> its number)
-  and each accelerator task's beats and CSR values (JOBS, JOB_BEATS).
+  unit's trace path (`snax_acc0/unit`; with several groups the
+  accelerator's, `snax_acc0`), the CSR layout (each CSR's header name -> its
+  number) and each accelerator task's beats and CSR values (its group's
+  JOBS, JOB_BEATS), with several groups also its unit's trace path
+  (`snax_acc0/unit_<unit>`).
 
 Every hjson and C file starts with a comment naming the design point; the
 rest of an hjson file is JSON, which hjson reads. `accelerator.json` is
@@ -100,8 +106,9 @@ writes in place):
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
 (the same with every folder's recipe; the design step reads the sandbox's
-last step, `out/sandbox/<design>/<n>_bind.snaxdfg`: the recipes of `matadd`,
-`rowsum`, `rowsum_serial` and `rowsum_3x7` have three steps), then commit the
+last step, `out/sandbox/<design>/<n>_<transform>.snaxdfg`: the recipes of
+`matadd`, `rowsum`, `rowsum_serial` and `rowsum_3x7` have three steps,
+`dot_1`'s five, the last `5_encapsulate.snaxdfg`), then commit the
 folder as written and
 bump snax-forge's submodule so its test compares against it. `make regress`
 runs every folder with the generic app, so a new folder needs nothing else.

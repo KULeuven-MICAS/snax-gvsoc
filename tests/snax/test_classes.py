@@ -94,9 +94,9 @@ class CheckTraces(unittest.TestCase):
             log, traces = Path(d) / "run.log", Path(d) / "trace.log"
             log.write_text("forge cycles: 30\nforge counter add_acc: 10\nforge errors: 0\n")
             traces.write_text("\n".join(trace_lines) + "\n")
-            tasks = [{"name": "add_acc", "beats": 8}]
+            manifest = {"trace": "snax_acc0/unit", "tasks": [{"name": "add_acc", "beats": 8}]}
             why, where = regress.check_traces(
-                log, traces, lambda text, runs: regress.check_counters(text, runs, tasks))
+                log, traces, lambda text, parsed: regress.check_counters(text, parsed, manifest))
             return why, None if where is None else where.name
 
     def test_a_whole_trace_passes_both_checks(self):
@@ -111,6 +111,35 @@ class CheckTraces(unittest.TestCase):
         why, where = self.run_checks(cut(LOG, 6, LOG[6].index(" flush")))
         self.assertEqual(where, "trace.log")
         self.assertIn("line 7: a run line without flush", why)
+
+
+class TwoUnits(unittest.TestCase):
+    """An accelerator of two groups (snax-forge D148, forge/dot_1): each task's counter is
+    checked against its own unit's runs, from its trace path in the manifest."""
+
+    MANIFEST = {"trace": "snax_acc0", "tasks": [
+        {"name": "mult_mul", "beats": 8, "trace": "snax_acc0/unit_mul"},
+        {"name": "sum_sum", "beats": 4, "trace": "snax_acc0/unit_sum"}]}
+
+    def parsed(self):
+        mul, total = (f"/chip/soc/cluster_0/snax_acc0/unit_{u}" for u in ("mul", "sum"))
+        return classes.parse("\n".join([
+            line(mul, "summary", 20, "run index=0 firings=8 busy=8 stall_in=2 stall_out=0 flush=0"),
+            line(total, "summary", 40, "run index=0 firings=4 busy=4 stall_in=1 stall_out=0 flush=1"),
+        ]) + "\n")
+
+    def test_each_task_against_its_unit(self):
+        log = "forge counter mult_mul: 10\nforge counter sum_sum: 6\n"
+        self.assertIsNone(regress.check_counters(log, self.parsed(), self.MANIFEST))
+        self.assertEqual(regress.task_traces(self.MANIFEST),
+                         ["snax_acc0/unit_mul", "snax_acc0/unit_sum"])
+        self.assertEqual(classes.unit_runs(self.parsed(), "snax_acc0/unit_sum"),
+                         {0: [4, 4, 1, 0, 1]})
+
+    def test_a_counter_of_the_other_unit_fails(self):
+        log = "forge counter mult_mul: 10\nforge counter sum_sum: 10\n"
+        why = regress.check_counters(log, self.parsed(), self.MANIFEST)
+        self.assertTrue(why.startswith("sum_sum: counter 10"), why)
 
 
 if __name__ == "__main__":

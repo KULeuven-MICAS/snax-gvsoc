@@ -69,10 +69,13 @@ def parse(text, name="trace.log"):
     return out
 
 
-def unit_runs(parsed):
-    """The unit's `run` lines by index: [firings, busy, stall_in, stall_out, flush]."""
+def unit_runs(parsed, unit=None):
+    """The unit's `run` lines by index: [firings, busy, stall_in, stall_out, flush]; with
+    several units, those of the one whose path ends in `unit` (a manifest's trace path,
+    snax_acc0/unit_mul)."""
     return {int(x.fields["index"]): [int(x.fields[f]) for f in FIELDS["run"][1:]]
-            for x in parsed if x.kind == "run"}
+            for x in parsed
+            if x.kind == "run" and (unit is None or x.path.endswith("/" + unit))}
 
 
 def runs(parsed):
