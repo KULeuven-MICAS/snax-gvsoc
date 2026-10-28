@@ -81,8 +81,8 @@ COPIED = [
         "putchar.c", "snitch_cluster_start.S", "snitch_cluster_start.c")),
     "target/snitch_cluster/cfg/snitch_cluster.hjson",
     # snax-forge's vecadd fixture, the cluster the apps build for
-    *(f"target/snitch_cluster/cfg/{FORGE}/{n}.hjson"
-      for n in ("snax_forge", "snax_forge_streamer", "snax_forge_acc")),
+    *(f"target/snitch_cluster/cfg/{FORGE}/{n}"
+      for n in ("snax_forge.hjson", "snax_forge_streamer.hjson", "accelerator.json")),
     # The cluster hjson's schema, clustergen's check of it
     "docs/schema/snitch_cluster.schema.json",
     "util/sim/data_utils.py",

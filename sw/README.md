@@ -27,7 +27,7 @@ into `build/sw/apps/<name>/`, building the libraries first when needed:
 
 | What | Commit | |
 |---|---|---|
-| `snax_cluster` | `4bd582d2d9a082c380f85d640fbae4b9436232b9` | 2026-10-27, snax-forge fixtures: PACK0's packed int32/int8 designs (#663) |
+| `snax_cluster` | `2cd0987439f4ffe891e369ea5f8a2fa06d94e2f2` | 2026-10-28, snax-forge fixtures: B1's accelerator.json designs and dot_1 (#664) |
 | `sw/deps/printf` | `d3b984684bb8a8bdc48cc7a1abecb93ce59bbe3e` | 2020-01-01, chore(readme): 2020 announcement |
 | `sw/deps/riscv-opcodes` | `94caf0e0fefff1009ba144bccb6d8f7d425ea2f5` | 2023-10-03, Add custom HW barrier CSR (#9) |
 
@@ -53,8 +53,8 @@ every relative include in the copied files (`../../deps/...`,
 the sync's diff and the generated headers below; SNAX-GVSoC never reads its
 cluster files: the `snax_hjson` target's default and `test_snax_cfg` read
 `forge/vecadd/` (the cluster file, the streamer file and `accelerator.json`),
-refreshed from snax-forge itself (snax-forge D126), so the copy may lag
-behind snax-forge's format until snax_cluster takes the new fixtures.
+refreshed from snax-forge itself (snax-forge D126). Since snax_cluster's
+#664 the copy is in snax-forge's B1 format (`accelerator.json`).
 
 ## Licences
 
