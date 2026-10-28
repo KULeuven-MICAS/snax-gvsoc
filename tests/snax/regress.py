@@ -15,7 +15,7 @@ forge/vecadd/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
 `dma-timing`, `snax-csr`, the seven `stream-timing` cases, the three
 `core-tcdm` cases and the `dma-tcdm` case, each a plain run (exit code
 only); then `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file
-(SHELL_DESIGN: SnaxShell and SnaxUnit, a lockstep add), with the unit's
+(SHELL_DESIGN: SnaxShell and SnaxUnit, an ElementwiseLanes add), with the unit's
 trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
 (snax-forge's generated main.c and data.h), named forge.<design>: the

@@ -4,36 +4,40 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""SnaxUnit (snax_unit.cpp): a Chisel block's datapath, every number a property.
+"""SnaxUnit (snax_unit.cpp): one unit of accelerator.json, a datapath under its
+nest controller, every number a property.
 
-The rule (lockstep, pipelined), the op table and NumPy's arithmetic on each
-port's type are in snax_unit.hpp. The C++ checks every property and stops on
-a bad one, naming it; this class only passes them on, so a design point
-compiles nothing (D134 in snax-forge).
+The rule (latency, II, jobs and job_beats), the op table and NumPy's
+arithmetic on each port's type are in snax_unit.hpp. The C++ checks every
+property and stops on a bad one, naming it; this class only passes them on,
+so a design point compiles nothing (D134 in snax-forge).
 """
 
 import gvsoc.systree
 
 
 class SnaxUnit(gvsoc.systree.Component):
-    """The datapath: lanes elements per beat, one op, lockstep or pipelined;
-    with one input a fold, one result every rate firings.
+    """The datapath: lanes elements per beat, one op, latency L and II; with
+    TreeAccumulate a fold, one result every job_beats firings.
 
     Parameters
     ----------
+    datapath : str
+        ElementwiseLanes (two inputs, the op per lane) or TreeAccumulate (one
+        input, a fold: x is the beat's lanes summed through a tree, and the
+        output's value is acc + x over the firings of one job, acc starting
+        from the first x; the output one element).
     inputs : list[str]
-        Input port names, in the op's operand order: two, or one for a fold
-        (x is the beat's lanes reduced by op through a tree, and the output's
-        value is op(acc, x) over the firings of one output, acc starting from
-        the first x; the output one element).
+        Input port names, in the op's operand order and the streamer's
+        reader order.
     outputs : list[str]
         Output port names (one).
     lanes : int
         Elements per input beat.
-    op : int
-        ElementwiseOp's encoding: add 0, sub 1, mul 2, and 3, or 4, xor 5,
-        min 6, max 7; at NumPy's types (snax_unit.hpp): an elementwise op at
-        the inputs' result type, cast to the output's; a fold's lanes cast to
+    op : str
+        The op's name: add, sub, mul, and, or, xor, min, max (TreeAccumulate:
+        add); at NumPy's types (snax_unit.hpp): an elementwise op at the
+        inputs' result type, cast to the output's; a fold's lanes cast to
         the output's type, the tree and acc at it.
     in_widths, in_signed : list
         Each input's element width (8, 16, 32 or 64; lanes * width a
@@ -41,43 +45,35 @@ class SnaxUnit(gvsoc.systree.Component):
     out_widths, out_signed : list
         The output's, one each; lanes * width a multiple of 64 unless a fold
         (one word).
-    control : str
-        counted: the unit counts its firings.
-    config : list[str]
-        The role of each configuration word the shell sends, in order:
-        count (the run's firings) and rate (firings per output; a fold,
-        pipelined). Default ['count'].
-    wait : str
-        lockstep or pipelined.
     latency : int
-        Pipeline stages L (pipelined; 0 for lockstep).
+        Pipeline stages L (0: lockstep).
     ii : int
-        Initiation interval (pipelined; 1 for lockstep).
+        Initiation interval.
     csr_base : int
-        Number of the shell's first CSR, for the trace.
+        Number of its group's first CSR, for the trace.
 
     Ports
     -----
     <input>, <output> : io master
         The streamer's reader_<i> and writer_<j> ports.
     ctrl : io slave
-        A start: a write of the configuration words in CSR order.
+        A start: a write of two words, jobs and job_beats.
     busy : wire<bool> master
         Busy from the next cycle on, driven on every change.
     """
 
     SOURCES = ['snax_unit.cpp']
 
-    def __init__(self, parent: gvsoc.systree.Component, name: str, inputs: list,
-            outputs: list, lanes: int, op: int, in_widths: list, in_signed: list,
-            out_widths: list, out_signed: list, control: str = 'counted',
-            wait: str = 'lockstep', latency: int = 0, ii: int = 1, csr_base: int = 0,
-            config: list = None):
+    def __init__(self, parent: gvsoc.systree.Component, name: str, datapath: str,
+            inputs: list, outputs: list, lanes: int, op: str, in_widths: list,
+            in_signed: list, out_widths: list, out_signed: list, latency: int = 0, ii: int = 1,
+            csr_base: int = 0):
         super().__init__(parent, name)
 
         self.add_sources(self.SOURCES)
 
         self.add_properties({
+            'datapath': datapath,
             'inputs': list(inputs),
             'outputs': list(outputs),
             'lanes': lanes,
@@ -86,9 +82,6 @@ class SnaxUnit(gvsoc.systree.Component):
             'out_widths': list(out_widths),
             'out_signed': list(out_signed),
             'op': op,
-            'control': control,
-            'config': list(config) if config is not None else ['count'],
-            'wait': wait,
             'latency': latency,
             'ii': ii,
             'csr_base': csr_base,

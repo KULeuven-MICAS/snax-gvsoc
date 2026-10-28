@@ -3,11 +3,10 @@
 # a missing room does not matter. After the last firing the cycles with
 # results in flight are flush, but a frozen one, which is stall_out (busy 4 +
 # stall_in 1 + stall_out 3 + flush 2 = 10 busy cycles)
-wait pipelined
 latency 2
 ii 1
 inputs 2
-start 0 4 taken
+start 0 4 1 taken
 expect run index=0 firings=4 busy=4 stall_in=1 stall_out=3 flush=2
 cycles
 # a b out  fire push busy

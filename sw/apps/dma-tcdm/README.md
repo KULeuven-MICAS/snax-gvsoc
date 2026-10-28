@@ -29,9 +29,9 @@ instruction cache.
   cycles of each other.
 
 In the window neither core touches the TCDM: the compute core starts the
-accelerator and the streamer and polls their busy CSRs, the DMA core waits
+accelerator and the streamer and polls their busy (the group's STATUS bit 0), the DMA core waits
 on `mcycle`, issues the copies from registers and polls the DMA. The line
-also gives the shell's counter (981, `acc counter`), which depends on the
+also gives the group's COUNTER (981, `acc counter`), which depends on the
 gap between the two start writes (the core's timing), and the errors: O against A + B, and the
 copies against their source; the program returns them.
 

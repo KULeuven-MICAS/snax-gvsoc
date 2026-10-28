@@ -1,0 +1,25 @@
+# The empty run: a start with jobs 0 or with job_beats 0 fires nothing, so the
+# unit ignores it and busy stays 0 (the shell ends such a run itself, without
+# the unit: tests/snax/shell/cases/jobs_zero.txt). A fold at L = 1, II 1: jobs
+# 0 in cycle 0, job_beats 0 in cycle 1, both ignored; a start of one job of two
+# beats in cycle 2 runs as usual: firings in 3 and 4, the result pushed in 5,
+# the end (busy 2 + flush 1 = 3). jobs 0 and job_beats 0 together in cycle 6:
+# ignored too
+latency 1
+ii 1
+inputs 1
+start 0 0 4 ignored
+start 1 2 0 ignored
+start 2 1 2 taken
+start 6 0 0 ignored
+expect run index=0 firings=2 busy=2 stall_in=0 stall_out=0 flush=1
+cycles
+# in out  fire push busy
+1 1       0 0 0     # 0: jobs 0: ignored
+1 1       0 0 0     # 1: job_beats 0: ignored
+1 1       0 0 0     # 2: start, jobs 1, job_beats 2
+1 1       1 0 1     # 3: firing 0
+1 1       1 0 1     # 4: firing 1 (the last), gives the result
+1 1       0 1 1     # 5: push, the end (flush)
+1 1       0 0 0     # 6: jobs 0 and job_beats 0: ignored
+1 1       0 0 0     # 7: still idle

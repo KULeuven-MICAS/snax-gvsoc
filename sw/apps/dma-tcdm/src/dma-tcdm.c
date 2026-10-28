@@ -65,7 +65,7 @@ static uint64_t src_l2[COPIES * SUPERBANK / 8] __attribute__((aligned(SUPERBANK)
 // One run's results, in L1 for both cores
 typedef struct {
     uint32_t counter;      // STREAMER_PERFORMANCE_COUNTER_CSR
-    uint32_t acc_counter;  // ACC_RO_PERF_COUNT
+    uint32_t acc_counter;  // ACC_RO_COUNTER
     uint32_t errors;
 } result_t;
 
@@ -109,7 +109,7 @@ static __attribute__((noinline)) void run(uint32_t area, uint32_t dma_offset,
         csrw_ss(S_STRIDE_WRITER_0_0, 8);
         csrw_ss(T_BOUND_WRITER_0_0, BEATS);
         csrw_ss(T_STRIDE_WRITER_0_0, ROW);
-        csrw_ss(ACC_RW_LOOP_COUNT, BEATS);
+        csrw_ss(ACC_RW_JOBS, BEATS);
     }
 
     snrt_cluster_hw_barrier();
@@ -117,7 +117,7 @@ static __attribute__((noinline)) void run(uint32_t area, uint32_t dma_offset,
     if (snrt_is_compute_core()) {
         csrw_ss(ACC_RW_START, 1);
         csrw_ss(STREAMER_START_CSR, 1);
-        while (csrr_ss(ACC_RO_BUSY)) {
+        while (csrr_ss(ACC_RO_STATUS) & 1) {
         }
         while (csrr_ss(STREAMER_BUSY_CSR)) {
         }
@@ -143,7 +143,7 @@ static __attribute__((noinline)) void run(uint32_t area, uint32_t dma_offset,
         for (uint32_t i = 0; i < COPIES * SUPERBANK / 8; i++)
             errors += *copy_word(copies, i) != src_l2[i];
         r->counter = csrr_ss(STREAMER_PERFORMANCE_COUNTER_CSR);
-        r->acc_counter = csrr_ss(ACC_RO_PERF_COUNT);
+        r->acc_counter = csrr_ss(ACC_RO_COUNTER);
         r->errors = errors;
     }
 }

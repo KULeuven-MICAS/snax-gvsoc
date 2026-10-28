@@ -1,10 +1,11 @@
-# lockstep, no stalls: four firings back to back; a start in the run's last
+# L = 0, II 1 (lockstep), no stalls: four firings back to back; a start in the run's last
 # cycle (4) is refused, one in the next cycle starts a run of two
-wait lockstep
+latency 0
+ii 1
 inputs 2
-start 0 4 taken
-start 4 9 refused
-start 5 2 taken
+start 0 4 1 taken
+start 4 9 1 refused
+start 5 2 1 taken
 expect run index=0 firings=4 busy=4 stall_in=0 stall_out=0 flush=0
 expect run index=1 firings=2 busy=2 stall_in=0 stall_out=0 flush=0
 cycles

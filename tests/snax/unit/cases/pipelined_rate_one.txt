@@ -1,11 +1,9 @@
-# pipelined fold, L = 1, II 1, rate 1 (the Accumulator at len = 1): every
+# pipelined fold, L = 1, II 1, job_beats 1 (TreeAccumulate at T = 1): every
 # firing gives a result, pushed the cycle after while the next input is taken
 # (busy 4 + flush 1 = 5)
-wait pipelined
 latency 1
 ii 1
 inputs 1
-config count rate
 start 0 4 1 taken
 expect run index=0 firings=4 busy=4 stall_in=0 stall_out=0 flush=1
 cycles

@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // SnaxShell's rule against hand-worked cases (README.md): each case file
-// gives the shell's fields and the unit behind it, then, per cycle, each
-// input's valid, the output's ready, at most one CSR access with its
-// expected result, and the expected busy. The tb steps snax_shell.hpp's rule
+// gives the group's read-write CSRs and the unit behind it, then, per cycle,
+// each input's valid, the output's ready, at most one CSR access with its
+// expected result, and the expected STATUS. The tb steps snax_shell.hpp's rule
 // with snax_unit.hpp's, wired as GVSoC wires them: the shell's accepted start
-// starts the unit with the fields, and the unit's busy feeds the shell.
+// (but the empty run) starts the unit with JOBS and JOB_BEATS, and the unit's
+// busy feeds the shell.
 //
 //   tb CASE...
 //
@@ -32,16 +33,14 @@ struct CycleLine
     int offset;
     uint32_t value;             // a write's value
     int64_t result;             // a write's answer cycle, a read's value; -1 for '-' and '.'
-    int busy;
+    int status;
     int lineno;
 };
 
 struct Case
 {
     std::string name;
-    std::vector<std::string> fields = {"loopCount"};
-    std::vector<std::string> config = {"count"};    // the unit's role of each field
-    std::string wait = "lockstep";
+    std::vector<std::string> csrs = {"START", "JOBS"};    // the read-write CSRs
     int latency = 0;
     int ii = 1;
     int inputs = 2;
@@ -63,7 +62,7 @@ static bool number(const std::string &token, int64_t &value)
     return !token.empty() && *end == '\0';
 }
 
-// A cycle line: VALID... READY ACCESS RESULT BUSY, ACCESS being `w OFFSET
+// A cycle line: VALID... READY ACCESS RESULT STATUS, ACCESS being `w OFFSET
 // VALUE`, `r OFFSET`, `-` or `.`
 static bool parse_cycle(const std::string &line, int inputs, CycleLine &l)
 {
@@ -124,7 +123,7 @@ static bool parse_cycle(const std::string &line, int inputs, CycleLine &l)
         return false;
     }
     if (!number(t[rest + 1], v)) return false;
-    l.busy = v;
+    l.status = v;
     return true;
 }
 
@@ -158,19 +157,17 @@ static bool parse(const std::string &path, Case &c)
             l.lineno = lineno;
             c.cycles.push_back(l);
         }
-        else if (key == "fields" || key == "config")
+        else if (key == "csrs")
         {
-            std::vector<std::string> &list = key == "fields" ? c.fields : c.config;
-            list.clear();
+            // START, JOBS, then the units' (JOB_BEATS)
+            c.csrs.clear();
             std::string word;
             while (ss >> word)
             {
-                ok = ok && (key == "fields" || word == "count" || word == "rate");
-                list.push_back(word);
+                c.csrs.push_back(word);
             }
-            ok = ok && !list.empty();
+            ok = c.csrs.size() >= 2 && c.csrs[0] == "START" && c.csrs[1] == "JOBS";
         }
-        else if (key == "wait") { ok = (bool)(ss >> c.wait); }
         else if (key == "latency") { ok = (bool)(ss >> c.latency); }
         else if (key == "ii") { ok = (bool)(ss >> c.ii); }
         else if (key == "inputs") { ok = (bool)(ss >> c.inputs) && c.inputs > 0; }
@@ -182,12 +179,6 @@ static bool parse(const std::string &path, Case &c)
             return false;
         }
     }
-    if (c.config.size() != c.fields.size())
-    {
-        fprintf(stderr, "%s: config gives %zu roles for %zu fields\n", path.c_str(),
-            c.config.size(), c.fields.size());
-        return false;
-    }
     return true;
 }
 
@@ -195,18 +186,15 @@ static bool parse(const std::string &path, Case &c)
 static int run(const Case &c)
 {
     SnaxUnitRule unit;
-    SnaxUnitRule::Wait wait;
-    if (c.wait == "lockstep") wait = SnaxUnitRule::LOCKSTEP;
-    else if (c.wait == "pipelined") wait = SnaxUnitRule::PIPELINED;
-    else
-    {
-        printf("%s: unknown wait %s\n", c.name.c_str(), c.wait.c_str());
-        return 1;
-    }
-    unit.configure(wait, c.latency, c.ii);
+    unit.configure(c.latency, c.ii);
     SnaxShellRule shell;
-    shell.configure(c.fields.size());
-    int nb_rw = c.fields.size() + 1;
+    int job_beats = -1;
+    for (size_t i = 2; i < c.csrs.size(); i++)
+    {
+        job_beats = c.csrs[i] == "JOB_BEATS" ? i : job_beats;
+    }
+    shell.configure(c.csrs.size(), job_beats);
+    int nb_rw = c.csrs.size();
 
     int errors = 0;
     auto fail = [&](int64_t cycle, const CycleLine &l, const std::string &why) {
@@ -214,14 +202,10 @@ static int run(const Case &c)
         errors++;
     };
 
-    // The shell's accepted start in cycle: the fields to the unit's ctrl
+    // The shell's accepted start in cycle (not the empty run): JOBS and
+    // JOB_BEATS to the unit's ctrl
     auto start_unit = [&](int64_t cycle, const CycleLine &l) {
-        uint32_t count = 0, rate = 1;
-        for (size_t f = 0; f < c.fields.size(); f++)
-        {
-            (c.config[f] == "count" ? count : rate) = shell.regs[f];
-        }
-        SnaxUnitRule::Start answer = unit.start(cycle, count, rate);
+        SnaxUnitRule::Start answer = unit.start(cycle, shell.jobs(), shell.job_beats());
         if (answer == SnaxUnitRule::REFUSED)
         {
             fail(cycle, l, "the unit refused a start the shell sent while idle");
@@ -243,8 +227,10 @@ static int run(const Case &c)
         // A held start taken in E + 1: it goes to the unit, its write is answered
         if (shell.held && shell.release_cycle() == cycle)
         {
-            shell.release(cycle);
-            start_unit(cycle, l);
+            if (!shell.release(cycle))
+            {
+                start_unit(cycle, l);
+            }
             answered = cycle;
         }
 
@@ -284,7 +270,7 @@ static int run(const Case &c)
                 pending = &l;
                 pending_cycle = cycle;
                 answered = w.held ? -1 : cycle;
-                if (w.start)
+                if (w.start && !w.empty)
                 {
                     start_unit(cycle, l);
                 }
@@ -322,10 +308,11 @@ static int run(const Case &c)
             }
         }
 
-        int busy = shell.read(cycle, nb_rw);
-        if (busy != l.busy)
+        int status = shell.read(cycle, nb_rw);
+        if (status != l.status)
         {
-            fail(cycle, l, "busy " + std::to_string(busy) + ", expected " + std::to_string(l.busy));
+            fail(cycle, l, "STATUS " + std::to_string(status) + ", expected " +
+                std::to_string(l.status));
         }
     }
     if (pending != nullptr)

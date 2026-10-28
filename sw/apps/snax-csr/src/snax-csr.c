@@ -28,13 +28,13 @@
     X(BASE_PTR_READER_1_LOW) X(BASE_PTR_READER_1_HIGH) X(S_STRIDE_READER_1_0) \
     X(T_BOUND_READER_1_0) X(T_STRIDE_READER_1_0)                              \
     X(BASE_PTR_WRITER_0_LOW) X(BASE_PTR_WRITER_0_HIGH) X(S_STRIDE_WRITER_0_0) \
-    X(T_BOUND_WRITER_0_0) X(T_STRIDE_WRITER_0_0) X(ACC_RW_LOOP_COUNT)
+    X(T_BOUND_WRITER_0_0) X(T_STRIDE_WRITER_0_0) X(ACC_RW_JOBS)
 #define RO_CSRS(X)                                                \
     X(STREAMER_BUSY_CSR) X(STREAMER_PERFORMANCE_COUNTER_CSR)      \
-    X(ACC_RO_BUSY) X(ACC_RO_PERF_COUNT)
-// Part 3's CSRs: a read-write one, and the shell's read-only counter
+    X(ACC_RO_STATUS) X(ACC_RO_COUNTER)
+// Part 3's CSRs: a read-write one, and the group's read-only COUNTER
 #define ONE_RW BASE_PTR_READER_0_LOW
-#define ONE_RO ACC_RO_PERF_COUNT
+#define ONE_RO ACC_RO_COUNTER
 
 #define STR(x) #x
 #define WRITE(csr, v) write_csr(csr, v)

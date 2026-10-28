@@ -12,9 +12,10 @@
 
 (or --target snax_hjson:hjson=<cluster.hjson>). A relative path is taken
 from gvrun's working directory. Without it, the build's default:
-sw/cfg/snax_forge/snax_forge.hjson, snax-forge's vecadd fixture's cluster,
-installed beside this module as cfg/snax_forge/snax_forge.hjson
-(snax/CMakeLists.txt). The build's platform tree holds the default file's
+forge/vecadd/snax_forge.hjson, snax-forge's vecadd fixture's cluster (with
+its streamer file and accelerator.json), installed beside this module as
+cfg/forge/vecadd/ (snax/CMakeLists.txt); snax_cluster's synced copy in
+sw/cfg/snax_forge/ is never read (snax-forge D126). The build's platform tree holds the default file's
 components and bindings: a file with the same ones (forge/vecadd/'s) uses it, its properties coming through the JSON
 config as always; one with others (another accelerator) does not match, so
 gvrun warns and runs it on the JSON config (runner_gvrun2.py).
@@ -28,7 +29,7 @@ dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
 crossbar's sparse interconnect (each slot's sparse_interconnect_config;
 tcdm.sparse_interconnect false is an error: the plain interconnect is not
 modelled). Each core's accelerator slot gets the standard
-composite (snax_unit_acc.py) from its datapath block (snax_datapath_cfg); a
+composite (snax_unit_acc.py) from its accelerator.json (snax_datapath_cfg); a
 slot without one is an error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
@@ -67,10 +68,10 @@ if os.environ.get('USE_GVRUN') is None:
 
 HERE = Path(__file__).resolve().parent
 # Where a target's cluster file is found by name: cfg/ beside this module in
-# the install (snax/CMakeLists.txt copies sw/cfg/ there), the repo's sw/cfg/
-# when the build reads the sources
-CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg')
-DEFAULT_HJSON = 'snax_forge/snax_forge.hjson'
+# the install (snax/CMakeLists.txt copies sw/cfg/ and forge/vecadd/ there),
+# the repo's sw/cfg/ and its root when the build reads the sources
+CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg', HERE.parent)
+DEFAULT_HJSON = 'forge/vecadd/snax_forge.hjson'
 
 # The DMA and DRAM measured on the RTL (docs/notes/NOTES.md), with the hjson's
 # snax_alu cluster: one beat of dma_data_width per cycle into L1, the DMA's
@@ -113,10 +114,10 @@ def cfg_file(name: str) -> Path:
 
 
 def accelerator(cfg, slot):
-    """The accelerator class of a slot: the standard composite of its datapath block."""
-    if slot.datapath is None:
+    """The accelerator class of a slot: the standard composite of its accelerator.json."""
+    if slot.accelerator is None:
         raise CfgTargetError(cfg.path, f'{slot.at}.snax_datapath_cfg',
-            f'missing: {slot.name!r} has no datapath block, which the model builds a slot from')
+            f'missing: {slot.name!r} has no accelerator.json, which the model builds a slot from')
     return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
 
 

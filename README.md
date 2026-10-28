@@ -53,9 +53,9 @@ regression run on.
 
 `snax_hjson` (`snax/snax_hjson.py`, LNK2a) is a SNAX cluster read from its
 hjson (`snax/snax_cfg.py`), the file given with `--param hjson=<path>`
-(`sw/cfg/snax_forge/snax_forge.hjson`, `forge/vecadd/`'s cluster, by
-default): a compute core and a DMA core, the compute core's accelerator
-(the streamer, `SnaxShell` and `SnaxUnit`); its TCDM ports, the cores' and
+(`forge/vecadd/snax_forge.hjson` by default, snax-forge D126): a compute
+core and a DMA core, the compute core's accelerator (the streamer, a
+`SnaxShell` per group and a `SnaxUnit` per unit of its `accelerator.json`); its TCDM ports, the cores' and
 the narrow AXI port's go through a crossbar into the banks. With the sparse
 interconnect the crossbar takes the streamer's priority bit first, then
 round robin from the last pick (SG7, `docs/plans/SG7.md`); the cores and
@@ -80,22 +80,23 @@ core.
 
 ### snax-shell
 
-`sw/apps/snax-shell/` drives `SnaxShell` (GeMMX's shell contract: a start
-waits while busy, busy and a cycle counter) and `SnaxUnit` (a lockstep add,
-4 lanes of 64 bit) behind the streamer by hand. It runs on
-`snax_hjson` with `forge/vecadd/snax_forge.hjson`, whose datapath block and
-CSRs (`forge/vecadd/include/`) are that accelerator's; its README has the
+`sw/apps/snax-shell/` drives `SnaxShell` (GeMMX's shell contract per group,
+snax-forge C§17: START, JOBS, a start held while busy, STATUS with its busy
+and sticky done bits, the COUNTER) and `SnaxUnit` (an ElementwiseLanes add at
+L = 0, II 1, 4 lanes of 64 bit) behind the streamer by hand. It runs on
+`snax_hjson` with `forge/vecadd/snax_forge.hjson`, whose `accelerator.json`
+and CSRs (`forge/vecadd/include/`) are that accelerator's; its README has the
 commands and the lines it prints.
 
 ### Generated accelerators (forge/)
 
 `forge/<design>/` holds one design point as SNAX-GVSoC reads it (LNK2a):
-snax-forge's generator's three hjson files, the cluster file
+snax-forge's generator's three files, the cluster file
 `snax_forge.hjson` (snax-forge's base cluster as the cluster
 `snax_forge_cluster`, its accelerator slot renamed `snax_forge` and set for
 the design), the streamer file `snax_forge_streamer.hjson` (the slot's
-streamer template) and the accelerator file `snax_forge_acc.hjson` (its
-datapath block), the headers a program drives it with, the program itself,
+streamer template) and `accelerator.json` (the accelerator's one
+description: groups, units, CSRs; snax-forge C§17), the headers a program drives it with, the program itself,
 `main.c` with its `data.h` (GEN2a), and `manifest.json` (`forge/README.md`).
 No model is built: `snax_hjson` reads the cluster file and puts the
 standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and

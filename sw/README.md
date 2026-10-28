@@ -49,6 +49,13 @@ every relative include in the copied files (`../../deps/...`,
 | `LICENSE` | `sw/LICENSE` |
 | `docs/schema/X` | `sw/docs/schema/X` |
 
+`sw/cfg/snax_forge/` is snax_cluster's copy of its vecadd fixture, kept for
+the sync's diff and the generated headers below; SNAX-GVSoC never reads its
+cluster files: the `snax_hjson` target's default and `test_snax_cfg` read
+`forge/vecadd/` (the cluster file, the streamer file and `accelerator.json`),
+refreshed from snax-forge itself (snax-forge D126), so the copy may lag
+behind snax-forge's format until snax_cluster takes the new fixtures.
+
 ## Licences
 
 - snax_cluster: Apache 2.0, `LICENSE` here; each file keeps its header.

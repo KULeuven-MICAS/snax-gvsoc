@@ -1,0 +1,31 @@
+# The empty run (C§17): a start with JOBS 0, or with a JOB_BEATS 0, ends in
+# the cycle a it is accepted (E = a), without the unit: busy never rises,
+# done pulses in a, STATUS reads 2 from a + 1, COUNTER reads 0. A fold group
+# (TreeAccumulate, L = 1): START 0, JOBS 1, JOB_BEATS 2, STATUS 3, COUNTER 4.
+# c1's start, JOBS 0 (as reset): STATUS 2 from c2, COUNTER 0. Then a run of
+# one job of two beats from c6: busy c7 .. c9 (fires c7, c8, the result
+# pushed in c9 = E), done from c10, COUNTER 3. c13's start with JOB_BEATS 0:
+# the empty run again; its done pulse in c13 wins over the start's clear, so
+# STATUS stays 2, and COUNTER is reset to 0.
+csrs START JOBS JOB_BEATS
+latency 1
+ii 1
+inputs 1
+cycles
+# in out  access   result  status
+1 1       r 3      0       0     # 0: never started
+1 1       w 0 1    1       0     # 1: start, JOBS 0: the empty run, done in 1
+1 1       r 3      2       2     # 2: not busy, done
+1 1       r 4      0       2     # 3: COUNTER 0
+1 1       w 1 1    4       2     # 4: JOBS 1
+1 1       w 2 2    5       2     # 5: JOB_BEATS 2
+1 1       w 0 1    6       2     # 6: start accepted; busy from 7
+1 1       r 3      1       1     # 7: busy, done cleared; firing 0
+1 1       -        -       1     # 8: firing 1, gives the result
+1 1       -        -       1     # 9: push, E
+1 1       r 3      2       2     # 10: done
+1 1       r 4      3       2     # 11: [7, 9]
+1 1       w 2 0    12      2     # 12: JOB_BEATS 0
+1 1       w 0 1    13      2     # 13: start: the empty run, done in 13
+1 1       r 3      2       2     # 14: done stays (the set wins)
+1 1       r 4      0       2     # 15: reset in c13

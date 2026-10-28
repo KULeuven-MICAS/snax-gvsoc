@@ -1,19 +1,16 @@
-# A start of count 0 is accepted by the shell (the unit idle), which the unit
-# ignores: no run, busy stays 0; the counter is still reset. c1's start
-# (count 2) is busy c2, c3, so the counter reads 2 in c4. c6's start of count
-# 0 is answered at once, busy stays 0, and the counter reads 0.
-fields loopCount
-config count
-wait lockstep
-inputs 2
+# A start with JOBS 0 after a run: the empty run, accepted and ended by the
+# shell in its own cycle without the unit (E = a = 6): busy stays 0, the
+# counter is reset to 0, and done, already set by the run before, stays set:
+# the empty run's done pulse in c6 wins over the start's clear. c1's start
+# (JOBS 2) is busy c2, c3, so the counter reads 2 in c4.
 cycles
-# a b out  access   result  busy
-1 1 1      w 0 2    0       0     # 0: loopCount 2
-1 1 1      w 1 1    1       0     # 1: start accepted; busy from 2
+# a b out  access   result  status
+1 1 1      w 1 2    0       0     # 0: JOBS 2
+1 1 1      w 0 1    1       0     # 1: start accepted; busy from 2
 1 1 1      -        -       1     # 2: fires
 1 1 1      -        -       1     # 3: fires, E
-1 1 1      r 3      2       0     # 4: [2, 3]
-1 1 1      w 0 0    5       0     # 5: loopCount 0
-1 1 1      w 1 1    6       0     # 6: start accepted, ignored by the unit: no run
-1 1 1      r 2      0       0     # 7: busy stays 0
-1 1 1      r 3      0       0     # 8: reset in c6, no busy cycle since
+1 1 1      r 3      2       2     # 4: [2, 3]; done
+1 1 1      w 1 0    5       2     # 5: JOBS 0
+1 1 1      w 0 1    6       2     # 6: start accepted: the empty run, done in 6
+1 1 1      r 2      2       2     # 7: STATUS: not busy, done
+1 1 1      r 3      0       2     # 8: reset in c6, no busy cycle since
