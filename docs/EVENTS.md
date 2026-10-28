@@ -77,13 +77,18 @@ words, each the bytes it covers little-endian), a list of integers joined by
 ## Components
 
 The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`);
-`snax_acc<i>` is core `i`'s accelerator.
+`snax_acc<i>` is core `i`'s accelerator. Its components follow its
+`accelerator.json` (snax-forge C§17): with one group of one unit, as every
+fixture of `forge/` has, the unit is `snax_acc<i>/unit` and the group's
+shell `snax_acc<i>/shell`; with more, `snax_acc<i>/unit_<unit>` and
+`snax_acc<i>/shell_<group>` (`snax_unit_acc.py`'s `component_names`), each
+unit with the traces below. The shell has no trace of its own.
 
-### Unit (`snax_acc<i>/unit`, `snax/snax_unit.cpp`)
+### Unit (`snax_acc<i>/unit`, `snax_acc<i>/unit_<unit>`; `snax/snax_unit.cpp`)
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
-| `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count`, `rate` |
+| `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |
 | `events` | `done` | the run's last busy cycle `E` (idle from `E + 1`) | `firings`; `first` and `last`, the cycles of its first and last firing |
 | `summary` | `run` | `E` | `index` (from 0), `firings`, `busy`, `stall_in`, `stall_out`, `flush` (they add up to `E - s`) |
 | `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order), `value` (each input port's beat words, port order, flat) |

@@ -123,8 +123,8 @@ slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
     exit 0
 
 It exits 0. `make build` made `snax_hjson`'s platform tree from its default
-file, `sw/cfg/snax_forge/snax_forge.hjson`, the cluster of `forge/vecadd/`,
-so this run uses that tree. Another fixture's cluster file (`vecmul`,
+file, `forge/vecadd/snax_forge.hjson` (installed from `forge/vecadd/`), so
+this run uses that tree. Another fixture's cluster file (`vecmul`,
 `vsum`) puts another accelerator in the slot: gvrun then warns that the
 installed platform tree does not match and builds the system from its JSON
 configuration instead, on the same installed components. Nothing is
@@ -137,15 +137,15 @@ compiled for a design point.
   flow takes as the run's total cycles.
 - `forge data: 0 errors (64 words)`: every output word against its golden
   in `data.h` (the reference executor's result); 64 words is vecadd's `O`.
-- `forge counter add_acc: 19`: the shell's cycle counter, read after the
-  accelerator task `add_acc` finished.
+- `forge counter add_acc: 19`: the group's COUNTER (`ACC_RO_COUNTER`), read
+  after the accelerator task `add_acc` finished (STATUS bit 0 polled to 0).
 - The unit's run line, `run index=0 firings=16 busy=16 stall_in=3
   stall_out=0 flush=0`: the counter is busy + stall_in + stall_out + flush (16 + 3 +
   0 + 0 = 19), and the firings are the task's beats in the manifest:
 
       grep '"tasks"' forge/vecadd/manifest.json
 
-       "tasks": [{"name": "add_acc", "beats": 16, "csrs": {"loopCount": 16}}]
+       "tasks": [{"name": "add_acc", "beats": 16, "csrs": {"JOBS": 16}}]
 
 - `forge errors: 0`: the data errors plus one per counter below its beats;
   `main` returns it, so the run's exit code is 0.
@@ -281,15 +281,13 @@ regression's `unit`):
     PASS tree: 8 vectors
     PASS types: 6 vectors
     PASS beats: 15 vectors
+    PASS empty_run: 8 cycles, 1 run(s)
+    PASS fold_jobs: 9 cycles, 1 run(s), data
     PASS lockstep_count_zero: 6 cycles, 1 run(s)
     PASS lockstep_input_missing: 8 cycles, 1 run(s)
     PASS lockstep_no_stalls: 9 cycles, 2 run(s)
     PASS lockstep_out_not_ready: 9 cycles, 1 run(s)
     PASS pipelined_ii2: 10 cycles, 1 run(s)
-    PASS pipelined_l0(lockstep_no_stalls): 9 cycles, 2 run(s)
-    PASS pipelined_l0(lockstep_input_missing): 8 cycles, 1 run(s)
-    PASS pipelined_l0(lockstep_out_not_ready): 9 cycles, 1 run(s)
-    PASS pipelined_l0(lockstep_count_zero): 6 cycles, 1 run(s)
     PASS pipelined_l2_backpressure: 12 cycles, 1 run(s)
     PASS pipelined_rate_backpressure: 15 cycles, 1 run(s)
     PASS pipelined_rate_count_zero: 9 cycles, 1 run(s)
@@ -298,7 +296,7 @@ regression's `unit`):
     PASS pipelined_rate_zero: 7 cycles, 1 run(s)
     PASS pipelined_tree_t4: 18 cycles, 2 run(s)
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
-    21 passed, 0 failed
+    19 passed, 0 failed
 
 `SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against
 its hand-worked cases, with g++ (the regression's `shell`,
@@ -306,12 +304,14 @@ its hand-worked cases, with g++ (the regression's `shell`,
 
     tests/snax/shell/run.sh
 
-    PASS counter_after_start: 14 cycles
-    PASS counter: 14 cycles
     PASS count_zero: 9 cycles
+    PASS counter: 14 cycles
+    PASS counter_after_start: 14 cycles
     PASS field_read_back: 4 cycles
+    PASS jobs_zero: 16 cycles
     PASS read_busy: 8 cycles
     PASS start_bit0_clear: 7 cycles
     PASS start_held: 11 cycles
     PASS start_in_last_cycle: 8 cycles
-    8 passed, 0 failed
+    PASS status_sticky: 13 cycles
+    10 passed, 0 failed
