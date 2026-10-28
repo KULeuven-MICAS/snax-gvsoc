@@ -18,6 +18,7 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,7 +62,8 @@ def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Un
 
 def fold(name: str, base: int, in_dtype: str = "int64", lanes: int = 1) -> Unit:
     return Unit(name, "accumulate", "TreeAccumulate",
-                {"a": Port("in", in_dtype, lanes), "out": Port("out", "int64", 1)}, None, {},
+                {"a": Port("in", in_dtype, lanes), "out": Port("out", "int64", 1)}, None,
+                {"op": "add"},
                 1, 1, [Csr("JOB_BEATS", "rw", base + 2, 32)])
 
 
@@ -159,7 +161,8 @@ class Fixtures(unittest.TestCase):
                 slot = self.slot(folder.name)
                 self.assertEqual(slot.accelerator.design_point,
                                  f"out/design/{folder.name}/design_point.json")
-                self.assertEqual(slot.num_ro_csr, 2)
+                # STATUS and COUNTER per group
+                self.assertEqual(slot.num_ro_csr, 2 * len(slot.accelerator.groups))
 
 
 class Misa(unittest.TestCase):
@@ -498,6 +501,11 @@ class AccJson(unittest.TestCase):
         self.unit()["opType"] = "int64"
         self.fails(snax_cfg.CfgTypeError, "units[0].opType", "a TreeAccumulate unit has none")
         del self.unit()["opType"]
+        self.unit()["params"]["op"] = "max"
+        self.fails(snax_cfg.CfgTargetError, "units[0].params.op", "TreeAccumulate adds")
+        del self.unit()["params"]["op"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.op", "TreeAccumulate needs an op")
+        self.unit()["params"]["op"] = "add"
         self.unit()["csrs"] = []
         self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "a TreeAccumulate unit has JOB_BEATS")
 
@@ -519,6 +527,13 @@ class TwoGroups(unittest.TestCase):
                                                       ["START", "JOBS", "JOB_BEATS"]])
         self.assertEqual(acc.ports_of("sum", acc.inputs), [(2, "a")])
         self.assertEqual(acc.ports_of("sum", acc.outputs), [(1, "out")])
+
+    def test_forge_dot_1(self):
+        """forge/dot_1/, snax-forge's dot 1: the same accelerator, its design point named."""
+        (slot,) = snax_cfg.load(FORGE / "dot_1" / "snax_forge.hjson").cores[0].accelerators
+        self.assertEqual(slot.accelerator,
+                         replace(DOT, design_point="out/design/dot_1/design_point.json"))
+        self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports), (5, 4, 17))
 
 
 if __name__ == "__main__":

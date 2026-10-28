@@ -20,8 +20,9 @@ trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
 (snax-forge's generated main.c and data.h), named forge.<design>: the
 fixture's manifest.json gives its cluster file, the unit's trace path and
-each accelerator task's beats (the unit's `summary`, `events` and `beats`
-traces under the trace path are on); it runs on `snax_hjson` with
+each accelerator task's beats and, with several groups (forge/dot_1), its
+unit's own trace path (each unit's `summary`, `events` and `beats` traces
+under its trace path are on); it runs on `snax_hjson` with
 `--param hjson=<cluster file>` (but for vecadd's, its components are not
 the default file's, so gvrun warns and runs it on the JSON config), with the
 counter checks;
@@ -43,8 +44,9 @@ fired the task's beats. The
 hand-written snax-shell prints
 `<program> counter: <n>` for run 0, its beats SHELL_BEATS; a generated
 program (check_counters) prints
-`forge counter <task>: <n>` per accelerator task of its manifest, the k-th
-task matched to run k.
+`forge counter <task>: <n>` per accelerator task of its manifest, against
+its unit's runs (the task's trace path), the k-th task of a unit matched to
+that unit's run k.
 
 The class check (classes.py): every forge/ fixture run above also has
 the streamers' `summary`, `events` and `beats` traces on (CLASS_TRACES); it
@@ -162,29 +164,39 @@ def check_run(counter, lines, run, beats):
     return None
 
 
-def check_counter(program, log, lines, beats):
+def check_counter(program, log, parsed, beats):
     """The counter check of a hand-written program: `<program> counter: <n>`
-    in log (the program's output) against run 0 of lines (the unit's runs,
-    classes.unit_runs()). Returns None when it holds, else why not."""
+    in log (the program's output) against run 0 of the unit (trace.log's lines
+    parsed, classes.unit_runs()). Returns None when it holds, else why not."""
     counter = re.search(rf"^{re.escape(program)} counter: (\d+)$", log, re.MULTILINE)
     if counter is None:
         return f"no `{program} counter:` line"
-    return check_run(int(counter.group(1)), lines, 0, beats)
+    return check_run(int(counter.group(1)), classes.unit_runs(parsed), 0, beats)
 
 
-def check_counters(log, lines, tasks):
+def task_traces(manifest):
+    """Each accelerator task's unit trace path: its own (several groups), else the
+    manifest's."""
+    return [t.get("trace", manifest["trace"]) for t in manifest["tasks"]]
+
+
+def check_counters(log, parsed, manifest):
     """The counter checks of a generated program: per accelerator task of the
     manifest, in order, `forge counter <task>: <n>` in log (the program's
-    output) against run k of lines (the unit's runs, classes.unit_runs()).
+    output) against its unit's runs (trace.log's lines parsed, classes.unit_runs()
+    at the task's trace path), the k-th task of a unit matched to its run k.
     Returns None when they hold, else why not."""
+    tasks = manifest["tasks"]
     if not tasks:
         return "no accelerator task in the manifest"
-    for k, task in enumerate(tasks):
+    seen = {}
+    for task, path in zip(tasks, task_traces(manifest)):
         counter = re.search(rf"^forge counter {re.escape(task['name'])}: (\d+)$", log,
                             re.MULTILINE)
         if counter is None:
             return f"no `forge counter {task['name']}:` line"
-        why = check_run(int(counter.group(1)), lines, k, task["beats"])
+        k = seen[path] = seen.get(path, -1) + 1
+        why = check_run(int(counter.group(1)), classes.unit_runs(parsed, path), k, task["beats"])
         if why is not None:
             return f"{task['name']}: {why}"
     return None
@@ -203,7 +215,7 @@ def check_traces(log, traces, counters):
         parsed = classes.parse(traces.read_text(errors="replace"), name)
     except classes.LineError as e:
         return str(e), traces
-    why = counters(log.read_text(errors="replace"), classes.unit_runs(parsed))
+    why = counters(log.read_text(errors="replace"), parsed)
     if why is not None:
         return why, log
     why = classes.check(parsed)
@@ -244,18 +256,19 @@ class Check:
 
     def run_fixture(self, name, design, app, elf, make_args, counters):
         """Builds app (make_args) and runs elf on FORGE_TARGET with forge/<design>/'s
-        cluster file, the unit's UNIT_TRACES and CLASS_TRACES on, into trace.log beside
-        the run's log; then check_traces() with counters(log, unit runs,
-        manifest), its counter check."""
+        cluster file, each unit's UNIT_TRACES (below its tasks' trace paths) and
+        CLASS_TRACES on, into trace.log beside the run's log; then check_traces() with
+        counters(log, trace.log parsed, manifest), its counter check."""
         if not self.selected(name):
             return
         manifest = json.loads((FORGE_DIR / design / "manifest.json").read_text())
+        units = list(dict.fromkeys(task_traces(manifest))) or [manifest["trace"]]
         make(APPS / app, *make_args)
         traces = WORK / name / "trace.log"
         log = self.run(name, FORGE_TARGET, elf,
                        options=["--param", f"hjson={cluster_file(design)}",
                                 *(f"--trace={t}:{traces}"
-                                  for t in (*(f"{manifest['trace']}/{u}$" for u in UNIT_TRACES),
+                                  for t in (*(f"{p}/{u}$" for p in units for u in UNIT_TRACES),
                                             *CLASS_TRACES))])
         if log is not None:
             # The traces in their own file: GVSoC buffers its stdout, so the
@@ -329,7 +342,7 @@ def main():
     prog, name = "snax-shell", f"snax-shell.{FORGE_TARGET}"
     print(f"{prog} on {FORGE_TARGET}, forge/{SHELL_DESIGN}/'s cluster file")
     check.run_fixture(name, SHELL_DESIGN, prog, BUILD / "apps" / prog / f"{prog}.elf", [],
-                      lambda log, runs, _: check_counter(prog, log, runs, SHELL_BEATS))
+                      lambda log, parsed, _: check_counter(prog, log, parsed, SHELL_BEATS))
     print(f"  {check.count - count} run")
 
     count = check.count
@@ -340,8 +353,7 @@ def main():
         check.run_fixture(f"{FORGE_APP}.{design}", design, FORGE_APP,
                           BUILD / "apps" / FORGE_APP / design / f"{FORGE_APP}.elf",
                           [f"DESIGN={design}"],
-                          lambda log, runs, manifest: check_counters(log, runs,
-                                                                     manifest["tasks"]))
+                          check_counters)
     print(f"  {check.count - count} run")
 
     print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")

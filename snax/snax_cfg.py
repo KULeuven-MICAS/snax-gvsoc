@@ -58,7 +58,8 @@ accelerator.json (snax-forge C§17), what the standard composite
     groups[].units[]          Unit: name, brm, datapath (ElementwiseLanes or
                               TreeAccumulate), ports (per BRM port: port, the
                               datapath's; dtype, NumPy's name; lanes), opType
-                              (ElementwiseLanes only), params (op), timing
+                              (ElementwiseLanes only), params (op: every
+                              unit's; a TreeAccumulate's add), timing
                               (latency, ii), csrs (its R/W ones: JOB_BEATS, a
                               TreeAccumulate's)
     a CSR                     Csr: name, access (rw, ro), offset (from the
@@ -85,8 +86,8 @@ CfgParseError (not an hjson object), CfgRefError (a $ref that does not
 resolve), CfgKeyError (a key missing), CfgTypeError (a value of the wrong
 type), CfgSlotError (slot counts or CSRs that disagree with the files); a
 target refuses what it cannot model with CfgTargetError (a datapath other
-than the two, links, a unit CSR other than a fold's JOB_BEATS, a group of
-more than one unit). The datapath block before accelerator.json
+than the two, a TreeAccumulate op other than add, links, a unit CSR other
+than a fold's JOB_BEATS, a group of more than one unit). The datapath block before accelerator.json
 (<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key.
 """
 
@@ -337,8 +338,8 @@ class Unit:
 
     @property
     def op(self) -> str:
-        """The op its lanes compute: params.op, add for a fold."""
-        return self.params.get('op', 'add')
+        """The op its lanes compute: params.op (a fold's add)."""
+        return self.params['op']
 
 
 @dataclass(frozen=True)
@@ -556,11 +557,13 @@ def _unit(node: _Node) -> Unit:
     params = node.node('params')
     op = params.get('op', str, None)
     fold = datapath == 'TreeAccumulate'
-    if op is None and not fold:
+    if op is None:
         raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
-    if op is not None and (op not in OPS or (fold and op != 'add')):
-        why = 'TreeAccumulate adds' if fold else f'not an op ({", ".join(OPS)})'
-        raise CfgTypeError(node.file, params.where('op'), f'{op!r}, {why}')
+    if op not in OPS:
+        raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)})')
+    if fold and op != 'add':
+        raise CfgTargetError(node.file, params.where('op'),
+            f'{op!r}: TreeAccumulate adds; a fold of another op is not modelled')
     op_type = node.get('opType', str, None)
     if fold and op_type is not None:
         raise CfgTypeError(node.file, node.where('opType'), 'a TreeAccumulate unit has none')
