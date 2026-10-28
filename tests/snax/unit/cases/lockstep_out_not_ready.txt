@@ -1,8 +1,9 @@
-# lockstep, out not ready in some cycles: no firing, stall_out with both
+# L = 0, II 1 (lockstep), out not ready in some cycles: no firing, stall_out with both
 # inputs there; with an input missing as well the cycle is stall_in
-wait lockstep
+latency 0
+ii 1
 inputs 2
-start 0 3 taken
+start 0 3 1 taken
 expect run index=0 firings=3 busy=3 stall_in=1 stall_out=3 flush=0
 cycles
 # a b out  fire push busy

@@ -195,15 +195,12 @@ static bool parse(const std::string &path, Case &c)
 static int run(const Case &c)
 {
     SnaxUnitRule unit;
-    SnaxUnitRule::Wait wait;
-    if (c.wait == "lockstep") wait = SnaxUnitRule::LOCKSTEP;
-    else if (c.wait == "pipelined") wait = SnaxUnitRule::PIPELINED;
-    else
+    if (c.wait != "lockstep" && c.wait != "pipelined")
     {
         printf("%s: unknown wait %s\n", c.name.c_str(), c.wait.c_str());
         return 1;
     }
-    unit.configure(wait, c.latency, c.ii);
+    unit.configure(c.wait == "lockstep" ? 0 : c.latency, c.wait == "lockstep" ? 1 : c.ii);
     SnaxShellRule shell;
     shell.configure(c.fields.size());
     int nb_rw = c.fields.size() + 1;
@@ -221,7 +218,7 @@ static int run(const Case &c)
         {
             (c.config[f] == "count" ? count : rate) = shell.regs[f];
         }
-        SnaxUnitRule::Start answer = unit.start(cycle, count, rate);
+        SnaxUnitRule::Start answer = unit.start(cycle, rate == 0 ? count : count / rate, rate);
         if (answer == SnaxUnitRule::REFUSED)
         {
             fail(cycle, l, "the unit refused a start the shell sent while idle");

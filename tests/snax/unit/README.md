@@ -1,62 +1,79 @@
 # SnaxUnit's rule
 
-GEN3 step 1 (`docs/plans/GEN3.md`): the cycle rule, the op table and
-(PACK0) the per-type arithmetic of
+The cycle rule, the op table and the per-type arithmetic of
 `snax/snax_unit.hpp`, the code `SnaxUnit` (`snax/snax_unit.cpp`) runs,
 against hand-worked cases, with g++ only. `make regress` runs it first, as
-`unit`.
+`unit`. snax-forge's Chisel specs drive its nest controller and datapaths
+through the same files (`SNAX_GVSOC_UNIT_CASES`), so the format below is the
+contract between the two.
 
 - `tb.cpp` drives the rule cycle by cycle from a case file and compares,
   every cycle, whether it fires, pushes and is busy, each start's answer,
   and the summary line at the end of every run (`SnaxUnitRule::run_line`, the
   line the component prints), whose busy, stall_in, stall_out and flush must
-  add up to the run's busy cycles in the case file. It also checks the op table on fixed vectors
-  (wrapping at 8 to 64 bits, signed and unsigned min and max), a fold's tree over a beat's
-  lanes (`snax_unit_tree`: halves first, wrapping), NumPy's result types
-  (`snax_unit_result_type`, `types`: int64 with uint64 refused), and whole beats (`beats`:
-  `snax_unit_elementwise` and `snax_unit_fold` on 64-bit channel words, lane 0 lowest, with
-  int8, uint8, int16, int32 and int64 ports: the op at the inputs' result type, then cast to
-  the output's; a fold's lanes cast to the output's type first).
+  add up to the run's busy cycles in the case file. A case with `types` also
+  computes each firing's result from its beat, as the component does, and
+  compares every pushed result. It also checks the op table on fixed vectors
+  (wrapping at 8 to 64 bits, signed and unsigned min and max), a fold's tree
+  over a beat's lanes (`snax_unit_tree`: halves first, wrapping), NumPy's
+  result types (`snax_unit_result_type`, `types`: int64 with uint64 refused),
+  and whole beats (`beats`: `snax_unit_elementwise` and `snax_unit_fold` on
+  64-bit channel words, lane 0 lowest, with int8, uint8, int16, int32 and
+  int64 ports).
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/unit`) and runs
   it on every `cases/*.txt`; exit 1 on any difference.
 
+## The rule in one line
+
+A start carries jobs J and job_beats T: the run fires J * T times, a result
+every T-th firing, with latency L and initiation interval II (L = 0, II 1 is
+lockstep: fire when every input has a beat and the output has room, push in
+the same cycle). J or T 0 is the empty run: the unit ignores the start (the
+shell ends that run itself).
+
 ## A case file
 
-`#` starts a comment. Header lines, then `cycles` and one line per cycle
-from cycle 0:
+Plain text; `#` starts a comment, blank lines are skipped. Header lines, in
+any order, then `cycles` and one line per cycle from cycle 0:
 
 | Line | What |
 |---|---|
-| `wait lockstep\|pipelined` | the rule (default lockstep) |
-| `latency L`, `ii N` | pipelined only (defaults 0 and 1) |
-| `inputs N` | input columns (default 2; 1 for a fold) |
-| `lanes W` | a fold's input lanes (default 1): the tree in front of the fold, not the rule, so read by snax-forge's Chisel spec only |
-| `config ROLE...` | the roles of a start's words, `count` and `rate` (default `count`), as SnaxUnit's `config` |
-| `start CYCLE WORD... taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step), its words in `config`'s order, and its expected answer |
+| `latency L`, `ii N` | the unit's L >= 0 and II >= 1 (defaults 0 and 1) |
+| `inputs N` | input columns: 2 (an elementwise op) or 1 (a fold); default 2 |
+| `lanes W` | input lanes (default 1): a fold's tree, or the op's lanes; only the data uses it |
+| `start CYCLE J T taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step) with jobs J and job_beats T, and its expected answer |
 | `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the summary line expected at the end of run I, in order (`docs/EVENTS.md`) |
-| `like FILE` | run FILE (beside this one) with this file's `wait`, `latency` and `ii` instead of its own; one run per `like` |
+| `types IN... OUT` | optional: each input's and the output's NumPy integer type (`int8` .. `uint64`); with it the data below is checked |
+| `op NAME` | the op with `types`: add, sub, mul, and, or, xor, min, max (default add) |
+| `beat N V...` | the input lanes of the case's N-th firing (from 0, over every run): W values per input, input 0 first |
+| `result N V...` | the case's N-th pushed result: W values for an elementwise op, one for a fold |
 | `cycles` | the cycle lines follow |
 
 A cycle line: each input's valid, the output's ready (room), then the
 expected fire, push and busy, all 0 or 1. The rule is stepped only in busy
-cycles, with every input valid ANDed. The expected values are worked by
-hand from the rules in `snax_unit.hpp`; each case says how in its comments.
+cycles, with every input valid ANDed. Values are decimal or `0x` hex, taken
+modulo their type's width. An elementwise result is the op at the inputs'
+NumPy result type, cast to the output's; a fold casts each lane to the
+output's type, sums them through its tree, and starts a result on each
+job's first firing. The expected values are worked by hand from the rules in
+`snax_unit.hpp`; each case says how in its comments.
 
 | Case | What |
 |---|---|
-| `lockstep_no_stalls` | four firings back to back; a start in the run's last cycle refused, one in the next cycle taken |
-| `lockstep_input_missing` | a or b or both missing: stall_in |
-| `lockstep_out_not_ready` | no room: stall_out; no room and an input missing: stall_in |
-| `lockstep_count_zero` | a start with count 0 ignored, busy stays 0 |
+| `lockstep_no_stalls` | L = 0, II 1: four firings back to back; a start in the run's last cycle refused, one in the next cycle taken |
+| `lockstep_input_missing` | L = 0, II 1: a or b or both missing: stall_in |
+| `lockstep_out_not_ready` | L = 0, II 1: no room: stall_out; no room and an input missing: stall_in |
+| `lockstep_count_zero` | L = 0, II 1: a start with jobs 0 ignored, busy stays 0 |
 | `pipelined_l2_backpressure` | L = 2: the pipeline freezes on a full head with no room, results in flight after the last firing (flush, but a frozen cycle: stall_out) |
 | `pipelined_ii2` | L = 1, II 2: the II gap is busy, with or without inputs; one flush cycle |
-| `pipelined_l0` | every lockstep case again as pipelined with L = 0, II 1, its expectations unchanged |
-| `pipelined_rate_t4` | a fold at L = 1, II 1, rate 4, count 8 (snax-forge's Accumulator at T = 4, n = 8): a result every fourth firing, the next input taken as it leaves; a start in the last cycle refused, the next run in the cycle after |
+| `pipelined_rate_t4` | a fold at L = 1, II 1, J = 2, T = 4 (TreeAccumulate at T = 4, n = 8): a result every fourth firing, the next input taken as it leaves; a start in the last cycle refused, the next run in the cycle after |
 | `pipelined_rate_backpressure` | the same with no room: a waiting result freezes the pipeline (stall_out), an empty head needs no room |
-| `pipelined_rate_one` | rate 1 (len = 1): every firing a result, pushed while the next input is taken |
-| `pipelined_rate_count_zero`, `pipelined_rate_zero` | a start with count 0, or with rate 0, ignored |
-| `pipelined_tree_tn` | a fold over 4 lanes at T = n = 8 (the Accumulator with lanes 4): one sum per run, a missing input (stall_in) and a sum with no room (stall_out) |
-| `pipelined_tree_t4` | a fold over 4 lanes at T < n: count 8, rate 4 with the first sum waiting for room, then count 4, rate 2 |
+| `pipelined_rate_one` | T = 1: every firing a result, pushed while the next input is taken |
+| `pipelined_rate_count_zero`, `pipelined_rate_zero` | a fold's start with jobs 0, or with job_beats 0, ignored |
+| `pipelined_tree_tn` | a fold over 4 lanes at J = 1, T = 8: one sum per run, a missing input (stall_in) and a sum with no room (stall_out) |
+| `pipelined_tree_t4` | a fold over 4 lanes at J = 2: T = 4 with the first sum waiting for room, then T = 2 |
+| `empty_run` | jobs 0, job_beats 0 and both: ignored, busy stays 0; a run between them as usual |
+| `fold_jobs` | J = 2, T = 3, L = 1, int32 in, int64 out, with data: beats (k, k, k, k) for k = 1 .. 6 give 24 and 60, pushed in the cycles after firings 3 and 6, the next input taken as a result leaves |
 
 ## Running
 
@@ -64,4 +81,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/unit/run.sh
 
-It prints `PASS` per case (and `ops`, `tree`, `types` and `beats`) and ends with `21 passed, 0 failed`.
+It prints `PASS` per case (and `ops`, `tree`, `types` and `beats`) and ends with `19 passed, 0 failed`.

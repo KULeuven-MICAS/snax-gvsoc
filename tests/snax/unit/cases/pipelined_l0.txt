@@ -1,9 +1,0 @@
-# pipelined, L = 0, II 1: every lockstep case, its stimulus and its expected
-# cycles and run lines unchanged
-wait pipelined
-latency 0
-ii 1
-like lockstep_no_stalls.txt
-like lockstep_input_missing.txt
-like lockstep_out_not_ready.txt
-like lockstep_count_zero.txt

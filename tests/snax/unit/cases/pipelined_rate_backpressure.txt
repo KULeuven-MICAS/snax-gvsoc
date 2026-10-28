@@ -1,12 +1,10 @@
-# pipelined fold, L = 1, II 1, rate 4, out not ready: a result waiting with no
+# pipelined fold, L = 1, II 1, jobs 2, job_beats 4, out not ready: a result waiting with no
 # room freezes the pipeline, so no input is taken (stall_out); with the head
 # empty a missing room does not matter (busy 8 + stall_out 4 + flush 1 = 13)
-wait pipelined
 latency 1
 ii 1
 inputs 1
-config count rate
-start 0 8 4 taken
+start 0 2 4 taken
 expect run index=0 firings=8 busy=8 stall_in=0 stall_out=4 flush=1
 cycles
 # in out  fire push busy

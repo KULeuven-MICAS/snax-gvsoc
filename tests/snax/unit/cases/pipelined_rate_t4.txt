@@ -1,16 +1,15 @@
-# pipelined fold, L = 1, II 1, rate 4 (snax-forge's Accumulator, T = 4, n = 8):
+# pipelined fold, L = 1, II 1, jobs 2, job_beats 4 (snax-forge's TreeAccumulate,
+# T = 4, n = 8):
 # a result on every fourth firing, pushed the cycle after it; the fifth input
 # is taken in the cycle the first result leaves (no drain cycle). The final
 # result's push is the run's last cycle, flush (busy 8 + flush 1 = 9 busy
 # cycles). A start in that cycle is refused, one in the next cycle runs again
-wait pipelined
 latency 1
 ii 1
 inputs 1
-config count rate
-start 0 8 4 taken
-start 9 8 4 refused
-start 10 4 4 taken
+start 0 2 4 taken
+start 9 2 4 refused
+start 10 1 4 taken
 expect run index=0 firings=8 busy=8 stall_in=0 stall_out=0 flush=1
 expect run index=1 firings=4 busy=4 stall_in=0 stall_out=0 flush=1
 cycles

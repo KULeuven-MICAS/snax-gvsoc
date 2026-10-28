@@ -1,11 +1,10 @@
 # pipelined, L = 1, II 2: at most one firing every two cycles; the cycle after
 # a firing is busy (the II gap, D59) whether the inputs are there or not
 # (busy 5 + stall_in 1 + stall_out 1 + flush 1 = 8 busy cycles)
-wait pipelined
 latency 1
 ii 2
 inputs 2
-start 0 3 taken
+start 0 3 1 taken
 expect run index=0 firings=3 busy=5 stall_in=1 stall_out=1 flush=1
 cycles
 # a b out  fire push busy

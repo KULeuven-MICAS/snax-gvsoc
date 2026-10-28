@@ -240,7 +240,7 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
         {
             this->trace.fatal("Property ii: %d, lockstep has II 1\n", ii);
         }
-        this->rule.configure(SnaxUnitRule::LOCKSTEP, 0, 1);
+        this->rule.configure(0, 1);
     }
     else if (wait == "pipelined")
     {
@@ -252,7 +252,7 @@ SnaxUnit::SnaxUnit(vp::ComponentConf &config)
         {
             this->trace.fatal("Property ii: %d, must be 1 or more\n", ii);
         }
-        this->rule.configure(SnaxUnitRule::PIPELINED, latency, ii);
+        this->rule.configure(latency, ii);
     }
     else
     {
@@ -482,7 +482,8 @@ vp::IoReqStatus SnaxUnit::ctrl_req(vp::Block *__this, vp::IoReq *req)
             count, rate);
     }
 
-    switch (_this->rule.start(cycle, count, rate))
+    // count firings, a result every rate: jobs = count / rate of job_beats = rate
+    switch (_this->rule.start(cycle, rate == 0 ? count : count / rate, rate))
     {
         case SnaxUnitRule::REFUSED:
             _this->trace.force_warning("Start (shell CSRs from %d) refused at cycle %ld: busy\n",
@@ -618,10 +619,10 @@ void SnaxUnit::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             }
             if (_this->is_fold)
             {
-                _this->fold(n % _this->rule.rate == 0);
+                _this->fold(n % _this->rule.job_beats == 0);
                 if (step.result)
                 {
-                    _this->results.push_back({_this->acc, n + 1 - _this->rule.rate, n});
+                    _this->results.push_back({_this->acc, n + 1 - _this->rule.job_beats, n});
                 }
             }
             else

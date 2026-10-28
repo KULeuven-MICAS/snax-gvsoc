@@ -1,20 +1,18 @@
-# pipelined fold over 4 lanes, L = 1, II 1 (snax-forge's Accumulator with
-# lanes 4, T < n): run 0 at count 8, rate 4, two sums; run 1 at count 4, rate
-# 2, two sums. Each firing takes a 4-lane beat through the tree. Run 0's first
+# pipelined fold over 4 lanes, L = 1, II 1 (snax-forge's TreeAccumulate with
+# lanes 4, T < n): run 0 at jobs 2, job_beats 4, two sums; run 1 at jobs 2,
+# job_beats 2, two sums. Each firing takes a 4-lane beat through the tree. Run 0's first
 # sum, given by firing 3 in cycle 4, finds no room in cycle 5: the pipeline
 # freezes (stall_out) and the fifth input waits; in cycle 6 the sum leaves
 # while firing 4 is taken. busy 8 + stall_out 1 + flush 1 = 10. A start in
 # run 0's last cycle is refused, run 1 starts in the cycle after: its first
 # sum is pushed while firing 2 is taken (busy 4 + flush 1 = 5)
-wait pipelined
 latency 1
 ii 1
 inputs 1
 lanes 4
-config count rate
-start 0 8 4 taken
-start 10 8 4 refused
-start 11 4 2 taken
+start 0 2 4 taken
+start 10 2 4 refused
+start 11 2 2 taken
 expect run index=0 firings=8 busy=8 stall_in=0 stall_out=1 flush=1
 expect run index=1 firings=4 busy=4 stall_in=0 stall_out=0 flush=1
 cycles
