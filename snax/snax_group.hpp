@@ -86,6 +86,7 @@
 #include <vector>
 
 #include "snax_datapath.hpp"
+#include "snax_run_span.hpp"
 
 
 // The classes by name, as a run line and the class lines give them
@@ -241,9 +242,7 @@ public:
 
     void reset()
     {
-        this->started = false;
-        this->start_cycle = 0;
-        this->end_cycle = -1;
+        this->span.reset();
         this->jobs = 0;
         this->beats.assign(this->cfg.size(), 1);
         this->counts.assign(this->cfg.size(), 0);
@@ -271,17 +270,10 @@ public:
     const std::vector<Link> &edges() const { return this->links; }
 
     // Idle in cycle: no run, or the last one ended before it
-    bool idle(int64_t cycle) const
-    {
-        return !this->started || (this->end_cycle != -1 && this->end_cycle < cycle);
-    }
+    bool idle(int64_t cycle) const { return this->span.idle(cycle); }
 
     // Busy in cycle: from the cycle after the start to the run's last cycle
-    bool busy(int64_t cycle) const
-    {
-        return this->started && cycle > this->start_cycle &&
-            (this->end_cycle == -1 || cycle <= this->end_cycle);
-    }
+    bool busy(int64_t cycle) const { return this->span.busy(cycle); }
 
     // A start of jobs, unit k a result every t[k] firings, offered in cycle;
     // the caller keeps every n_k within 32 bits
@@ -300,9 +292,7 @@ public:
         {
             return IGNORED;
         }
-        this->started = true;
-        this->start_cycle = cycle;
-        this->end_cycle = -1;
+        this->span.start(cycle);
         this->jobs = jobs;
         this->beats = t;
         // From the sink back: each firing of a consumer takes one result of its producer
@@ -441,7 +431,7 @@ public:
         if (this->finished())
         {
             s.end = true;
-            this->end_cycle = cycle;
+            this->span.end(cycle);
             this->runs++;
         }
         return s;
@@ -464,10 +454,9 @@ public:
         return line;
     }
 
-    // The current or last run: its start s, its last cycle E (-1 while busy),
-    // its jobs, each unit's T and n, and its cycles per class; runs ended so far
-    int64_t start_cycle;
-    int64_t end_cycle;
+    // The current or last run: its start s and last cycle E, its jobs, each
+    // unit's T and n, and its cycles per class; runs ended so far
+    SnaxRunSpan span;
     uint32_t jobs;
     std::vector<uint32_t> beats;
     std::vector<uint32_t> counts;
@@ -525,7 +514,6 @@ private:
     size_t output = 0;                          // the unit owning the outer output
     std::vector<UnitState> u;
     std::vector<LinkState> l;
-    bool started = false;
     // step()'s, sized at configure: its result and its passes' per-unit values
     Step stepped;
     std::vector<bool> avail, wants, would_fire, gives, head, offer;

@@ -101,6 +101,7 @@
 #include "snax_csr_block.hpp"
 #include "snax_events.hpp"
 #include "snax_props.hpp"
+#include "snax_run_span.hpp"
 
 
 // A beat word in a lane's queue, and the first cycle it can leave
@@ -242,9 +243,7 @@ private:
     std::vector<Mover *> readers;
     std::vector<Mover *> writers;
 
-    bool started;               // a start was taken since reset
-    int64_t start_cycle;        // s
-    int64_t end_cycle;          // e, -1 while not known
+    SnaxRunSpan span;           // s, and e (-1 while not known)
     uint32_t counter_before;    // the counter's value up to s + 1
     int64_t stepped_cycle;      // the last cycle the requests were sent
     int64_t classed_cycle;      // the last cycle classed
@@ -380,9 +379,7 @@ void SnaxStreamer::reset(bool active)
                 ch.free_reqs.push_back(i);
             }
         }
-        this->started = false;
-        this->start_cycle = 0;
-        this->end_cycle = -1;
+        this->span.reset();
         this->counter_before = 0;
         this->stepped_cycle = -1;
         this->classed_cycle = -1;
@@ -394,24 +391,23 @@ void SnaxStreamer::reset(bool active)
 // Busy from s + 1 to e (cstate in Streamer.scala)
 bool SnaxStreamer::busy_at(int64_t cycle)
 {
-    return this->started && cycle >= this->start_cycle + 1 &&
-        (this->end_cycle == -1 || cycle <= this->end_cycle);
+    return this->span.busy(cycle);
 }
 
 
 // Reset at the end of s + 1, then one more at the end of each busy cycle
 uint32_t SnaxStreamer::counter_at(int64_t cycle)
 {
-    if (!this->started || cycle <= this->start_cycle + 1)
+    if (!this->span.started || cycle <= this->span.start_cycle + 1)
     {
         return this->counter_before;
     }
     int64_t last = cycle - 1;
-    if (this->end_cycle != -1 && this->end_cycle < last)
+    if (this->span.end_cycle != -1 && this->span.end_cycle < last)
     {
-        last = this->end_cycle;
+        last = this->span.end_cycle;
     }
-    return (uint32_t)(last - this->start_cycle - 1);
+    return (uint32_t)(last - this->span.start_cycle - 1);
 }
 
 
@@ -473,7 +469,7 @@ bool SnaxStreamer::can_request(Channel &ch, int64_t cycle)
 // The streamer's next step: in this cycle (a pop returned credit) or the next
 void SnaxStreamer::wake(int64_t delay)
 {
-    if (this->end_cycle != -1 || !this->started)
+    if (this->span.end_cycle != -1 || !this->span.started)
     {
         return;
     }
@@ -642,9 +638,7 @@ void SnaxStreamer::start(int64_t cycle)
 
     this->counter_before = this->counter_at(cycle);
     this->runs++;
-    this->started = true;
-    this->start_cycle = cycle;
-    this->end_cycle = -1;
+    this->span.start(cycle);
     // Cycles are classed from s + 1
     this->classed_cycle = cycle;
 
@@ -669,16 +663,16 @@ void SnaxStreamer::end_run(int64_t cycle)
     {
         this->mover_done(mover, cycle);
     }
-    this->end_cycle = cycle + 1;
-    this->sigs.set_from(this->sig_busy, 0, this->end_cycle + 1);
+    this->span.end(cycle + 1);
+    this->sigs.set_from(this->sig_busy, 0, this->span.end_cycle + 1);
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Done: busy up to cycle %ld, counter %d\n",
-        this->end_cycle, this->counter_at(this->end_cycle + 1));
+        this->span.end_cycle, this->counter_at(this->span.end_cycle + 1));
     for (Mover &mover : this->movers)
     {
         this->classify(mover, IDLE, this->classed_cycle + 1,
-            this->end_cycle - this->classed_cycle);
+            this->span.end_cycle - this->classed_cycle);
     }
-    this->classed_cycle = this->end_cycle;
+    this->classed_cycle = this->span.end_cycle;
     this->summary_event.enqueue(1);
 }
 
@@ -889,7 +883,7 @@ void SnaxStreamer::step_handler(vp::Block *__this, vp::ClockEvent *event)
     SnaxStreamer *_this = (SnaxStreamer *)__this;
     int64_t cycle = _this->clock.get_cycles();
 
-    if (_this->stepped_cycle == cycle || _this->end_cycle != -1)
+    if (_this->stepped_cycle == cycle || _this->span.end_cycle != -1)
     {
         return;
     }

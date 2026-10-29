@@ -49,6 +49,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "snax_run_span.hpp"
+
 
 class SnaxShellRule
 {
@@ -67,9 +69,8 @@ public:
 
     // Read-write CSRs, as written: START, JOBS, the units'
     std::vector<uint32_t> regs;
-    // The unit's busy wire: the cycles it last rose and fell (-1 if not)
-    int64_t rise_cycle;
-    int64_t fall_cycle;
+    // The unit's busy wire: the cycles it last rose (its start) and fell (E)
+    SnaxRunSpan unit_run;
     // The last accepted start and the last done pulse (-1 if none), and the
     // ones before them, which STATUS still shows in the cycle of a newer one
     int64_t accept_cycle;
@@ -92,7 +93,7 @@ public:
     void reset()
     {
         std::fill(this->regs.begin(), this->regs.end(), 0);
-        this->rise_cycle = this->fall_cycle = -1;
+        this->unit_run.reset();
         this->accept_cycle = this->done_cycle = -1;
         this->accept_before = this->done_before = -1;
         this->held = false;
@@ -171,12 +172,11 @@ public:
     {
         if (busy)
         {
-            this->rise_cycle = cycle;
-            this->fall_cycle = -1;
+            this->unit_run.start(cycle);
         }
         else
         {
-            this->fall_cycle = cycle;
+            this->unit_run.end(cycle);
             this->done(cycle);
         }
     }
@@ -185,7 +185,7 @@ public:
     // while none is held or the unit is still busy
     int64_t release_cycle() const
     {
-        return this->held && this->fall_cycle != -1 ? this->fall_cycle + 1 : -1;
+        return this->held && this->unit_run.ended() ? this->unit_run.end_cycle + 1 : -1;
     }
 
     // The held start taken in cycle: written and accepted, its write answered.
@@ -198,16 +198,9 @@ public:
     }
 
     // Idle in cycle: never started, or the last run ended before it
-    bool unit_idle(int64_t cycle) const
-    {
-        return this->rise_cycle == -1 || (this->fall_cycle != -1 && this->fall_cycle < cycle);
-    }
+    bool unit_idle(int64_t cycle) const { return this->unit_run.idle(cycle); }
 
-    bool busy_at(int64_t cycle) const
-    {
-        return this->rise_cycle != -1 && cycle > this->rise_cycle &&
-            (this->fall_cycle == -1 || cycle <= this->fall_cycle);
-    }
+    bool busy_at(int64_t cycle) const { return this->unit_run.busy(cycle); }
 
     // Done in cycle, a register: the last done pulse before cycle, not
     // cleared by a start accepted after it and before cycle (a start in the
@@ -227,15 +220,15 @@ public:
     // The busy cycles in [accept + 1, cycle - 1]
     uint32_t counter_at(int64_t cycle) const
     {
-        if (this->accept_cycle == -1 || this->rise_cycle == -1)
+        if (this->accept_cycle == -1 || !this->unit_run.started)
         {
             return 0;
         }
-        int64_t first = std::max(this->accept_cycle, this->rise_cycle) + 1;
+        int64_t first = std::max(this->accept_cycle, this->unit_run.start_cycle) + 1;
         int64_t last = cycle - 1;
-        if (this->fall_cycle != -1 && this->fall_cycle < last)
+        if (this->unit_run.ended() && this->unit_run.end_cycle < last)
         {
-            last = this->fall_cycle;
+            last = this->unit_run.end_cycle;
         }
         return last >= first ? last - first + 1 : 0;
     }
