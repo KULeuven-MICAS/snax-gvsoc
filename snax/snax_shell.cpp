@@ -18,7 +18,7 @@
 //              order); STATUS and COUNTER follow
 // An accepted start, but the empty run (JOBS or a JOB_BEATS 0), goes to the
 // group's ctrl as a write of 32-bit words: JOBS, then every JOB_BEATS in unit
-// order (JOBS and 1 without one: B1's two words).
+// order (JOBS and 1 without one).
 
 #include <string>
 #include <vector>

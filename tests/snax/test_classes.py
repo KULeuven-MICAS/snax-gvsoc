@@ -114,7 +114,7 @@ class CheckTraces(unittest.TestCase):
 
 
 class TwoUnits(unittest.TestCase):
-    """An accelerator of two groups (snax-forge D148, forge/dot_1): each task's counter is
+    """An accelerator of two groups (forge/dot_1): each task's counter is
     checked against its own unit's runs, from its trace path in the manifest."""
 
     MANIFEST = {"trace": "snax_acc0", "tasks": [

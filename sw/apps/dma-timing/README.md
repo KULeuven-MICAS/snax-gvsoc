@@ -1,6 +1,6 @@
 # dma-timing
 
-The SG2 DMA timing program (`docs/plans/SG2.md`), on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL (SG2 at `b2672f8`, SG7 at `9fbf35d`); the DMA's values do not depend on the cluster's accelerator.
+The DMA timing program, on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL (at `b2672f8` and at `9fbf35d`); the DMA's values do not depend on the cluster's accelerator.
 
 The DMA core copies between DRAM (L2) and L1. For each case it clears the destination, resets and enables the cluster's perf counters 0 to 5, reads one enable back (so the posted stores have landed before the DMA turns busy), then takes `mcycle` before the first `snrt_dma_start_1d`, after the last one and after `snrt_dma_wait_all`. It then stops the counters, reads them and checks the copy. Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier the compute core prints one line per case.
 
@@ -27,7 +27,7 @@ The DMA core copies between DRAM (L2) and L1. For each case it clears the destin
 
 ## Checked against the RTL
 
-`busy`, `r` and `w` do not depend on the cores' timing (D123), and SNAX-GVSoC gives the RTL's on every line. The program holds the RTL's values per case (SG2 step 3 at `b2672f8`, the same at the pin `9fbf35d` in SG7 round 4) and prints a line for each case off them, so `make regress` and CI fail when the DMA's own timing moves. `issue` and `done` include the core's issue and polling (SG5, open item 67 in snax-forge): printed, not compared.
+`busy`, `r` and `w` do not depend on the cores' timing (D123), and SNAX-GVSoC gives the RTL's on every line. The program holds the RTL's values per case (at `b2672f8`, the same at the pin `9fbf35d`) and prints a line for each case off them, so `make regress` and CI fail when the DMA's own timing moves. `issue` and `done` include the core's issue and polling (open item 67 in snax-forge): printed, not compared.
 
 The program returns the copy errors plus the cases off the RTL's values; the RTL itself returns 0.
 

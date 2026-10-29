@@ -1,6 +1,6 @@
 # forge
 
-GEN2a (`docs/plans/GEN2a.md`): the generic app for a generated accelerator. It builds the program snax-forge writes for a design point (`forge/<design>/main.c`, snax-forge's C backend, its D135) with the fixture's own headers and data; nothing here is written by hand per design.
+The generic app for a generated accelerator. It builds the program snax-forge writes for a design point (`forge/<design>/main.c`, snax-forge's C backend, its D135) with the fixture's own headers and data; nothing here is written by hand per design.
 
     make -C sw/apps/forge DESIGN=vecadd
 
@@ -29,4 +29,4 @@ In the container, from snax-gvsoc, with GVSoC built and the program made:
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
 
-It warns that the platform tree does not match (LNK2a), prints the unit's lines (`docs/EVENTS.md`), among them `run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=0`, then `forge data: 0 errors (64 words)`, `forge counter add_acc: 19` (busy + stall_in + stall_out + flush of that line) and `forge errors: 0`, and exits 0.
+It warns that the platform tree does not match, prints the unit's lines (`docs/EVENTS.md`), among them `run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=0`, then `forge data: 0 errors (64 words)`, `forge counter add_acc: 19` (busy + stall_in + stall_out + flush of that line) and `forge errors: 0`, and exits 0.

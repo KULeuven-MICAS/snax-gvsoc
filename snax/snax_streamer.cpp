@@ -56,7 +56,7 @@
 // during a cycle is the RTL queue's: the words visible by then and not popped
 // before it.
 //
-// Per mover, the cycles of each run are classed as SNAX-MODEL classed them:
+// Per mover, the cycles of each run are classed in D59's order:
 // busy (a channel granted) > stall_xbar (requested, none granted) >
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
 // them with the highest queue count per lane when the streamer is done. The

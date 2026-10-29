@@ -151,7 +151,7 @@ def buffer(name, dtype, lanes, depth, steps=12):
 
 
 def fixed():
-    """The round's named vectors (G1's prompt)."""
+    """The named vectors, worked by hand and checked against NumPy here."""
     out = []
     # Plain W = 4: y = a * b + c
     t = Test("mac_plain_w4", "Mac", ["int64"] * 3, "int64", "int64", 4, accumulate=False,

@@ -13,11 +13,11 @@ The two start CSRs, the streamer's (975) and the group's START (978), are left o
 | | `csrrc` with `x0`, `csrrsi` and `csrrci` with 0 on CSR 981: each returns 0 | the callback, read only (`priv.hpp`) |
 | 4 | `csrr` of the 4 read-only CSRs | the callback |
 
-Part 3's no-write forms run on 981, the group's read-only COUNTER (0, as nothing ran): a write to a read-only SNAX CSR is refused and stops the run here (the RTL's manager asserts on it), so they pass only if nothing is written. Before SG6, `priv.hpp` wrote the value read back for these three forms, and the run stopped at the first one.
+Part 3's no-write forms run on 981, the group's read-only COUNTER (0, as nothing ran): a write to a read-only SNAX CSR is refused and stops the run here (the RTL's manager asserts on it), so they pass only if nothing is written.
 
 The streamer and the shell see 105 accesses: 66 reads and 39 writes.
 
-Every form follows Zicsr (D120 in snax-forge) on both sides: `csrrw` and `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`, `csrrsi` and `csrrci` write unless `rs1` is `x0` or `uimm` is 0. The RTL does so since snax_cluster `9fbf35d` (#657): there the program as it was before SG6 prints four lines of `0 errors`. SG6's checks in part 3 run on SNAX-GVSoC only.
+Every form follows Zicsr (D120 in snax-forge) on both sides: `csrrw` and `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`, `csrrsi` and `csrrci` write unless `rs1` is `x0` or `uimm` is 0. The RTL does so since snax_cluster `9fbf35d` (#657); the checks of part 3 run on SNAX-GVSoC only.
 
 ## Build and run
 
@@ -33,7 +33,7 @@ Adding `--trace=snax_acc0` prints every access the streamer and the shell receiv
 
 ## Expected output
 
-On SNAX-GVSoC since SG6, exit code 0 and nothing else printed:
+On SNAX-GVSoC, exit code 0 and nothing else printed:
 
     csrw/csrr: 0 errors
     csrrw: 0 errors

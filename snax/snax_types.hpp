@@ -5,18 +5,17 @@
  */
 
 // The integer types and the per-lane arithmetic every SNAX datapath runs
-// (snax_datapath.hpp) and the tests check, moved here unchanged from
-// snax_unit.hpp: NumPy's arithmetic on integer types (SnaxType: 8 to 64
-// bits, signed or not), each port with its own (PACK0). A port of W lanes of b
-// bits takes W * b / 64 channel words, lane l at bits [l * b, (l + 1) * b) of
-// them side by side (the wire slice). An elementwise op runs per lane at T,
-// the result type of its two inputs' types (snax_op_result_type; none for a
-// signed type with uint64), each operand extended to T by its own signedness;
-// the result wraps at T and is cast to the output's type (its low bits, or
-// extended by T's signedness). A fold casts each lane from the input's type to
-// the output's, and runs its tree and acc at the output's type; its output beat
-// is one word. min and max compare by the signedness of the type they run at.
-// Plain C++, no GVSoC types.
+// (snax_datapath.hpp) and the tests check: NumPy's arithmetic on integer types
+// (SnaxType: 8 to 64 bits, signed or not), each port with its own. A port of W
+// lanes of b bits takes W * b / 64 channel words, lane l at bits
+// [l * b, (l + 1) * b) of them side by side (the wire slice). An elementwise
+// op runs per lane at T, the result type of its two inputs' types
+// (snax_op_result_type; none for a signed type with uint64), each operand
+// extended to T by its own signedness; the result wraps at T and is cast to
+// the output's type (its low bits, or extended by T's signedness). A fold
+// casts each lane from the input's type to the output's, and runs its tree and
+// acc at the output's type; its output beat is one word. min and max compare
+// by the signedness of the type they run at. Plain C++, no GVSoC types.
 
 #pragma once
 

@@ -1,6 +1,6 @@
 # The winner check
 
-SG7 step 5 (`docs/plans/SG7.md`): the crossbar's sparse pick (`snax/snax_sparse_arb.hpp`, the code `snax_tcdm_xbar.cpp` runs) against snax_cluster's elaborated `SparseInterconnect.sv`, per bank and cycle, under the same random stimulus. Run by hand; not in `make regress` or CI.
+The crossbar's sparse pick (`snax/snax_sparse_arb.hpp`, the code `snax_tcdm_xbar.cpp` runs) against snax_cluster's elaborated `SparseInterconnect.sv`, per bank and cycle, under the same random stimulus (`docs/plans/SG7.md` has the runs that compared them). Run by hand; not in `make regress` or CI.
 
 - `tb.cpp` drives the module through Verilator and the header beside it: random valid, banks, priority bits and bank `ready` (refusals), in phases of 500 cycles with their own load, bank spread, priority and refusal rates. Each input's bank-local address is its own index, so the bank's request address names the selection, also in a refused cycle. Only accesses the granularity allows. Per cycle and bank it compares the module's request valid and address with the model's pick, and per input its `ready` with the model's (picked, not refused).
 - `ports.py` writes `ports.h`: the module's input and bank counts and accessors for its per-port signals.
@@ -12,7 +12,7 @@ In snax_cluster's image `d3d8f5572ff4` (`ghcr.io/kuleuven-micas/snax:main`; it h
 
     run.sh MODULE_SV MODULE_CONFIG [MODEL_CONFIG [CYCLES [SEED]]]
 
-`MODULE_CONFIG` is the `sparse_config` the module was elaborated with; `MODEL_CONFIG` the model's, the same by default, or the module's first ports only, the other inputs then held idle. The modules of SG7 step 2:
+`MODULE_CONFIG` is the `sparse_config` the module was elaborated with; `MODEL_CONFIG` the model's, the same by default, or the module's first ports only, the other inputs then held idle. The modules `docs/plans/SG7.md` elaborated:
 
     A="[[12, 1], [1, 1], [1, 1], [1, 1]]"
     M="[[12, 1], [8, 8], [1, 1], [1, 1], [1, 1]]"

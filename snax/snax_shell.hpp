@@ -27,7 +27,7 @@
 //     answered, in the cycle busy falls: E + 1, E the run's last cycle;
 //   - an accepted start a goes to the group's ctrl as JOBS and every
 //     JOB_BEATS in unit order, as they stand (JOBS and 1 for a group without
-//     one: the two words of B1), unless one of them is 0: the empty run,
+//     one: a start is two words at least), unless one of them is 0: the empty run,
 //     which the shell ends in its own cycle (E = a) without the group, so busy
 //     never rises;
 //   - STATUS: bit 0 busy, the unit's busy in c (from a + 1 to E); bit 1 done,
