@@ -8,12 +8,15 @@ the installed `snax_hjson` target. A folder is the fixture of snax-forge's
 D134: it lets this repo's regression run a design point without snax-forge.
 Each is snax-forge's generator's output, checked in untouched; snax-forge's
 `tests/gen/test_fixture.py` writes it again and compares it byte for byte.
-All seventeen are snax-forge's branch `ry/b1x` at `6b533bf` (tag `b1x-f1`,
-M13 B1x F1: `accelerator.json` with `dir` on every port and `span` in every
-unit's timing, beside B1 R3's per-group CSRs START, JOBS, JOB_BEATS, STATUS,
-COUNTER, a TreeAccumulate's `params.op` `add`, and `dot_1/`, one accelerator
-of two groups), written by that checkout's `tests/gen/test_fixture.py`
-(`regenerate`).
+All twenty-eight are snax-forge's branch `ry/b1x-2` at `f3256c1` (tag
+`b1x-f3`, M13 B1x F3), written by that checkout's `tests/gen/test_fixture.py`
+(`regenerate`): the seventeen of B1x F1 (`accelerator.json` with `dir` on
+every port and `span` in every unit's timing, beside B1 R3's per-group CSRs
+START, JOBS, JOB_BEATS, STATUS, COUNTER, a TreeAccumulate's `params.op`
+`add`, and `dot_1/`, one accelerator of two groups) byte for byte as before,
+and B1x's eleven, dot 2–6 and matvec 1–6: each one accelerator, dot 2–6 and
+matvec 2–6 one group of two units joined by a link (a wire, or a buffer of
+its depth) under one control unit (SnaxGroup).
 
 | Folder | Design point | Slot |
 |---|---|---|
@@ -34,6 +37,17 @@ of two groups), written by that checkout's `tests/gen/test_fixture.py`
 | `vsum_tree_n21/` | `recipes/vsum_tree_n21.json` (W = 4, N = 21, int64, `chisel_adder_tree`: six firings, A padded to 24 with zeros) on `platforms/snax_forge.json` | 5 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
 | `rowsum_3x7/` | `recipes/rowsum_3x7.json` (W = 4, M = 3, N = 7, int64, `chisel_adder_tree`, T = 2: each row padded to 8) on `platforms/snax_forge.json` | 5 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
 | `dot_1/` | `recipes/dot_1.json` (W = 4, N = 64, int64: `elementwise_mul` into `tmp0` in L1, then `chisel_adder_tree` over it, T = N / W; `encapsulate` puts both into the accelerator `dot`, snax-forge D148) on `platforms/snax_forge.json` | 17 TCDM ports (readers mul.a, mul.b, sum.a, writers mul.out, sum.out); groups `mul` (`START`, `JOBS`, `STATUS`, `COUNTER`) and `sum` (with `JOB_BEATS`), a task each, the other group's movers at temporal bound 0 |
+| `dot_2/` | `recipes/dot_2.json` (W = 4, N = 512, int64: `elementwise_mul` → `accumulate`'s `chisel_adder_tree`, T = N / W, `link tmp0` at depth 1: a `LinkBuffer` of one beat) on `platforms/snax_forge.json` | 9 TCDM ports (readers mul.a, mul.b, writer sum.out); one group `dot` (`START`, `JOBS`, `JOB_BEATS` of `sum`, `STATUS`, `COUNTER`), one task |
+| `dot_3/` | `recipes/dot_3.json` (W = 4, N = 512, int64: as dot 2, `link tmp0` at depth 0, a wire) on `platforms/snax_forge.json` | 9 TCDM ports (readers mul.a, mul.b, writer sum.out); one group `dot` (`START`, `JOBS`, `JOB_BEATS` of `sum`, `STATUS`, `COUNTER`), one task |
+| `dot_4/` | `recipes/dot_4.json` (W = 4, N = 512, int64: `split_reduce`, `fuse_map`, the `mac` (`Mac`, accumulate, T = N / W) wired by `link out_partial`, depth 0, into `chisel_adder_tree` (`params.T` 1)) on `platforms/snax_forge.json` | 9 TCDM ports (readers mac.a, mac.b, writer sum.out); one group `dot` (`START`, `JOBS`, `JOB_BEATS` of `mac`, `STATUS`, `COUNTER`), one task |
+| `dot_5/` | `recipes/dot_5.json` (W = 4, N = 512, int64: as dot 4, the sum `chisel_serial` (`SerialAccumulate`, span W, `params.T` 1) through a wire) on `platforms/snax_forge.json` | 9 TCDM ports (readers mac.a, mac.b, writer sum.out); one group `dot` (`START`, `JOBS`, `JOB_BEATS` of `mac`, `STATUS`, `COUNTER`), one task |
+| `dot_6/` | `recipes/dot_6.json` (W = 4, N = 512, int64: as dot 5, `link out_partial` at depth 1, a `LinkBuffer` of one beat) on `platforms/snax_forge.json` | 9 TCDM ports (readers mac.a, mac.b, writer sum.out); one group `dot` (`START`, `JOBS`, `JOB_BEATS` of `mac`, `STATUS`, `COUNTER`), one task |
+| `matvec_1/` | `recipes/matvec_1.json` (W = 4, M = 8, N = 512, int64: dot 1's two groups on each row, `encapsulate`d as `matvec`; 8 rows, snax-forge open item 97) on `platforms/snax_forge.json` | 17 TCDM ports (readers mul.a, mul.b, sum.a, writers mul.out, sum.out); groups `mul` and `sum` (with `JOB_BEATS`), a task each, as dot_1 |
+| `matvec_2/` | `recipes/matvec_2.json` (W = 4, M = 16, N = 512, int64, the row form: dot 2 on each row, one job a row, `link tmp0` at depth 1) on `platforms/snax_forge.json` | 9 TCDM ports (readers mul.a, mul.b, writer sum.out); one group `matvec` (`START`, `JOBS`, `JOB_BEATS` of `sum`, `STATUS`, `COUNTER`), one task |
+| `matvec_3/` | `recipes/matvec_3.json` (W = 4, M = 16, N = 512, int64, the row form: dot 3 on each row, `link tmp0` at depth 0) on `platforms/snax_forge.json` | 9 TCDM ports (readers mul.a, mul.b, writer sum.out); one group `matvec` (`START`, `JOBS`, `JOB_BEATS` of `sum`, `STATUS`, `COUNTER`), one task |
+| `matvec_4/` | `recipes/matvec_4.json` (W = 4, M = 16, N = 512, int64, the row form: dot 4 on each row, `link q_partial` at depth 0) on `platforms/snax_forge.json` | 9 TCDM ports (readers mac.a, mac.b, writer sum.out); one group `matvec` (`START`, `JOBS`, `JOB_BEATS` of `mac`, `STATUS`, `COUNTER`), one task |
+| `matvec_5/` | `recipes/matvec_5.json` (W = 4, M = 16, N = 512, int64, the row form: dot 5 on each row, `link q_partial` at depth 0) on `platforms/snax_forge.json` | 9 TCDM ports (readers mac.a, mac.b, writer sum.out); one group `matvec` (`START`, `JOBS`, `JOB_BEATS` of `mac`, `STATUS`, `COUNTER`), one task |
+| `matvec_6/` | `recipes/matvec_6.json` (W = 4, M = 16, N = 512, int64, the row form: dot 6 on each row, `link q_partial` at depth 1) on `platforms/snax_forge.json` | 9 TCDM ports (readers mac.a, mac.b, writer sum.out); one group `matvec` (`START`, `JOBS`, `JOB_BEATS` of `mac`, `STATUS`, `COUNTER`), one task |
 
 Each folder holds:
 
@@ -59,11 +73,13 @@ Each folder holds:
   `spatial_bounds` in 64-bit words (`[S_0 / k, S_1, ...]`, k the elements
   of the port's dtype a word holds) and its `num_channel` their product.
 - `accelerator.json`, the accelerator's one description: its groups, each
-  with START, JOBS, STATUS, COUNTER, its unit (datapath `ElementwiseLanes`
-  or `TreeAccumulate`, each port's dtype and lanes, `opType`, `params`,
-  latency and II, a fold's JOB_BEATS) and the CSRs' offsets, which the
+  with START, JOBS, STATUS, COUNTER, its units (datapath `ElementwiseLanes`,
+  `TreeAccumulate`, `Mac` or `SerialAccumulate`, each port's `dir`, dtype
+  and lanes, `opType`, `params`, latency, II and span, a fold's JOB_BEATS)
+  and its links (`from`, `to`, `depth`), and the CSRs' offsets, which the
   standard composite takes (`snax/snax_cfg.py` reads and checks it,
-  `snax/snax_unit_acc.py` builds a shell per group and a unit per unit).
+  `snax/snax_unit_acc.py` builds a shell per group and its unit, or for a
+  linked group one component `group_<group>`).
 - `include/`: the headers a program drives it with
   (`streamer_csr_addr_map.h` and `<name>_csr.h`, every CSR by its C§17
   name, `ACC_RW_START`, `ACC_RW_JOBS`, `ACC_RW_JOB_BEATS`, `ACC_RO_STATUS`,
@@ -88,7 +104,7 @@ Each folder holds:
 - `manifest.json`: the design, the design point, the bound graph's symbols,
   the cluster file (`cluster`), the files, the program (`main.c`), the
   unit's trace path (`snax_acc0/unit`; with several groups the
-  accelerator's, `snax_acc0`), the CSR layout (each CSR's header name -> its
+  accelerator's, `snax_acc0`; a linked group's `snax_acc0/group_<group>`), the CSR layout (each CSR's header name -> its
   number) and each accelerator task's beats and CSR values (its group's
   JOBS, JOB_BEATS), with several groups also its unit's trace path
   (`snax_acc0/unit_<unit>`).
@@ -110,7 +126,10 @@ writes in place):
 (the same with every folder's recipe; the design step reads the sandbox's
 last step, `out/sandbox/<design>/<n>_<transform>.snaxdfg`: the recipes of
 `matadd`, `rowsum`, `rowsum_serial` and `rowsum_3x7` have three steps,
-`dot_1`'s five, the last `5_encapsulate.snaxdfg`), then commit the
+`dot_1`'s five, the last `5_encapsulate.snaxdfg`; `dot_2` and `dot_3`
+end in `5_link.snaxdfg`, `dot_4` to `dot_6` in `6_link.snaxdfg`, `matvec_1`
+in `7_encapsulate.snaxdfg`, `matvec_2` and `matvec_3` in `7_link.snaxdfg`,
+`matvec_4` to `matvec_6` in `8_link.snaxdfg`), then commit the
 folder as written and
 bump snax-forge's submodule so its test compares against it. `make regress`
 runs every folder with the generic app, so a new folder needs nothing else.

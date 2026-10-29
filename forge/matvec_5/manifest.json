@@ -1,0 +1,20 @@
+{
+ "design": "matvec_5",
+ "design_point": "out/design/matvec_5/design_point.json",
+ "symbols": {"M": 16, "N": 512},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "accelerator.json", "include/streamer_csr_addr_map.h", "include/matvec_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0/group_matvec",
+ "csrs": {
+  "streamer": {"first": 960, "last": 981},
+  "accelerator": {
+   "MATVEC_RW_START": 982,
+   "MATVEC_RW_JOBS": 983,
+   "MATVEC_RW_MAC_JOB_BEATS": 984,
+   "MATVEC_RO_STATUS": 985,
+   "MATVEC_RO_COUNTER": 986
+  }
+ },
+ "tasks": [{"name": "mult_matvec", "beats": 2048, "csrs": {"JOBS": 16, "MAC_JOB_BEATS": 128}}]
+}
