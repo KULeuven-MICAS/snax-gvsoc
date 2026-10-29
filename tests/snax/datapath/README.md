@@ -26,9 +26,10 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 - Accumulate at W = 2, J = 2, T = 3: A's rows (1, -2, 3, 4, -5, 6) and (2, 2, 2, 2, 2, 2) against p = (2, 1, 0, -1, 3, 2), a beat a cycle, give the partials (-13, 6) and (10, 4); dot's sums of them are q = (-7, 14).
 - The int32 product that wraps, W = 2, T = 8: 46341 x 46341 wraps at int32, and the partials are (-2147478991, 4).
 - SerialAccumulate over the beat (-13, 6): -13 after lane 0, -7 after lane 1.
+- `snax/snax_types.hpp`'s arithmetic, which the classes run, on fixed vectors worked by hand in `tb.cpp`, for the edges the NumPy vectors do not reach: `ops`, the op table (wrapping at 8 to 64 bits, signed and unsigned min and max); `tree`, a fold's tree over a beat's lanes (`snax_op_tree`: halves first, wrapping); `types`, NumPy's result types (`snax_op_result_type`: int64 with uint64 refused); `beats`, whole beats (`snax_op_elementwise` and `snax_op_fold` on 64-bit channel words, lane 0 lowest, with int8, uint8, int16, int32 and int64 ports).
 
 ## Running
 
     tests/snax/datapath/run.sh
 
-It prints `PASS` per test and ends with `56 passed, 0 failed`.
+It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `60 passed, 0 failed`.

@@ -227,26 +227,19 @@ The rule of one unit (`SnaxGroupRule` with one unit and no links) against its ha
 
     tests/snax/unit/run.sh
 
-    PASS ops: 16 vectors
-    PASS tree: 8 vectors
-    PASS types: 6 vectors
-    PASS beats: 15 vectors
     PASS empty_run: 8 cycles, 1 run(s)
     PASS fold_jobs: 9 cycles, 1 run(s), data
-    PASS lockstep_count_zero: 6 cycles, 1 run(s)
     PASS lockstep_input_missing: 8 cycles, 1 run(s)
     PASS lockstep_no_stalls: 9 cycles, 2 run(s)
     PASS lockstep_out_not_ready: 9 cycles, 1 run(s)
     PASS pipelined_ii2: 10 cycles, 1 run(s)
     PASS pipelined_l2_backpressure: 12 cycles, 1 run(s)
     PASS pipelined_rate_backpressure: 15 cycles, 1 run(s)
-    PASS pipelined_rate_count_zero: 9 cycles, 1 run(s)
     PASS pipelined_rate_one: 7 cycles, 1 run(s)
     PASS pipelined_rate_t4: 17 cycles, 2 run(s)
-    PASS pipelined_rate_zero: 7 cycles, 1 run(s)
     PASS pipelined_tree_t4: 18 cycles, 2 run(s)
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
-    19 passed, 0 failed
+    12 passed, 0 failed
 
 `SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against its hand-worked cases, with g++ (the regression's `shell`, `tests/snax/shell/README.md`):
 
