@@ -10,11 +10,12 @@
 // read-write CSRs, BlockGemm's ctrl handshake, busy and performance counter
 // (hw/chisel_acc/.../gemm/BlockGemm.scala), with the group's START, JOBS,
 // STATUS and COUNTER. Plain C++, so the component (snax_shell.cpp) and the
-// standalone test (tests/snax/shell/) run the same code, as snax_unit.hpp.
+// standalone test (tests/snax/shell/) run the same code, as snax_group.hpp.
 //
 // CSRs, offsets from the group's first CSR (the CSR mux removes it): START,
-// JOBS, then the units' read-write CSRs (JOB_BEATS for a fold), read back as
-// written; then STATUS and COUNTER, read-only.
+// JOBS, then the units' read-write CSRs (JOB_BEATS for each fold without a
+// fixed T, in unit order), read back as written; then STATUS and COUNTER,
+// read-only.
 //
 // Rules, c being the cycle of an access:
 //   - a write to a read-write CSR other than START, or to START with bit 0
@@ -24,10 +25,11 @@
 //     once. While the unit is busy in c the write is held (IO_REQ_PENDING:
 //     the ReqRspManager's req.ready is ctrl.ready), and accepted, then
 //     answered, in the cycle busy falls: E + 1, E the run's last cycle;
-//   - an accepted start a goes to the unit's ctrl as (JOBS, JOB_BEATS) as
-//     they stand (JOB_BEATS 1 for a group without one), unless one of them is
-//     0: the empty run, which the shell ends in its own cycle (E = a) without
-//     the unit, so busy never rises;
+//   - an accepted start a goes to the group's ctrl as JOBS and every
+//     JOB_BEATS in unit order, as they stand (JOBS and 1 for a group without
+//     one: the two words of B1), unless one of them is 0: the empty run,
+//     which the shell ends in its own cycle (E = a) without the group, so busy
+//     never rises;
 //   - STATUS: bit 0 busy, the unit's busy in c (from a + 1 to E); bit 1 done,
 //     sticky: set by the done pulse in E, so it reads 1 from E + 1, and
 //     cleared by an accepted start, so it reads 0 from a + 1; a set wins over
@@ -78,9 +80,9 @@ public:
     bool held;
     uint32_t held_value;
 
-    // nb_rw read-write CSRs (START, JOBS and the units'), JOB_BEATS at
-    // job_beats (an index into them, -1 for a group without one)
-    void configure(int nb_rw, int job_beats)
+    // nb_rw read-write CSRs (START, JOBS and the units'), the JOB_BEATS ones
+    // at job_beats (indices into them, in unit order; none for a group without)
+    void configure(int nb_rw, const std::vector<int> &job_beats)
     {
         this->job_beats_index = job_beats;
         this->regs.assign(nb_rw, 0);
@@ -108,14 +110,32 @@ public:
         return this->regs[JOBS];
     }
 
-    uint32_t job_beats() const
+    // The words an accepted start sends: JOBS, then every JOB_BEATS in unit
+    // order (JOBS and 1 without one)
+    std::vector<uint32_t> words() const
     {
-        return this->job_beats_index < 0 ? 1 : this->regs[this->job_beats_index];
+        std::vector<uint32_t> w = {this->jobs()};
+        for (int i : this->job_beats_index)
+        {
+            w.push_back(this->regs[i]);
+        }
+        if (this->job_beats_index.empty())
+        {
+            w.push_back(1);
+        }
+        return w;
     }
 
     bool empty() const
     {
-        return this->jobs() == 0 || this->job_beats() == 0;
+        for (uint32_t w : this->words())
+        {
+            if (w == 0)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     // A write of value to read-write CSR index in cycle
@@ -247,5 +267,5 @@ private:
         this->done_cycle = cycle;
     }
 
-    int job_beats_index;
+    std::vector<int> job_beats_index;
 };

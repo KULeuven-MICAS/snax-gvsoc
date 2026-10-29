@@ -2,7 +2,8 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests of snax/snax_unit_acc.py: the slot's CSR limit, and the composite built
-from accelerator.json, one group (forge/vecadd/) and two (dot 1, test_snax_cfg's DOT).
+from accelerator.json, one group (forge/vecadd/), two (dot 1, test_snax_cfg's DOT) and a
+linked group (dot 4, test_snax_cfg's DOT4).
 Run from snax-gvsoc after `make build` (the composite imports GVSoC's Python from
 install/):
 
@@ -31,7 +32,7 @@ except ImportError:
     snax_unit_acc = None
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
-from test_snax_cfg import CLUSTER, STREAMER, VECADD, dot_cluster  # noqa: E402
+from test_snax_cfg import CLUSTER, DOT4, DOT4_STREAMER, STREAMER, VECADD, dot_cluster  # noqa: E402
 
 
 def slot_of(accelerator, streamer=STREAMER):
@@ -86,13 +87,16 @@ class Built(unittest.TestCase):
         first = SNAX_CSR_FIRST + nb_csrs(STREAMER)
         self.assertEqual(acc.components["shell"].properties,
                          {"csr_base": first, "csrs": ["START", "JOBS"]})
-        unit = acc.components["unit"].properties
-        self.assertEqual((unit["datapath"], unit["inputs"], unit["outputs"], unit["op"],
-                          unit["lanes"], unit["latency"], unit["ii"], unit["csr_base"]),
-                         ("ElementwiseLanes", ["a", "b"], ["out"], "add", 4, 0, 1, first))
+        group = acc.components["unit"].properties
+        (unit,) = group["units"]
+        self.assertEqual((group["links"], group["csr_base"]), ([], first))
+        self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"],
+                          unit["lanes"], unit["latency"], unit["ii"], unit["span"], unit["t"]),
+                         ("ElementwiseLanes", ["acc_a", "acc_b"], "acc_out", "add", 4, 0, 1, 1,
+                          1))
 
     def test_dot_two_groups(self):
-        """dot 1: a shell per group at its window, a unit per unit, named after them."""
+        """dot 1: a shell per group at its window, a group per unit, named after them."""
         with tempfile.TemporaryDirectory() as tmp:
             path = dot_cluster(Path(tmp))
             (slot,) = snax_cfg.load(path).cores[0].accelerators
@@ -104,16 +108,40 @@ class Built(unittest.TestCase):
                          {"csr_base": first, "csrs": ["START", "JOBS"]})
         self.assertEqual(acc.components["shell_sum"].properties,
                          {"csr_base": first + 4, "csrs": ["START", "JOBS", "JOB_BEATS"]})
-        mul, total = (acc.components[n].properties for n in ("unit_mul", "unit_sum"))
-        self.assertEqual((mul["datapath"], mul["inputs"], mul["op"], mul["csr_base"]),
-                         ("ElementwiseLanes", ["a", "b"], "mul", first))
-        self.assertEqual((total["datapath"], total["inputs"], total["outputs"], total["op"],
-                          total["lanes"], total["latency"], total["csr_base"]),
-                         ("TreeAccumulate", ["a"], ["out"], "add", 4, 1, first + 4))
+        (mul,), (total,) = (acc.components[n].properties["units"] for n in ("unit_mul", "unit_sum"))
+        self.assertEqual((mul["datapath"], mul["inputs"], mul["op"], mul["t"]),
+                         ("ElementwiseLanes", ["mul_a", "mul_b"], "mul", 1))
+        self.assertEqual((total["datapath"], total["inputs"], total["output"], total["op"],
+                          total["lanes"], total["latency"], total["t"]),
+                         ("TreeAccumulate", ["sum_a"], "sum_out", "add", 4, 1, 0))
+        self.assertEqual(acc.components["unit_sum"].properties["csr_base"], first + 4)
         self.assertEqual(snax_unit_acc.component_names(slot.accelerator),
                          ({"mul": "shell_mul", "sum": "shell_sum"},
                           {"mul": "unit_mul", "sum": "unit_sum"}))
 
+    def test_dot4_one_linked_group(self):
+        """dot 4: one shell and one group_dot over its window (START, JOBS, the MAC's
+        JOB_BEATS, STATUS, COUNTER), the MAC's outer inputs and the sum's outer output, the
+        wire between them; the sum's T fixed at 1 (params.T), the MAC's from the start."""
+        cls = snax_unit_acc.SnaxUnitAcc.for_slot(slot_of(DOT4, DOT4_STREAMER), 131072)
+        acc = cls(None, "snax_acc0")
+        self.assertEqual(sorted(acc.components), ["csr_mux", "group_dot", "shell_dot",
+                                                  "streamer"])
+        first = SNAX_CSR_FIRST + nb_csrs(DOT4_STREAMER)
+        self.assertEqual(acc.components["shell_dot"].properties,
+                         {"csr_base": first, "csrs": ["START", "JOBS", "JOB_BEATS"]})
+        group = acc.components["group_dot"].properties
+        mac, total = group["units"]
+        self.assertEqual((group["links"], group["csr_base"]), ([0], first))
+        self.assertEqual((mac["datapath"], mac["inputs"], mac["output"], mac["accumulate"],
+                          mac["reg_out"], mac["latency"], mac["t"], mac["op_width"]),
+                         ("Mac", ["mac_a", "mac_b"], "", True, False, 1, 0, 64))
+        self.assertEqual((total["datapath"], total["inputs"], total["output"], total["span"],
+                          total["t"]), ("TreeAccumulate", [""], "sum_out", 1, 1))
+        self.assertEqual(snax_unit_acc.component_names(DOT4), ({"dot": "shell_dot"},
+                                                               {"dot": "group_dot"}))
+        # The window: five CSRs, the last at first + 4
+        self.assertEqual(len(DOT4.csrs), 5)
 
 if __name__ == "__main__":
     unittest.main()

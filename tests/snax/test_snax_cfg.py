@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "snax"))
 import hjson  # noqa: E402
 import snax_cfg  # noqa: E402
-from snax_cfg import Accelerator, Csr, Group, Port, Unit  # noqa: E402
+from snax_cfg import Accelerator, Csr, Group, Link, Port, Unit  # noqa: E402
 
 CFG = ROOT / "sw" / "cfg"
 FORGE = ROOT / "forge"
@@ -57,12 +57,13 @@ def group_csrs(base: int, between: int = 0) -> list:
 
 def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
     return Unit(name, brm or f"elementwise_{op}", "ElementwiseLanes",
-                {p: Port(p, dtype, 4) for p in ("a", "b", "out")}, dtype, {"op": op}, 0, 1, [])
+                {p: Port(p, dtype, 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                dtype, {"op": op}, 0, 1, [])
 
 
 def fold(name: str, base: int, in_dtype: str = "int64", lanes: int = 1) -> Unit:
     return Unit(name, "accumulate", "TreeAccumulate",
-                {"a": Port("in", in_dtype, lanes), "out": Port("out", "int64", 1)}, None,
+                {"a": Port("in", in_dtype, lanes, "in"), "out": Port("out", "int64", 1, "out")}, None,
                 {"op": "add"},
                 1, 1, [Csr("JOB_BEATS", "rw", base + 2, 32)])
 
@@ -293,18 +294,24 @@ def acc_json(acc: Accelerator) -> dict:
 
     def unit(u):
         d = {"name": u.name, "brm": u.brm, "datapath": u.datapath,
-             "ports": {k: {"port": p.port, "dtype": p.dtype, "lanes": p.lanes}
+             "ports": {k: {"port": p.port, **({"dir": p.dir} if p.dir else {}),
+                           "dtype": p.dtype, "lanes": p.lanes}
                        for k, p in u.ports.items()}}
         if u.op_type is not None:
             d["opType"] = u.op_type
-        d.update({"params": dict(u.params), "timing": {"latency": u.latency, "ii": u.ii},
+        d.update({"params": dict(u.params),
+                  "timing": {"latency": u.latency, "ii": u.ii, "span": u.span},
                   "csrs": [csr(c) for c in u.csrs]})
         return d
+
+    def link(k):
+        return {"name": k.name, "from": k.from_, "to": k.to, "depth": k.depth}
 
     return {"name": acc.name, "design_point": acc.design_point, "tag": acc.tag,
             "inputs": list(acc.inputs), "outputs": list(acc.outputs),
             "groups": [{"name": g.name, "csrs": [csr(c) for c in g.csrs],
-                        "units": [unit(u) for u in g.units], "links": list(g.links)}
+                        "units": [unit(u) for u in g.units],
+                        "links": [link(k) for k in g.links]}
                        for g in acc.groups]}
 
 
@@ -322,6 +329,26 @@ DOT_STREAMER = {
                            "num_channel": [4, 4, 4], "fifo_depth": [8, 8, 8]},
     "data_writer_params": {"spatial_bounds": [[4], [1]], "temporal_dim": [1, 1],
                            "num_channel": [4, 1], "fifo_depth": [8, 8]},
+}
+
+
+# dot 4 (snax-forge C§17's block): one group dot, a Mac unit (JOB_BEATS at 2) wired into a
+# TreeAccumulate unit of fixed T 1 by the link out_partial; readers mac.a, mac.b, writer sum.out
+DOT4 = Accelerator(
+    "dot", "out/design/dot_4/design_point.json", "snax_forge", ["mac.a", "mac.b"], ["sum.out"],
+    [Group("dot", group_csrs(0, 1), [
+        Unit("mac", "mac", "Mac", {p: Port(p, "int64", 4, "out" if p == "out" else "in")
+                                   for p in ("a", "b", "out")}, "int64",
+             {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)], 1),
+        Unit("sum", "accumulate", "TreeAccumulate",
+             {"a": Port("in", "int64", 4, "in"), "out": Port("out", "int64", 1, "out")}, None,
+             {"op": "add", "T": 1}, 1, 1, [], 1),
+    ], [Link("out_partial", "mac.out", "sum.a", 0)])])
+DOT4_STREAMER = {
+    "data_reader_params": {"spatial_bounds": [[4], [4]], "temporal_dim": [1, 1],
+                           "num_channel": [4, 4], "fifo_depth": [8, 8]},
+    "data_writer_params": {"spatial_bounds": [[1]], "temporal_dim": [1], "num_channel": [1],
+                           "fifo_depth": [8]},
 }
 
 
@@ -420,18 +447,22 @@ class AccJson(unittest.TestCase):
 
     def test_datapath(self):
         self.unit()["datapath"] = "Gemm"
-        self.fails(snax_cfg.CfgTargetError, "units[0].datapath", "not a datapath SnaxUnit models")
+        self.fails(snax_cfg.CfgTargetError, "units[0].datapath", "not a datapath SnaxGroup models")
 
     def test_links_and_units(self):
-        self.acc["groups"][0]["links"] = [{"name": "l"}]
-        self.fails(snax_cfg.CfgTargetError, "groups[0].links", "not modelled yet")
+        """A link has its four keys; a group's units are connected by its links (gen.group);
+        a unit name is the accelerator's once."""
+        self.acc["groups"][0]["links"] = [{"name": "l", "from": "acc.out", "to": "acc.a"}]
+        self.fails(snax_cfg.CfgKeyError, "groups[0].links[0].depth", "missing")
         self.acc = acc_json(VECADD)
         self.acc["groups"][0]["units"].append(copy.deepcopy(self.unit()))
-        self.fails(snax_cfg.CfgTargetError, "groups[0].units", "2 units")
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.groups", "unit 'acc' twice")
+        self.acc["groups"][0]["units"][1]["name"] = "acc2"
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.groups", "gen.group")
 
     def test_ports_name_the_movers(self):
         self.acc["inputs"] = ["acc.a"]
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "neither inputs nor outputs")
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs", "gen.outer")
         self.acc["inputs"] = ["acc.a", "acc.c"]
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.inputs[1]", "names no port")
         self.acc["inputs"] = ["acc.a", "acc.a"]
@@ -480,7 +511,7 @@ class AccJson(unittest.TestCase):
         self.acc["groups"][0]["csrs"][2]["offset"] = 3
         self.acc["groups"][0]["csrs"][3]["offset"] = 4
         self.rw, self.ro = 3, 2
-        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "an ElementwiseLanes unit none")
+        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "any other unit none")
         self.unit()["csrs"][0]["name"] = "SCALE"
         self.fails(snax_cfg.CfgTargetError, "units[0].csrs[0]", "SCALE (rw)")
 
@@ -507,7 +538,107 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgKeyError, "units[0].params.op", "TreeAccumulate needs an op")
         self.unit()["params"]["op"] = "add"
         self.unit()["csrs"] = []
-        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "a TreeAccumulate unit has JOB_BEATS")
+        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "a fold without params.T has JOB_BEATS")
+
+
+class LinkedGroup(unittest.TestCase):
+    """dot 4 (snax-forge C§17's block): one group of a Mac wired into a TreeAccumulate, read
+    as written; each of snax-forge's link checks refuses its case with its code."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.acc = acc_json(DOT4)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self):
+        path = write_design(self.dir, self.acc, DOT4_STREAMER, 3, 2)
+        (slot,) = snax_cfg.load(path).cores[0].accelerators
+        return slot
+
+    def fails(self, kind, text):
+        with self.assertRaises(kind) as ctx:
+            self.load()
+        self.assertIn(text, ctx.exception.why)
+
+    def test_dot4_reads_as_written(self):
+        acc = self.load().accelerator
+        self.assertEqual(acc, DOT4)
+        (group,) = acc.groups
+        self.assertEqual([u.span for u in group.units], [1, 1])
+        self.assertEqual(group.units[1].params["T"], 1)
+        self.assertEqual(group.links, [Link("out_partial", "mac.out", "sum.a", 0)])
+        self.assertEqual(group.rw, ["START", "JOBS", "JOB_BEATS"])
+
+    def link(self, **kw):
+        self.acc["groups"][0]["links"][0].update(kw)
+
+    def test_gen_link(self):
+        self.link(to="mac.a")  # out to an in port, but mac.a is outer: also on inputs
+        self.fails(snax_cfg.CfgSlotError, "gen.")
+        self.acc = acc_json(DOT4)
+        self.link(**{"from": "sum.a", "to": "mac.a"})  # in to in
+        self.fails(snax_cfg.CfgSlotError, "gen.link:")
+        self.acc = acc_json(DOT4)
+        self.acc["groups"][0]["units"][1]["ports"]["a"]["lanes"] = 2  # lanes differ
+        self.fails(snax_cfg.CfgSlotError, "gen.link:")
+        self.acc = acc_json(DOT4)
+        self.link(depth=-1)
+        self.fails(snax_cfg.CfgSlotError, "gen.link:")
+
+    def test_gen_link_port(self):
+        links = self.acc["groups"][0]["links"]
+        links.append(dict(links[0], name="again", depth=1))
+        self.fails(snax_cfg.CfgSlotError, "gen.link_port:")
+
+    def test_gen_outer(self):
+        self.acc["inputs"] = ["mac.a", "mac.b", "sum.a"]
+        self.fails(snax_cfg.CfgSlotError, "gen.outer:")
+        self.acc = acc_json(DOT4)
+        self.acc["inputs"] = ["mac.b", "mac.a"]
+        self.fails(snax_cfg.CfgSlotError, "gen.outer:")
+
+    def test_gen_group(self):
+        self.acc["groups"][0]["links"] = []
+        self.acc["inputs"] = ["mac.a", "mac.b", "sum.a"]
+        self.acc["outputs"] = ["mac.out", "sum.out"]
+        self.fails(snax_cfg.CfgSlotError, "gen.group:")
+
+    def test_gen_chain(self):
+        """The link mac -> sum over the units in the order sum, mac: not a chain in unit order,
+        snax-forge's gen.chain in its words."""
+        self.acc["groups"][0]["units"].reverse()
+        self.fails(snax_cfg.CfgTargetError,
+                   "gen.chain: accelerator dot: group dot's links [('mac', 'sum')] over its units "
+                   "['sum', 'mac']: a group is a chain until tier A (fork and join)")
+
+    def test_gen_span(self):
+        """A SerialAccumulate of 4 lanes (span 4) fed by the streamer: snax-forge's gen.span in
+        its words."""
+        serial = Unit("acc", "accumulate", "SerialAccumulate",
+                      {"a": Port("in", "int64", 4, "in"), "out": Port("out", "int64", 1, "out")},
+                      None, {}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)], 4)
+        streamer = {
+            "data_reader_params": {"spatial_bounds": [[4]], "temporal_dim": [1],
+                                   "num_channel": [4], "fifo_depth": [8]},
+            "data_writer_params": {"spatial_bounds": [[1]], "temporal_dim": [1],
+                                   "num_channel": [1], "fifo_depth": [8]},
+        }
+        acc = acc_json(accelerator("serial", serial, between=1))
+        with self.assertRaises(snax_cfg.CfgTargetError) as ctx:
+            snax_cfg.load(write_design(self.dir, acc, streamer, 3, 2))
+        self.assertIn("gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the streamer: "
+                      "a unit with span > 1 reads from a link until B2", ctx.exception.why)
+
+    def test_a_datapath_is_the_registrys(self):
+        self.acc["groups"][0]["units"][0]["datapath"] = "LinkBuffer"
+        self.fails(snax_cfg.CfgTargetError, "not a datapath SnaxGroup models")
+
+    def test_timing_is_the_datapaths(self):
+        self.acc["groups"][0]["units"][1]["timing"]["span"] = 4
+        self.fails(snax_cfg.CfgTargetError, "gen.timing:")
 
 
 class TwoGroups(unittest.TestCase):

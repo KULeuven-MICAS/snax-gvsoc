@@ -5,7 +5,7 @@
 #
 # SnaxUnit's rule against the hand-worked cases (README.md), g++ only:
 #   run.sh [OBJ_DIR]
-# Builds tb.cpp with snax/snax_unit.hpp into OBJ_DIR (default
+# Builds tb.cpp with snax/snax_group.hpp into OBJ_DIR (default
 # build/unit), then runs it on every case in cases/. Exit 1 on a difference.
 set -e
 

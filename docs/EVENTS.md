@@ -78,22 +78,40 @@ words, each the bytes it covers little-endian), a list of integers joined by
 
 The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`);
 `snax_acc<i>` is core `i`'s accelerator. Its components follow its
-`accelerator.json` (snax-forge C§17): with one group of one unit, as every
-fixture of `forge/` has, the unit is `snax_acc<i>/unit` and the group's
-shell `snax_acc<i>/shell`; with more, `snax_acc<i>/unit_<unit>` and
-`snax_acc<i>/shell_<group>` (`snax_unit_acc.py`'s `component_names`), each
-unit with the traces below. The shell has no trace of its own.
+`accelerator.json` (snax-forge C§17): one `SnaxGroup` per group. With one
+group of one unit, as most fixtures of `forge/` have, it is
+`snax_acc<i>/unit` and the group's shell `snax_acc<i>/shell`; with several
+groups of one unit each, `snax_acc<i>/unit_<unit>` and
+`snax_acc<i>/shell_<group>`; a linked group (several units joined by links)
+is `snax_acc<i>/group_<group>`, its shell `snax_acc<i>/shell_<group>`
+(`snax_unit_acc.py`'s `component_names`). Each group has the traces below,
+at its boundary; the shell has no trace of its own.
 
-### Unit (`snax_acc<i>/unit`, `snax_acc<i>/unit_<unit>`; `snax/snax_unit.cpp`)
+### Group (`snax_acc<i>/unit`, `snax_acc<i>/unit_<unit>`, `snax_acc<i>/group_<group>`; `snax/snax_group.cpp`)
+
+A group of one unit gives the lines below as B1's unit did. A linked
+group's `fire` lines are its head unit's firings, with its head's outer
+inputs, its `push` lines the last unit's results, `first` and `last` the
+head's firings each folds; `count` and `firings` are the head's, `rate` the
+head's firings per result of the last unit.
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
-| `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |
+| `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS; a linked group's head's), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |
 | `events` | `done` | the run's last busy cycle `E` (idle from `E + 1`) | `firings`; `first` and `last`, the cycles of its first and last firing |
 | `summary` | `run` | `E` | `index` (from 0), `firings`, `busy`, `stall_in`, `stall_out`, `flush` (they add up to `E - s`) |
 | `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order), `value` (each input port's beat words, port order, flat) |
 | `beats` | `push` | the push | `n` (its index among the run's results), `first`, `last` (the firings it folds; equal at rate 1), `value` (the output beat's words) |
 | `beats` | `class` | the first cycle of a run of one class, from `s + 1` to `E` | `mode` (`busy`, `stall_in`, `stall_out`, `flush`: the class the `run` line counts the cycle in) |
+
+A linked group's run line (`snax/snax_group.hpp`'s `SnaxGroupRule`) judges
+each busy cycle at the group's boundary, in D59's order: `stall_out` (the
+last unit has a result and no room), `busy` (any unit fires, reads a lane
+in place, or is in its II gap), `stall_in` (a unit with outer inputs wants
+to fire and one of them has no beat), `flush` (otherwise: results in
+flight, beats in a buffer). Its `firings` are the head unit's. For one unit
+these are the unit's classes above. Per-unit events of a linked group are
+parked (snax-forge open item 96).
 
 ### Streamer (`snax_acc<i>/streamer`, `snax/snax_streamer.cpp`)
 

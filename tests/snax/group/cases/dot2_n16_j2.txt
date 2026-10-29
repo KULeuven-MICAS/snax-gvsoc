@@ -1,0 +1,26 @@
+# dot 2 at N = 16, W = 4 (T = 4), JOBS 2: mul -> a buffer of depth 1 -> TreeAccumulate sum
+# C§17: busy cycles E - s = 10
+
+unit mul ElementwiseLanes latency 0 ii 1 span 1 t 1 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 4 inputs 0
+link mul sum depth 1
+jobs 2
+start 0 taken
+expect run index=0 firings=8 busy=9 stall_in=0 stall_out=0 flush=1
+# E - s = 10, C§17's formula
+
+# a b ready | mul fire give | sum fire give | occ0 | busy
+cycles
+1 1 1 | 0 0 | 0 0 | 0 | 0    # 0: idle
+1 1 1 | 1 1 | 0 0 | 1 | 1    # 1: mul pushes; mul fires 0 (gives)
+1 1 1 | 1 1 | 1 0 | 1 | 1    # 2: mul pushes; mul fires 1 (gives); sum fires 0
+1 1 1 | 1 1 | 1 0 | 1 | 1    # 3: mul pushes; mul fires 2 (gives); sum fires 1
+1 1 1 | 1 1 | 1 0 | 1 | 1    # 4: mul pushes; mul fires 3 (gives); sum fires 2
+1 1 1 | 1 1 | 1 0 | 1 | 1    # 5: mul pushes; mul fires 4 (gives); sum fires 3 (gives)
+1 1 1 | 1 1 | 1 1 | 1 | 1    # 6: mul pushes; mul fires 5 (gives); sum pushes; sum fires 4
+1 1 1 | 1 1 | 1 0 | 1 | 1    # 7: mul pushes; mul fires 6 (gives); sum fires 5
+1 1 1 | 1 1 | 1 0 | 1 | 1    # 8: mul pushes; mul fires 7 (gives); sum fires 6
+1 1 1 | 0 0 | 1 0 | 0 | 1    # 9: sum fires 7 (gives)
+1 1 1 | 0 0 | 0 1 | 0 | 1    # 10: sum pushes
+1 1 1 | 0 0 | 0 0 | 0 | 0    # 11: idle
+1 1 1 | 0 0 | 0 0 | 0 | 0    # 12: idle

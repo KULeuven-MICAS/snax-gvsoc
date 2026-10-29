@@ -99,7 +99,7 @@ a cluster file, its streamer and datapath files, the headers, `main.c` and
     make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/forge'
 
 `snax_hjson` reads the cluster file given with `--param hjson=` and puts the
-standard composite (streamer, `SnaxShell`, `SnaxUnit`) in its accelerator
+standard composite (streamer, `SnaxShell`, `SnaxGroup`) in its accelerator
 slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
 `trace`, and its `events` and `summary`, `docs/EVENTS.md`):
 
@@ -204,7 +204,8 @@ snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd`
 
 ## 6. The regression
 
-`make regress` runs `SnaxUnit`'s and `SnaxShell`'s rules on their cases, builds `sw/` and every
+`make regress` runs the rules of one unit, of `SnaxShell` and of a group and the datapath classes on
+their cases, builds `sw/` and every
 program, and runs them all: the cluster tests, snax-shell and every
 `forge/` folder on `snax_hjson`
 (their counters checked as in section 5), and the plain tests on `snitch`.
@@ -213,16 +214,20 @@ About two minutes:
     make regress
 
     python3 tests/snax/regress.py 
-    SnaxUnit's rule (tests/snax/unit)
+    The rule of one unit (tests/snax/unit)
       1 run
     SnaxShell's rule (tests/snax/shell)
+      1 run
+    The datapath classes (tests/snax/datapath)
+      1 run
+    SnaxGroupRule's cases (tests/snax/group)
       1 run
     cluster tests on snax_hjson, forge/vecadd/'s cluster file
       13 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       1 run
-    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
-      16 run
+    forge/'s accelerators: forge.dot_1, forge.dot_2, forge.dot_3, forge.dot_4, forge.dot_5, forge.dot_6, forge.matadd, forge.matvec_1, forge.matvec_2, forge.matvec_3, forge.matvec_4, forge.matvec_5, forge.matvec_6, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      28 run
     plain tests on snitch (build/sw/tests)
       17 run
     regression passed
@@ -236,16 +241,20 @@ does not: make reads `-k` itself):
     make regress K=forge
 
     python3 tests/snax/regress.py -k forge
-    SnaxUnit's rule (tests/snax/unit)
+    The rule of one unit (tests/snax/unit)
       0 run
     SnaxShell's rule (tests/snax/shell)
+      0 run
+    The datapath classes (tests/snax/datapath)
+      0 run
+    SnaxGroupRule's cases (tests/snax/group)
       0 run
     cluster tests on snax_hjson, forge/vecadd/'s cluster file
       0 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       0 run
-    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
-      16 run
+    forge/'s accelerators: forge.dot_1, forge.dot_2, forge.dot_3, forge.dot_4, forge.dot_5, forge.dot_6, forge.matadd, forge.matvec_1, forge.matvec_2, forge.matvec_3, forge.matvec_4, forge.matvec_5, forge.matvec_6, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      28 run
     plain tests on snitch (build/sw/tests)
       0 run
     regression passed
@@ -266,14 +275,15 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    .............................................
+    .......................................................
     ----------------------------------------------------------------------
-    Ran 45 tests in 0.242s
+    Ran 55 tests in 0.444s
 
     OK
 
-`SnaxUnit`'s cycle rule against its hand-worked cases, with g++ (the
-regression's `unit`):
+The rule of one unit (`SnaxGroupRule`'s one-unit case, `SnaxUnitRule`)
+against its hand-worked cases, with g++ (the regression's `unit`; `shell`,
+`datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
 
     tests/snax/unit/run.sh
 

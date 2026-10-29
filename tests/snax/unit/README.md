@@ -1,8 +1,9 @@
 # SnaxUnit's rule
 
-The cycle rule, the op table and the per-type arithmetic of
-`snax/snax_unit.hpp`, the code `SnaxUnit` (`snax/snax_unit.cpp`) runs,
-against hand-worked cases, with g++ only. `make regress` runs it first, as
+The cycle rule of one unit (`snax/snax_group.hpp`'s `SnaxUnitRule`, the
+one-unit case of `SnaxGroupRule`, which `SnaxGroup` (`snax/snax_group.cpp`)
+runs for a group of one unit), the op table and the per-type arithmetic of
+`snax/snax_types.hpp`, against hand-worked cases, with g++ only. `make regress` runs it first, as
 `unit`. snax-forge's Chisel specs drive its nest controller and datapaths
 through the same files (`SNAX_GVSOC_UNIT_CASES`), so the format below is the
 contract between the two.
@@ -56,7 +57,7 @@ modulo their type's width. An elementwise result is the op at the inputs'
 NumPy result type, cast to the output's; a fold casts each lane to the
 output's type, sums them through its tree, and starts a result on each
 job's first firing. The expected values are worked by hand from the rules in
-`snax_unit.hpp`; each case says how in its comments.
+`snax_group.hpp` and `snax_types.hpp`; each case says how in its comments.
 
 | Case | What |
 |---|---|
