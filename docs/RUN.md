@@ -226,8 +226,8 @@ About two minutes:
       13 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       1 run
-    forge/'s accelerators: forge.dot_1, forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
-      17 run
+    forge/'s accelerators: forge.dot_1, forge.dot_2, forge.dot_3, forge.dot_4, forge.dot_5, forge.dot_6, forge.matadd, forge.matvec_1, forge.matvec_2, forge.matvec_3, forge.matvec_4, forge.matvec_5, forge.matvec_6, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      28 run
     plain tests on snitch (build/sw/tests)
       17 run
     regression passed
@@ -253,8 +253,8 @@ does not: make reads `-k` itself):
       0 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       0 run
-    forge/'s accelerators: forge.dot_1, forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
-      17 run
+    forge/'s accelerators: forge.dot_1, forge.dot_2, forge.dot_3, forge.dot_4, forge.dot_5, forge.dot_6, forge.matadd, forge.matvec_1, forge.matvec_2, forge.matvec_3, forge.matvec_4, forge.matvec_5, forge.matvec_6, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      28 run
     plain tests on snitch (build/sw/tests)
       0 run
     regression passed
@@ -275,9 +275,9 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
-    .............................................
+    .......................................................
     ----------------------------------------------------------------------
-    Ran 45 tests in 0.242s
+    Ran 55 tests in 0.444s
 
     OK
 
