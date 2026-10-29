@@ -100,6 +100,11 @@ else
 BUILD_TYPE = Release
 endif
 
+# FAST=1 skips the models' asserts flavour, which gvrun runs only with
+# --asserts: a plain run takes the optim models, --trace and --vcd the debug
+# ones. Passed either way, as CMake keeps an option in its cache.
+BUILD_ASSERT = $(if $(FAST),OFF,ON)
+
 gvrun.build:
 	$(CMAKE) -S gvrun -B $(BUILDDIR)/gvrun -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DCMAKE_INSTALL_PREFIX=$(INSTALLDIR)
@@ -123,6 +128,7 @@ build: gvrun.build
 		-DCMAKE_BUILD_RPATH=$(INSTALLDIR_ABS)/lib \
 		-DGVSOC_MODULES="$(GVSOC_MODULES);$(MODULES)" \
 		-DGVSOC_TARGETS="${TARGETS}" \
+		-DBUILD_ASSERT=$(BUILD_ASSERT) \
 		-DCMAKE_SKIP_INSTALL_RPATH=false
 
 	cd $(CURDIR) && $(CMAKE) --build $(BUILDDIR) $(CMAKE_FLAGS)

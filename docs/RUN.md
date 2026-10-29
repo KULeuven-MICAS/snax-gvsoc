@@ -31,6 +31,8 @@ GVSoC for the targets the programs run on, the Makefile's `SNAX_TARGETS` (`snitc
     -- Up-to-date: $ROOT/snax-gvsoc/install/python/./requirements.txt
     -- Up-to-date: $ROOT/snax-gvsoc/install/python/./.gitignore
 
+`FAST=1` (`make build TARGETS='$(SNAX_TARGETS)' FAST=1`) skips the models' asserts flavour, which only `gvrun --asserts` runs: about 15% less build time; a plain run, `--trace` and `--vcd` work as before.
+
 `source sourceme.sh` puts the install's `gvrun` on `PATH`; every new container needs it again. It prints nothing.
 
     source sourceme.sh
