@@ -38,10 +38,10 @@ its index in that unit's inputs.
 import gvsoc.systree
 import interco.router as router
 from snax_acc import SNAX_ACC_CSR_LAST, SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
-from snax_cfg import CATALOGUE, DTYPES, CfgTargetError, dirs_of
+from snax_cfg import CATALOGUE, DTYPES, CfgTargetError, dirs_of, streamer_channels
 from snax_group import SnaxGroup
 from snax_shell import SnaxShell
-from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
+from snax_streamer import SnaxStreamer, nb_csrs, tcdm_port_names
 
 
 def compile_components():
@@ -124,7 +124,7 @@ class SnaxUnitAcc(SnaxAcc):
             'template': slot.streamer,
             'accelerator': accelerator,
             'tcdm_size': tcdm_size,
-            'nb_tcdm_ports': nb_tcdm_ports(slot.streamer),
+            'nb_tcdm_ports': streamer_channels(slot.streamer),
             'tcdm_port_names': ['streamer.' + name for name in tcdm_port_names(slot.streamer)],
         })
 

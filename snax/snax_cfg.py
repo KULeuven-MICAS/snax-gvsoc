@@ -536,6 +536,43 @@ def spatial_mismatch(spatial_bounds: list, num_channel: int):
             'numChannel')
 
 
+# The keys of a mover group in the hjson's streamer template that the model
+# reads; any other key is refused by name. dynamicPriority (default true) and
+# higherStaticPriority (default false) are read as stream_param_gen.scala.tpl
+# reads them.
+MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth', 'dynamicPriority',
+    'higherStaticPriority']
+# The keys of the streamer template the model reads (MOVERS), or that do not change it
+TEMPLATE_KEYS = [*MOVERS, 'snax_library_name']
+
+
+def check_template(template: dict):
+    """Refuses a streamer template the model does not cover: a key it does not read, or a
+    mover whose spatial bounds do not multiply to its num_channel, as snax_cluster's
+    StreamerParam requires (spatial_mismatch). A RuntimeError naming it.
+
+    Parameters
+    ----------
+    template : dict
+        The streamer template, as the cluster hjson gives it (e.g.
+        snax_forge_streamer.hjson).
+    """
+    for key in template:
+        if key not in TEMPLATE_KEYS:
+            raise RuntimeError(f'Streamer template key not modelled: {key}')
+    for group in MOVERS:
+        for key in template.get(group, {}):
+            if key not in MOVER_KEYS:
+                raise RuntimeError(f'Streamer template key not modelled: {group}.{key}')
+    for group in MOVERS:
+        params = template.get(group, {})
+        for i, (bounds, channels) in enumerate(zip(params.get('spatial_bounds', []),
+                                                   params.get('num_channel', []))):
+            why = spatial_mismatch(list(bounds), channels)
+            if why is not None:
+                raise RuntimeError(f'{group}[{i}]: {why}')
+
+
 def streamer_channels(template: dict) -> int:
     """The streamer's TCDM ports: num_channel summed over its movers."""
     return sum(sum(template.get(mover, {}).get('num_channel', [])) for mover in MOVERS)
