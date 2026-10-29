@@ -1,41 +1,17 @@
 # SnaxUnit's rule
 
-The cycle rule of one unit (`snax/snax_group.hpp`'s `SnaxUnitRule`, the
-one-unit case of `SnaxGroupRule`, which `SnaxGroup` (`snax/snax_group.cpp`)
-runs for a group of one unit), the op table and the per-type arithmetic of
-`snax/snax_types.hpp`, against hand-worked cases, with g++ only. `make regress` runs it first, as
-`unit`. snax-forge's Chisel specs drive its nest controller and datapaths
-through the same files (`SNAX_GVSOC_UNIT_CASES`), so the format below is the
-contract between the two.
+The cycle rule of one unit (`snax/snax_group.hpp`'s `SnaxUnitRule`, the one-unit case of `SnaxGroupRule`, which `SnaxGroup` (`snax/snax_group.cpp`) runs for a group of one unit), the op table and the per-type arithmetic of `snax/snax_types.hpp`, against hand-worked cases, with g++ only. `make regress` runs it first, as `unit`. snax-forge's Chisel specs drive its nest controller and datapaths through the same files (`SNAX_GVSOC_UNIT_CASES`), so the format below is the contract between the two.
 
-- `tb.cpp` drives the rule cycle by cycle from a case file and compares,
-  every cycle, whether it fires, pushes and is busy, each start's answer,
-  and the summary line at the end of every run (`SnaxUnitRule::run_line`, the
-  line the component prints), whose busy, stall_in, stall_out and flush must
-  add up to the run's busy cycles in the case file. A case with `types` also
-  computes each firing's result from its beat, as the component does, and
-  compares every pushed result. It also checks the op table on fixed vectors
-  (wrapping at 8 to 64 bits, signed and unsigned min and max), a fold's tree
-  over a beat's lanes (`snax_unit_tree`: halves first, wrapping), NumPy's
-  result types (`snax_unit_result_type`, `types`: int64 with uint64 refused),
-  and whole beats (`beats`: `snax_unit_elementwise` and `snax_unit_fold` on
-  64-bit channel words, lane 0 lowest, with int8, uint8, int16, int32 and
-  int64 ports).
-- `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/unit`) and runs
-  it on every `cases/*.txt`; exit 1 on any difference.
+- `tb.cpp` drives the rule cycle by cycle from a case file and compares, every cycle, whether it fires, pushes and is busy, each start's answer, and the summary line at the end of every run (`SnaxUnitRule::run_line`, the line the component prints), whose busy, stall_in, stall_out and flush must add up to the run's busy cycles in the case file. A case with `types` also computes each firing's result from its beat, as the component does, and compares every pushed result. It also checks the op table on fixed vectors (wrapping at 8 to 64 bits, signed and unsigned min and max), a fold's tree over a beat's lanes (`snax_unit_tree`: halves first, wrapping), NumPy's result types (`snax_unit_result_type`, `types`: int64 with uint64 refused), and whole beats (`beats`: `snax_unit_elementwise` and `snax_unit_fold` on 64-bit channel words, lane 0 lowest, with int8, uint8, int16, int32 and int64 ports).
+- `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/unit`) and runs it on every `cases/*.txt`; exit 1 on any difference.
 
 ## The rule in one line
 
-A start carries jobs J and job_beats T: the run fires J * T times, a result
-every T-th firing, with latency L and initiation interval II (L = 0, II 1 is
-lockstep: fire when every input has a beat and the output has room, push in
-the same cycle). J or T 0 is the empty run: the unit ignores the start (the
-shell ends that run itself).
+A start carries jobs J and job_beats T: the run fires J * T times, a result every T-th firing, with latency L and initiation interval II (L = 0, II 1 is lockstep: fire when every input has a beat and the output has room, push in the same cycle). J or T 0 is the empty run: the unit ignores the start (the shell ends that run itself).
 
 ## A case file
 
-Plain text; `#` starts a comment, blank lines are skipped. Header lines, in
-any order, then `cycles` and one line per cycle from cycle 0:
+Plain text; `#` starts a comment, blank lines are skipped. Header lines, in any order, then `cycles` and one line per cycle from cycle 0:
 
 | Line | What |
 |---|---|
@@ -50,14 +26,7 @@ any order, then `cycles` and one line per cycle from cycle 0:
 | `result N V...` | the case's N-th pushed result: W values for an elementwise op, one for a fold |
 | `cycles` | the cycle lines follow |
 
-A cycle line: each input's valid, the output's ready (room), then the
-expected fire, push and busy, all 0 or 1. The rule is stepped only in busy
-cycles, with every input valid ANDed. Values are decimal or `0x` hex, taken
-modulo their type's width. An elementwise result is the op at the inputs'
-NumPy result type, cast to the output's; a fold casts each lane to the
-output's type, sums them through its tree, and starts a result on each
-job's first firing. The expected values are worked by hand from the rules in
-`snax_group.hpp` and `snax_types.hpp`; each case says how in its comments.
+A cycle line: each input's valid, the output's ready (room), then the expected fire, push and busy, all 0 or 1. The rule is stepped only in busy cycles, with every input valid ANDed. Values are decimal or `0x` hex, taken modulo their type's width. An elementwise result is the op at the inputs' NumPy result type, cast to the output's; a fold casts each lane to the output's type, sums them through its tree, and starts a result on each job's first firing. The expected values are worked by hand from the rules in `snax_group.hpp` and `snax_types.hpp`; each case says how in its comments.
 
 | Case | What |
 |---|---|

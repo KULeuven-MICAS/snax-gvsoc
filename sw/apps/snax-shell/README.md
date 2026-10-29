@@ -1,18 +1,8 @@
 # snax-shell
 
-`SnaxShell` and `SnaxUnit` (an ElementwiseLanes add at L = 0, II 1, 4 lanes
-of 64 bit behind the streamer), driven by hand on `snax_hjson` with
-`forge/vecadd/snax_forge.hjson`: a DMA and streamer setup written out with
-the CSRs of `forge/vecadd/include/` (`streamer_csr_addr_map.h`, `acc_csr.h`;
-snax-forge C§17): `ACC_RW_START` 978, `ACC_RW_JOBS` 979, `ACC_RO_STATUS` 980
-(bit 0 busy, bit 1 done), `ACC_RO_COUNTER` 981. `data.h` is `data/datagen.py` at 192 words, seed 0:
-the data snax_cluster's ALU `datagen.py` gives for an add. snax_cluster
-builds this accelerator from snax-forge's vecadd bundle, but this program
-has not been run on that RTL.
+`SnaxShell` and `SnaxUnit` (an ElementwiseLanes add at L = 0, II 1, 4 lanes of 64 bit behind the streamer), driven by hand on `snax_hjson` with `forge/vecadd/snax_forge.hjson`: a DMA and streamer setup written out with the CSRs of `forge/vecadd/include/` (`streamer_csr_addr_map.h`, `acc_csr.h`; snax-forge C§17): `ACC_RW_START` 978, `ACC_RW_JOBS` 979, `ACC_RO_STATUS` 980 (bit 0 busy, bit 1 done), `ACC_RO_COUNTER` 981. `data.h` is `data/datagen.py` at 192 words, seed 0: the data snax_cluster's ALU `datagen.py` gives for an add. snax_cluster builds this accelerator from snax-forge's vecadd bundle, but this program has not been run on that RTL.
 
-One streamer run of 48 beats feeds three unit runs of 16 beats
-(`RUN_BEATS`). It checks only what does not depend on code layout, and
-returns the number of checks failed plus the data errors:
+One streamer run of 48 beats feeds three unit runs of 16 beats (`RUN_BEATS`). It checks only what does not depend on code layout, and returns the number of checks failed plus the data errors:
 
 | Line | Check |
 |---|---|
@@ -21,12 +11,7 @@ returns the number of checks failed plus the data errors:
 | `held start` | start 3, written right after start 2, is held until run 2 is done: the `mcycle` span from before start 2 to after start 3 is at least `RUN_BEATS` |
 | `JOBS 0` | a start with JOBS 0, the empty run: STATUS 2 (not busy, done) and the counter 0 |
 
-It prints run 1's counter on its own line, `snax-shell counter: <n>`.
-`make regress` runs it with `--trace=snax_acc0/unit` and checks that `n` is
-the unit's first run line's busy + stall_in + stall_out + flush, and that
-the run fired 16 times (`check_counter` in `tests/snax/regress.py`). How
-many cycles a run takes beyond its beats follows the core's and the
-streamer's timing, so a change to the program can move `n`.
+It prints run 1's counter on its own line, `snax-shell counter: <n>`. `make regress` runs it with `--trace=snax_acc0/unit` and checks that `n` is the unit's first run line's busy + stall_in + stall_out + flush, and that the run fired 16 times (`check_counter` in `tests/snax/regress.py`). How many cycles a run takes beyond its beats follows the core's and the streamer's timing, so a change to the program can move `n`.
 
 ## Build and run
 
@@ -38,11 +23,7 @@ In the container, from snax-gvsoc, with GVSoC built for `snax_hjson`:
         --work-dir build/work/snax-shell --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/snax-shell/snax-shell.elf run
 
-It prints gvrun's warning that the platform tree does not match (the
-cluster file's accelerator is not the build's default file's, so gvrun runs
-it on the JSON config), the unit's lines per run (`docs/EVENTS.md`), among
-them `run index=0 firings=16 busy=B stall_in=SI stall_out=SO flush=0` (B +
-SI + SO the counter), then those of runs 1 and 2, and
+It prints gvrun's warning that the platform tree does not match (the cluster file's accelerator is not the build's default file's, so gvrun runs it on the JSON config), the unit's lines per run (`docs/EVENTS.md`), among them `run index=0 firings=16 busy=B stall_in=SI stall_out=SO flush=0` (B + SI + SO the counter), then those of runs 1 and 2, and
 
     snax-shell data: 0 errors (192 words)
     snax-shell counter: N
@@ -52,5 +33,4 @@ SI + SO the counter), then those of runs 1 and 2, and
     snax-shell JOBS 0: STATUS 2, counter 0
     snax-shell errors: 0
 
-and exits 0. N and S follow the core's timing: 19 (`run index=0 firings=16
-busy=16 stall_in=3 stall_out=0 flush=0`) and 28.
+and exits 0. N and S follow the core's timing: 19 (`run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=0`) and 28.

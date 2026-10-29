@@ -1,12 +1,8 @@
 # Upstream
 
-This repository is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc)
-at `93cedc4`, made on 2026-10-12. It is developed on its own and is never
-merged or rebased from upstream (D116 in
-[snax-forge](https://github.com/KULeuven-MICAS/snax-forge)).
+This repository is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at `93cedc4`, made on 2026-10-12. It is developed on its own and is never merged or rebased from upstream (D116 in [snax-forge](https://github.com/KULeuven-MICAS/snax-forge)).
 
-`sw/` is a pinned copy of snax_cluster's software, not of GVSoC: its pin,
-licences and sync are in `sw/README.md`.
+`sw/` is a pinned copy of snax_cluster's software, not of GVSoC: its pin, licences and sync are in `sw/README.md`.
 
 ## Upstream commits
 
@@ -23,26 +19,15 @@ licences and sync are in `sw/README.md`.
 
 ## How the copy was made
 
-GVSoC was cloned and checked out at `93cedc4`. One commit removed the seven
-submodules and `.gitmodules`, then each submodule was folded in with
-`git subtree add --prefix=<path> <upstream> <commit>`, keeping its history.
-Only `main` was pushed. A folded file's older history uses paths without the
-prefix, so it is read through the pin:
-`git log 731f804 -- models/cpu/iss/src/csr.cpp`.
+GVSoC was cloned and checked out at `93cedc4`. One commit removed the seven submodules and `.gitmodules`, then each submodule was folded in with `git subtree add --prefix=<path> <upstream> <commit>`, keeping its history. Only `main` was pushed. A folded file's older history uses paths without the prefix, so it is read through the pin: `git log 731f804 -- models/cpu/iss/src/csr.cpp`.
 
 ## License
 
-GVSoC is Apache 2.0: the root `LICENSE`, and `core/`, `engine/`, `gvrun/`
-and `pulp/` each carry the same license. `config_tree/`, `gvtest/` and
-`pulpos/` ship no LICENSE file of their own. Upstream has no NOTICE file.
-Files with a header of their own (e.g. `.gitlab-ci.yml`, SHL-0.51) keep it.
-Files we add are Apache 2.0 too.
+GVSoC is Apache 2.0: the root `LICENSE`, and `core/`, `engine/`, `gvrun/` and `pulp/` each carry the same license. `config_tree/`, `gvtest/` and `pulpos/` ship no LICENSE file of their own. Upstream has no NOTICE file. Files with a header of their own (e.g. `.gitlab-ci.yml`, SHL-0.51) keep it. Files we add are Apache 2.0 too.
 
 ## Changed files
 
-Every upstream file we edit gets one comment line near its top,
-`Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md`, and a row here
-(Apache 2.0, section 4(b)). A replaced or removed file only gets a row.
+Every upstream file we edit gets one comment line near its top, `Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md`, and a row here (Apache 2.0, section 4(b)). A replaced or removed file only gets a row.
 
 | File | Change | Step |
 |---|---|---|
