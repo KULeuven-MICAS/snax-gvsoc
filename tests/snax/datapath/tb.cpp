@@ -23,13 +23,13 @@
 #include "snax_datapath.hpp"
 
 
-static bool type_of(const std::string &name, SnaxUnitType &t)
+static bool type_of(const std::string &name, SnaxType &t)
 {
     for (int width : {8, 16, 32, 64})
     {
         for (bool is_signed : {true, false})
         {
-            if (name == snax_unit_type_name({width, is_signed}))
+            if (name == snax_type_name({width, is_signed}))
             {
                 t = {width, is_signed};
                 return true;
@@ -96,7 +96,7 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         else if (key == "in")
         {
             std::string name;
-            SnaxUnitType t;
+            SnaxType t;
             while (ok && ss >> name)
             {
                 ok = type_of(name, t);
@@ -118,9 +118,9 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
             std::string name;
             ok = (bool)(ss >> name);
             tests.back().p.op = -1;
-            for (int op = 0; op < UNIT_NB_OPS; op++)
+            for (int op = 0; op < SNAX_NB_OPS; op++)
             {
-                tests.back().p.op = name == snax_unit_op_names[op] ? op : tests.back().p.op;
+                tests.back().p.op = name == snax_op_names[op] ? op : tests.back().p.op;
             }
             ok = ok && tests.back().p.op != -1;
         }
@@ -165,12 +165,12 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
 }
 
 // A beat's words from its lanes, each of type t
-static std::vector<uint64_t> words(const std::vector<int64_t> &lanes, SnaxUnitType t)
+static std::vector<uint64_t> words(const std::vector<int64_t> &lanes, SnaxType t)
 {
     std::vector<uint64_t> w((lanes.size() * t.width + 63) / 64, 0);
     for (size_t l = 0; l < lanes.size(); l++)
     {
-        snax_unit_set_lane(w.data(), t.width, l, (uint64_t)lanes[l]);
+        snax_lane_set(w.data(), t.width, l, (uint64_t)lanes[l]);
     }
     return w;
 }
@@ -210,8 +210,8 @@ static int run(const Test &t)
         }
         for (int l = 0; l < out_lanes; l++)
         {
-            uint64_t got = snax_unit_lane(dp->out().data(), t.p.out_type.width, l);
-            uint64_t want = (uint64_t)s.out[l] & snax_unit_mask(t.p.out_type.width);
+            uint64_t got = snax_lane_get(dp->out().data(), t.p.out_type.width, l);
+            uint64_t want = (uint64_t)s.out[l] & snax_lane_mask(t.p.out_type.width);
             if (got != want)
             {
                 printf("%s: step %zu: lane %d is 0x%lx, expected 0x%lx\n", t.name.c_str(), k, l,
@@ -227,7 +227,7 @@ static int run(const Test &t)
 // The registry: each catalogue name builds; the wrong shapes are refused
 static int check_registry(int *count)
 {
-    const SnaxUnitType i64 = {64, true};
+    const SnaxType i64 = {64, true};
     struct Case { const char *name; SnaxDatapathParams p; bool builds; int latency, span; };
     SnaxDatapathParams two, one, plain, plain_bad, serial, link;
     two.in_types = {i64, i64};

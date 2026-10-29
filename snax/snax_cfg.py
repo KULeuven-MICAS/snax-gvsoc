@@ -87,7 +87,7 @@ the codes snax-forge's reader gives; each outer port's words per beat
 one-lane output: 1), since SnaxGroup has no FIFO slicer; snax_num_rw_csr and
 snax_num_ro_csr are the file's R/W and R/O CSRs. An ElementwiseLanes unit's
 opType is its inputs' NumPy result type (snax_types.hpp's
-snax_unit_result_type: a signed type with uint64 has none), a Mac's that of a
+snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
 and b.
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
@@ -189,7 +189,7 @@ GROUP_RW = ('START', 'JOBS')
 GROUP_RO = ('STATUS', 'COUNTER')
 # The unit CSRs modelled: a fold's JOB_BEATS
 UNIT_RW = ('JOB_BEATS',)
-# The op names (snax_types.hpp's snax_unit_op_names)
+# The op names (snax_types.hpp's snax_op_names)
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
 # The keys of the datapath block accelerator.json replaced: refused at their key
 OLD_DATAPATH_KEYS = ('unit', 'control', 'config', 'wait', 'fields')
@@ -597,7 +597,7 @@ DTYPES = {type_name(w, s): (w, s) for w in (8, 16, 32, 64) for s in (True, False
 
 def result_type(a: tuple, b: tuple):
     """NumPy's result type of two integer types (width, signed), as snax_types.hpp's
-    snax_unit_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
+    snax_op_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
     if a[1] == b[1]:
         return max(a[0], b[0]), a[1]
     s, u = (a, b) if a[1] else (b, a)
@@ -881,7 +881,7 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     if u.op_type != type_name(*t):
         raise CfgSlotError(node.file, node.where('groups'),
             f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
-            f'{type_name(*t)} (snax_unit_result_type)')
+            f'{type_name(*t)} (snax_op_result_type)')
 
 
 def _slot(acc: _Node) -> AccSlot:

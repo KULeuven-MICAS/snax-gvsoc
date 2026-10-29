@@ -27,10 +27,10 @@
 // write enable and its ring's write and read slots).
 //
 //   ElementwiseLanes(inTypes, opType, outType, lanes, op)   L 0: per lane
-//       a op b at opType, cast to outType (snax_unit_elementwise)
+//       a op b at opType, cast to outType (snax_op_elementwise)
 //   TreeAccumulate(inType, outType, lanes, add)   L 1, pins fire, first: on
 //       fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to outType
-//       first (snax_unit_fold); the output, one word, is acc
+//       first (snax_op_fold); the output, one word, is acc
 //   Mac(inTypes, opType, outType, lanes, accumulate, regOut)   per lane
 //       p = cast_out(cast_op(a) * cast_op(b)); with accumulate, L 1, pins fire
 //       and first: on fire s <- first ? p : s + p at outType, the output s;
@@ -79,11 +79,11 @@ struct SnaxEnables
 // a datapath takes of the rest
 struct SnaxDatapathParams
 {
-    std::vector<SnaxUnitType> in_types;
-    SnaxUnitType op_type = {64, true};
-    SnaxUnitType out_type = {64, true};
+    std::vector<SnaxType> in_types;
+    SnaxType op_type = {64, true};
+    SnaxType out_type = {64, true};
     int lanes = 1;
-    int op = UNIT_ADD;
+    int op = SNAX_OP_ADD;
     bool accumulate = true;
     bool reg_out = false;
     int depth = 1;
@@ -114,7 +114,7 @@ protected:
 };
 
 
-inline int snax_words(int lanes, SnaxUnitType t)
+inline int snax_words(int lanes, SnaxType t)
 {
     return lanes * t.width / 64;
 }
@@ -132,7 +132,7 @@ public:
 
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &) override
     {
-        snax_unit_elementwise(this->p.op, this->p.lanes, this->p.in_types[0],
+        snax_op_elementwise(this->p.op, this->p.lanes, this->p.in_types[0],
             this->p.in_types[1], this->p.out_type, in[0], in[1], this->out_.data());
     }
 
@@ -157,7 +157,7 @@ public:
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &en) override
     {
         this->out_[0] = this->acc;
-        this->next = en.fire ? snax_unit_fold(this->p.op, this->p.lanes, this->p.in_types[0],
+        this->next = en.fire ? snax_op_fold(this->p.op, this->p.lanes, this->p.in_types[0],
             this->p.out_type, in[0], en.first, this->acc) : this->acc;
     }
 
@@ -181,7 +181,7 @@ class SnaxMac : public SnaxDatapath
 public:
     explicit SnaxMac(const SnaxDatapathParams &p) : p(p)
     {
-        for (const SnaxUnitType &t : p.in_types)
+        for (const SnaxType &t : p.in_types)
         {
             this->in_words.push_back(snax_words(p.lanes, t));
         }
@@ -196,11 +196,11 @@ public:
     uint64_t product(const std::vector<const uint64_t *> &in, int l) const
     {
         const SnaxDatapathParams &p = this->p;
-        uint64_t a = snax_unit_cast(snax_unit_lane(in[0], p.in_types[0].width, l), p.in_types[0],
+        uint64_t a = snax_lane_cast(snax_lane_get(in[0], p.in_types[0].width, l), p.in_types[0],
             p.op_type);
-        uint64_t b = snax_unit_cast(snax_unit_lane(in[1], p.in_types[1].width, l), p.in_types[1],
+        uint64_t b = snax_lane_cast(snax_lane_get(in[1], p.in_types[1].width, l), p.in_types[1],
             p.op_type);
-        return snax_unit_cast(snax_unit_compute(UNIT_MUL, p.op_type, a, b), p.op_type,
+        return snax_lane_cast(snax_op_compute(SNAX_OP_MUL, p.op_type, a, b), p.op_type,
             p.out_type);
     }
 
@@ -216,16 +216,16 @@ public:
             uint64_t v;
             if (p.accumulate)
             {
-                v = en.first ? q : snax_unit_compute(UNIT_ADD, p.out_type,
-                    snax_unit_lane(this->reg.data(), w, l), q);
+                v = en.first ? q : snax_op_compute(SNAX_OP_ADD, p.out_type,
+                    snax_lane_get(this->reg.data(), w, l), q);
             }
             else
             {
-                uint64_t c = snax_unit_cast(snax_unit_lane(in[2], p.in_types[2].width, l),
+                uint64_t c = snax_lane_cast(snax_lane_get(in[2], p.in_types[2].width, l),
                     p.in_types[2], p.out_type);
-                v = snax_unit_compute(UNIT_ADD, p.out_type, q, c);
+                v = snax_op_compute(SNAX_OP_ADD, p.out_type, q, c);
             }
-            snax_unit_set_lane(this->next.data(), w, l, v);
+            snax_lane_set(this->next.data(), w, l, v);
         }
         const std::vector<uint64_t> &out = p.accumulate || p.reg_out ? this->reg : this->next;
         std::copy(out.begin(), out.end(), this->out_.begin());
@@ -265,10 +265,10 @@ public:
         this->next = this->acc;
         if (en.read)
         {
-            uint64_t x = snax_unit_cast(snax_unit_lane(in[0], p.in_types[0].width, en.lane),
+            uint64_t x = snax_lane_cast(snax_lane_get(in[0], p.in_types[0].width, en.lane),
                 p.in_types[0], p.out_type);
             this->next = en.first && en.lane == 0 ? x
-                : snax_unit_compute(UNIT_ADD, p.out_type, this->acc, x);
+                : snax_op_compute(SNAX_OP_ADD, p.out_type, this->acc, x);
         }
     }
 
@@ -336,7 +336,7 @@ struct SnaxDatapathEntry
 };
 
 // Whether the elements of lanes of t fill whole 64-bit words
-inline bool snax_whole_words(int lanes, SnaxUnitType t)
+inline bool snax_whole_words(int lanes, SnaxType t)
 {
     return lanes > 0 && lanes * t.width % 64 == 0;
 }
@@ -345,8 +345,8 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
 {
     static const std::map<std::string, SnaxDatapathEntry> registry = {
         {"ElementwiseLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
-            SnaxUnitType t;
-            if (p.in_types.size() != 2 || !snax_unit_result_type(p.in_types[0], p.in_types[1], &t))
+            SnaxType t;
+            if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
             {
                 *why = "two inputs with an integer result type";
                 return std::unique_ptr<SnaxDatapath>();
@@ -354,7 +354,7 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
             return std::unique_ptr<SnaxDatapath>(new SnaxElementwiseLanes(p));
         }}},
         {"TreeAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
-            if (p.in_types.size() != 1 || p.op != UNIT_ADD)
+            if (p.in_types.size() != 1 || p.op != SNAX_OP_ADD)
             {
                 *why = "one input, op add";
                 return std::unique_ptr<SnaxDatapath>();
@@ -403,7 +403,7 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
         *why = "not a datapath of the catalogue";
         return nullptr;
     }
-    for (const SnaxUnitType &t : p.in_types)
+    for (const SnaxType &t : p.in_types)
     {
         if (it->second.whole_words && !snax_whole_words(p.lanes, t))
         {

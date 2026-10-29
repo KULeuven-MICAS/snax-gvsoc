@@ -98,7 +98,7 @@ private:
     static void fire_handler(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
 
-    SnaxUnitType type_prop(js::Config *config, const char *width, const char *is_signed,
+    SnaxType type_prop(js::Config *config, const char *width, const char *is_signed,
         const std::string &where);
     bool probe(vp::IoMaster &port, bool is_write);
     void move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words);
@@ -223,9 +223,9 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         p.op_type = this->type_prop(u, "op_width", "op_signed", w);
         std::string op = this->props.str_prop(u, "op", w);
         p.op = -1;
-        for (int i = 0; i < UNIT_NB_OPS; i++)
+        for (int i = 0; i < SNAX_NB_OPS; i++)
         {
-            p.op = op == snax_unit_op_names[i] ? i : p.op;
+            p.op = op == snax_op_names[i] ? i : p.op;
         }
         if (p.op == -1)
         {
@@ -408,7 +408,7 @@ void SnaxGroup::reset(bool active)
 }
 
 
-SnaxUnitType SnaxGroup::type_prop(js::Config *config, const char *width, const char *is_signed,
+SnaxType SnaxGroup::type_prop(js::Config *config, const char *width, const char *is_signed,
     const std::string &where)
 {
     return {this->props.width_prop(config, width, where),
@@ -543,7 +543,7 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         _this->sigs.set(_this->sig_push, tail.push);
         _this->sigs.set(_this->sig_class, step.cls + 1);
         snax_class_line(_this->ev.beats, &_this->line_class, step.cls,
-            snax_unit_class_names[step.cls], cycle);
+            snax_group_class_names[step.cls], cycle);
 
         // The beats of each unit that fires, its outer inputs in port order (outer)
         std::string beats, values;

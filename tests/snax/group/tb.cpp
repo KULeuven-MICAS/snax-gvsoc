@@ -240,7 +240,7 @@ static int64_t b_of(int i) { return (i * 5) % 11 - 5; }
 // one the link; nullptr when the case is not a dot (no data check then)
 static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const SnaxGroupRule &rule)
 {
-    const SnaxUnitType i64 = {64, true};
+    const SnaxType i64 = {64, true};
     if (c.units.size() != 2 || c.units[0].inputs != 2 || c.units[1].inputs != 0 ||
         c.links.size() != 1 || c.links[0].from != 0)
     {
@@ -252,7 +252,7 @@ static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const Sn
         SnaxDatapathParams p;
         p.in_types.assign(k == 0 ? 2 : 1, i64);
         p.lanes = LANES;
-        p.op = c.units[k].datapath == "ElementwiseLanes" ? UNIT_MUL : UNIT_ADD;
+        p.op = c.units[k].datapath == "ElementwiseLanes" ? SNAX_OP_MUL : SNAX_OP_ADD;
         std::string why;
         g->units.push_back(snax_datapath_new(c.units[k].datapath, p, &why));
         if (!g->units.back())

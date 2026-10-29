@@ -90,7 +90,7 @@
 
 
 // The classes by name, as a run line and the class lines give them
-static const char *const snax_unit_class_names[] = {"busy", "stall_in", "stall_out", "flush"};
+static const char *const snax_group_class_names[] = {"busy", "stall_in", "stall_out", "flush"};
 
 
 class SnaxGroupRule
