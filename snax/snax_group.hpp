@@ -8,8 +8,9 @@
 // C§17's Control paragraph (D146, D147): the `<tag>_<group>_ctrl` of its
 // Chisel, which drives the group's datapaths (snax_datapath.hpp) with their
 // enables, every cycle. Plain C++, so the component (snax_group.cpp) and the
-// standalone tests (tests/snax/unit/, tests/snax/group/) run the same code,
-// as snax_sparse_arb.hpp. SnaxUnitRule, below, is its one-unit case.
+// standalone tests (tests/snax/unit/, tests/snax/shell/, tests/snax/group/,
+// the first two with one unit and no links) run the same code, as
+// snax_sparse_arb.hpp.
 //
 // A group is a graph of units and links: a link is an edge from one unit's
 // output to an input of another (Link: from, to, to_input, depth; depth 0 a
@@ -70,10 +71,9 @@
 // in D59's order: stall_out (it has a result and no room: it is frozen) >
 // busy (any unit fires or reads, or is in its II gap) > stall_in (a unit with
 // outer inputs wants to fire and one of them has no beat) > flush (results in
-// flight, beats in a buffer: accel.py's idle). For one unit these are
-// SnaxUnitRule's classes as they were. busy + stall_in + stall_out + flush
-// is the run's busy cycles, E - s; the run line's firings are the head's (the
-// first unit in the topological order).
+// flight, beats in a buffer: accel.py's idle). busy + stall_in + stall_out +
+// flush is the run's busy cycles, E - s; the run line's firings are the
+// head's (the first unit in the topological order).
 
 #pragma once
 
@@ -511,105 +511,6 @@ private:
     std::vector<UnitState> u;
     std::vector<LinkState> l;
     bool started = false;
-};
-
-
-// SnaxUnitRule: SnaxGroupRule of one unit (the nest controller of B1, D147),
-// with its interface as it was: a start carries jobs and job_beats (T), and
-// step() one bool for every input's beat. A run fires jobs * job_beats times
-// and gives a result on every job_beats-th firing; with L = 0 the result is
-// pushed in its firing cycle, else L cycles later, the pipeline stalling as a
-// whole when its head has no room; II counts from the last firing and carries
-// over to the next run. Its classes are the group's: stall_out > busy (fired,
-// or in the II gap) > stall_in (II allows, an input has no beat) > flush.
-class SnaxUnitRule
-{
-public:
-    using Class = SnaxGroupRule::Class;
-    using Start = SnaxGroupRule::Start;
-    static const Class BUSY = SnaxGroupRule::BUSY;
-    static const Class STALL_IN = SnaxGroupRule::STALL_IN;
-    static const Class STALL_OUT = SnaxGroupRule::STALL_OUT;
-    static const Class FLUSH = SnaxGroupRule::FLUSH;
-    static const int NB_CLASSES = SnaxGroupRule::NB_CLASSES;
-    static const Start TAKEN = SnaxGroupRule::TAKEN;
-    static const Start IGNORED = SnaxGroupRule::IGNORED;
-    static const Start REFUSED = SnaxGroupRule::REFUSED;
-
-    struct Step
-    {
-        bool fire;      // a beat taken from every input
-        bool result;    // the firing gives a result (every job_beats-th firing)
-        bool push;      // a beat given to the output
-        Class cls;
-        bool end;       // the run's last cycle: idle from the next one
-    };
-
-    // L >= 0 and II >= 1; L = 0, II 1 is lockstep
-    void configure(int latency, int ii)
-    {
-        SnaxGroupRule::UnitCfg c;
-        c.latency = latency;
-        c.ii = ii;
-        this->group.configure({c}, {});
-        this->sync();
-    }
-
-    void reset()
-    {
-        this->group.reset();
-        this->sync();
-    }
-
-    bool idle(int64_t cycle) const { return this->group.idle(cycle); }
-    bool busy(int64_t cycle) const { return this->group.busy(cycle); }
-
-    Start start(int64_t cycle, uint32_t jobs, uint32_t job_beats = 1)
-    {
-        Start s = this->group.start(cycle, jobs, {job_beats});
-        this->sync();
-        return s;
-    }
-
-    Step step(int64_t cycle, bool inputs, bool room)
-    {
-        SnaxGroupRule::Step g = this->group.step(cycle, {inputs}, {room});
-        this->sync();
-        const SnaxGroupRule::UnitStep &u = g.units[0];
-        return {u.fire, u.result, u.push, g.cls, g.end};
-    }
-
-    std::string run_line() const { return this->group.run_line(); }
-
-    // The current or last run, as SnaxGroupRule's: start s, last cycle E (-1
-    // while busy), jobs, job_beats, its count (jobs * job_beats firings), its
-    // firings, its cycles per class; runs ended so far
-    int64_t start_cycle;
-    int64_t end_cycle;
-    uint32_t jobs;
-    uint32_t job_beats;
-    uint32_t count;
-    uint32_t firings;
-    int64_t classes[SnaxGroupRule::NB_CLASSES];
-    int runs;
-
-    SnaxGroupRule group;
-
-private:
-    void sync()
-    {
-        this->start_cycle = this->group.start_cycle;
-        this->end_cycle = this->group.end_cycle;
-        this->jobs = this->group.jobs;
-        this->job_beats = this->group.beats.empty() ? 1 : this->group.beats[0];
-        this->count = this->group.count();
-        this->firings = this->group.firings();
-        for (int c = 0; c < SnaxGroupRule::NB_CLASSES; c++)
-        {
-            this->classes[c] = this->group.classes[c];
-        }
-        this->runs = this->group.runs;
-    }
 };
 
 

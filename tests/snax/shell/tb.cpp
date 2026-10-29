@@ -185,8 +185,11 @@ static bool parse(const std::string &path, Case &c)
 // Runs one case; returns the number of differences
 static int run(const Case &c)
 {
-    SnaxUnitRule unit;
-    unit.configure(c.latency, c.ii);
+    SnaxGroupRule unit;
+    SnaxGroupRule::UnitCfg cfg;
+    cfg.latency = c.latency;
+    cfg.ii = c.ii;
+    unit.configure({cfg}, {});
     SnaxShellRule shell;
     std::vector<int> job_beats;
     for (size_t i = 2; i < c.csrs.size(); i++)
@@ -209,12 +212,12 @@ static int run(const Case &c)
     // JOB_BEATS to the unit's ctrl
     auto start_unit = [&](int64_t cycle, const CycleLine &l) {
         std::vector<uint32_t> w = shell.words();
-        SnaxUnitRule::Start answer = unit.start(cycle, w[0], w[1]);
-        if (answer == SnaxUnitRule::REFUSED)
+        SnaxGroupRule::Start answer = unit.start(cycle, w[0], {w[1]});
+        if (answer == SnaxGroupRule::REFUSED)
         {
             fail(cycle, l, "the unit refused a start the shell sent while idle");
         }
-        else if (answer == SnaxUnitRule::TAKEN)
+        else if (answer == SnaxGroupRule::TAKEN)
         {
             shell.busy(cycle, true);
         }
@@ -305,7 +308,7 @@ static int run(const Case &c)
             {
                 inputs = inputs && v;
             }
-            SnaxUnitRule::Step step = unit.step(cycle, inputs, l.ready);
+            SnaxGroupRule::Step step = unit.step(cycle, {inputs}, {l.ready != 0});
             if (step.end)
             {
                 shell.busy(cycle, false);

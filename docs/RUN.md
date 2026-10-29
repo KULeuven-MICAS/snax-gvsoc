@@ -221,7 +221,7 @@ Each run's output is in `build/regress/work/<name>/run.log`, beside its `gvsoc_c
 
     OK
 
-The rule of one unit (`SnaxGroupRule`'s one-unit case, `SnaxUnitRule`) against its hand-worked cases, with g++ (the regression's `unit`; `shell`, `datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
+The rule of one unit (`SnaxGroupRule` with one unit and no links) against its hand-worked cases, with g++ (the regression's `unit`; `shell`, `datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
 
     tests/snax/unit/run.sh
 

@@ -2,8 +2,8 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// SnaxUnit's cycle rule, SnaxGroupRule's one-unit case (snax_group.hpp's
-// SnaxUnitRule), against hand-worked cases (README.md): each case file
+// SnaxUnit's cycle rule, snax_group.hpp's SnaxGroupRule with one unit and no
+// links, against hand-worked cases (README.md): each case file
 // gives the unit (latency, II, inputs, lanes), the starts (jobs and job_beats)
 // and, per cycle, each input's valid, the output's ready and the expected
 // fire, push and busy; the tb drives that rule with them and
@@ -290,8 +290,11 @@ struct Data
 // Runs one case; returns the number of differences
 static int run(const Case &c)
 {
-    SnaxUnitRule rule;
-    rule.configure(c.latency, c.ii);
+    SnaxGroupRule rule;
+    SnaxGroupRule::UnitCfg cfg;
+    cfg.latency = c.latency;
+    cfg.ii = c.ii;
+    rule.configure({cfg}, {});
     Data data{c};
 
     int errors = 0;
@@ -307,9 +310,9 @@ static int run(const Case &c)
             {
                 continue;
             }
-            SnaxUnitRule::Start answer = rule.start(cycle, s.jobs, s.job_beats);
+            SnaxGroupRule::Start answer = rule.start(cycle, s.jobs, {s.job_beats});
             const char *got = start_names[answer];
-            if (answer == SnaxUnitRule::TAKEN)
+            if (answer == SnaxGroupRule::TAKEN)
             {
                 run_busy = 0;
             }
@@ -321,7 +324,8 @@ static int run(const Case &c)
             }
         }
         int busy = rule.busy(cycle);
-        SnaxUnitRule::Step step = {false, false, false, SnaxUnitRule::FLUSH, false};
+        SnaxGroupRule::Step step;
+        step.units.assign(1, SnaxGroupRule::UnitStep());
         run_busy += l.busy;
         if (busy)
         {
@@ -330,27 +334,28 @@ static int run(const Case &c)
             {
                 inputs = inputs && v;
             }
-            step = rule.step(cycle, inputs, l.ready);
+            step = rule.step(cycle, {inputs}, {l.ready != 0});
         }
-        if (busy != l.busy || step.fire != l.fire || step.push != l.push)
+        const SnaxGroupRule::UnitStep &u = step.units[0];
+        if (busy != l.busy || u.fire != l.fire || u.push != l.push)
         {
             printf("%s: cycle %ld: fire %d push %d busy %d, expected %d %d %d\n",
-                c.name.c_str(), (long)cycle, step.fire, step.push, busy, l.fire, l.push,
+                c.name.c_str(), (long)cycle, u.fire, u.push, busy, l.fire, l.push,
                 l.busy);
             errors++;
         }
         if (!c.types.empty())
         {
             // A push leaves before the firing of its cycle enters (L = 0: the same result)
-            if (step.push && c.latency > 0)
+            if (u.push && c.latency > 0)
             {
                 data.push(cycle);
             }
-            if (step.fire)
+            if (u.fire)
             {
-                data.fire(cycle, rule.firings - 1, rule.job_beats, step.result);
+                data.fire(cycle, rule.firings() - 1, rule.beats[0], u.result);
             }
-            if (step.push && c.latency == 0)
+            if (u.push && c.latency == 0)
             {
                 data.push(cycle);
             }

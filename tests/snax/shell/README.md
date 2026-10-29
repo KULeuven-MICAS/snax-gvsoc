@@ -2,7 +2,7 @@
 
 The rule of `snax/snax_shell.hpp`, the code `SnaxShell` (`snax/snax_shell.cpp`) runs for one group of an accelerator (snax-forge C§17, D146: START, JOBS, the units' read-write CSRs, STATUS, COUNTER; a start, a start held while busy, the empty run, the sticky done bit, the counter), against hand-worked cases, with g++ only. `make regress` runs it after `unit`, as `shell`. snax-forge's Chisel specs drive their shell through the same files, from the folder `SNAX_GVSOC_SHELL_CASES` names, so both sides read one set of cases and the format below is the contract between the two.
 
-- `tb.cpp` steps `SnaxShellRule` with `snax_group.hpp`'s `SnaxUnitRule` (a group of one unit), wired as GVSoC wires them: the shell's accepted start, but the empty run, starts the unit with JOBS and JOB_BEATS as they stand, and the unit's busy feeds the shell (rising in the start's cycle, falling in the run's last cycle E). Every cycle it takes a held start in E + 1, then the cycle's CSR access, then the unit's step, and compares each access's result and STATUS.
+- `tb.cpp` steps `SnaxShellRule` with `snax_group.hpp`'s `SnaxGroupRule` (one unit, no links), wired as GVSoC wires them: the shell's accepted start, but the empty run, starts the unit with JOBS and JOB_BEATS as they stand, and the unit's busy feeds the shell (rising in the start's cycle, falling in the run's last cycle E). Every cycle it takes a held start in E + 1, then the cycle's CSR access, then the unit's step, and compares each access's result and STATUS.
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/shell`) and runs it on every `cases/*.txt`; exit 1 on any difference.
 
 ## A case file
