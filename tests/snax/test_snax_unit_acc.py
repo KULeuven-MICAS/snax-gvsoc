@@ -132,7 +132,8 @@ class Built(unittest.TestCase):
                          {"csr_base": first, "csrs": ["START", "JOBS", "JOB_BEATS"]})
         group = acc.components["group_dot"].properties
         mac, total = group["units"]
-        self.assertEqual((group["links"], group["csr_base"]), ([0], first))
+        self.assertEqual((group["links"], group["csr_base"]),
+                         ([{"from": "mac", "to": "sum", "to_input": 0, "depth": 0}], first))
         self.assertEqual((mac["datapath"], mac["inputs"], mac["output"], mac["accumulate"],
                           mac["reg_out"], mac["latency"], mac["t"], mac["op_width"]),
                          ("Mac", ["mac_a", "mac_b"], "", True, False, 1, 0, 64))

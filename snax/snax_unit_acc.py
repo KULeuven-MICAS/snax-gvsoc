@@ -26,11 +26,13 @@ name); with several groups of one unit each, `shell_<group>` and
 `unit_<unit>`; a linked group (several units) is `group_<group>`, its shell
 `shell_<group>`.
 
-Each SnaxGroup gets its units as a chain, head first (group_units): per unit
+Each SnaxGroup gets its units in the group's order (group_units): per unit
 its datapath, its inputs in BRM port order (an outer one named
-`<unit>_<port>`, the linked one ""), its output (outer, the last unit's), its
+`<unit>_<port>`, a linked one ""), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
-JOB_BEATS, else 1; and each link's depth.
+JOB_BEATS, else 1; and its links as edges, each {from, to, to_input, depth}:
+the producer's and the consumer's names and the consumer's input it feeds,
+its index in that unit's inputs.
 """
 
 import gvsoc.systree
@@ -62,22 +64,14 @@ def component_names(accelerator) -> tuple:
     return shells, comps
 
 
-def port_dirs(accelerator, unit) -> dict:
-    """Each BRM port of unit's: its dir, as accelerator.json gives it, else from inputs and
-    outputs (a file before dir)."""
-    outs = {p for _, p in accelerator.ports_of(unit.name, accelerator.outputs)}
-    return {name: port.dir or ('out' if name in outs else 'in') for name, port in unit.ports.items()}
-
-
 def group_units(accelerator, group) -> tuple:
     """SnaxGroup's units and links properties for group (module doc)."""
     to = {link.to: link for link in group.links}
     frm = {link.from_: link for link in group.links}
-    units = []
-    for k, u in enumerate(group.units):
-        dirs = port_dirs(accelerator, u)
-        ins = [p for p in u.ports if dirs[p] == 'in']
-        (out,) = [p for p in u.ports if dirs[p] == 'out']
+    units, ins_of = [], {}
+    for u in group.units:
+        ins = ins_of[u.name] = [p for p, port in u.ports.items() if port.dir == 'in']
+        (out,) = [p for p, port in u.ports.items() if port.dir == 'out']
         in_ports = [u.ports[p] for p in ins]
         out_port = u.ports[out]
         op_width, op_signed = DTYPES[u.op_type] if u.op_type else (out_port.width, out_port.signed)
@@ -96,12 +90,12 @@ def group_units(accelerator, group) -> tuple:
             'reg_out': bool(u.params.get('regOut', False)),
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
         })
-    depths = []
-    for k in range(len(group.units) - 1):
-        a, b = group.units[k].name, group.units[k + 1].name
-        (link,) = [x for x in group.links if x.from_.split('.')[0] == a and x.to.split('.')[0] == b]
-        depths.append(link.depth)
-    return units, depths
+    links = []
+    for x in group.links:
+        src, dst = x.from_.split('.', 1)[0], x.to.split('.', 1)
+        links.append({'from': src, 'to': dst[0], 'to_input': ins_of[dst[0]].index(dst[1]),
+                      'depth': x.depth})
+    return units, links
 
 
 class SnaxUnitAcc(SnaxAcc):

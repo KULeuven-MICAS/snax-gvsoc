@@ -58,8 +58,7 @@ accelerator.json (snax-forge C§17), what the standard composite
                               snax_datapath.hpp's registry: ElementwiseLanes,
                               TreeAccumulate, Mac, SerialAccumulate), ports
                               (per BRM port: port, the datapath's; dir, in or
-                              out, optional before B1x; dtype, NumPy's name;
-                              lanes), opType (ElementwiseLanes and Mac),
+                              out; dtype, NumPy's name; lanes), opType (ElementwiseLanes and Mac),
                               params (op: ElementwiseLanes' and
                               TreeAccumulate's, add; accumulate, regOut: Mac's;
                               T: a fold's rate fixed at design time), timing
@@ -323,12 +322,12 @@ class Csr:
 @dataclass(frozen=True)
 class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes and its
-    direction (in or out; None in a file before dir)."""
+    direction (in or out)."""
 
     port: str
     dtype: str
     lanes: int
-    dir: str = None
+    dir: str
 
     @property
     def width(self) -> int:
@@ -567,8 +566,8 @@ def _port(node: _Node) -> Port:
     lanes = node.get('lanes', int)
     if lanes < 1:
         raise CfgTypeError(node.file, node.where('lanes'), f'{lanes}, must be 1 or more')
-    direction = node.get('dir', str, None)
-    if direction not in (None, 'in', 'out'):
+    direction = node.get('dir', str)
+    if direction not in ('in', 'out'):
         raise CfgTypeError(node.file, node.where('dir'), f'{direction!r}, must be in or out')
     return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction)
 
@@ -722,11 +721,9 @@ def _accelerator(node: _Node) -> Accelerator:
     return acc
 
 
-def dirs_of(acc: Accelerator, unit: Unit) -> dict:
-    """Each BRM port of unit's: its dir, as accelerator.json gives it, else from inputs and
-    outputs (a file before dir)."""
-    outs = {p for _, p in acc.ports_of(unit.name, acc.outputs)}
-    return {name: port.dir or ('out' if name in outs else 'in') for name, port in unit.ports.items()}
+def dirs_of(unit: Unit) -> dict:
+    """Each BRM port of unit's: its dir."""
+    return {name: port.dir for name, port in unit.ports.items()}
 
 
 def _check_links(node: _Node, acc: Accelerator):
@@ -738,7 +735,7 @@ def _check_links(node: _Node, acc: Accelerator):
     linked = set()
     outer = {'in': [], 'out': []}
     for g in acc.groups:
-        ports = {f'{u.name}.{k}': (p, dirs_of(acc, u)[k]) for u in g.units
+        ports = {f'{u.name}.{k}': (p, dirs_of(u)[k]) for u in g.units
                  for k, p in u.ports.items()}
         parent = {u.name: u.name for u in g.units}
 
@@ -781,7 +778,7 @@ def _check_links(node: _Node, acc: Accelerator):
         hops = [(k.from_.split('.')[0], k.to.split('.')[0]) for k in g.links]
         chain = sorted(hops) == sorted(zip(names, names[1:]))
         for k, u in enumerate(g.units):
-            outer_out = [p for p, d in dirs_of(acc, u).items()
+            outer_out = [p for p, d in dirs_of(u).items()
                          if d == 'out' and f'{u.name}.{p}' not in linked]
             chain = chain and bool(outer_out) == (k == len(g.units) - 1)
         if not chain:
@@ -789,7 +786,7 @@ def _check_links(node: _Node, acc: Accelerator):
                 f"gen.chain: accelerator {acc.name}: group {g.name}'s links {hops} over its "
                 f'units {names}: a group is a chain until tier A (fork and join)')
         for u in g.units:
-            outer_in = [p for p, d in dirs_of(acc, u).items()
+            outer_in = [p for p, d in dirs_of(u).items()
                         if d == 'in' and f'{u.name}.{p}' not in linked]
             if u.span > 1 and outer_in:
                 raise CfgTargetError(node.file, node.where('inputs'),
@@ -799,7 +796,7 @@ def _check_links(node: _Node, acc: Accelerator):
 
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     """A unit's ports against its datapath: their number, lanes and types."""
-    dirs = dirs_of(acc, u)
+    dirs = dirs_of(u)
     ins = [u.ports[p] for p in u.ports if dirs[p] == 'in']
     outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
     plain = u.datapath == 'Mac' and not u.params.get('accumulate', True)
