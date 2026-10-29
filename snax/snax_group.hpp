@@ -77,6 +77,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -226,6 +227,13 @@ public:
         this->output = output < 0 ? sink : output;
         this->u.assign(n, UnitState());
         this->l.assign(links.size(), LinkState());
+        this->stepped.units.assign(n, UnitStep());
+        this->stepped.links.assign(links.size(), LinkStep());
+        for (std::vector<bool> *v : {&this->avail, &this->wants, &this->would_fire, &this->gives,
+            &this->head, &this->offer})
+        {
+            v->assign(n, false);
+        }
         this->reset();
         return "";
     }
@@ -317,14 +325,19 @@ public:
 
     // One busy cycle: inputs[k], every outer input of unit k has a beat (true
     // for a unit without one); outer_room[k], unit k's outer output has room
-    // (true for a unit without one)
-    Step step(int64_t cycle, const std::vector<bool> &inputs, const std::vector<bool> &outer_room)
+    // (true for a unit without one). The step is valid until the next call.
+    const Step &step(int64_t cycle, const std::vector<bool> &inputs,
+        const std::vector<bool> &outer_room)
     {
         size_t n = this->cfg.size();
-        Step s;
-        s.units.assign(n, UnitStep());
-        s.links.assign(this->links.size(), LinkStep());
-        std::vector<bool> avail(n), wants(n), would_fire(n), gives(n), head(n), offer(n);
+        Step &s = this->stepped;
+        std::fill(s.units.begin(), s.units.end(), UnitStep());
+        std::fill(s.links.begin(), s.links.end(), LinkStep());
+        s.cls = FLUSH;
+        s.end = false;
+        std::vector<bool> &avail = this->avail, &wants = this->wants,
+            &would_fire = this->would_fire, &gives = this->gives, &head = this->head,
+            &offer = this->offer;
 
         // Forward: what each unit offers whatever its room
         for (size_t k : this->order)
@@ -511,6 +524,9 @@ private:
     std::vector<UnitState> u;
     std::vector<LinkState> l;
     bool started = false;
+    // step()'s, sized at configure: its result and its passes' per-unit values
+    Step stepped;
+    std::vector<bool> avail, wants, would_fire, gives, head, offer;
 };
 
 
@@ -541,14 +557,19 @@ public:
         this->order = rule.topological();
         this->output = rule.output_unit();
         this->feeds.assign(this->units.size(), {});
+        this->in.assign(this->units.size(), {});
         for (size_t k = 0; k < this->units.size(); k++)
         {
             this->feeds[k].assign(this->units[k]->in_words.size(), -1);
+            this->in[k].assign(this->units[k]->in_words.size(), nullptr);
         }
         for (size_t i = 0; i < this->links.size(); i++)
         {
             this->feeds[this->links[i].to][this->links[i].to_input] = i;
         }
+        this->en.assign(this->units.size(), SnaxEnables());
+        this->ben.assign(this->buffers.size(), SnaxEnables());
+        this->buffer_in.assign(1, nullptr);
     }
 
     // One cycle with the rule's step; outer[k], unit k's outer inputs' beats in port order
@@ -557,7 +578,7 @@ public:
     const std::vector<uint64_t> &cycle(const SnaxGroupRule::Step &step,
         const std::vector<std::vector<const uint64_t *>> &outer)
     {
-        std::vector<SnaxEnables> en(this->units.size()), ben(this->buffers.size());
+        std::vector<SnaxEnables> &en = this->en, &ben = this->ben;
         for (size_t k = 0; k < this->units.size(); k++)
         {
             const SnaxGroupRule::UnitStep &u = step.units[k];
@@ -575,19 +596,20 @@ public:
         }
         for (size_t k : this->order)
         {
-            std::vector<const uint64_t *> in;
+            std::vector<const uint64_t *> &in = this->in[k];
             size_t o = 0;
-            for (int i : this->feeds[k])
+            for (size_t j = 0; j < in.size(); j++)
             {
+                int i = this->feeds[k][j];
                 if (i >= 0)
                 {
                     const SnaxDatapath *src = this->buffers[i] ? this->buffers[i].get()
                         : this->units[this->links[i].from].get();
-                    in.push_back(src->out().data());
+                    in[j] = src->out().data();
                 }
                 else
                 {
-                    in.push_back(outer[k][o++]);
+                    in[j] = outer[k][o++];
                 }
             }
             this->units[k]->eval(in, en[k]);
@@ -595,7 +617,8 @@ public:
             {
                 if (this->links[i].from == (int)k && this->buffers[i])
                 {
-                    this->buffers[i]->eval({this->units[k]->out().data()}, ben[i]);
+                    this->buffer_in[0] = this->units[k]->out().data();
+                    this->buffers[i]->eval(this->buffer_in, ben[i]);
                 }
             }
         }
@@ -618,4 +641,8 @@ private:
     std::vector<size_t> order;
     size_t output = 0;
     std::vector<std::vector<int>> feeds;
+    // cycle()'s, sized at wire(): the enables, each unit's input words, a buffer's input
+    std::vector<SnaxEnables> en, ben;
+    std::vector<std::vector<const uint64_t *>> in;
+    std::vector<const uint64_t *> buffer_in;
 };

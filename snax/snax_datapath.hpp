@@ -227,15 +227,15 @@ public:
             }
             snax_unit_set_lane(this->next.data(), w, l, v);
         }
-        bool registered = p.accumulate || p.reg_out;
-        this->out_ = registered ? this->reg : this->next;
+        const std::vector<uint64_t> &out = p.accumulate || p.reg_out ? this->reg : this->next;
+        std::copy(out.begin(), out.end(), this->out_.begin());
     }
 
     void commit(const SnaxEnables &en) override
     {
         if ((this->p.accumulate && en.fire) || (!this->p.accumulate && this->p.reg_out && en.en))
         {
-            this->reg = this->next;
+            std::copy(this->next.begin(), this->next.end(), this->reg.begin());
         }
     }
 
@@ -298,19 +298,21 @@ public:
         this->latency = 1;
         this->slots.assign(p.depth, std::vector<uint64_t>(words, 0));
         this->out_.assign(words, 0);
+        this->in.assign(words, 0);
     }
 
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &en) override
     {
-        this->out_ = this->slots[en.rslot];
-        this->in.assign(in[0], in[0] + this->out_words);
+        const std::vector<uint64_t> &slot = this->slots[en.rslot];
+        std::copy(slot.begin(), slot.end(), this->out_.begin());
+        std::copy(in[0], in[0] + this->out_words, this->in.begin());
     }
 
     void commit(const SnaxEnables &en) override
     {
         if (en.load)
         {
-            this->slots[en.wslot] = this->in;
+            std::copy(this->in.begin(), this->in.end(), this->slots[en.wslot].begin());
         }
     }
 

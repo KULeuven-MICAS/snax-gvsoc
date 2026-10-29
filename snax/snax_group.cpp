@@ -78,6 +78,7 @@
 // and push (the head fires, the outer output's unit pushes), cycle_class (0 idle, 1
 // busy, 2 stall_in, 3 stall_out, 4 flush).
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -133,6 +134,11 @@ private:
     vp::IoMaster out_itf;
     int out_words;
     std::vector<std::vector<size_t>> unit_ins;   // per unit, its outer inputs (in_itf indices)
+    // fire_handler's, sized once: per unit whether its outer inputs have a beat and its outer
+    // output room, its outer inputs' beats; the outer output's beat
+    std::vector<bool> inputs, room;
+    std::vector<std::vector<const uint64_t *>> outer;
+    std::vector<uint64_t> out_beat;
     std::vector<uint32_t> fixed_t;      // per unit: its t, 0 from the start
     uint32_t csr_base;
     SnaxGroupRule rule;
@@ -375,6 +381,17 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         this->trace.fatal("Property units, links: %s\n", refused.c_str());
     }
     this->data.wire(this->rule);
+    this->inputs.assign(units.size(), true);
+    this->room.assign(units.size(), true);
+    this->outer.assign(units.size(), {});
+    for (size_t k = 0; k < units.size(); k++)
+    {
+        for (size_t i : this->unit_ins[k])
+        {
+            this->outer[k].push_back(this->in_itf[i].beat.data());
+        }
+    }
+    this->out_beat.assign(this->out_words, 0);
     this->csr_base = this->int_prop(this->get_js_config(), "csr_base", "");
 
     this->new_master_port(out_name, &this->out_itf);
@@ -581,15 +598,15 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
 
     if (_this->rule.busy(cycle))
     {
-        std::vector<bool> inputs(_this->unit_ins.size(), true);
+        std::vector<bool> &inputs = _this->inputs;
+        std::fill(inputs.begin(), inputs.end(), true);
         for (OuterIn &o : _this->in_itf)
         {
             inputs[o.unit] = _this->probe(o.itf, false) && inputs[o.unit];
         }
-        std::vector<bool> room(_this->unit_ins.size(), true);
-        room[_this->rule.output_unit()] = _this->probe(_this->out_itf, true);
+        _this->room[_this->rule.output_unit()] = _this->probe(_this->out_itf, true);
 
-        SnaxGroupRule::Step step = _this->rule.step(cycle, inputs, room);
+        const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, _this->room);
         const SnaxGroupRule::UnitStep &head = step.units[_this->rule.topological().front()];
         const SnaxGroupRule::UnitStep &tail = step.units[_this->rule.output_unit()];
         _this->sigs.set(_this->sig_busy, 1);
@@ -603,8 +620,7 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
                 snax_unit_class_names[step.cls]);
         }
 
-        // The beats of each unit that fires, its outer inputs in port order
-        std::vector<std::vector<const uint64_t *>> outer(_this->unit_ins.size());
+        // The beats of each unit that fires, its outer inputs in port order (outer)
         std::string beats, values;
         bool traced = _this->ev.beats.get_active();
         for (size_t k = 0; k < _this->unit_ins.size(); k++)
@@ -626,7 +642,6 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
                         }
                     }
                 }
-                outer[k].push_back(o.beat.data());
             }
         }
         if (head.fire)
@@ -644,10 +659,11 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             _this->last_fire = cycle;
         }
 
-        std::vector<uint64_t> out = _this->data.cycle(step, outer);
+        const std::vector<uint64_t> &result = _this->data.cycle(step, _this->outer);
         if (tail.push)
         {
-            out.resize(_this->out_words, 0);
+            std::vector<uint64_t> &out = _this->out_beat;
+            std::copy(result.begin(), result.end(), out.begin());
             _this->move(_this->out_itf, true, out.data(), _this->out_words);
             if (_this->ev.beats.get_active())
             {
