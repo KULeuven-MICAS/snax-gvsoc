@@ -10,8 +10,7 @@ under one control model, every number a property.
 The control model (SnaxGroupRule, snax-forge C§17's Control) is in snax_group.hpp,
 the datapaths (snax-forge's catalogue) in snax_datapath.hpp. The C++ checks every
 property and stops on a bad one, naming it; this class only passes them on, so a
-design point compiles nothing (D134 in snax-forge). A group of one unit is B1's
-SnaxUnit.
+design point compiles nothing (D134 in snax-forge).
 """
 
 import gvsoc.systree

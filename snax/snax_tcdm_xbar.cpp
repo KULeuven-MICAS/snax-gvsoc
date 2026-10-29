@@ -454,8 +454,8 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Superbank %d: grant dma (%s 0x%lx, %ld B)\n",
         superbank, req->get_is_write() ? "write" : "read", addr, size);
 
-    // Each bank word it covers, as DmaInterleaver did: the largest bank
-    // latency is the answer's
+    // Each bank word it covers, as upstream's DmaInterleaver splits it: the
+    // largest bank latency is the answer's
     uint64_t width = 1ULL << _this->width_bits;
     uint8_t *data = req->get_data();
     int64_t latency = 0;

@@ -10,7 +10,8 @@
 // enables, every cycle. Plain C++, so the component (snax_group.cpp) and the
 // standalone tests (tests/snax/unit/, tests/snax/shell/, tests/snax/group/,
 // the first two with one unit and no links) run the same code, as
-// snax_sparse_arb.hpp.
+// snax_sparse_arb.hpp. Its Python twin is snax_group_rule.py (GroupRule),
+// which writes the group cases: a change to the rule changes both.
 //
 // A group is a graph of units and links: a link is an edge from one unit's
 // output to an input of another (Link: from, to, to_input, depth; depth 0 a
@@ -23,17 +24,17 @@
 // tier A a group is one chain: configure() refuses a unit with two out-edges
 // (a fork) or two in-edges (a join), a cycle, and units no link joins.
 //
-// A run (snax-forge D146): a start offered in cycle s carries JOBS and each
-// unit's T; unit k fires n_k times, JOBS * T for the sink, n_succ * T_k for a
-// unit before it (each firing of its consumer takes one of its results): over
-// a chain, JOBS * prod T_v over k and every unit after it (C§17's firings).
-// It is taken only when the group is idle in s and no number is 0 (JOBS 0 or
-// any T 0 is the empty run, which the shell ends without the group: here it
-// is ignored, busy stays 0); a start while busy is refused. The group is busy
-// from s + 1 to the run's last cycle E, when every unit has fired its n and
-// nothing is in flight. step() is called once per busy cycle with, per unit,
-// whether its outer inputs all have a beat and whether its outer output has
-// room (true for a unit without one).
+// A run: a start offered in cycle s carries JOBS and each unit's T; unit k
+// fires n_k times, JOBS * T for the sink, n_succ * T_k for a unit before it
+// (each firing of its consumer takes one of its results): over a chain, JOBS *
+// prod T_v over k and every unit after it (C§17's firings). It is taken only
+// when the group is idle in s and no number is 0 (JOBS 0 or any T 0 is the
+// empty run, which the shell ends without the group: here it is ignored, busy
+// stays 0); a start while busy is refused. The group is busy from s + 1 to the
+// run's last cycle E, when every unit has fired its n and nothing is in
+// flight. step() is called once per busy cycle with, per unit, whether its
+// outer inputs all have a beat and whether its outer output has room (true for
+// a unit without one).
 //
 // Per unit (C§17): its beat digit d (its firings mod T: first = [d = 0], it
 // gives a result on firings with d = T - 1), an L-deep pipeline that stalls
@@ -55,7 +56,7 @@
 // takes it, at span S its last lane. With L = 0 a firing that gives a result
 // with no room is a stall (L = 0, II 1 is lockstep). A firing enters slot 0
 // in the cycle the head is pushed: with L = 1 and II 1 the next input is
-// taken as a result leaves. A wire chain is B1's nest with L = sum L_k, plus
+// taken as a result leaves. A wire chain is one nest with L = sum L_k, plus
 // one enable per stage: fire_{k+1}(c) = fire_k(c - L_k) and gives_k(c - L_k).
 //
 // The cycle is decided in two passes over the units in a topological order:
@@ -308,7 +309,8 @@ public:
         for (size_t r = this->order.size(); r-- > 0;)
         {
             size_t k = this->order[r];
-            uint32_t n = this->outs[k].empty() ? jobs : this->counts[this->links[this->outs[k][0]].to];
+            uint32_t n = this->outs[k].empty() ? jobs
+                : this->counts[this->links[this->outs[k][0]].to];
             this->counts[k] = n * t[k];
         }
         for (size_t k = 0; k < this->u.size(); k++)

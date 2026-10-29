@@ -81,7 +81,7 @@ class Built(unittest.TestCase):
         return cls(None, "snax_acc0")
 
     def test_vecadd(self):
-        """One group of one unit: shell and unit, as before (snax_acc0/unit)."""
+        """One group of one unit: shell and unit (snax_acc0/unit)."""
         acc = self.build(CLUSTER)
         self.assertEqual(sorted(acc.components), ["csr_mux", "shell", "streamer", "unit"])
         first = SNAX_CSR_FIRST + nb_csrs(STREAMER)

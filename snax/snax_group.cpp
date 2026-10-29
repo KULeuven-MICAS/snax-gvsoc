@@ -9,8 +9,7 @@
 // read at run time (get_js_config), so a design point compiles nothing. The
 // control model is snax_group.hpp's SnaxGroupRule (the `<tag>_<group>_ctrl` of
 // snax-forge's Chisel), the datapaths snax_datapath.hpp's classes, wired by
-// SnaxGroupDatapaths; this file is the component around them. A group of one
-// unit is B1's SnaxUnit, cycle for cycle.
+// SnaxGroupDatapaths; this file is the component around them.
 //
 // Properties (a missing one, a wrong type or a bad value is a fatal error
 // naming it):
