@@ -20,7 +20,10 @@
 // component sets, grouped under the tag snax in its gen_gtkw, dumped with
 // gvrun's --vcd. GVSoC dumps a signal when it is set, so a value known ahead
 // (a pulse that falls, a busy that ends, a queue's count from the next cycle)
-// is queued and set by SnaxSignals' event in its own cycle.
+// is queued and set by SnaxSignals' event in its own cycle. vp::Signal dumps
+// only where CONFIG_GVSOC_EVENT_ACTIVE is defined (the profile and debug
+// models, upstream's Event::dump_value); elsewhere SnaxSignals does nothing,
+// queues nothing and enqueues no event.
 
 #pragma once
 
@@ -116,17 +119,23 @@ public:
     // value from this cycle on, in place of the changes queued up to it
     void set(SnaxSignal &s, uint64_t value)
     {
+#ifdef CONFIG_GVSOC_EVENT_ACTIVE
         int64_t now = this->now();
         while (!s.pending.empty() && s.pending.front().first <= now)
         {
             s.pending.pop_front();
         }
         this->apply(s, value);
+#else
+        (void)s;
+        (void)value;
+#endif
     }
 
     // value from cycle on, in place of the changes queued from it on
     void set_from(SnaxSignal &s, uint64_t value, int64_t cycle)
     {
+#ifdef CONFIG_GVSOC_EVENT_ACTIVE
         int64_t now = this->now();
         if (cycle <= now)
         {
@@ -144,13 +153,22 @@ public:
             s.queued = true;
         }
         this->event.enqueue(cycle - now);
+#else
+        (void)s;
+        (void)value;
+        (void)cycle;
+#endif
     }
 
     // 1 in this cycle only
     void pulse(SnaxSignal &s)
     {
+#ifdef CONFIG_GVSOC_EVENT_ACTIVE
         this->set(s, 1);
         this->set_from(s, 0, this->now() + 1);
+#else
+        (void)s;
+#endif
     }
 
 private:
