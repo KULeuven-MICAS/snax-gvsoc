@@ -57,12 +57,13 @@ def group_csrs(base: int, between: int = 0) -> list:
 
 def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
     return Unit(name, brm or f"elementwise_{op}", "ElementwiseLanes",
-                {p: Port(p, dtype, 4) for p in ("a", "b", "out")}, dtype, {"op": op}, 0, 1, [])
+                {p: Port(p, dtype, 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                dtype, {"op": op}, 0, 1, [])
 
 
 def fold(name: str, base: int, in_dtype: str = "int64", lanes: int = 1) -> Unit:
     return Unit(name, "accumulate", "TreeAccumulate",
-                {"a": Port("in", in_dtype, lanes), "out": Port("out", "int64", 1)}, None,
+                {"a": Port("in", in_dtype, lanes, "in"), "out": Port("out", "int64", 1, "out")}, None,
                 {"op": "add"},
                 1, 1, [Csr("JOB_BEATS", "rw", base + 2, 32)])
 

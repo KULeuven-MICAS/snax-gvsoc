@@ -8,10 +8,12 @@ the installed `snax_hjson` target. A folder is the fixture of snax-forge's
 D134: it lets this repo's regression run a design point without snax-forge.
 Each is snax-forge's generator's output, checked in untouched; snax-forge's
 `tests/gen/test_fixture.py` writes it again and compares it byte for byte.
-All seventeen are snax-forge's branch `ry/blk1-2` at `a81a9d2` (M13 B1 R3:
-`accelerator.json` with the per-group CSRs START, JOBS, JOB_BEATS, STATUS,
-COUNTER, a TreeAccumulate's `params.op` `add`, and `dot_1/`, one
-accelerator of two groups).
+All seventeen are snax-forge's branch `ry/b1x` at `6b533bf` (tag `b1x-f1`,
+M13 B1x F1: `accelerator.json` with `dir` on every port and `span` in every
+unit's timing, beside B1 R3's per-group CSRs START, JOBS, JOB_BEATS, STATUS,
+COUNTER, a TreeAccumulate's `params.op` `add`, and `dot_1/`, one accelerator
+of two groups), written by that checkout's `tests/gen/test_fixture.py`
+(`regenerate`).
 
 | Folder | Design point | Slot |
 |---|---|---|
