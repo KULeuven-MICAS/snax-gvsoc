@@ -226,8 +226,8 @@ About two minutes:
       13 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       1 run
-    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
-      16 run
+    forge/'s accelerators: forge.dot_1, forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      17 run
     plain tests on snitch (build/sw/tests)
       17 run
     regression passed
@@ -253,8 +253,8 @@ does not: make reads `-k` itself):
       0 run
     snax-shell on snax_hjson, forge/vecadd/'s cluster file
       0 run
-    forge/'s accelerators: forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
-      16 run
+    forge/'s accelerators: forge.dot_1, forge.matadd, forge.rowsum, forge.rowsum_3x7, forge.rowsum_serial, forge.vecadd, forge.vecadd_i32, forge.vecadd_i8, forge.vecadd_n7, forge.vecmul, forge.vecmul_i32, forge.vecmul_i32_i64, forge.vsum, forge.vsum_tree, forge.vsum_tree_i32, forge.vsum_tree_i8, forge.vsum_tree_n21
+      17 run
     plain tests on snitch (build/sw/tests)
       0 run
     regression passed
