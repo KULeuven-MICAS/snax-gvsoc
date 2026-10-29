@@ -38,7 +38,7 @@ its index in that unit's inputs.
 import gvsoc.systree
 import interco.router as router
 from snax_acc import SNAX_ACC_CSR_LAST, SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
-from snax_cfg import CATALOGUE, DTYPES, CfgTargetError
+from snax_cfg import CATALOGUE, DTYPES, CfgTargetError, dirs_of
 from snax_group import SnaxGroup
 from snax_shell import SnaxShell
 from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
@@ -70,8 +70,9 @@ def group_units(accelerator, group) -> tuple:
     frm = {link.from_: link for link in group.links}
     units, ins_of = [], {}
     for u in group.units:
-        ins = ins_of[u.name] = [p for p, port in u.ports.items() if port.dir == 'in']
-        (out,) = [p for p, port in u.ports.items() if port.dir == 'out']
+        dirs = dirs_of(u)
+        ins = ins_of[u.name] = [p for p in u.ports if dirs[p] == 'in']
+        (out,) = [p for p in u.ports if dirs[p] == 'out']
         in_ports = [u.ports[p] for p in ins]
         out_port = u.ports[out]
         facts = CATALOGUE[u.datapath]
