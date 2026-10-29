@@ -8,16 +8,20 @@
 
     python3 gen.py
 
-A model of a group's control written here from snax-forge's C§17 (Control),
-not from snax/snax_group.hpp, steps each case and writes its cycle table with
-a comment per cycle; every dot variant's busy cycles E - s are checked
-against C§17's formulas before a file is written, so a case never states a
-total the formula does not give. The files are checked in; tb.cpp reads them.
+The group rule of snax/snax_group_rule.py (written from snax-forge's C§17,
+Control, not from snax/snax_group.hpp) steps each case, whose cycle table is
+written with a comment per cycle; every dot variant's busy cycles E - s are
+checked against C§17's formulas before a file is written, so a case never
+states a total the formula does not give. The files are checked in; tb.cpp reads them.
 """
 
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[2] / "snax"))
+from snax_group_rule import GroupRule  # noqa: E402
+
 W = 4
 
 # dot 2-6 (C§17): (datapath, L, span, inputs) per unit, the link's depth, whose T is N / W
@@ -36,94 +40,13 @@ def formula(v, t, j):
             6: (j - 1) * max(t, W) + t + W + 2}[v]
 
 
-class Model:
-    """C§17's Control, a chain of units: per unit its beat digit, its L-deep pipeline, its II
-    gap and lane counter; per buffer its occupancy."""
-
-    def __init__(self, units, depths):
-        self.units, self.depths = units, depths
-
-    def run(self, jobs, ts, valid, ready, cycles):
-        """Rows of (outer valids, ready, per unit (fire, give), occupancies, busy, class, notes)."""
-        n = len(self.units)
-        counts, x = [0] * n, jobs
-        for k in reversed(range(n)):
-            x *= ts[k]
-            counts[k] = x
-        fired, lane = [0] * n, [0] * n
-        slots = [[False] * u["L"] for u in self.units]
-        last = [None] * n
-        occ = [0] * len(self.depths)
-        rows, end = [], None
-        empty = jobs == 0 or 0 in ts
-        for c in range(cycles):
-            v, r = valid(c), ready(c)
-            busy = c >= 1 and not empty and (end is None or c <= end)
-            if not busy:
-                rows.append((v, r, [(0, 0)] * n, list(occ), 0, "-", "idle"))
-                continue
-            ins = [all(v) if u["inputs"] else True for u in self.units]
-            avail, wants, wfire, gives, head, offer = ([None] * n for _ in range(6))
-            for k, u in enumerate(self.units):
-                link = True if k == 0 else (offer[k - 1] if self.depths[k - 1] == 0
-                                            else occ[k - 1] > 0)
-                avail[k] = ins[k] and link
-                ii_ok = last[k] is None or c >= last[k] + u["ii"]
-                wants[k] = fired[k] < counts[k] and ii_ok
-                wfire[k] = wants[k] and avail[k] and (u["span"] == 1 or lane[k] == u["span"] - 1)
-                gives[k] = wfire[k] and (fired[k] + 1) % ts[k] == 0
-                head[k] = u["L"] > 0 and slots[k][-1]
-                offer[k] = head[k] if u["L"] > 0 else gives[k]
-            room, out, notes = r, [None] * n, []
-            busy_cls = waits = False
-            frozen = [False] * n
-            for k in reversed(range(n)):
-                u = self.units[k]
-                frozen[k] = (head[k] if u["L"] > 0 else gives[k]) and not room
-                fire = push = read = False
-                if not frozen[k]:
-                    fire = wfire[k]
-                    push = head[k] if u["L"] > 0 else gives[k]
-                    read = u["span"] > 1 and wants[k] and avail[k]
-                    if u["L"] > 0:
-                        slots[k] = [gives[k] and fire] + slots[k][:-1]
-                    gap = last[k] is not None and c < last[k] + u["ii"]
-                    busy_cls = busy_cls or fire or read or gap
-                    waits = waits or (wants[k] and not ins[k])
-                else:
-                    notes.append(f"{u['name']} holds")
-                if read and not fire:
-                    notes.append(f"{u['name']} reads lane {lane[k]}")
-                if fire:
-                    notes.append(f"{u['name']} fires {fired[k]}" + (" (gives)" if gives[k] else "")
-                                 + (f", lane {lane[k]}" if u["span"] > 1 else ""))
-                    fired[k] += 1
-                    last[k] = c
-                    lane[k] = 0
-                elif read:
-                    lane[k] += 1
-                if push:
-                    notes.append(f"{u['name']} pushes")
-                out[k] = (int(fire), int(push))
-                if k > 0:
-                    d = self.depths[k - 1]
-                    room = fire if d == 0 else occ[k - 1] < d or fire
-            for k, d in enumerate(self.depths):
-                if d:
-                    occ[k] += out[k][1] - out[k + 1][0]
-            cls = ("stall_out" if frozen[-1] else "busy" if busy_cls else
-                   "stall_in" if waits else "flush")
-            done = all(fired[k] == counts[k] and not any(slots[k]) for k in range(n)) and not any(occ)
-            if done:
-                end = c
-            rows.append((v, r, out, list(occ), 1, cls, "; ".join(reversed(notes)) or cls))
-        return rows, end
-
-
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
           formula_total=None, comment=()):
-    m = Model([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4])
-               for u in units], depths)
+    # A chain: link k joins unit k to unit k + 1's only input
+    links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
+             for k, d in enumerate(depths)]
+    m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4])
+                   for u in units], links)
     rows, end = m.run(jobs, ts, valid, ready, 64)
     if end is None:
         empty = jobs == 0 or 0 in ts
@@ -141,8 +64,8 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
         k = units.index(u)
         lines.append(f"unit {u[0]} {u[1]} latency {u[2]} ii 1 span {u[3]} t {ts[k]} "
                      f"inputs {u[4]}")
-    for k, d in enumerate(depths):
-        lines.append(f"link {units[k][0]} {units[k + 1][0]} depth {d}")
+    for e in links:
+        lines.append(f"link {e['from']} {e['to']} depth {e['depth']}")
     lines.append(f"jobs {jobs}")
     result = "ignored" if (jobs == 0 or 0 in ts) else "taken"
     lines.append(f"start 0 {result}")
