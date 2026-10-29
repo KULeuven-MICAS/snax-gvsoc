@@ -460,6 +460,8 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     uint8_t *data = req->get_data();
     int64_t latency = 0;
     uint64_t beat_addr = addr, beat_size = size;
+    // The beat's words for its dma line, only when that line is written
+    bool traced = _this->trace_dma && _this->ev.beats.get_active();
     std::string values;
     while (size > 0)
     {
@@ -482,14 +484,17 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
             return vp::IO_REQ_INVALID;
         }
         latency = std::max(latency, (int64_t)bank_req.get_latency());
-        values += (values.empty() ? "" : ",") + snax_word(data, chunk);
+        if (traced)
+        {
+            values += (values.empty() ? "" : ",") + snax_word(data, chunk);
+        }
         addr += chunk;
         data += chunk;
         size -= chunk;
     }
     req->inc_latency(latency);
 
-    if (_this->trace_dma && _this->ev.beats.get_active())
+    if (traced)
     {
         // A beat the iDMA's TCDM backend did not tag has no copy: -1
         bool tagged = snax_arg_get(req, SNAX_ARG_TAG) == SNAX_TAG_DMA;
