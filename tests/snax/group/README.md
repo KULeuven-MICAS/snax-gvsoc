@@ -1,47 +1,18 @@
 # SnaxGroupRule's cases
 
-The control model of a group (`snax/snax_group.hpp`'s `SnaxGroupRule`,
-snax-forge C§17's Control) against shared cases, with g++ only. `make
-regress` runs it after `datapath`, as `group`. snax-forge's Chisel specs
-(F2) drive a group's `<tag>_<group>_ctrl` and its datapaths through the
-same files, from the folder `SNAX_GVSOC_GROUP_CASES` names (as
-`SNAX_GVSOC_UNIT_CASES` for `tests/snax/unit/`), cycle-exact, so the format
-below is the contract between the two.
+The control model of a group (`snax/snax_group.hpp`'s `SnaxGroupRule`, snax-forge C§17's Control) against shared cases, with g++ only. `make regress` runs it after `datapath`, as `group`. snax-forge's Chisel specs (F2) drive a group's `<tag>_<group>_ctrl` and its datapaths through the same files, from the folder `SNAX_GVSOC_GROUP_CASES` names (as `SNAX_GVSOC_UNIT_CASES` for `tests/snax/unit/`), cycle-exact, so the format below is the contract between the two.
 
-- `gen.py` writes `cases/*.txt` from a model of C§17's rule written in
-  Python, not from the C++: it steps each case, comments each cycle with
-  what fires, reads, holds and pushes, and checks every dot variant's busy
-  cycles against C§17's formulas before it writes a file (a disagreement
-  stops it). The files are checked in; run `gen.py` again only to change
-  them (any Python 3).
-- `tb.cpp` steps `SnaxGroupRule` with each case's outer valids and ready and
-  compares, every cycle, each unit's fire and give, each buffer's occupancy
-  and busy, and the run line at the end of the run, whose classes must add
-  up to the case's busy cycles. For a dot case it also runs the group's
-  datapaths with the rule's enables (`SnaxGroupDatapaths`, the component's
-  wiring) on int64 beats at 4 lanes and checks each result against its job's
-  sum of products.
-- `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/group`) and
-  runs it on every `cases/*.txt`; exit 1 on any difference.
+- `gen.py` writes `cases/*.txt` from a model of C§17's rule written in Python, not from the C++: it steps each case, comments each cycle with what fires, reads, holds and pushes, and checks every dot variant's busy cycles against C§17's formulas before it writes a file (a disagreement stops it). The files are checked in; run `gen.py` again only to change them (any Python 3).
+- `tb.cpp` steps `SnaxGroupRule` with each case's outer valids and ready and compares, every cycle, each unit's fire and give, each buffer's occupancy and busy, and the run line at the end of the run, whose classes must add up to the case's busy cycles. For a dot case it also runs the group's datapaths with the rule's enables (`SnaxGroupDatapaths`, the component's wiring) on int64 beats at 4 lanes and checks each result against its job's sum of products.
+- `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/group`) and runs it on every `cases/*.txt`; exit 1 on any difference.
 
 ## The rule in one paragraph
 
-A group is a chain of units, head first, each link a wire (depth 0) or a
-buffer of D beats. A start carries JOBS and each unit's T; unit k fires
-JOBS * prod T_v times over itself and the units after it, gives a result on
-every T-th firing and pushes it L cycles later, its pipeline stalling as a
-whole when its head has no room. A unit gives into a wire only when the next
-unit takes in that cycle, into a buffer when it has room or the next unit
-takes; a unit of span S (SerialAccumulate) reads lane l of its input in
-place, one a cycle, and takes the beat on lane S - 1, so a wire's producer
-holds its result until the last lane. The group is busy from the cycle after
-the start to the push of the last unit's last result; its classes are judged
-at its boundary (docs/EVENTS.md).
+A group is a chain of units, head first, each link a wire (depth 0) or a buffer of D beats. A start carries JOBS and each unit's T; unit k fires JOBS * prod T_v times over itself and the units after it, gives a result on every T-th firing and pushes it L cycles later, its pipeline stalling as a whole when its head has no room. A unit gives into a wire only when the next unit takes in that cycle, into a buffer when it has room or the next unit takes; a unit of span S (SerialAccumulate) reads lane l of its input in place, one a cycle, and takes the beat on lane S - 1, so a wire's producer holds its result until the last lane. The group is busy from the cycle after the start to the push of the last unit's last result; its classes are judged at its boundary (docs/EVENTS.md).
 
 ## A case file
 
-Plain text; `#` starts a comment, blank lines are skipped. Header lines,
-then `cycles` and one line per cycle from cycle 0:
+Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `cycles` and one line per cycle from cycle 0:
 
 | Line | What |
 |---|---|
@@ -52,12 +23,7 @@ then `cycles` and one line per cycle from cycle 0:
 | `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the run line expected at the end of run I (`firings` the head's) |
 | `cycles` | the cycle lines follow |
 
-A cycle line: `V... R | F G | F G ... | O... | B`: the outer inputs' valid,
-unit by unit in port order, and the outer output's ready; per unit whether
-it fires (takes its input beat) and gives (pushes a result into its link or
-the outer output); per buffer its occupancy after the cycle (the column is
-absent when every link is a wire); busy. The rule is stepped only in busy
-cycles, each unit's outer valids ANDed.
+A cycle line: `V... R | F G | F G ... | O... | B`: the outer inputs' valid, unit by unit in port order, and the outer output's ready; per unit whether it fires (takes its input beat) and gives (pushes a result into its link or the outer output); per buffer its occupancy after the cycle (the column is absent when every link is a wire); busy. The rule is stepped only in busy cycles, each unit's outer valids ANDed.
 
 ## The cases
 
@@ -68,9 +34,7 @@ cycles, each unit's outer valids ANDed.
 | `dot6_input_gap` | dot 6, T = 4, JOBS 2, reader a without a beat for a cycle: stall_in |
 | `dot4_jobs0` | dot 4 with JOBS 0: the empty run, ignored, busy never rises |
 
-Their busy cycles E - s, as C§17's Cycles table (and the formulas
-C2 = JT + 2, C3 = JT + 1, C4 = JT + 2, C5 = J(T + W - 1) + 2,
-C6 = (J - 1) max(T, W) + T + W + 2) gives them:
+Their busy cycles E - s, as C§17's Cycles table (and the formulas C2 = JT + 2, C3 = JT + 1, C4 = JT + 2, C5 = J(T + W - 1) + 2, C6 = (J - 1) max(T, W) + T + W + 2) gives them:
 
 | T, J | dot 2 | dot 3 | dot 4 | dot 5 | dot 6 |
 |---|---|---|---|---|---|
@@ -83,5 +47,4 @@ C6 = (J - 1) max(T, W) + T + W + 2) gives them:
 
     tests/snax/group/run.sh
 
-It prints `PASS` per case (`, data` where the dot product is checked too)
-and ends with `23 passed, 0 failed`.
+It prints `PASS` per case (`, data` where the dot product is checked too) and ends with `23 passed, 0 failed`.

@@ -1,18 +1,8 @@
 # dma-timing
 
-The SG2 DMA timing program (`docs/plans/SG2.md`), on SNAX-GVSoC on
-`snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on
-snax_cluster's RTL (SG2 at `b2672f8`, SG7 at `9fbf35d`); the DMA's values
-do not depend on the cluster's accelerator.
+The SG2 DMA timing program (`docs/plans/SG2.md`), on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL (SG2 at `b2672f8`, SG7 at `9fbf35d`); the DMA's values do not depend on the cluster's accelerator.
 
-The DMA core copies between DRAM (L2) and L1. For each case it clears the
-destination, resets and enables the cluster's perf counters 0 to 5, reads one
-enable back (so the posted stores have landed before the DMA turns busy), then
-takes `mcycle` before the first `snrt_dma_start_1d`, after the last one and
-after `snrt_dma_wait_all`. It then stops the counters, reads them and checks
-the copy. Each case runs twice and the second run is kept, so instruction
-cache refills stay out of the numbers. After the barrier the compute core
-prints one line per case.
+The DMA core copies between DRAM (L2) and L1. For each case it clears the destination, resets and enables the cluster's perf counters 0 to 5, reads one enable back (so the posted stores have landed before the DMA turns busy), then takes `mcycle` before the first `snrt_dma_start_1d`, after the last one and after `snrt_dma_wait_all`. It then stops the counters, reads them and checks the copy. Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier the compute core prints one line per case.
 
 | Case | Copies |
 |---|---|
@@ -33,55 +23,39 @@ prints one line per case.
 | `r_stall` | `DMA_R_STALL`: cycles read data waits on a full buffer |
 | `err` | words of the copy that differ from the source |
 
-`w_stall` and `r_stall` have the meanings of the "buffer" lines of
-`idma_inst64_events.sv`, which overwrite the AXI-side ones. On SNAX-GVSoC the
-stall counters read 0 (not counted).
+`w_stall` and `r_stall` have the meanings of the "buffer" lines of `idma_inst64_events.sv`, which overwrite the AXI-side ones. On SNAX-GVSoC the stall counters read 0 (not counted).
 
 ## Checked against the RTL
 
-`busy`, `r` and `w` do not depend on the cores' timing (D123), and SNAX-GVSoC
-gives the RTL's on every line. The program holds the RTL's values per case
-(SG2 step 3 at `b2672f8`, the same at the pin `9fbf35d` in SG7 round 4) and
-prints a line for each case off them, so `make regress` and CI fail when the
-DMA's own timing moves. `issue` and `done` include the core's issue and
-polling (SG5, open item 67 in snax-forge): printed, not compared.
+`busy`, `r` and `w` do not depend on the cores' timing (D123), and SNAX-GVSoC gives the RTL's on every line. The program holds the RTL's values per case (SG2 step 3 at `b2672f8`, the same at the pin `9fbf35d` in SG7 round 4) and prints a line for each case off them, so `make regress` and CI fail when the DMA's own timing moves. `issue` and `done` include the core's issue and polling (SG5, open item 67 in snax-forge): printed, not compared.
 
-The program returns the copy errors plus the cases off the RTL's values; the
-RTL itself returns 0.
+The program returns the copy errors plus the cases off the RTL's values; the RTL itself returns 0.
 
 ## Build
 
-In the container, from snax-gvsoc (the Makefile builds the runtime from
-`sw/` first when needed):
+In the container, from snax-gvsoc (the Makefile builds the runtime from `sw/` first when needed):
 
     make -C sw/apps/dma-timing
 
-The ELF is `build/sw/apps/dma-timing/dma-timing.elf`. `data/data.h` is
-generated, from this folder:
+The ELF is `build/sw/apps/dma-timing/dma-timing.elf`. `data/data.h` is generated, from this folder:
 
     python3 data/datagen.py > data/data.h
 
 ## Run
 
-On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_hjson` and
-`source sourceme.sh`:
+On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_hjson` and `source sourceme.sh`:
 
     gvrun --target snax_hjson --work-dir build/work/dma-timing \
         --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/dma-timing/dma-timing.elf run
 
-On the RTL built from snax-forge's vecadd bundle (README, "Comparing with
-the RTL"), from snax_cluster:
+On the RTL built from snax-forge's vecadd bundle (README, "Comparing with the RTL"), from snax_cluster:
 
     make -C target/snitch_cluster snax-forge-run SIM=vlt CFG_OVERRIDE=<bundle>/snax_forge.hjson \
         ELF=<snax-gvsoc>/build/sw/apps/dma-timing/dma-timing.elf
 
-Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from
-that folder (the iDMA's own trace, hart 1), and the iDMA commit Bender
-checked out (`Bender.lock` in snax_cluster, or the folder name under
-`.bender/git/checkouts/`).
+Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from that folder (the iDMA's own trace, hart 1), and the iDMA commit Bender checked out (`Bender.lock` in snax_cluster, or the folder name under `.bender/git/checkouts/`).
 
 ## Expected output
 
-Eleven lines: nine cases, `Number of errors: 0` and `Cases off the RTL's
-busy, r, w: 0`; exit code 0.
+Eleven lines: nine cases, `Number of errors: 0` and `Cases off the RTL's busy, r, w: 0`; exit code 0.

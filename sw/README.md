@@ -1,27 +1,12 @@
 # sw
 
-The software snax-gvsoc's programs are built from: a pinned copy of the
-files of [snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)
-a build reads (the Snitch runtime, the math library, the 17 plain tests,
-two cluster configurations, snax-forge's vecadd fixture's with its streamer
-and accelerator files, and the schema clustergen checks a cluster configuration against), the headers
-generated from them, and our own programs in `apps/` (CI1, D126 in
-snax-forge). No snax_cluster checkout is needed to build or run them; one
-is needed only for the RTL and to refresh this copy.
+The software snax-gvsoc's programs are built from: a pinned copy of the files of [snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster) a build reads (the Snitch runtime, the math library, the 17 plain tests, two cluster configurations, snax-forge's vecadd fixture's with its streamer and accelerator files, and the schema clustergen checks a cluster configuration against), the headers generated from them, and our own programs in `apps/` (CI1, D126 in snax-forge). No snax_cluster checkout is needed to build or run them; one is needed only for the RTL and to refresh this copy.
 
-No copied file is edited. The list of copied files is `COPIED` and `MATH`
-in `sync.py`, and nowhere else.
+No copied file is edited. The list of copied files is `COPIED` and `MATH` in `sync.py`, and nowhere else.
 
 ## Building
 
-`make sw` at the top (`make -C sw`, `Makefile` here) builds into
-`build/sw/`: `libmath.a`; per cluster, `<cluster>/libsnRuntime.a`; every plain test in `tests/`
-(the 17 of `COPIED`) for `snitch_cluster` into `tests/`; the regression
-runs the same set. Flags come from `toolchain.mk`, include
-order and link flags from upstream's Makefiles (`MIRRORED` in `sync.py`).
-Each program in `apps/` has a Makefile of its own on `common.mk` and builds
-into `build/sw/apps/<name>/`, building the libraries first when needed:
-`make -C sw/apps/<name>`.
+`make sw` at the top (`make -C sw`, `Makefile` here) builds into `build/sw/`: `libmath.a`; per cluster, `<cluster>/libsnRuntime.a`; every plain test in `tests/` (the 17 of `COPIED`) for `snitch_cluster` into `tests/`; the regression runs the same set. Flags come from `toolchain.mk`, include order and link flags from upstream's Makefiles (`MIRRORED` in `sync.py`). Each program in `apps/` has a Makefile of its own on `common.mk` and builds into `build/sw/apps/<name>/`, building the libraries first when needed: `make -C sw/apps/<name>`.
 
 ## Pin
 
@@ -35,9 +20,7 @@ into `build/sw/apps/<name>/`, building the libraries first when needed:
 
 ## Path map
 
-snax_cluster's `sw/` and `target/snitch_cluster/sw/` are merged here, so
-every relative include in the copied files (`../../deps/...`,
-`../../rtl/src/...`) still works.
+snax_cluster's `sw/` and `target/snitch_cluster/sw/` are merged here, so every relative include in the copied files (`../../deps/...`, `../../rtl/src/...`) still works.
 
 | snax_cluster | Here |
 |---|---|
@@ -49,28 +32,19 @@ every relative include in the copied files (`../../deps/...`,
 | `LICENSE` | `sw/LICENSE` |
 | `docs/schema/X` | `sw/docs/schema/X` |
 
-`sw/cfg/snax_forge/` is snax_cluster's copy of its vecadd fixture, kept for
-the sync's diff and the generated headers below; SNAX-GVSoC never reads its
-cluster files: the `snax_hjson` target's default and `test_snax_cfg` read
-`forge/vecadd/` (the cluster file, the streamer file and `accelerator.json`),
-refreshed from snax-forge itself (snax-forge D126). Since snax_cluster's
-#664 the copy is in snax-forge's B1 format (`accelerator.json`).
+`sw/cfg/snax_forge/` is snax_cluster's copy of its vecadd fixture, kept for the sync's diff and the generated headers below; SNAX-GVSoC never reads its cluster files: the `snax_hjson` target's default and `test_snax_cfg` read `forge/vecadd/` (the cluster file, the streamer file and `accelerator.json`), refreshed from snax-forge itself (snax-forge D126). Since snax_cluster's #664 the copy is in snax-forge's B1 format (`accelerator.json`).
 
 ## Licences
 
 - snax_cluster: Apache 2.0, `LICENSE` here; each file keeps its header.
-- `math/`: musl, MIT, `math/COPYRIGHT` (snax_cluster's changes Apache 2.0,
-  `math/README`).
+- `math/`: musl, MIT, `math/COPYRIGHT` (snax_cluster's changes Apache 2.0, `math/README`).
 - `deps/printf/`: MIT, `deps/printf/LICENSE`.
-- `deps/riscv-opcodes/`: the Regents of the University of California's
-  BSD-style licence, `deps/riscv-opcodes/LICENSE`.
-- What we add (`sync.py`, the Makefiles, `apps/`, this file): Apache 2.0,
-  the repository's `LICENSE`.
+- `deps/riscv-opcodes/`: the Regents of the University of California's BSD-style licence, `deps/riscv-opcodes/LICENSE`.
+- What we add (`sync.py`, the Makefiles, `apps/`, this file): Apache 2.0, the repository's `LICENSE`.
 
 ## Generated files
 
-Checked in, so a build needs no generator. `sync.py` makes them with
-upstream's own rules, in the checkout:
+Checked in, so a build needs no generator. `sync.py` makes them with upstream's own rules, in the checkout:
 
 | File | Made by |
 |---|---|
@@ -81,22 +55,13 @@ upstream's own rules, in the checkout:
 
 ## Sync and review
 
-In snax-forge's image with sbt on `PATH` (snax-forge's pixi env has it), from this repository, with a checkout at the new
-commit, its submodules initialised and no tracked change in what sync reads
-(`CHECKED` in `sync.py`):
+In snax-forge's image with sbt on `PATH` (snax-forge's pixi env has it), from this repository, with a checkout at the new commit, its submodules initialised and no tracked change in what sync reads (`CHECKED` in `sync.py`):
 
     make sync-snax-cluster SNAX_CLUSTER=../snax_cluster
 
-It removes the copied files and copies them again (a file deleted upstream
-disappears), regenerates the generated files, writes the new pin above,
-and reports:
+It removes the copied files and copies them again (a file deleted upstream disappears), regenerates the generated files, writes the new pin above, and reports:
 
-- `git diff --stat` of `sw/` and its new files: what the new pin changes
-  here;
-- the checkout's `git diff --stat old..new` on the upstream build files our
-  Makefiles mirror (`MIRRORED` in `sync.py`): when one moved, check
-  `Makefile`, `common.mk` and `apps/*/Makefile` against it.
+- `git diff --stat` of `sw/` and its new files: what the new pin changes here;
+- the checkout's `git diff --stat old..new` on the upstream build files our Makefiles mirror (`MIRRORED` in `sync.py`): when one moved, check `Makefile`, `common.mk` and `apps/*/Makefile` against it.
 
-A file a build now needs and the list lacks shows as a build error; add it
-to `COPIED` and sync again. Then build and run the regression
-(`README.md`, "Regression"), and commit `sw/` with the pin.
+A file a build now needs and the list lacks shows as a build error; add it to `COPIED` and sync again. Then build and run the regression (`README.md`, "Regression"), and commit `sw/` with the pin.

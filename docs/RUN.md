@@ -1,9 +1,6 @@
 # Running SNAX-GVSoC
 
-The main path to a run of a generated design point is snax-forge's flow
-(snax-forge D136): with this repo as its submodule, it generates the design
-point, builds GVSoC when needed and the program, runs it on `snax_hjson`
-and takes the program's own check. From snax-forge, in the container:
+The main path to a run of a generated design point is snax-forge's flow (snax-forge D136): with this repo as its submodule, it generates the design point, builds GVSoC when needed and the program, runs it on `snax_hjson` and takes the program's own check. From snax-forge, in the container:
 
     pixi run flow recipes/vecadd.json --platform platforms/snax_forge.json
 
@@ -12,32 +9,20 @@ and takes the program's own check. From snax-forge, in the container:
       check     passed: 226 cycles (main to forge_check); data 0 errors (64 words); counters add_acc 19 (16 beats)
       report    none in FLOW3 round 1a; the reports come back in FLOW3 round 1b
 
-snax-forge's `docs/RUN.md` walks it. This file runs this repo by hand, from
-a clone to a checked run: the container, the build, a program on a
-hand-written target, a generated accelerator, what it prints, the
-regression and the unit tests. Each block is the command as typed, then
-what it printed in a fresh clone (long outputs cut to their last lines,
-marked `...`). README.md says what each part is.
+snax-forge's `docs/RUN.md` walks it. This file runs this repo by hand, from a clone to a checked run: the container, the build, a program on a hand-written target, a generated accelerator, what it prints, the regression and the unit tests. Each block is the command as typed, then what it printed in a fresh clone (long outputs cut to their last lines, marked `...`). README.md says what each part is.
 
 ## 1. The container
 
-The tools (GVSoC's build tools, snax_cluster's RISC-V toolchain) are in
-snax-forge's image. From the folder that holds this repo, `$ROOT` below
-(the outputs' absolute paths start there; yours will be your own):
+The tools (GVSoC's build tools, snax_cluster's RISC-V toolchain) are in snax-forge's image. From the folder that holds this repo, `$ROOT` below (the outputs' absolute paths start there; yours will be your own):
 
     podman run --rm -it -v "$PWD":"$PWD" -w "$PWD" ghcr.io/kuleuven-micas/snax-forge:main
     cd snax-gvsoc
 
-Every command below runs in that shell (the image's zsh), from
-`snax-gvsoc/`. Build here, not in snax-forge's `pixi shell`, whose
-environment sets `CC` and `CXX` to conda's gcc.
+Every command below runs in that shell (the image's zsh), from `snax-gvsoc/`. Build here, not in snax-forge's `pixi shell`, whose environment sets `CC` and `CXX` to conda's gcc.
 
 ## 2. Build GVSoC and the software
 
-GVSoC for the targets the programs run on, the Makefile's `SNAX_TARGETS`
-(`snitch;snax_hjson`). The single quotes matter:
-make expands `$(SNAX_TARGETS)`, the shell must not. The first build takes a
-few minutes; a second one with nothing changed compiles nothing.
+GVSoC for the targets the programs run on, the Makefile's `SNAX_TARGETS` (`snitch;snax_hjson`). The single quotes matter: make expands `$(SNAX_TARGETS)`, the shell must not. The first build takes a few minutes; a second one with nothing changed compiles nothing.
 
     make build TARGETS='$(SNAX_TARGETS)'
 
@@ -46,13 +31,11 @@ few minutes; a second one with nothing changed compiles nothing.
     -- Up-to-date: $ROOT/snax-gvsoc/install/python/./requirements.txt
     -- Up-to-date: $ROOT/snax-gvsoc/install/python/./.gitignore
 
-`source sourceme.sh` puts the install's `gvrun` on `PATH`; every new
-container needs it again. It prints nothing.
+`source sourceme.sh` puts the install's `gvrun` on `PATH`; every new container needs it again. It prints nothing.
 
     source sourceme.sh
 
-`make sw` builds snax_cluster's runtime, the math library and the 17 plain
-tests from the copy in `sw/` into `build/sw/`:
+`make sw` builds snax_cluster's runtime, the math library and the 17 plain tests from the copy in `sw/` into `build/sw/`:
 
     make sw
 
@@ -62,10 +45,7 @@ tests from the copy in `sw/` into `build/sw/`:
 
 ## 3. A cluster test: snax-csr on snax_hjson
 
-The cluster tests in `sw/apps/` (`snax-csr`, `dma-timing`, `stream-timing`,
-`core-tcdm`, `dma-tcdm`) run on `snax_hjson` with `forge/vecadd/`'s cluster
-file, whose streamer and shell they drive. `snax-csr` checks the compute
-core's SNAX CSRs:
+The cluster tests in `sw/apps/` (`snax-csr`, `dma-timing`, `stream-timing`, `core-tcdm`, `dma-tcdm`) run on `snax_hjson` with `forge/vecadd/`'s cluster file, whose streamer and shell they drive. `snax-csr` checks the compute core's SNAX CSRs:
 
     make -C sw/apps/snax-csr
 
@@ -88,9 +68,7 @@ core's SNAX CSRs:
 
 ## 4. A generated accelerator: forge/vecadd on snax_hjson
 
-`forge/vecadd/` is a design point snax-forge generated (`forge/README.md`):
-a cluster file, its streamer and datapath files, the headers, `main.c` and
-`data.h`. The generic app builds its `main.c`:
+`forge/vecadd/` is a design point snax-forge generated (`forge/README.md`): a cluster file, its streamer and datapath files, the headers, `main.c` and `data.h`. The generic app builds its `main.c`:
 
     make -C sw/apps/forge DESIGN=vecadd
 
@@ -98,10 +76,7 @@ a cluster file, its streamer and datapath files, the headers, `main.c` and
     llvm-objdump -D $ROOT/snax-gvsoc/build/sw/apps/forge/vecadd/forge.elf > $ROOT/snax-gvsoc/build/sw/apps/forge/vecadd/forge.dump
     make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/forge'
 
-`snax_hjson` reads the cluster file given with `--param hjson=` and puts the
-standard composite (streamer, `SnaxShell`, `SnaxGroup`) in its accelerator
-slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
-`trace`, and its `events` and `summary`, `docs/EVENTS.md`):
+`snax_hjson` reads the cluster file given with `--param hjson=` and puts the standard composite (streamer, `SnaxShell`, `SnaxGroup`) in its accelerator slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug `trace`, and its `events` and `summary`, `docs/EVENTS.md`):
 
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
         --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
@@ -122,46 +97,26 @@ slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
 
     exit 0
 
-It exits 0. `make build` made `snax_hjson`'s platform tree from its default
-file, `forge/vecadd/snax_forge.hjson` (installed from `forge/vecadd/`), so
-this run uses that tree. Another fixture's cluster file (`vecmul`,
-`vsum`) puts another accelerator in the slot: gvrun then warns that the
-installed platform tree does not match and builds the system from its JSON
-configuration instead, on the same installed components. Nothing is
-compiled for a design point.
+It exits 0. `make build` made `snax_hjson`'s platform tree from its default file, `forge/vecadd/snax_forge.hjson` (installed from `forge/vecadd/`), so this run uses that tree. Another fixture's cluster file (`vecmul`, `vsum`) puts another accelerator in the slot: gvrun then warns that the installed platform tree does not match and builds the system from its JSON configuration instead, on the same installed components. Nothing is compiled for a design point.
 
 ## 5. Reading the output
 
-- `forge cycles: 226`: the program's window, `mcycle` at `forge_check()`'s
-  entry minus `mcycle` at main's entry (snax-forge D135), which snax-forge's
-  flow takes as the run's total cycles.
-- `forge data: 0 errors (64 words)`: every output word against its golden
-  in `data.h` (the reference executor's result); 64 words is vecadd's `O`.
-- `forge counter add_acc: 19`: the group's COUNTER (`ACC_RO_COUNTER`), read
-  after the accelerator task `add_acc` finished (STATUS bit 0 polled to 0).
-- The unit's run line, `run index=0 firings=16 busy=16 stall_in=3
-  stall_out=0 flush=0`: the counter is busy + stall_in + stall_out + flush (16 + 3 +
-  0 + 0 = 19), and the firings are the task's beats in the manifest:
+- `forge cycles: 226`: the program's window, `mcycle` at `forge_check()`'s entry minus `mcycle` at main's entry (snax-forge D135), which snax-forge's flow takes as the run's total cycles.
+- `forge data: 0 errors (64 words)`: every output word against its golden in `data.h` (the reference executor's result); 64 words is vecadd's `O`.
+- `forge counter add_acc: 19`: the group's COUNTER (`ACC_RO_COUNTER`), read after the accelerator task `add_acc` finished (STATUS bit 0 polled to 0).
+- The unit's run line, `run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=0`: the counter is busy + stall_in + stall_out + flush (16 + 3 + 0 + 0 = 19), and the firings are the task's beats in the manifest:
 
       grep '"tasks"' forge/vecadd/manifest.json
 
        "tasks": [{"name": "add_acc", "beats": 16, "csrs": {"JOBS": 16}}]
 
-- `forge errors: 0`: the data errors plus one per counter below its beats;
-  `main` returns it, so the run's exit code is 0.
+- `forge errors: 0`: the data errors plus one per counter below its beats; `main` returns it, so the run's exit code is 0.
 
-The trace lines cut at `...` are the unit's ports being created and bound
-at start-up; the last but one is its start (`Start at cycle 2932: count
-16`).
+The trace lines cut at `...` are the unit's ports being created and bound at start-up; the last but one is its start (`Start at cycle 2932: count 16`).
 
 ### Beats, stalls and a VCD
 
-The levels above `task` are more trace names (`docs/EVENTS.md`): `beats`
-for every grant, DMA beat and burst, firing and push and every change of a
-unit's or mover's cycle class (`class`), `stalls` for every refused request
-and queue count, each a `--trace` regex into one file. The
-crossbar writes them for its SNAX ports and the DMA unless `--param
-chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...` names others:
+The levels above `task` are more trace names (`docs/EVENTS.md`): `beats` for every grant, DMA beat and burst, firing and push and every change of a unit's or mover's cycle class (`class`), `stalls` for every refused request and queue count, each a `--trace` regex into one file. The crossbar writes them for its SNAX ports and the DMA unless `--param chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...` names others:
 
     mkdir -p build/work/forge-vecadd-stall
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
@@ -175,8 +130,7 @@ chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...` names others:
     forge counter add_acc: 19
     forge errors: 0
 
-The first firing names the beat it took from each reader, the first stall
-the input that won its bank, the first queue count its cycle:
+The first firing names the beat it took from each reader, the first stall the input that won its bank, the first queue count its cycle:
 
     grep -m1 ' fire ' build/work/forge-vecadd-stall/events.log | sed 's/.*\] //'
     grep -m1 ' stall in' build/work/forge-vecadd-stall/events.log | sed 's/.*\] //'
@@ -186,9 +140,7 @@ the input that won its bank, the first queue count its cycle:
     2933 stall in=4 addr=0x200 bank=0 row=2 by=0 by_addr=0x0 b=0
     2935 fifo mover=reader0 lane=0 count=1
 
-`--vcd --event-tags=snax` dumps the SNAX components' signals (busy, firings,
-queue counts, the crossbar's handshakes; `docs/EVENTS.md`) for gtkwave, into
-a work directory that exists:
+`--vcd --event-tags=snax` dumps the SNAX components' signals (busy, firings, queue counts, the crossbar's handshakes; `docs/EVENTS.md`) for gtkwave, into a work directory that exists:
 
     mkdir -p build/work/forge-vecadd-vcd
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
@@ -199,17 +151,11 @@ a work directory that exists:
     A Gtkwave script has been generated and can be opened with the following command:
     gtkwave build/work/forge-vecadd-vcd/view.gtkw
 
-snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd`
-(its `docs/RUN.md`).
+snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd` (its `docs/RUN.md`).
 
 ## 6. The regression
 
-`make regress` runs the rules of one unit, of `SnaxShell` and of a group and the datapath classes on
-their cases, builds `sw/` and every
-program, and runs them all: the cluster tests, snax-shell and every
-`forge/` folder on `snax_hjson`
-(their counters checked as in section 5), and the plain tests on `snitch`.
-About two minutes:
+`make regress` runs the rules of one unit, of `SnaxShell` and of a group and the datapath classes on their cases, builds `sw/` and every program, and runs them all: the cluster tests, snax-shell and every `forge/` folder on `snax_hjson` (their counters checked as in section 5), and the plain tests on `snitch`. About two minutes:
 
     make regress
 
@@ -232,11 +178,7 @@ About two minutes:
       17 run
     regression passed
 
-Each run's output is in `build/regress/work/<name>/run.log`, beside its
-`gvsoc_config.json`, and a forge/ run's traces in `trace.log` beside it
-(GVSoC buffers its stdout, so the program's output there can cut a trace
-line in two); a failure prints the file it read and its last 20 lines. `K=` runs only the programs whose name holds it (`make regress -k`
-does not: make reads `-k` itself):
+Each run's output is in `build/regress/work/<name>/run.log`, beside its `gvsoc_config.json`, and a forge/ run's traces in `trace.log` beside it (GVSoC buffers its stdout, so the program's output there can cut a trace line in two); a failure prints the file it read and its last 20 lines. `K=` runs only the programs whose name holds it (`make regress -k` does not: make reads `-k` itself):
 
     make regress K=forge
 
@@ -269,9 +211,7 @@ does not: make reads `-k` itself):
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader, the class lines, and the composite's
-CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
-`make build`; skipped without it), with the image's Python:
+`snax_cfg.py`'s reader, the class lines, and the composite's CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after `make build`; skipped without it), with the image's Python:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
@@ -281,9 +221,7 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     OK
 
-The rule of one unit (`SnaxGroupRule`'s one-unit case, `SnaxUnitRule`)
-against its hand-worked cases, with g++ (the regression's `unit`; `shell`,
-`datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
+The rule of one unit (`SnaxGroupRule`'s one-unit case, `SnaxUnitRule`) against its hand-worked cases, with g++ (the regression's `unit`; `shell`, `datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
 
     tests/snax/unit/run.sh
 
@@ -308,9 +246,7 @@ against its hand-worked cases, with g++ (the regression's `unit`; `shell`,
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
     19 passed, 0 failed
 
-`SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against
-its hand-worked cases, with g++ (the regression's `shell`,
-`tests/snax/shell/README.md`):
+`SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against its hand-worked cases, with g++ (the regression's `shell`, `tests/snax/shell/README.md`):
 
     tests/snax/shell/run.sh
 
