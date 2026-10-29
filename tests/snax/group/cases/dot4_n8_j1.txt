@@ -1,0 +1,20 @@
+# dot 4 at N = 8, W = 4 (T = 2), JOBS 1: mac -> a wire -> TreeAccumulate sum
+# C§17: busy cycles E - s = 4
+
+unit mac Mac latency 1 ii 1 span 1 t 2 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 1 inputs 0
+link mac sum depth 0
+jobs 1
+start 0 taken
+expect run index=0 firings=2 busy=3 stall_in=0 stall_out=0 flush=1
+# E - s = 4, C§17's formula
+
+# a b ready | mac fire give | sum fire give | busy
+cycles
+1 1 1 | 0 0 | 0 0 | 0    # 0: idle
+1 1 1 | 1 0 | 0 0 | 1    # 1: mac fires 0
+1 1 1 | 1 0 | 0 0 | 1    # 2: mac fires 1 (gives)
+1 1 1 | 0 1 | 1 0 | 1    # 3: mac pushes; sum fires 0 (gives)
+1 1 1 | 0 0 | 0 1 | 1    # 4: sum pushes
+1 1 1 | 0 0 | 0 0 | 0    # 5: idle
+1 1 1 | 0 0 | 0 0 | 0    # 6: idle

@@ -1,0 +1,15 @@
+# dot 4, JOBS 0: the empty run, ignored; busy never rises
+# the shell ends it in its own cycle (tests/snax/shell)
+
+unit mac Mac latency 1 ii 1 span 1 t 2 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 1 inputs 0
+link mac sum depth 0
+jobs 0
+start 0 ignored
+
+# a b ready | mac fire give | sum fire give | busy
+cycles
+1 1 1 | 0 0 | 0 0 | 0    # 0: idle
+1 1 1 | 0 0 | 0 0 | 0    # 1: idle
+1 1 1 | 0 0 | 0 0 | 0    # 2: idle
+1 1 1 | 0 0 | 0 0 | 0    # 3: idle

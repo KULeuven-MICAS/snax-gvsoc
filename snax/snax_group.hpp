@@ -75,8 +75,11 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "snax_datapath.hpp"
 
 
 // The classes by name, as a run line and the class lines give them
@@ -511,5 +514,85 @@ private:
             this->classes[c] = this->group.classes[c];
         }
         this->runs = this->group.runs;
+    }
+};
+
+
+// SnaxGroupDatapaths: a group's datapaths (snax_datapath.hpp) wired as the
+// component wires them, one per unit and one LinkBuffer per link of depth >=
+// 1, so the component (snax_group.cpp) and the tests run the same cycle:
+//
+//   en = the rule's step
+//   for each unit, producer before consumer: eval(its inputs' sources, en)
+//   for each unit and buffer: commit(en)
+//
+// An input's source is an outer port (the streamer's beat, moved when the
+// unit fires), a wire (the producer's output from its eval this cycle) or a
+// buffer (its slot rslot, written in an earlier cycle). Unit k > 0 takes its
+// link on input `linked[k]`; its other inputs, and all of the head's, are
+// outer, in port order.
+class SnaxGroupDatapaths
+{
+public:
+    std::vector<std::unique_ptr<SnaxDatapath>> units;
+    std::vector<std::unique_ptr<SnaxDatapath>> buffers;     // per link; null for a wire
+    std::vector<int> linked;                                // per unit; -1 for the head
+
+    // One cycle with the rule's step; outer[k], unit k's outer inputs' beats in port order
+    // (any words when it does not fire). The last unit's output, valid when it pushes.
+    const std::vector<uint64_t> &cycle(const SnaxGroupRule::Step &step,
+        const std::vector<std::vector<const uint64_t *>> &outer)
+    {
+        std::vector<SnaxEnables> en(this->units.size()), ben(this->buffers.size());
+        for (size_t k = 0; k < this->units.size(); k++)
+        {
+            const SnaxGroupRule::UnitStep &u = step.units[k];
+            en[k].fire = u.fire;
+            en[k].first = u.first;
+            en[k].read = u.read;
+            en[k].lane = u.lane;
+            en[k].en = u.fire;
+        }
+        for (size_t k = 0; k < this->buffers.size(); k++)
+        {
+            ben[k].load = step.links[k].load;
+            ben[k].wslot = step.links[k].wslot;
+            ben[k].rslot = step.links[k].rslot;
+        }
+        for (size_t k = 0; k < this->units.size(); k++)
+        {
+            std::vector<const uint64_t *> in;
+            size_t o = 0;
+            for (size_t i = 0; i < this->units[k]->in_words.size(); i++)
+            {
+                if ((int)i == this->linked[k])
+                {
+                    const SnaxDatapath *src = this->buffers[k - 1] ? this->buffers[k - 1].get()
+                        : this->units[k - 1].get();
+                    in.push_back(src->out().data());
+                }
+                else
+                {
+                    in.push_back(outer[k][o++]);
+                }
+            }
+            this->units[k]->eval(in, en[k]);
+            if (k < this->buffers.size() && this->buffers[k])
+            {
+                this->buffers[k]->eval({this->units[k]->out().data()}, ben[k]);
+            }
+        }
+        for (size_t k = 0; k < this->units.size(); k++)
+        {
+            this->units[k]->commit(en[k]);
+        }
+        for (size_t k = 0; k < this->buffers.size(); k++)
+        {
+            if (this->buffers[k])
+            {
+                this->buffers[k]->commit(ben[k]);
+            }
+        }
+        return this->units.back()->out();
     }
 };
