@@ -2,10 +2,11 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// SnaxUnit's cycle rule against hand-worked cases (README.md): each case file
+// SnaxUnit's cycle rule, SnaxGroupRule's one-unit case (snax_group.hpp's
+// SnaxUnitRule), against hand-worked cases (README.md): each case file
 // gives the unit (latency, II, inputs, lanes), the starts (jobs and job_beats)
 // and, per cycle, each input's valid, the output's ready and the expected
-// fire, push and busy; the tb drives snax_unit.hpp's rule with them and
+// fire, push and busy; the tb drives that rule with them and
 // compares every cycle and the trace line at the end of each run, whose busy,
 // stall_in, stall_out and flush must add up to the run's busy cycles in the
 // case file. A case with `types` also gives each firing's input lanes and
@@ -26,7 +27,8 @@
 #include <string>
 #include <vector>
 
-#include "snax_unit.hpp"
+#include "snax_group.hpp"
+#include "snax_types.hpp"
 
 
 struct StartLine

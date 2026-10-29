@@ -95,6 +95,15 @@ unit with the traces below. The shell has no trace of its own.
 | `beats` | `push` | the push | `n` (its index among the run's results), `first`, `last` (the firings it folds; equal at rate 1), `value` (the output beat's words) |
 | `beats` | `class` | the first cycle of a run of one class, from `s + 1` to `E` | `mode` (`busy`, `stall_in`, `stall_out`, `flush`: the class the `run` line counts the cycle in) |
 
+A linked group's run line (`snax/snax_group.hpp`'s `SnaxGroupRule`) judges
+each busy cycle at the group's boundary, in D59's order: `stall_out` (the
+last unit has a result and no room), `busy` (any unit fires, reads a lane
+in place, or is in its II gap), `stall_in` (a unit with outer inputs wants
+to fire and one of them has no beat), `flush` (otherwise: results in
+flight, beats in a buffer). Its `firings` are the head unit's. For one unit
+these are the unit's classes above. Per-unit events of a linked group are
+parked (snax-forge open item 96).
+
 ### Streamer (`snax_acc<i>/streamer`, `snax/snax_streamer.cpp`)
 
 Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
