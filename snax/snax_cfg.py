@@ -47,7 +47,7 @@ snax_num_ro_csr, snax_streamer_cfg (the streamer template, as the hjson has
 it) and snax_datapath_cfg (accelerator.json, optional; Accelerator).
 
 accelerator.json (snax-forge C§17), what the standard composite
-(snax_unit_acc.py) builds the slot's shells and units from:
+(snax_accelerator.py) builds the slot's shells and units from:
 
     name, design_point, tag   Accelerator.name (the header's <ACC>), ...
     inputs, outputs           the outer ports, "<unit>.<port>", in the

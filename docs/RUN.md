@@ -211,7 +211,7 @@ Each run's output is in `build/regress/work/<name>/run.log`, beside its `gvsoc_c
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader, the class lines, and the composite's CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after `make build`; skipped without it), with the image's Python:
+`snax_cfg.py`'s reader, the class lines, and the composite's CSR check (`snax_accelerator.py`, which imports GVSoC from `install/`, so after `make build`; skipped without it), with the image's Python:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 

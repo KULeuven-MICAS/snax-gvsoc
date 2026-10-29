@@ -39,7 +39,7 @@ GVSoC writes a header before each line, `<ps>: <cycles>: [<path>] `, with ANSI c
 
 ## Components
 
-The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`); `snax_acc<i>` is core `i`'s accelerator. Its components follow its `accelerator.json` (snax-forge C§17): one `SnaxGroup` per group. With one group of one unit, as most fixtures of `forge/` have, it is `snax_acc<i>/unit` and the group's shell `snax_acc<i>/shell`; with several groups of one unit each, `snax_acc<i>/unit_<unit>` and `snax_acc<i>/shell_<group>`; a linked group (several units joined by links) is `snax_acc<i>/group_<group>`, its shell `snax_acc<i>/shell_<group>` (`snax_unit_acc.py`'s `component_names`). Each group has the traces below, at its boundary; the shell has no trace of its own.
+The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`); `snax_acc<i>` is core `i`'s accelerator. Its components follow its `accelerator.json` (snax-forge C§17): one `SnaxGroup` per group. With one group of one unit, as most fixtures of `forge/` have, it is `snax_acc<i>/unit` and the group's shell `snax_acc<i>/shell`; with several groups of one unit each, `snax_acc<i>/unit_<unit>` and `snax_acc<i>/shell_<group>`; a linked group (several units joined by links) is `snax_acc<i>/group_<group>`, its shell `snax_acc<i>/shell_<group>` (`snax_accelerator.py`'s `component_names`). Each group has the traces below, at its boundary; the shell has no trace of its own.
 
 ### Group (`snax_acc<i>/unit`, `snax_acc<i>/unit_<unit>`, `snax_acc<i>/group_<group>`; `snax/snax_group.cpp`)
 
