@@ -353,7 +353,7 @@ static int run(const Case &c)
             }
             if (u.fire)
             {
-                data.fire(cycle, rule.firings() - 1, rule.beats[0], u.result);
+                data.fire(cycle, rule.firings() - 1, rule.t[0], u.gives);
             }
             if (u.push && c.latency == 0)
             {

@@ -53,14 +53,14 @@ class Dot(unittest.TestCase):
 
     def test_counts_over_the_chain(self):
         rule = GroupRule([unit("mul"), unit("sum", inputs=0)], [link("mul", "sum")])
-        self.assertEqual(rule.counts(2, [1, 4]), [8, 8])
-        self.assertEqual(rule.counts(2, [4, 1]), [8, 2])
+        self.assertEqual(rule.firings_per_run(2, [1, 4]), [8, 8])
+        self.assertEqual(rule.firings_per_run(2, [4, 1]), [8, 2])
 
     def test_the_links_need_not_be_in_unit_order(self):
         rule = GroupRule([unit("sum", L=1, inputs=0), unit("mul")], [link("mul", "sum", 1)])
         self.assertEqual(rule.order, [1, 0])
         self.assertEqual(rule.output, 0)
-        self.assertEqual(rule.counts(1, [4, 1]), [4, 4])
+        self.assertEqual(rule.firings_per_run(1, [4, 1]), [4, 4])
 
 
 class Refused(unittest.TestCase):

@@ -91,7 +91,7 @@ class GroupRule:
             raise GroupError("the links form a cycle")
         return order
 
-    def counts(self, jobs, ts):
+    def firings_per_run(self, jobs, ts):
         """Each unit's firings n_k in a run of ``jobs``, unit k a result every ts[k] firings."""
         counts = [0] * len(self.units)
         for k in reversed(self.order):
@@ -105,7 +105,7 @@ class GroupRule:
         output's. Rows of (valids, ready, per unit (fire, give), per link its occupancy, busy,
         class, notes) and the run's last cycle E (None when it does not end)."""
         n, links = len(self.units), self.links
-        counts = self.counts(jobs, ts)
+        counts = self.firings_per_run(jobs, ts)
         fired, lane = [0] * n, [0] * n
         slots = [[False] * u["L"] for u in self.units]
         last = [None] * n

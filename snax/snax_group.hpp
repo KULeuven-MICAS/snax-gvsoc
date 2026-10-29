@@ -122,7 +122,7 @@ public:
     struct UnitStep
     {
         bool fire = false;      // a beat taken from its input (the last lane's read at span > 1)
-        bool result = false;    // the firing gives a result (d = T - 1)
+        bool gives = false;     // the firing gives a result (d = T - 1)
         bool push = false;      // a result given to the outer output or the link
         bool read = false;      // span > 1: lane `lane` read in place
         int lane = 0;
@@ -244,8 +244,8 @@ public:
     {
         this->span.reset();
         this->jobs = 0;
-        this->beats.assign(this->cfg.size(), 1);
-        this->counts.assign(this->cfg.size(), 0);
+        this->t.assign(this->cfg.size(), 1);
+        this->firings_per_run.assign(this->cfg.size(), 0);
         for (size_t k = 0; k < this->u.size(); k++)
         {
             this->u[k] = UnitState();
@@ -294,14 +294,14 @@ public:
         }
         this->span.start(cycle);
         this->jobs = jobs;
-        this->beats = t;
+        this->t = t;
         // From the sink back: each firing of a consumer takes one result of its producer
         for (size_t r = this->order.size(); r-- > 0;)
         {
             size_t k = this->order[r];
             uint32_t n = this->outs[k].empty() ? jobs
-                : this->counts[this->links[this->outs[k][0]].to];
-            this->counts[k] = n * t[k];
+                : this->firings_per_run[this->links[this->outs[k][0]].to];
+            this->firings_per_run[k] = n * t[k];
         }
         for (size_t k = 0; k < this->u.size(); k++)
         {
@@ -344,9 +344,9 @@ public:
             }
             avail[k] = inputs[k] && linked;
             bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
-            wants[k] = us.firings < this->counts[k] && ii_ok;
+            wants[k] = us.firings < this->firings_per_run[k] && ii_ok;
             would_fire[k] = wants[k] && avail[k] && (c.span == 1 || us.lane == c.span - 1);
-            gives[k] = would_fire[k] && (us.firings + 1) % this->beats[k] == 0;
+            gives[k] = would_fire[k] && (us.firings + 1) % this->t[k] == 0;
             head[k] = c.latency > 0 && us.slots[c.latency - 1];
             offer[k] = c.latency > 0 ? head[k] : gives[k];
         }
@@ -367,11 +367,11 @@ public:
                 room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
             }
             st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
-            st.first = us.firings % this->beats[k] == 0;
+            st.first = us.firings % this->t[k] == 0;
             if (!st.frozen)
             {
                 st.fire = would_fire[k];
-                st.result = gives[k];
+                st.gives = gives[k];
                 st.push = c.latency > 0 ? head[k] : gives[k];
                 st.read = c.span > 1 && wants[k] && avail[k];
                 st.lane = us.lane;
@@ -381,7 +381,7 @@ public:
                 }
                 if (c.latency > 0)
                 {
-                    us.slots[0] = st.result;
+                    us.slots[0] = st.gives;
                 }
                 bool in_gap = us.has_fired && cycle < us.last_fire + c.ii;
                 busy = busy || st.fire || st.read || in_gap;
@@ -439,7 +439,7 @@ public:
 
     // The head unit's firings in this run, and its count n
     uint32_t firings() const { return this->order.empty() ? 0 : this->u[this->order[0]].firings; }
-    uint32_t count() const { return this->order.empty() ? 0 : this->counts[this->order[0]]; }
+    uint32_t count() const { return this->order.empty() ? 0 : this->firings_per_run[this->order[0]]; }
 
     // The summary line of the run that ended, run index from 0
     // (docs/EVENTS.md): its classes add up to its busy cycles
@@ -458,8 +458,8 @@ public:
     // unit's T and n, and its cycles per class; runs ended so far
     SnaxRunSpan span;
     uint32_t jobs;
-    std::vector<uint32_t> beats;
-    std::vector<uint32_t> counts;
+    std::vector<uint32_t> t;                // per unit, its T: a result every T-th firing
+    std::vector<uint32_t> firings_per_run;  // per unit, its n
     int64_t classes[NB_CLASSES];
     int runs;
 
@@ -485,7 +485,7 @@ private:
     {
         for (size_t k = 0; k < this->u.size(); k++)
         {
-            if (this->u[k].firings != this->counts[k])
+            if (this->u[k].firings != this->firings_per_run[k])
             {
                 return false;
             }

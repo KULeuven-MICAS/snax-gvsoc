@@ -95,7 +95,7 @@ public:
 
 private:
     static vp::IoReqStatus ctrl_req(vp::Block *__this, vp::IoReq *req);
-    static void fire_handler(vp::Block *__this, vp::ClockEvent *event);
+    static void cycle_handler(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
 
     SnaxType type_prop(js::Config *config, const char *width, const char *is_signed,
@@ -108,7 +108,7 @@ private:
     SnaxEvents ev;
     vp::IoSlave ctrl_itf;
     vp::WireMaster<bool> busy_itf;
-    vp::ClockEvent fire_event;
+    vp::ClockEvent cycle_event;
     vp::IoReq beat_req;
     SnaxSignals sigs;
     SnaxSignal sig_busy;
@@ -129,7 +129,7 @@ private:
     vp::IoMaster out_itf;
     int out_words;
     std::vector<std::vector<size_t>> unit_ins;   // per unit, its outer inputs (in_itf indices)
-    // fire_handler's, sized once: per unit whether its outer inputs have a beat and its outer
+    // cycle_handler's, sized once: per unit whether its outer inputs have a beat and its outer
     // output room, its outer inputs' beats; the outer output's beat
     std::vector<bool> inputs, room;
     std::vector<std::vector<const uint64_t *>> outer;
@@ -149,7 +149,7 @@ private:
 SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     : vp::Component(config),
       props(&this->trace),
-      fire_event(this, &SnaxGroup::fire_handler),
+      cycle_event(this, &SnaxGroup::cycle_handler),
       sigs(this),
       sig_busy(*this, "busy", 1),
       sig_fire(*this, "fire", 1),
@@ -474,7 +474,7 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
         default:
         {
             size_t last = _this->rule.output_unit();
-            uint32_t results = _this->rule.counts[last] / _this->rule.beats[last];
+            uint32_t results = _this->rule.firings_per_run[last] / _this->rule.t[last];
             _this->rate = _this->rule.count() / results;
             _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: JOBS %u, %ld T\n", cycle,
                 jobs, ts.size());
@@ -487,9 +487,9 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
             {
                 _this->busy_itf.sync(true);
             }
-            if (!_this->fire_event.is_enqueued())
+            if (!_this->cycle_event.is_enqueued())
             {
-                _this->fire_event.enqueue(1);
+                _this->cycle_event.enqueue(1);
             }
             return vp::IO_REQ_OK;
         }
@@ -520,7 +520,7 @@ void SnaxGroup::move(vp::IoMaster &port, bool is_write, uint64_t *beat, int word
 
 
 // One busy cycle: probe every outer port, step the rule, move what it says, run the datapaths
-void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
+void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     SnaxGroup *_this = (SnaxGroup *)__this;
     int64_t cycle = _this->clock.get_cycles();
@@ -623,7 +623,7 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
     // Every busy cycle, so it always runs before the streamer's step
     if (_this->rule.busy(cycle + 1))
     {
-        _this->fire_event.enqueue(1);
+        _this->cycle_event.enqueue(1);
     }
 }
 
