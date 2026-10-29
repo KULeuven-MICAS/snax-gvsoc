@@ -77,9 +77,10 @@ SNAX_TARGETS = snitch;snax_hjson
 # SNAX-GVSoC's regression (tests/snax/regress.py): builds sw/ and the
 # programs of sw/apps/, then every program must exit 0 within its timeout.
 # Needs GVSoC built for $(SNAX_TARGETS).
-# K=SUBSTRING runs only the programs whose name holds it (regress.py -k).
+# K=SUBSTRING runs only the programs whose name holds it (regress.py -k), J=N
+# that many at a time (regress.py -j; default the CPU count).
 regress:
-	python3 tests/snax/regress.py $(if $(K),-k $(K))
+	python3 tests/snax/regress.py$(if $(K), -k $(K))$(if $(J), -j $(J))
 
 # Refreshes sw/ from a snax_cluster checkout (sw/README.md)
 sync-snax-cluster:
@@ -98,6 +99,11 @@ BUILD_TYPE = RelWithDebInfo
 else
 BUILD_TYPE = Release
 endif
+
+# FAST=1 skips the models' asserts flavour, which gvrun runs only with
+# --asserts: a plain run takes the optim models, --trace and --vcd the debug
+# ones. Passed either way, as CMake keeps an option in its cache.
+BUILD_ASSERT = $(if $(FAST),OFF,ON)
 
 gvrun.build:
 	$(CMAKE) -S gvrun -B $(BUILDDIR)/gvrun -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
@@ -122,6 +128,7 @@ build: gvrun.build
 		-DCMAKE_BUILD_RPATH=$(INSTALLDIR_ABS)/lib \
 		-DGVSOC_MODULES="$(GVSOC_MODULES);$(MODULES)" \
 		-DGVSOC_TARGETS="${TARGETS}" \
+		-DBUILD_ASSERT=$(BUILD_ASSERT) \
 		-DCMAKE_SKIP_INSTALL_RPATH=false
 
 	cd $(CURDIR) && $(CMAKE) --build $(BUILDDIR) $(CMAKE_FLAGS)

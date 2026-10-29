@@ -10,27 +10,28 @@ under one control model, every number a property.
 The control model (SnaxGroupRule, snax-forge C§17's Control) is in snax_group.hpp,
 the datapaths (snax-forge's catalogue) in snax_datapath.hpp. The C++ checks every
 property and stops on a bad one, naming it; this class only passes them on, so a
-design point compiles nothing (D134 in snax-forge). A group of one unit is B1's
-SnaxUnit.
+design point compiles nothing (D134 in snax-forge).
 """
 
 import gvsoc.systree
 
 
 class SnaxGroup(gvsoc.systree.Component):
-    """A chain of units, head first, each link a wire (depth 0) or a buffer.
+    """A group's units and the links between them, each a wire (depth 0) or a buffer.
 
     Parameters
     ----------
     units : list[dict]
         Each unit (snax_group.cpp's header): name, datapath, inputs (per BRM
-        input its outer port's name, or "" for the link from the unit before),
-        output (the outer port's name, the last unit's; else ""), lanes,
+        input its outer port's name, or "" for one a link feeds), output (the
+        outer port's name, or "" when linked; one unit has one), lanes,
         in_widths, in_signed, out_width, out_signed, op_width, op_signed, op,
         accumulate, reg_out, latency, ii, span, and t (a result every t-th
         firing, fixed; 0 for a fold's JOB_BEATS, from the start).
-    links : list[int]
-        Each link's depth, one fewer than the units: 0 a wire, >= 1 a buffer.
+    links : list[dict]
+        Each link an edge: from and to (the producer's and the consumer's
+        names), to_input (the consumer's input it feeds, an index in its
+        inputs) and depth (0 a wire, >= 1 a buffer). A chain until tier A.
     csr_base : int
         Number of its group's first CSR, for the trace.
 
@@ -54,7 +55,7 @@ class SnaxGroup(gvsoc.systree.Component):
 
         self.add_properties({
             'units': [dict(u) for u in units],
-            'links': list(links),
+            'links': [dict(x) for x in links],
             'csr_base': csr_base,
         })
 

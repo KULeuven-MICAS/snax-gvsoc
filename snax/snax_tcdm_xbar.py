@@ -92,8 +92,7 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
             'nb_inputs': nb_inputs,
             'nb_banks': nb_banks,
             'bank_width': bank_width,
-            'input_names': list(input_names) if input_names is not None
-                else [f'in_{i}' for i in range(0, nb_inputs)],
+            'input_names': self.input_names,
             'holds': [bool(hold) for hold in holds or []],
             'sparse_config': [list(port) for port in sparse_config],
             'superbank_banks': superbank_banks,

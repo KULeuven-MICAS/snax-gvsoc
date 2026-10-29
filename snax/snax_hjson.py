@@ -29,7 +29,7 @@ dma_axi_req_fifo_depth as its bursts in flight), dram, and the SNAX
 crossbar's sparse interconnect (each slot's sparse_interconnect_config;
 tcdm.sparse_interconnect false is an error: the plain interconnect is not
 modelled). Each core's accelerator slot gets the standard
-composite (snax_unit_acc.py) from its accelerator.json (snax_datapath_cfg); a
+composite (snax_accelerator.py) from its accelerator.json (snax_datapath_cfg); a
 slot without one is an error.
 
 Not in the hjson, so constants here, calibrated to snax_cluster's RTL: the
@@ -53,7 +53,7 @@ from pulp.snitch.snitch_cluster.snitch_cluster import ClusterArch
 from pulp.chips.snitch.snitch import Snitch
 import snax_cfg
 from snax_cfg import CfgTargetError
-from snax_unit_acc import SnaxUnitAcc, compile_components
+from snax_accelerator import SnaxAccelerator, compile_components
 
 # GVSoC reads a target twice: `make build` lists its components through gapy
 # without USE_GVRUN, and gvrun runs it with USE_GVRUN set. Each pulp module
@@ -118,7 +118,7 @@ def accelerator(cfg, slot):
     if slot.accelerator is None:
         raise CfgTargetError(cfg.path, f'{slot.at}.snax_datapath_cfg',
             f'missing: {slot.name!r} has no accelerator.json, which the model builds a slot from')
-    return SnaxUnitAcc.for_slot(slot, cfg.tcdm.size, cfg.path)
+    return SnaxAccelerator.for_slot(slot, cfg.tcdm.size, cfg.path)
 
 
 def _one(cfg, values: dict, what: str):

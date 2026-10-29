@@ -7,7 +7,7 @@
 """The standard composite of an accelerator slot with an accelerator.json: the
 CSR mux, the streamer, and per group one SnaxShell and one SnaxGroup.
 
-    SnaxUnitAcc.for_slot(slot, tcdm_size, file) -> class
+    SnaxAccelerator.for_slot(slot, tcdm_size, file) -> class
 
 The slot (snax_cfg.AccSlot) gives the streamer template and the accelerator
 (snax_cfg.Accelerator), the cluster its TCDM size. Each entry of the
@@ -18,7 +18,7 @@ index, each entry of its outputs the writer of its index; a port on a link
 CSRs: the streamer's from SNAX_CSR_FIRST (nb_csrs of its template); then the
 accelerator's, at the offsets accelerator.json gives: each group's window
 (START, JOBS, its units' R/W CSRs, STATUS, COUNTER) to its shell. The last
-must be at most SNAX_ACC_CSR_LAST (snax_acc.py).
+must be at most SNAX_ACC_CSR_LAST.
 
 Names (component_names): with one group of one unit, the shell is `shell` and
 the group `unit` (snax_acc<i>/unit, the trace path snax-forge's manifests
@@ -26,20 +26,31 @@ name); with several groups of one unit each, `shell_<group>` and
 `unit_<unit>`; a linked group (several units) is `group_<group>`, its shell
 `shell_<group>`.
 
-Each SnaxGroup gets its units as a chain, head first (group_units): per unit
+Each SnaxGroup gets its units in the group's order (group_units): per unit
 its datapath, its inputs in BRM port order (an outer one named
-`<unit>_<port>`, the linked one ""), its output (outer, the last unit's), its
+`<unit>_<port>`, a linked one ""), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
-JOB_BEATS, else 1; and each link's depth.
+JOB_BEATS, else 1; and its links as edges, each {from, to, to_input, depth}:
+the producer's and the consumer's names and the consumer's input it feeds,
+its index in that unit's inputs.
 """
 
 import gvsoc.systree
 import interco.router as router
-from snax_acc import SNAX_ACC_CSR_LAST, SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
-from snax_cfg import DTYPES, CfgTargetError
+from snax_cfg import CATALOGUE, DTYPES, CfgTargetError, dirs_of, streamer_channels
 from snax_group import SnaxGroup
 from snax_shell import SnaxShell
-from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
+from snax_streamer import SnaxStreamer, nb_csrs, tcdm_port_names
+
+# The first SNAX CSR (CSR_SNAX_BEGIN, 960) and the last one the core sends
+# out (1535). The core puts CSR n at byte address 4 * n on its snax_csr port.
+SNAX_CSR_FIRST = 0x3C0
+SNAX_CSR_LAST = 0x5FF
+# The last CSR an accelerator may use: snax_cluster's hw/snitch/src/csr_snax_def.sv reserves
+# 0x5FE (CSR_SNAX_READ_TASK_READY_QUEUE) and 0x5FF (CSR_SNAX_WRITE_TASK_DONE_QUEUE), which
+# hw/snax_util/src/snax_intf_translator.sv routes to the cluster's top-level CSR port, not
+# to the accelerator
+SNAX_ACC_CSR_LAST = 0x5FD
 
 
 def compile_components():
@@ -62,27 +73,21 @@ def component_names(accelerator) -> tuple:
     return shells, comps
 
 
-def port_dirs(accelerator, unit) -> dict:
-    """Each BRM port of unit's: its dir, as accelerator.json gives it, else from inputs and
-    outputs (a file before dir)."""
-    outs = {p for _, p in accelerator.ports_of(unit.name, accelerator.outputs)}
-    return {name: port.dir or ('out' if name in outs else 'in') for name, port in unit.ports.items()}
-
-
 def group_units(accelerator, group) -> tuple:
     """SnaxGroup's units and links properties for group (module doc)."""
     to = {link.to: link for link in group.links}
     frm = {link.from_: link for link in group.links}
-    units = []
-    for k, u in enumerate(group.units):
-        dirs = port_dirs(accelerator, u)
-        ins = [p for p in u.ports if dirs[p] == 'in']
+    units, ins_of = [], {}
+    for u in group.units:
+        dirs = dirs_of(u)
+        ins = ins_of[u.name] = [p for p in u.ports if dirs[p] == 'in']
         (out,) = [p for p in u.ports if dirs[p] == 'out']
         in_ports = [u.ports[p] for p in ins]
         out_port = u.ports[out]
-        op_width, op_signed = DTYPES[u.op_type] if u.op_type else (out_port.width, out_port.signed)
-        fold = any(c.name == 'JOB_BEATS' for c in u.csrs)
-        t = u.params['T'] if 'T' in u.params else 0 if fold else 1
+        facts = CATALOGUE[u.datapath]
+        op_width, op_signed = (DTYPES[u.op_type] if facts.typed
+                               else (out_port.width, out_port.signed))
+        t = u.params['T'] if 'T' in u.params else 0 if facts.is_fold(u.params) else 1
         units.append({
             'name': u.name, 'datapath': u.datapath,
             'inputs': ['' if f'{u.name}.{p}' in to else f'{u.name}_{p}' for p in ins],
@@ -96,23 +101,37 @@ def group_units(accelerator, group) -> tuple:
             'reg_out': bool(u.params.get('regOut', False)),
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
         })
-    depths = []
-    for k in range(len(group.units) - 1):
-        a, b = group.units[k].name, group.units[k + 1].name
-        (link,) = [x for x in group.links if x.from_.split('.')[0] == a and x.to.split('.')[0] == b]
-        depths.append(link.depth)
-    return units, depths
+    links = []
+    for x in group.links:
+        src, dst = x.from_.split('.', 1)[0], x.to.split('.', 1)
+        links.append({'from': src, 'to': dst[0], 'to_input': ins_of[dst[0]].index(dst[1]),
+                      'depth': x.depth})
+    return units, links
 
 
-class SnaxUnitAcc(SnaxAcc):
-    """The CSR mux, the streamer, the shells and groups of one slot, ports as SnaxAcc's;
-    for_slot gives the slot's class."""
+class SnaxAccelerator(gvsoc.systree.Component):
+    """The CSR mux, the streamer, the shells and groups of one slot, bound to a core's
+    snax_csr port, its streamer's channels leaving it as its TCDM ports; for_slot gives the
+    slot's class.
 
-    # Set by for_slot: the streamer template, the accelerator, the TCDM size, and
-    # SnaxAcc's nb_tcdm_ports and tcdm_port_names
+    Ports
+    -----
+    input : io slave
+        The compute core's CSR accesses, a 32-bit request at 4 * CSR number.
+    tcdm_<i> : io master
+        The streamer's TCDM ports (nb_tcdm_ports of them).
+    tcdm_prio_<i> : wire<bool> master
+        The priority bit of each TCDM port's request.
+    """
+
+    # Set by for_slot: the streamer template, the accelerator, the TCDM size, and the TCDM
+    # ports the cluster binds (snax_tcdm_ports in the hjson), named in the crossbar's trace by
+    # their owner
     template = None
     accelerator = None
     tcdm_size = None
+    nb_tcdm_ports = 0
+    tcdm_port_names = []
 
     @classmethod
     def for_slot(cls, slot, tcdm_size: int, file='?'):
@@ -124,11 +143,11 @@ class SnaxUnitAcc(SnaxAcc):
             raise CfgTargetError(file, slot.at,
                 f"the accelerator's last CSR {last} is past {SNAX_ACC_CSR_LAST}, the last an "
                 "accelerator may use")
-        return type(f'SnaxUnitAcc_{slot.name}', (cls,), {
+        return type(f'SnaxAccelerator_{slot.name}', (cls,), {
             'template': slot.streamer,
             'accelerator': accelerator,
             'tcdm_size': tcdm_size,
-            'nb_tcdm_ports': nb_tcdm_ports(slot.streamer),
+            'nb_tcdm_ports': streamer_channels(slot.streamer),
             'tcdm_port_names': ['streamer.' + name for name in tcdm_port_names(slot.streamer)],
         })
 
@@ -173,3 +192,27 @@ class SnaxUnitAcc(SnaxAcc):
             owner[unit].o_PORT(f'{unit}_{port}', streamer.i_WRITER(j))
 
         self.bind_ports(csr_mux, streamer)
+
+    def bind_ports(self, csr_mux, streamer):
+        """The composite's input into csr_mux, and the streamer's TCDM ports out as its own."""
+        self.bind(self, 'input', csr_mux, 'input')
+
+        for port in range(0, self.nb_tcdm_ports):
+            streamer.o_TCDM(port, self.i_TCDM_INTERNAL(port))
+            streamer.o_TCDM_PRIORITY(port, self.i_TCDM_PRIORITY_INTERNAL(port))
+
+    def i_INPUT(self) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, 'input', signature='io')
+
+    def i_TCDM_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
+        # Inside the composite: the streamer's port i leaves as tcdm_<i>
+        return gvsoc.systree.SlaveItf(self, f'tcdm_{port}', signature='io')
+
+    def o_TCDM(self, port: int, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind(f'tcdm_{port}', itf, signature='io')
+
+    def i_TCDM_PRIORITY_INTERNAL(self, port: int) -> gvsoc.systree.SlaveItf:
+        return gvsoc.systree.SlaveItf(self, f'tcdm_prio_{port}', signature='wire<bool>')
+
+    def o_TCDM_PRIORITY(self, port: int, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind(f'tcdm_prio_{port}', itf, signature='wire<bool>')

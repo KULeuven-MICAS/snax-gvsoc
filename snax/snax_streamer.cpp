@@ -56,7 +56,7 @@
 // during a cycle is the RTL queue's: the words visible by then and not popped
 // before it.
 //
-// Per mover, the cycles of each run are classed as SNAX-MODEL classed them:
+// Per mover, the cycles of each run are classed in D59's order:
 // busy (a channel granted) > stall_xbar (requested, none granted) >
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
 // them with the highest queue count per lane when the streamer is done. The
@@ -100,6 +100,8 @@
 #include <vp/itf/io.hpp>
 #include "snax_csr_block.hpp"
 #include "snax_events.hpp"
+#include "snax_props.hpp"
+#include "snax_run_span.hpp"
 
 
 // A beat word in a lane's queue, and the first cycle it can leave
@@ -241,9 +243,7 @@ private:
     std::vector<Mover *> readers;
     std::vector<Mover *> writers;
 
-    bool started;               // a start was taken since reset
-    int64_t start_cycle;        // s
-    int64_t end_cycle;          // e, -1 while not known
+    SnaxRunSpan span;           // s, and e (-1 while not known)
     uint32_t counter_before;    // the counter's value up to s + 1
     int64_t stepped_cycle;      // the last cycle the requests were sent
     int64_t classed_cycle;      // the last cycle classed
@@ -263,25 +263,31 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     this->ev.declare(this);
 
     js::Config *cfg = this->get_js_config();
-    int addr_bits = cfg->get_child_int("addr_bits");
+    SnaxProps props(&this->trace);
+    int addr_bits = props.int_prop(cfg, "addr_bits", "");
     this->addr_mask = (uint32_t)((1ULL << addr_bits) - 1);
 
     int csr = 0;
     int nb_channels = 0;
-    for (auto m : cfg->get("movers")->get_elems())
+    std::vector<js::Config *> movers = props.list_prop(cfg, "movers", "");
+    for (size_t i = 0; i < movers.size(); i++)
     {
+        js::Config *m = movers[i];
+        std::string w = "movers[" + std::to_string(i) + "]";
         Mover mover = {};
-        mover.name = m->get_child_str("name");
-        mover.is_reader = m->get_child_bool("is_reader");
-        for (auto b : m->get("spatial_bounds")->get_elems())
+        mover.name = props.str_prop(m, "name", w);
+        mover.is_reader = props.bool_prop(m, "is_reader", w);
+        std::vector<js::Config *> bounds = props.list_prop(m, "spatial_bounds", w);
+        for (size_t j = 0; j < bounds.size(); j++)
         {
-            mover.spatial_bounds.push_back(b->get_int());
+            mover.spatial_bounds.push_back(props.as_int(bounds[j],
+                w + ".spatial_bounds[" + std::to_string(j) + "]"));
         }
-        mover.temporal_dim = m->get_child_int("temporal_dim");
-        mover.num_channel = m->get_child_int("num_channel");
-        mover.fifo_depth = m->get_child_int("fifo_depth");
-        mover.dynamic_priority = m->get_child_bool("dynamic_priority");
-        mover.higher_static_priority = m->get_child_bool("higher_static_priority");
+        mover.temporal_dim = props.int_prop(m, "temporal_dim", w);
+        mover.num_channel = props.int_prop(m, "num_channel", w);
+        mover.fifo_depth = props.int_prop(m, "fifo_depth", w);
+        mover.dynamic_priority = props.bool_prop(m, "dynamic_priority", w);
+        mover.higher_static_priority = props.bool_prop(m, "higher_static_priority", w);
         mover.csr_first = csr;
         mover.first_channel = nb_channels;
         // Pointer low and high, spatial strides, temporal bounds and strides
@@ -291,7 +297,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     }
     // The start CSR
     this->nb_rw = csr + 1;
-    this->csrs.configure(&this->trace, cfg->get_child_int("csr_base"), this->nb_rw, 2);
+    this->csrs.configure(&this->trace, props.int_prop(cfg, "csr_base", ""), this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxStreamer::csr_req);
     this->new_slave_port("input", &this->csr_itf);
@@ -373,9 +379,7 @@ void SnaxStreamer::reset(bool active)
                 ch.free_reqs.push_back(i);
             }
         }
-        this->started = false;
-        this->start_cycle = 0;
-        this->end_cycle = -1;
+        this->span.reset();
         this->counter_before = 0;
         this->stepped_cycle = -1;
         this->classed_cycle = -1;
@@ -387,24 +391,23 @@ void SnaxStreamer::reset(bool active)
 // Busy from s + 1 to e (cstate in Streamer.scala)
 bool SnaxStreamer::busy_at(int64_t cycle)
 {
-    return this->started && cycle >= this->start_cycle + 1 &&
-        (this->end_cycle == -1 || cycle <= this->end_cycle);
+    return this->span.busy(cycle);
 }
 
 
 // Reset at the end of s + 1, then one more at the end of each busy cycle
 uint32_t SnaxStreamer::counter_at(int64_t cycle)
 {
-    if (!this->started || cycle <= this->start_cycle + 1)
+    if (!this->span.started || cycle <= this->span.start_cycle + 1)
     {
         return this->counter_before;
     }
     int64_t last = cycle - 1;
-    if (this->end_cycle != -1 && this->end_cycle < last)
+    if (this->span.end_cycle != -1 && this->span.end_cycle < last)
     {
-        last = this->end_cycle;
+        last = this->span.end_cycle;
     }
-    return (uint32_t)(last - this->start_cycle - 1);
+    return (uint32_t)(last - this->span.start_cycle - 1);
 }
 
 
@@ -466,7 +469,7 @@ bool SnaxStreamer::can_request(Channel &ch, int64_t cycle)
 // The streamer's next step: in this cycle (a pop returned credit) or the next
 void SnaxStreamer::wake(int64_t delay)
 {
-    if (this->end_cycle != -1 || !this->started)
+    if (this->span.end_cycle != -1 || !this->span.started)
     {
         return;
     }
@@ -635,9 +638,7 @@ void SnaxStreamer::start(int64_t cycle)
 
     this->counter_before = this->counter_at(cycle);
     this->runs++;
-    this->started = true;
-    this->start_cycle = cycle;
-    this->end_cycle = -1;
+    this->span.start(cycle);
     // Cycles are classed from s + 1
     this->classed_cycle = cycle;
 
@@ -662,16 +663,16 @@ void SnaxStreamer::end_run(int64_t cycle)
     {
         this->mover_done(mover, cycle);
     }
-    this->end_cycle = cycle + 1;
-    this->sigs.set_from(this->sig_busy, 0, this->end_cycle + 1);
+    this->span.end(cycle + 1);
+    this->sigs.set_from(this->sig_busy, 0, this->span.end_cycle + 1);
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Done: busy up to cycle %ld, counter %d\n",
-        this->end_cycle, this->counter_at(this->end_cycle + 1));
+        this->span.end_cycle, this->counter_at(this->span.end_cycle + 1));
     for (Mover &mover : this->movers)
     {
         this->classify(mover, IDLE, this->classed_cycle + 1,
-            this->end_cycle - this->classed_cycle);
+            this->span.end_cycle - this->classed_cycle);
     }
-    this->classed_cycle = this->end_cycle;
+    this->classed_cycle = this->span.end_cycle;
     this->summary_event.enqueue(1);
 }
 
@@ -698,12 +699,8 @@ void SnaxStreamer::classify(Mover &mover, CycleClass cls, int64_t first, int64_t
         return;
     }
     mover.classes[cls] += cycles;
-    if (cls != mover.line_class)
-    {
-        mover.line_class = cls;
-        this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld class mover=%s mode=%s\n", (long)first,
-            mover.name.c_str(), class_names[cls]);
-    }
+    snax_class_line(this->ev.beats, &mover.line_class, cls, class_names[cls], first,
+        mover.name.c_str());
 }
 
 
@@ -719,6 +716,10 @@ void SnaxStreamer::summary_handler(vp::Block *__this, vp::ClockEvent *event)
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
             _this->count_flush(_this->channel(mover, lane));
+        }
+        if (!_this->trace.get_active() && !_this->ev.summary.get_active())
+        {
+            continue;
         }
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
@@ -882,7 +883,7 @@ void SnaxStreamer::step_handler(vp::Block *__this, vp::ClockEvent *event)
     SnaxStreamer *_this = (SnaxStreamer *)__this;
     int64_t cycle = _this->clock.get_cycles();
 
-    if (_this->stepped_cycle == cycle || _this->end_cycle != -1)
+    if (_this->stepped_cycle == cycle || _this->span.end_cycle != -1)
     {
         return;
     }

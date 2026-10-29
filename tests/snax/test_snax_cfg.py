@@ -294,7 +294,7 @@ def acc_json(acc: Accelerator) -> dict:
 
     def unit(u):
         d = {"name": u.name, "brm": u.brm, "datapath": u.datapath,
-             "ports": {k: {"port": p.port, **({"dir": p.dir} if p.dir else {}),
+             "ports": {k: {"port": p.port, "dir": p.dir,
                            "dtype": p.dtype, "lanes": p.lanes}
                        for k, p in u.ports.items()}}
         if u.op_type is not None:
@@ -503,6 +503,13 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "units[0].params.op", "not an op")
         del self.unit()["params"]["op"]
         self.fails(snax_cfg.CfgKeyError, "units[0].params.op", "needs an op")
+
+    def test_port_dir(self):
+        del self.unit()["ports"]["a"]["dir"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].ports.a.dir")
+        self.acc = acc_json(VECADD)
+        self.unit()["ports"]["a"]["dir"] = "inout"
+        self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.dir", "must be in or out")
 
     def test_unit_csrs(self):
         """ElementwiseLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not

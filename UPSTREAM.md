@@ -91,3 +91,5 @@ Every upstream file we edit gets one comment line near its top, `Modified for SN
 | `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | FLOW3's `beats` trace: a `burst` line per request to AXI (its copy, address and size as it leaves, written when its data is back or it is acknowledged) | FLOW3 2a step 2 |
 | `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | The busy wire as the VCD signal `dma_busy` | FLOW3 2a step 4 |
 | `pulp/pulp/idma/snitch_dma.py` | `SnitchDma.gen_gtkw` lists `fe/dma_busy` under the tag `snax` | FLOW3 2a step 4 |
+| `pulp/pulp/idma/idma.hpp` | A comment line: the `IDMA_SNAX_*` constants are kept equal to `snax/snax_events.hpp`'s by hand | CLN2 G1b |
+| `Makefile` | `FAST=1` passes `-DBUILD_ASSERT=OFF` to the build (no asserts flavour; `ON` otherwise); `regress` passes `J` as `-j` | CLN2 G1b |

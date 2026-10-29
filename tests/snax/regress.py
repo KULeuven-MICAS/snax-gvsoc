@@ -67,7 +67,10 @@ program's output written there can cut a trace line in two); a failure
 prints the file it read and its last lines. Under GitHub Actions
 (GITHUB_ACTIONS=true) each failure also prints an `::error` line, an
 annotation on the run naming the program, why and its log. `-k SUBSTRING`
-runs only the programs whose name holds it.
+runs only the programs whose name holds it. `-j N` runs N programs at a time
+(default: the CPU count), each in its own work directory, while the builds
+stay one after another; the output is printed in the order of a run with
+`-j 1`.
 
 Needs GVSoC built for the Makefile's SNAX_TARGETS
 (`make build TARGETS='$(SNAX_TARGETS)'`). Exit code 0 when every program
@@ -80,6 +83,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import classes
@@ -232,60 +236,79 @@ def make(path, *args):
 
 
 class Check:
-    """Runs the programs whose name holds only (all when None) and collects
-    the ones that did not exit 0."""
+    """Runs the programs whose name holds only (all when None), jobs at a time, and collects
+    the ones that did not exit 0. A section is a title and the runs submitted under it; the
+    runs go to a thread pool as they are submitted (each in its own work directory), and
+    report() prints each section, its failures and its count in submission order, as a
+    sequential run would."""
 
-    def __init__(self, only=None):
+    def __init__(self, only=None, jobs=1):
         self.only = only
-        self.count = 0
+        self.pool = ThreadPoolExecutor(max_workers=jobs)
+        self.sections = []
         self.failed = []
 
     def selected(self, name):
         return self.only is None or self.only in name
 
+    def section(self, title):
+        self.sections.append((title, []))
+
+    def submit(self, task, *args, counted=True):
+        """task(*args) in the pool, returning its failures [(name, why, log)]."""
+        self.sections[-1][1].append((counted, self.pool.submit(task, *args)))
+
     def run(self, name, target, elf, work=None, options=()):
-        """Runs one program; returns its log when it exited 0, else None."""
-        if not self.selected(name):
-            return None
-        self.count += 1
+        """Runs one program, if selected."""
+        if self.selected(name):
+            self.submit(self._run, name, target, elf, work, options)
+
+    def _run(self, name, target, elf, work, options):
+        return self._gvrun(name, target, elf, work, options)[1]
+
+    def _gvrun(self, name, target, elf, work, options):
+        """One program: (its log when it exited 0, else None; its failures)."""
         log = WORK / (work or name) / "run.log"
         code = gvrun(target, elf, log.parent, log, options)
         if code == 0:
-            return log
+            return log, []
         why = f"did not finish within {TIMEOUT} s" if code is None else f"exit {code}"
-        self.fail(name, why, log)
-        return None
+        return None, [(name, why, log)]
 
     def run_fixture(self, name, design, app, elf, make_args, counters):
-        """Builds app (make_args) and runs elf on FORGE_TARGET with forge/<design>/'s
+        """Builds app (make_args), then runs elf on FORGE_TARGET with forge/<design>/'s
         cluster file, each unit's UNIT_TRACES (below its tasks' trace paths) and
         CLASS_TRACES on, into trace.log beside the run's log; then check_traces() with
         counters(log, trace.log parsed, manifest), its counter check."""
         if not self.selected(name):
             return
         manifest = json.loads((FORGE_DIR / design / "manifest.json").read_text())
-        units = list(dict.fromkeys(task_traces(manifest))) or [manifest["trace"]]
         make(APPS / app, *make_args)
+        self.submit(self._run_fixture, name, design, elf, manifest, counters)
+
+    def _run_fixture(self, name, design, elf, manifest, counters):
+        units = list(dict.fromkeys(task_traces(manifest))) or [manifest["trace"]]
         traces = WORK / name / "trace.log"
-        log = self.run(name, FORGE_TARGET, elf,
-                       options=["--param", f"hjson={cluster_file(design)}",
-                                *(f"--trace={t}:{traces}"
-                                  for t in (*(f"{p}/{u}$" for p in units for u in UNIT_TRACES),
-                                            *CLASS_TRACES))])
+        log, failed = self._gvrun(name, FORGE_TARGET, elf, None,
+                                  ["--param", f"hjson={cluster_file(design)}",
+                                   *(f"--trace={t}:{traces}"
+                                     for t in (*(f"{p}/{u}$" for p in units for u in UNIT_TRACES),
+                                               *CLASS_TRACES))])
         if log is not None:
             # The traces in their own file: GVSoC buffers its stdout, so the
             # program's output there could cut a trace line in two
             why, where = check_traces(log, traces,
                                       lambda text, runs: counters(text, runs, manifest))
             if why is not None:
-                self.fail(name, why, where)
+                failed.append((name, why, where))
+        return failed
 
     def run_script(self, name, script):
-        """Runs a test script, its output into the log; it passes when it
-        exits 0."""
-        if not self.selected(name):
-            return
-        self.count += 1
+        """Runs a test script, its output into the log; it passes when it exits 0."""
+        if self.selected(name):
+            self.submit(self._run_script, name, script)
+
+    def _run_script(self, name, script):
         log = WORK / name / "run.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -293,12 +316,24 @@ class Check:
                 p = subprocess.run([str(script)], cwd=ROOT, stdout=out,
                                    stderr=subprocess.STDOUT, timeout=TIMEOUT)
         except subprocess.TimeoutExpired:
-            self.fail(name, f"did not finish within {TIMEOUT} s", log)
-            return
-        if p.returncode != 0:
-            self.fail(name, f"exit {p.returncode}", log)
+            return [(name, f"did not finish within {TIMEOUT} s", log)]
+        return [(name, f"exit {p.returncode}", log)] if p.returncode != 0 else []
 
     def fail(self, name, why, log=None):
+        """A failure found without a run (not counted)."""
+        self.submit(lambda: [(name, why, log)], counted=False)
+
+    def report(self):
+        """Each section in order: its title, its runs' failures, its count."""
+        for title, runs in self.sections:
+            print(title)
+            for _, future in runs:
+                for name, why, log in future.result():
+                    self.print_failure(name, why, log)
+            print(f"  {sum(counted for counted, _ in runs)} run")
+        self.pool.shutdown()
+
+    def print_failure(self, name, why, log):
         self.failed.append(name)
         print(f"  FAIL {name}: {why}")
         if ACTIONS:
@@ -314,31 +349,23 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("-k", metavar="SUBSTRING", dest="only",
                    help="run only the programs whose name holds SUBSTRING")
-    check = Check(p.parse_args().only)
+    p.add_argument("-j", metavar="N", dest="jobs", type=int, default=os.cpu_count(),
+                   help="programs run at a time (default: the CPU count)")
+    args = p.parse_args()
+    check = Check(args.only, max(1, args.jobs))
 
-    print("The rule of one unit (tests/snax/unit)")
+    check.section("The rule of one unit (tests/snax/unit)")
     check.run_script("unit", HERE / "unit" / "run.sh")
-    print(f"  {check.count} run")
-
-    count = check.count
-    print("SnaxShell's rule (tests/snax/shell)")
+    check.section("SnaxShell's rule (tests/snax/shell)")
     check.run_script("shell", HERE / "shell" / "run.sh")
-    print(f"  {check.count - count} run")
-
-    count = check.count
-    print("The datapath classes (tests/snax/datapath)")
+    check.section("The datapath classes (tests/snax/datapath)")
     check.run_script("datapath", HERE / "datapath" / "run.sh")
-    print(f"  {check.count - count} run")
-
-    count = check.count
-    print("SnaxGroupRule's cases (tests/snax/group)")
+    check.section("SnaxGroupRule's cases (tests/snax/group)")
     check.run_script("group", HERE / "group" / "run.sh")
-    print(f"  {check.count - count} run")
 
     make(SW)
 
-    count = check.count
-    print(f"cluster tests on {FORGE_TARGET}, forge/{CLUSTER_DESIGN}/'s cluster file")
+    check.section(f"cluster tests on {FORGE_TARGET}, forge/{CLUSTER_DESIGN}/'s cluster file")
     hjson = ["--param", f"hjson={cluster_file(CLUSTER_DESIGN)}"]
     programs = [(prog, [prog]) for prog in CLUSTER_TESTS]
     programs += [(prog, [f"{prog}-{case}" for case in cases]) for prog, cases in CASES]
@@ -348,28 +375,22 @@ def main():
         for name in names:
             check.run(f"{name}.{FORGE_TARGET}", FORGE_TARGET,
                       BUILD / "apps" / prog / f"{name}.elf", options=hjson)
-    print(f"  {check.count - count} run")
 
-    count = check.count
     prog, name = "snax-shell", f"snax-shell.{FORGE_TARGET}"
-    print(f"{prog} on {FORGE_TARGET}, forge/{SHELL_DESIGN}/'s cluster file")
+    check.section(f"{prog} on {FORGE_TARGET}, forge/{SHELL_DESIGN}/'s cluster file")
     check.run_fixture(name, SHELL_DESIGN, prog, BUILD / "apps" / prog / f"{prog}.elf", [],
                       lambda log, parsed, _: check_counter(prog, log, parsed, SHELL_BEATS))
-    print(f"  {check.count - count} run")
 
-    count = check.count
     designs = sorted(d.name for d in FORGE_DIR.iterdir() if (d / "manifest.json").is_file())
     names = [f"{FORGE_APP}.{d}" for d in designs]
-    print(f"forge/'s accelerators: {', '.join(names)}")
+    check.section(f"forge/'s accelerators: {', '.join(names)}")
     for design in designs:
         check.run_fixture(f"{FORGE_APP}.{design}", design, FORGE_APP,
                           BUILD / "apps" / FORGE_APP / design / f"{FORGE_APP}.elf",
                           [f"DESIGN={design}"],
                           check_counters)
-    print(f"  {check.count - count} run")
 
-    print(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")
-    count = check.count
+    check.section(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")
     for test in PLAIN_TESTS:
         elf = PLAIN_DIR / f"{test}.elf"
         name = f"plain {test}"
@@ -378,8 +399,8 @@ def main():
                 check.fail(name, f"{elf.relative_to(ROOT)} missing")
             continue
         check.run(name, "snitch", elf, f"plain/{test}")
-    print(f"  {check.count - count} run")
 
+    check.report()
     if check.failed:
         print(f"regression FAILED: {len(check.failed)} program(s): {', '.join(check.failed)}")
         return 1

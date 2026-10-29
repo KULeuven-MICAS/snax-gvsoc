@@ -31,6 +31,8 @@ GVSoC for the targets the programs run on, the Makefile's `SNAX_TARGETS` (`snitc
     -- Up-to-date: $ROOT/snax-gvsoc/install/python/./requirements.txt
     -- Up-to-date: $ROOT/snax-gvsoc/install/python/./.gitignore
 
+`FAST=1` (`make build TARGETS='$(SNAX_TARGETS)' FAST=1`) skips the models' asserts flavour, which only `gvrun --asserts` runs: about 15% less build time; a plain run, `--trace` and `--vcd` work as before.
+
 `source sourceme.sh` puts the install's `gvrun` on `PATH`; every new container needs it again. It prints nothing.
 
     source sourceme.sh
@@ -211,7 +213,7 @@ Each run's output is in `build/regress/work/<name>/run.log`, beside its `gvsoc_c
 
 ## 7. The unit tests
 
-`snax_cfg.py`'s reader, the class lines, and the composite's CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after `make build`; skipped without it), with the image's Python:
+`snax_cfg.py`'s reader, the class lines, and the composite's CSR check (`snax_accelerator.py`, which imports GVSoC from `install/`, so after `make build`; skipped without it), with the image's Python:
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
@@ -221,30 +223,23 @@ Each run's output is in `build/regress/work/<name>/run.log`, beside its `gvsoc_c
 
     OK
 
-The rule of one unit (`SnaxGroupRule`'s one-unit case, `SnaxUnitRule`) against its hand-worked cases, with g++ (the regression's `unit`; `shell`, `datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
+The rule of one unit (`SnaxGroupRule` with one unit and no links) against its hand-worked cases, with g++ (the regression's `unit`; `shell`, `datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
 
     tests/snax/unit/run.sh
 
-    PASS ops: 16 vectors
-    PASS tree: 8 vectors
-    PASS types: 6 vectors
-    PASS beats: 15 vectors
     PASS empty_run: 8 cycles, 1 run(s)
     PASS fold_jobs: 9 cycles, 1 run(s), data
-    PASS lockstep_count_zero: 6 cycles, 1 run(s)
     PASS lockstep_input_missing: 8 cycles, 1 run(s)
     PASS lockstep_no_stalls: 9 cycles, 2 run(s)
     PASS lockstep_out_not_ready: 9 cycles, 1 run(s)
     PASS pipelined_ii2: 10 cycles, 1 run(s)
     PASS pipelined_l2_backpressure: 12 cycles, 1 run(s)
     PASS pipelined_rate_backpressure: 15 cycles, 1 run(s)
-    PASS pipelined_rate_count_zero: 9 cycles, 1 run(s)
     PASS pipelined_rate_one: 7 cycles, 1 run(s)
     PASS pipelined_rate_t4: 17 cycles, 2 run(s)
-    PASS pipelined_rate_zero: 7 cycles, 1 run(s)
     PASS pipelined_tree_t4: 18 cycles, 2 run(s)
     PASS pipelined_tree_tn: 13 cycles, 1 run(s)
-    19 passed, 0 failed
+    12 passed, 0 failed
 
 `SnaxShell`'s rule (`snax/snax_shell.hpp`) stepped with the unit's against its hand-worked cases, with g++ (the regression's `shell`, `tests/snax/shell/README.md`):
 

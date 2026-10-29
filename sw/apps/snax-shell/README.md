@@ -1,6 +1,6 @@
 # snax-shell
 
-`SnaxShell` and `SnaxUnit` (an ElementwiseLanes add at L = 0, II 1, 4 lanes of 64 bit behind the streamer), driven by hand on `snax_hjson` with `forge/vecadd/snax_forge.hjson`: a DMA and streamer setup written out with the CSRs of `forge/vecadd/include/` (`streamer_csr_addr_map.h`, `acc_csr.h`; snax-forge C§17): `ACC_RW_START` 978, `ACC_RW_JOBS` 979, `ACC_RO_STATUS` 980 (bit 0 busy, bit 1 done), `ACC_RO_COUNTER` 981. `data.h` is `data/datagen.py` at 192 words, seed 0: the data snax_cluster's ALU `datagen.py` gives for an add. snax_cluster builds this accelerator from snax-forge's vecadd bundle, but this program has not been run on that RTL.
+`SnaxShell` and a `SnaxGroup` of one unit (an ElementwiseLanes add at L = 0, II 1, 4 lanes of 64 bit behind the streamer), driven by hand on `snax_hjson` with `forge/vecadd/snax_forge.hjson`: a DMA and streamer setup written out with the CSRs of `forge/vecadd/include/` (`streamer_csr_addr_map.h`, `acc_csr.h`; snax-forge C§17): `ACC_RW_START` 978, `ACC_RW_JOBS` 979, `ACC_RO_STATUS` 980 (bit 0 busy, bit 1 done), `ACC_RO_COUNTER` 981. `data.h` is `data/datagen.py` at 192 words, seed 0: the data snax_cluster's ALU `datagen.py` gives for an add. snax_cluster builds this accelerator from snax-forge's vecadd bundle, but this program has not been run on that RTL.
 
 One streamer run of 48 beats feeds three unit runs of 16 beats (`RUN_BEATS`). It checks only what does not depend on code layout, and returns the number of checks failed plus the data errors:
 

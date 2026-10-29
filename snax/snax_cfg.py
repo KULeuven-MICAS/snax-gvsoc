@@ -47,7 +47,7 @@ snax_num_ro_csr, snax_streamer_cfg (the streamer template, as the hjson has
 it) and snax_datapath_cfg (accelerator.json, optional; Accelerator).
 
 accelerator.json (snax-forge C§17), what the standard composite
-(snax_unit_acc.py) builds the slot's shells and units from:
+(snax_accelerator.py) builds the slot's shells and units from:
 
     name, design_point, tag   Accelerator.name (the header's <ACC>), ...
     inputs, outputs           the outer ports, "<unit>.<port>", in the
@@ -58,8 +58,7 @@ accelerator.json (snax-forge C§17), what the standard composite
                               snax_datapath.hpp's registry: ElementwiseLanes,
                               TreeAccumulate, Mac, SerialAccumulate), ports
                               (per BRM port: port, the datapath's; dir, in or
-                              out, optional before B1x; dtype, NumPy's name;
-                              lanes), opType (ElementwiseLanes and Mac),
+                              out; dtype, NumPy's name; lanes), opType (ElementwiseLanes and Mac),
                               params (op: ElementwiseLanes' and
                               TreeAccumulate's, add; accumulate, regOut: Mac's;
                               T: a fold's rate fixed at design time), timing
@@ -88,7 +87,7 @@ the codes snax-forge's reader gives; each outer port's words per beat
 one-lane output: 1), since SnaxGroup has no FIFO slicer; snax_num_rw_csr and
 snax_num_ro_csr are the file's R/W and R/O CSRs. An ElementwiseLanes unit's
 opType is its inputs' NumPy result type (snax_types.hpp's
-snax_unit_result_type: a signed type with uint64 has none), a Mac's that of a
+snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
 and b.
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
@@ -150,18 +149,47 @@ class CfgTargetError(SnaxCfgError):
 # refused
 MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
-# The unit datapaths SnaxGroup models: snax_datapath.hpp's registry but LinkBuffer, a link's
-# (snax-forge's catalogue, D147, D149)
-DATAPATHS = ('ElementwiseLanes', 'TreeAccumulate', 'Mac', 'SerialAccumulate')
-# The folds: a result every T firings, T a JOB_BEATS CSR or params.T
-FOLDS = ('TreeAccumulate', 'SerialAccumulate')
+
+
+@dataclass(frozen=True)
+class Datapath:
+    """A unit datapath's facts (snax-forge's catalogue, D147, D149), each from its params
+    (accelerator.json's unit params: accumulate, regOut) where it depends on them."""
+
+    nb_inputs: object           # params -> its input ports
+    is_fold: object             # params -> a result every T firings (a JOB_BEATS CSR or params.T)
+    latency: object             # params -> its latency
+    serial: bool = False        # span = lanes (it reads a beat's lanes one a cycle), else 1
+    reduces: bool = False       # its output is one lane, one 64-bit word (the lanes summed)
+    typed: bool = False         # it runs its op at an opType, its inputs' result type
+    needs_op: bool = False      # params.op is given
+    only_op: str = None         # the one op it computes
+
+
+def _accumulates(params: dict) -> bool:
+    return bool(params.get('accumulate', True))
+
+
+# The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
+# LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
+CATALOGUE = {
+    'ElementwiseLanes': Datapath(nb_inputs=lambda p: 2, is_fold=lambda p: False,
+                                 latency=lambda p: 0, typed=True, needs_op=True),
+    'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
+                               latency=lambda p: 1, reduces=True, needs_op=True, only_op='add'),
+    'Mac': Datapath(nb_inputs=lambda p: 2 if _accumulates(p) else 3, is_fold=_accumulates,
+                    latency=lambda p: int(_accumulates(p) or bool(p.get('regOut', False))),
+                    typed=True),
+    'SerialAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
+                                 latency=lambda p: 1, serial=True, reduces=True),
+}
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
 # read-only, last (C§17)
 GROUP_RW = ('START', 'JOBS')
 GROUP_RO = ('STATUS', 'COUNTER')
 # The unit CSRs modelled: a fold's JOB_BEATS
 UNIT_RW = ('JOB_BEATS',)
-# The op names (snax_types.hpp's snax_unit_op_names)
+# The op names (snax_types.hpp's snax_op_names)
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
 # The keys of the datapath block accelerator.json replaced: refused at their key
 OLD_DATAPATH_KEYS = ('unit', 'control', 'config', 'wait', 'fields')
@@ -323,12 +351,12 @@ class Csr:
 @dataclass(frozen=True)
 class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes and its
-    direction (in or out; None in a file before dir)."""
+    direction (in or out)."""
 
     port: str
     dtype: str
     lanes: int
-    dir: str = None
+    dir: str
 
     @property
     def width(self) -> int:
@@ -508,6 +536,43 @@ def spatial_mismatch(spatial_bounds: list, num_channel: int):
             'numChannel')
 
 
+# The keys of a mover group in the hjson's streamer template that the model
+# reads; any other key is refused by name. dynamicPriority (default true) and
+# higherStaticPriority (default false) are read as stream_param_gen.scala.tpl
+# reads them.
+MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth', 'dynamicPriority',
+    'higherStaticPriority']
+# The keys of the streamer template the model reads (MOVERS), or that do not change it
+TEMPLATE_KEYS = [*MOVERS, 'snax_library_name']
+
+
+def check_template(template: dict):
+    """Refuses a streamer template the model does not cover: a key it does not read, or a
+    mover whose spatial bounds do not multiply to its num_channel, as snax_cluster's
+    StreamerParam requires (spatial_mismatch). A RuntimeError naming it.
+
+    Parameters
+    ----------
+    template : dict
+        The streamer template, as the cluster hjson gives it (e.g.
+        snax_forge_streamer.hjson).
+    """
+    for key in template:
+        if key not in TEMPLATE_KEYS:
+            raise RuntimeError(f'Streamer template key not modelled: {key}')
+    for group in MOVERS:
+        for key in template.get(group, {}):
+            if key not in MOVER_KEYS:
+                raise RuntimeError(f'Streamer template key not modelled: {group}.{key}')
+    for group in MOVERS:
+        params = template.get(group, {})
+        for i, (bounds, channels) in enumerate(zip(params.get('spatial_bounds', []),
+                                                   params.get('num_channel', []))):
+            why = spatial_mismatch(list(bounds), channels)
+            if why is not None:
+                raise RuntimeError(f'{group}[{i}]: {why}')
+
+
 def streamer_channels(template: dict) -> int:
     """The streamer's TCDM ports: num_channel summed over its movers."""
     return sum(sum(template.get(mover, {}).get('num_channel', [])) for mover in MOVERS)
@@ -532,7 +597,7 @@ DTYPES = {type_name(w, s): (w, s) for w in (8, 16, 32, 64) for s in (True, False
 
 def result_type(a: tuple, b: tuple):
     """NumPy's result type of two integer types (width, signed), as snax_types.hpp's
-    snax_unit_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
+    snax_op_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
     if a[1] == b[1]:
         return max(a[0], b[0]), a[1]
     s, u = (a, b) if a[1] else (b, a)
@@ -567,31 +632,18 @@ def _port(node: _Node) -> Port:
     lanes = node.get('lanes', int)
     if lanes < 1:
         raise CfgTypeError(node.file, node.where('lanes'), f'{lanes}, must be 1 or more')
-    direction = node.get('dir', str, None)
-    if direction not in (None, 'in', 'out'):
+    direction = node.get('dir', str)
+    if direction not in ('in', 'out'):
         raise CfgTypeError(node.file, node.where('dir'), f'{direction!r}, must be in or out')
     return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction)
 
 
-def _is_fold(datapath: str, params: dict) -> bool:
-    """A unit that gives a result every T firings: a tree, a serial sum, an accumulating Mac."""
-    return datapath in FOLDS or (datapath == 'Mac' and params.get('accumulate', True))
-
-
-# Each datapath's latency and span from its params and lanes (snax-forge's catalogue)
-def _timing(datapath: str, params: dict, lanes: int) -> tuple:
-    if datapath == 'ElementwiseLanes':
-        return 0, 1
-    if datapath == 'Mac':
-        return int(bool(params.get('accumulate', True)) or bool(params.get('regOut', False))), 1
-    return 1, lanes if datapath == 'SerialAccumulate' else 1
-
-
 def _unit(node: _Node) -> Unit:
     datapath = node.get('datapath', str)
-    if datapath not in DATAPATHS:
+    if datapath not in CATALOGUE:
         raise CfgTargetError(node.file, node.where('datapath'),
-            f'{datapath!r}, not a datapath SnaxGroup models ({", ".join(DATAPATHS)})')
+            f'{datapath!r}, not a datapath SnaxGroup models ({", ".join(CATALOGUE)})')
+    facts = CATALOGUE[datapath]
     ports = node.node('ports')
     if not ports.value:
         raise CfgTypeError(node.file, node.where('ports'), 'no port')
@@ -605,22 +657,21 @@ def _unit(node: _Node) -> Unit:
     if span < 1:
         raise CfgTypeError(node.file, timing.where('span'), f'{span}, must be 1 or more')
     params = node.node('params')
-    takes_op = datapath in ('ElementwiseLanes', 'TreeAccumulate')
     op = params.get('op', str, None)
-    if takes_op and op is None:
+    if facts.needs_op and op is None:
         raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
     if op is not None and op not in OPS:
         raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)})')
-    if datapath == 'TreeAccumulate' and op != 'add':
+    if facts.only_op is not None and op != facts.only_op:
         raise CfgTargetError(node.file, params.where('op'),
-            f'{op!r}: TreeAccumulate adds; a fold of another op is not modelled')
+            f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
     for key in ('accumulate', 'regOut'):
         params.get(key, bool, None)
     t = params.get('T', int, None)
     if t is not None and t < 1:
         raise CfgTypeError(node.file, params.where('T'), f'{t}, must be 1 or more')
     op_type = node.get('opType', str, None)
-    typed = datapath in ('ElementwiseLanes', 'Mac')
+    typed = facts.typed
     if not typed and op_type is not None:
         raise CfgTypeError(node.file, node.where('opType'), f'a {datapath} unit has none')
     if typed and op_type is None:
@@ -633,13 +684,14 @@ def _unit(node: _Node) -> Unit:
         if c.name not in UNIT_RW or c.access != 'rw':
             raise CfgTargetError(node.file, f'{node.where("csrs")}[{i}]',
                 f'{c.name} ({c.access}): the unit CSRs modelled are {", ".join(UNIT_RW)} (rw)')
-    fold = _is_fold(datapath, params.value)
+    fold = facts.is_fold(params.value)
     if (fold and t is None) != ('JOB_BEATS' in [c.name for c in csrs]):
         raise CfgSlotError(node.file, node.where('csrs'),
             f'{[c.name for c in csrs]}: a fold without params.T has JOB_BEATS, any other unit '
             'none')
     unit_ports = {key: _port(ports.node(key)) for key in ports.value}
-    want = _timing(datapath, params.value, next(iter(unit_ports.values())).lanes)
+    lanes = next(iter(unit_ports.values())).lanes
+    want = (facts.latency(params.value), lanes if facts.serial else 1)
     if (latency, ii, span) != (*want[:1], 1, want[1]):
         raise CfgTargetError(node.file, node.where('timing'),
             f'gen.timing: latency {latency}, ii {ii}, span {span}; {datapath} here is latency '
@@ -722,11 +774,9 @@ def _accelerator(node: _Node) -> Accelerator:
     return acc
 
 
-def dirs_of(acc: Accelerator, unit: Unit) -> dict:
-    """Each BRM port of unit's: its dir, as accelerator.json gives it, else from inputs and
-    outputs (a file before dir)."""
-    outs = {p for _, p in acc.ports_of(unit.name, acc.outputs)}
-    return {name: port.dir or ('out' if name in outs else 'in') for name, port in unit.ports.items()}
+def dirs_of(unit: Unit) -> dict:
+    """Each BRM port of unit's: its dir."""
+    return {name: port.dir for name, port in unit.ports.items()}
 
 
 def _check_links(node: _Node, acc: Accelerator):
@@ -738,7 +788,7 @@ def _check_links(node: _Node, acc: Accelerator):
     linked = set()
     outer = {'in': [], 'out': []}
     for g in acc.groups:
-        ports = {f'{u.name}.{k}': (p, dirs_of(acc, u)[k]) for u in g.units
+        ports = {f'{u.name}.{k}': (p, dirs_of(u)[k]) for u in g.units
                  for k, p in u.ports.items()}
         parent = {u.name: u.name for u in g.units}
 
@@ -781,7 +831,7 @@ def _check_links(node: _Node, acc: Accelerator):
         hops = [(k.from_.split('.')[0], k.to.split('.')[0]) for k in g.links]
         chain = sorted(hops) == sorted(zip(names, names[1:]))
         for k, u in enumerate(g.units):
-            outer_out = [p for p, d in dirs_of(acc, u).items()
+            outer_out = [p for p, d in dirs_of(u).items()
                          if d == 'out' and f'{u.name}.{p}' not in linked]
             chain = chain and bool(outer_out) == (k == len(g.units) - 1)
         if not chain:
@@ -789,7 +839,7 @@ def _check_links(node: _Node, acc: Accelerator):
                 f"gen.chain: accelerator {acc.name}: group {g.name}'s links {hops} over its "
                 f'units {names}: a group is a chain until tier A (fork and join)')
         for u in g.units:
-            outer_in = [p for p, d in dirs_of(acc, u).items()
+            outer_in = [p for p, d in dirs_of(u).items()
                         if d == 'in' and f'{u.name}.{p}' not in linked]
             if u.span > 1 and outer_in:
                 raise CfgTargetError(node.file, node.where('inputs'),
@@ -799,16 +849,17 @@ def _check_links(node: _Node, acc: Accelerator):
 
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     """A unit's ports against its datapath: their number, lanes and types."""
-    dirs = dirs_of(acc, u)
+    dirs = dirs_of(u)
     ins = [u.ports[p] for p in u.ports if dirs[p] == 'in']
     outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
-    plain = u.datapath == 'Mac' and not u.params.get('accumulate', True)
-    n_in = {'ElementwiseLanes': 2, 'Mac': 3 if plain else 2}.get(u.datapath, 1)
+    facts = CATALOGUE[u.datapath]
+    plain = facts.nb_inputs(u.params) == 3
+    n_in = facts.nb_inputs(u.params)
     if (len(ins), len(outs)) != (n_in, 1):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
             f'{n_in} and 1')
-    if u.datapath in FOLDS:
+    if facts.reduces:
         if outs[0].lanes != 1:
             raise CfgTargetError(node.file, node.where('outputs'),
                 f'unit {u.name}: a fold\'s output has 1 lane, not {outs[0].lanes}')
@@ -830,7 +881,7 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     if u.op_type != type_name(*t):
         raise CfgSlotError(node.file, node.where('groups'),
             f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
-            f'{type_name(*t)} (snax_unit_result_type)')
+            f'{type_name(*t)} (snax_op_result_type)')
 
 
 def _slot(acc: _Node) -> AccSlot:
@@ -916,7 +967,7 @@ def _check_accelerator(acc: _Node, slot: AccSlot):
             unit, _, name = entry.partition('.')
             u = accelerator.unit(unit)
             port = u.ports[name]
-            if u.datapath in FOLDS and key == 'outputs':
+            if CATALOGUE[u.datapath].reduces and key == 'outputs':
                 if channels[i] != 1:
                     fail(f'snax_datapath_cfg.{key}[{i}]', f"{entry}: a fold's output is one "
                          f'64-bit word per beat, but {mover}[{i}] has num_channel {channels[i]}')

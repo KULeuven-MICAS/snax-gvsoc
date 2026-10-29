@@ -9,42 +9,12 @@
 import math
 
 import gvsoc.systree
-from snax_cfg import MOVERS, spatial_mismatch
-
-
-# The keys of a mover group in the hjson's streamer template that the model
-# reads; any other key is refused by name. dynamicPriority (default true) and
-# higherStaticPriority (default false) are read as stream_param_gen.scala.tpl
-# reads them.
-MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth', 'dynamicPriority',
-    'higherStaticPriority']
-# The keys of the streamer template the model reads (snax_cfg.MOVERS), or that do
-# not change it
-TEMPLATE_KEYS = [*MOVERS, 'snax_library_name']
-
-
-def check_template(template: dict):
-    """Refuses the keys of an hjson streamer template that the model does not cover.
-
-    Parameters
-    ----------
-    template : dict
-        The streamer template, as the cluster hjson gives it (e.g.
-        snax_forge_streamer.hjson).
-    """
-    for key in template:
-        if key not in TEMPLATE_KEYS:
-            raise RuntimeError(f'Streamer template key not modelled: {key}')
-    for group in MOVERS:
-        for key in template.get(group, {}):
-            if key not in MOVER_KEYS:
-                raise RuntimeError(f'Streamer template key not modelled: {group}.{key}')
+from snax_cfg import check_template
 
 
 def movers_of(template: dict) -> list[dict]:
-    """The template's movers, readers first then writers, as the streamer orders them; each
-    mover's spatial bounds must multiply to its num_channel, as snax_cluster's StreamerParam
-    requires (snax_cfg.spatial_mismatch)."""
+    """The template's movers, readers first then writers, as the streamer orders them, after
+    snax_cfg.check_template."""
     check_template(template)
     movers = []
     for group, is_reader, kind in [('data_reader_params', True, 'reader'),
@@ -55,9 +25,6 @@ def movers_of(template: dict) -> list[dict]:
         for i in range(0, len(params['num_channel'])):
             spatial_bounds = list(params['spatial_bounds'][i])
             num_channel = params['num_channel'][i]
-            why = spatial_mismatch(spatial_bounds, num_channel)
-            if why is not None:
-                raise RuntimeError(f'{group}[{i}]: {why}')
             movers.append({
                 'name': f'{kind}{i}',
                 'is_reader': is_reader,
@@ -79,11 +46,6 @@ def nb_csrs(template: dict) -> int:
     rw = sum(2 + len(mover['spatial_bounds']) + 2 * mover['temporal_dim']
         for mover in movers_of(template))
     return rw + 1 + 2
-
-
-def nb_tcdm_ports(template: dict) -> int:
-    """The streamer's TCDM ports: one per channel (snax_tcdm_ports in the hjson)."""
-    return sum(mover['num_channel'] for mover in movers_of(template))
 
 
 def tcdm_port_names(template: dict) -> list[str]:

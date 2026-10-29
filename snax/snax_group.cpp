@@ -9,21 +9,20 @@
 // read at run time (get_js_config), so a design point compiles nothing. The
 // control model is snax_group.hpp's SnaxGroupRule (the `<tag>_<group>_ctrl` of
 // snax-forge's Chisel), the datapaths snax_datapath.hpp's classes, wired by
-// SnaxGroupDatapaths; this file is the component around them. A group of one
-// unit is B1's SnaxUnit, cycle for cycle.
+// SnaxGroupDatapaths; this file is the component around them.
 //
 // Properties (a missing one, a wrong type or a bad value is a fatal error
 // naming it):
-//   units      the group's units, head first, a chain: link k joins unit k's
-//              output to unit k + 1's input. Each an object:
+//   units      the group's units. Each an object:
 //                name, datapath     the instance, a catalogue datapath
 //                                   (snax_datapath.hpp's registry)
 //                inputs             per BRM input, in port order: the outer
-//                                   port's name, or "" for the input the link
-//                                   from the unit before feeds (unit k > 0,
-//                                   one; a unit of span > 1 has no outer one)
-//                output             the outer output's port name (the last
-//                                   unit's), or "" (linked)
+//                                   port's name, or "" for an input a link
+//                                   feeds (exactly one; a unit of span > 1
+//                                   has no outer one)
+//                output             the outer output's port name, or ""
+//                                   (linked); exactly one unit has one until
+//                                   tier A
 //                in_widths, in_signed, out_width, out_signed, op_width,
 //                op_signed          each input's, the output's and the op's
 //                                   element type (snax_types.hpp: 8 to 64
@@ -36,8 +35,12 @@
 //                t                  a result every t-th firing, fixed (1 for a
 //                                   unit without a fold, params.T), or 0: a
 //                                   fold's JOB_BEATS, from the start
-//   links      each link's depth, one fewer than the units: 0 a wire, >= 1 a
-//              buffer (a LinkBuffer of that many beats)
+//   links      the edges between the units, each an object: from and to, the
+//              producer's and the consumer's names; to_input, the consumer's
+//              input it feeds (an index in its inputs, one left ""); depth, 0 a
+//              wire, >= 1 a buffer (a LinkBuffer of that many beats). Until
+//              tier A the edges are one chain: SnaxGroupRule refuses a fork or
+//              a join
 //   csr_base   the group's first CSR, for the trace
 //
 // Ports:
@@ -60,20 +63,21 @@
 //
 // Events (docs/EVENTS.md, snax_events.hpp), at the group's boundary: `start`
 // (count, the head's firings, and rate, the head's firings per result of the
-// last unit; for one unit JOBS * JOB_BEATS and JOB_BEATS) in the cycle a start
+// outer output's unit; for one unit JOBS * JOB_BEATS and JOB_BEATS) in the cycle a start
 // is taken; `done` (the head's firings, its first and last firing's cycles)
 // in the run's last busy cycle; there too, the summary's `run` line
 // (SnaxGroupRule::run_line), the classes adding up to the run's busy cycles.
 // Beats: `fire` per head firing (its index n, each outer input's beat b as the
 // streamer hands it back, -1 if it does not, and the words), `push` per
-// result the last unit pushes (its index n, the head's firings it folds, the
+// result the outer output's unit pushes (its index n, the head's firings it folds, the
 // words), and `class` (mode) in the first cycle of each run of one class.
 // Per-unit events of a linked group are parked (snax-forge open item 96).
 //
 // VCD signals (snax_events.hpp, gtkwave only): busy (from s + 1 to E), fire
-// and push (the head fires, the last unit pushes), cycle_class (0 idle, 1
+// and push (the head fires, the outer output's unit pushes), cycle_class (0 idle, 1
 // busy, 2 stall_in, 3 stall_out, 4 flush).
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -81,6 +85,7 @@
 #include <vp/itf/wire.hpp>
 #include "snax_events.hpp"
 #include "snax_group.hpp"
+#include "snax_props.hpp"
 
 
 class SnaxGroup : public vp::Component
@@ -90,25 +95,20 @@ public:
 
 private:
     static vp::IoReqStatus ctrl_req(vp::Block *__this, vp::IoReq *req);
-    static void fire_handler(vp::Block *__this, vp::ClockEvent *event);
+    static void cycle_handler(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
 
-    js::Config *prop(js::Config *config, const char *name, const std::string &where);
-    int int_prop(js::Config *config, const char *name, const std::string &where);
-    bool bool_prop(js::Config *config, const char *name, const std::string &where);
-    std::string str_prop(js::Config *config, const char *name, const std::string &where);
-    std::vector<js::Config *> list_prop(js::Config *config, const char *name,
-        const std::string &where);
-    SnaxUnitType type_prop(js::Config *config, const char *width, const char *is_signed,
+    SnaxType type_prop(js::Config *config, const char *width, const char *is_signed,
         const std::string &where);
     bool probe(vp::IoMaster &port, bool is_write);
     void move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words);
 
     vp::Trace trace;
+    SnaxProps props;
     SnaxEvents ev;
     vp::IoSlave ctrl_itf;
     vp::WireMaster<bool> busy_itf;
-    vp::ClockEvent fire_event;
+    vp::ClockEvent cycle_event;
     vp::IoReq beat_req;
     SnaxSignals sigs;
     SnaxSignal sig_busy;
@@ -129,12 +129,16 @@ private:
     vp::IoMaster out_itf;
     int out_words;
     std::vector<std::vector<size_t>> unit_ins;   // per unit, its outer inputs (in_itf indices)
+    // cycle_handler's, sized once: per unit whether its outer inputs have a beat and its outer
+    // output room, its outer inputs' beats; the outer output's beat
+    std::vector<bool> inputs, room;
+    std::vector<std::vector<const uint64_t *>> outer;
+    std::vector<uint64_t> out_beat;
     std::vector<uint32_t> fixed_t;      // per unit: its t, 0 from the start
-    std::vector<std::string> names;
     uint32_t csr_base;
     SnaxGroupRule rule;
     SnaxGroupDatapaths data;
-    uint32_t rate;                      // the head's firings per result of the last unit
+    uint32_t rate;                      // the head's firings per result of the outer output's unit
     int64_t first_fire;                 // the run's first and last head firing, for its done line
     int64_t last_fire;
     int line_class;                     // the class of the last class line in this run, -1 none
@@ -144,7 +148,8 @@ private:
 
 SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     : vp::Component(config),
-      fire_event(this, &SnaxGroup::fire_handler),
+      props(&this->trace),
+      cycle_event(this, &SnaxGroup::cycle_handler),
       sigs(this),
       sig_busy(*this, "busy", 1),
       sig_fire(*this, "fire", 1),
@@ -154,28 +159,17 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
 
-    std::vector<js::Config *> units = this->list_prop(this->get_js_config(), "units", "");
-    std::vector<js::Config *> links = this->list_prop(this->get_js_config(), "links", "");
-    if (units.empty() || links.size() + 1 != units.size())
+    std::vector<js::Config *> units = this->props.list_prop(this->get_js_config(), "units", "");
+    if (units.empty())
     {
-        this->trace.fatal("Property units, links: %ld units and %ld links; a chain has one link "
-            "fewer than units\n", units.size(), links.size());
-    }
-    std::vector<int> depths;
-    for (size_t k = 0; k < links.size(); k++)
-    {
-        if (dynamic_cast<js::ConfigNumber *>(links[k]) == nullptr || links[k]->get_int() < 0)
-        {
-            this->trace.fatal("Property links[%ld]: a depth, 0 or more\n", k);
-        }
-        depths.push_back(links[k]->get_int());
+        this->trace.fatal("Property units: no unit\n");
     }
 
     // The outer inputs, counted first: in_itf is sized once
     size_t nb_in = 0;
     for (size_t k = 0; k < units.size(); k++)
     {
-        for (js::Config *p : this->list_prop(units[k], "inputs", "units[" + std::to_string(k) + "]"))
+        for (js::Config *p : this->props.list_prop(units[k], "inputs", "units[" + std::to_string(k) + "]"))
         {
             nb_in += dynamic_cast<js::ConfigString *>(p) != nullptr && !p->get_str().empty();
         }
@@ -183,45 +177,39 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     this->in_itf.resize(nb_in);
 
     std::vector<SnaxGroupRule::UnitCfg> cfgs;
+    std::vector<std::string> names;
+    std::vector<SnaxDatapathParams> params;
+    std::vector<std::vector<int>> linked(units.size());     // per unit, its inputs left ""
     std::string out_name;
+    int output = -1;
     size_t at = 0;
     std::string described;
     for (size_t k = 0; k < units.size(); k++)
     {
         std::string w = "units[" + std::to_string(k) + "]";
         js::Config *u = units[k];
-        std::string name = this->str_prop(u, "name", w);
-        std::string datapath = this->str_prop(u, "datapath", w);
+        std::string name = this->props.str_prop(u, "name", w);
+        std::string datapath = this->props.str_prop(u, "datapath", w);
         SnaxDatapathParams p;
-        p.lanes = this->int_prop(u, "lanes", w);
-        std::vector<js::Config *> ins = this->list_prop(u, "inputs", w);
-        std::vector<js::Config *> widths = this->list_prop(u, "in_widths", w);
-        std::vector<js::Config *> signs = this->list_prop(u, "in_signed", w);
+        p.lanes = this->props.int_prop(u, "lanes", w);
+        std::vector<js::Config *> ins = this->props.list_prop(u, "inputs", w);
+        std::vector<js::Config *> widths = this->props.list_prop(u, "in_widths", w);
+        std::vector<js::Config *> signs = this->props.list_prop(u, "in_signed", w);
         if (widths.size() != ins.size() || signs.size() != ins.size())
         {
             this->trace.fatal("Property %s.in_widths, in_signed: one per input (%ld)\n",
                 w.c_str(), ins.size());
         }
-        int linked = -1;
         this->unit_ins.emplace_back();
         for (size_t i = 0; i < ins.size(); i++)
         {
-            int width = widths[i]->get_int();
-            if (width != 8 && width != 16 && width != 32 && width != 64)
-            {
-                this->trace.fatal("Property %s.in_widths[%ld]: %d, must be 8, 16, 32 or 64\n",
-                    w.c_str(), i, width);
-            }
-            p.in_types.push_back({width, signs[i]->get_bool()});
+            std::string at_i = "[" + std::to_string(i) + "]";
+            p.in_types.push_back({this->props.as_width(widths[i], w + ".in_widths" + at_i),
+                this->props.as_bool(signs[i], w + ".in_signed" + at_i)});
             std::string port = dynamic_cast<js::ConfigString *>(ins[i]) ? ins[i]->get_str() : "";
             if (port.empty())
             {
-                if (k == 0 || linked != -1)
-                {
-                    this->trace.fatal("Property %s.inputs[%ld]: \"\", but only one input of a "
-                        "unit after the head is its link's\n", w.c_str(), i);
-                }
-                linked = i;
+                linked[k].push_back(i);
                 continue;
             }
             OuterIn &o = this->in_itf[at];
@@ -231,26 +219,21 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             this->new_master_port(port, &o.itf);
             this->unit_ins.back().push_back(at++);
         }
-        if (k > 0 && linked == -1)
-        {
-            this->trace.fatal("Property %s.inputs: no \"\": unit %ld takes its link on one input\n",
-                w.c_str(), k);
-        }
         p.out_type = this->type_prop(u, "out_width", "out_signed", w);
         p.op_type = this->type_prop(u, "op_width", "op_signed", w);
-        std::string op = this->str_prop(u, "op", w);
+        std::string op = this->props.str_prop(u, "op", w);
         p.op = -1;
-        for (int i = 0; i < UNIT_NB_OPS; i++)
+        for (int i = 0; i < SNAX_NB_OPS; i++)
         {
-            p.op = op == snax_unit_op_names[i] ? i : p.op;
+            p.op = op == snax_op_names[i] ? i : p.op;
         }
         if (p.op == -1)
         {
             this->trace.fatal("Property %s.op: \"%s\", not an op (add, sub, mul, and, or, xor, "
                 "min, max)\n", w.c_str(), op.c_str());
         }
-        p.accumulate = this->bool_prop(u, "accumulate", w);
-        p.reg_out = this->bool_prop(u, "reg_out", w);
+        p.accumulate = this->props.bool_prop(u, "accumulate", w);
+        p.reg_out = this->props.bool_prop(u, "reg_out", w);
         std::string why;
         std::unique_ptr<SnaxDatapath> dp = snax_datapath_new(datapath, p, &why);
         if (!dp)
@@ -259,9 +242,9 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 why.c_str());
         }
         SnaxGroupRule::UnitCfg c;
-        c.latency = this->int_prop(u, "latency", w);
-        c.ii = this->int_prop(u, "ii", w);
-        c.span = this->int_prop(u, "span", w);
+        c.latency = this->props.int_prop(u, "latency", w);
+        c.ii = this->props.int_prop(u, "ii", w);
+        c.span = this->props.int_prop(u, "span", w);
         if (c.latency != dp->latency || c.ii != 1 || c.span != dp->span)
         {
             this->trace.fatal("Property %s.latency, ii, span: %d, %d, %d; %s is %d, 1, %d\n",
@@ -273,54 +256,135 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 "its input is a link, not a streamer's\n", w.c_str(), c.span);
         }
         cfgs.push_back(c);
-        int t = this->int_prop(u, "t", w);
+        int t = this->props.int_prop(u, "t", w);
         if (t < 0)
         {
             this->trace.fatal("Property %s.t: %d, must be 0 or more\n", w.c_str(), t);
         }
         this->fixed_t.push_back(t);
-        std::string output = this->str_prop(u, "output", w);
-        if ((k + 1 == units.size()) == output.empty())
+        std::string out = this->props.str_prop(u, "output", w);
+        if (!out.empty())
         {
-            this->trace.fatal("Property %s.output: \"%s\"; the last unit's output, and only "
-                "its, is outer\n", w.c_str(), output.c_str());
-        }
-        if (!output.empty())
-        {
-            out_name = output;
+            if (output != -1)
+            {
+                this->trace.fatal("Property %s.output: \"%s\", but units[%d] has the outer "
+                    "output already: until tier A a group has one\n", w.c_str(), out.c_str(),
+                    output);
+            }
+            output = k;
+            out_name = out;
             this->out_words = dp->out_words;
         }
-        if (k > 0 && depths[k - 1] > 0)
-        {
-            SnaxDatapathParams b;
-            b.in_types = {p.in_types[linked]};
-            b.out_type = p.in_types[linked];
-            b.lanes = p.lanes;
-            b.depth = depths[k - 1];
-            this->data.buffers.back() = snax_datapath_new("LinkBuffer", b, &why);
-        }
-        if (k > 0)
-        {
-            const SnaxDatapath *src = this->data.units.back().get();
-            if (src->out_words != dp->in_words[linked])
-            {
-                this->trace.fatal("Property %s.inputs[%d]: its link carries %d words a beat, "
-                    "the input takes %d\n", w.c_str(), linked, src->out_words,
-                    dp->in_words[linked]);
-            }
-        }
         this->data.units.push_back(std::move(dp));
-        this->data.linked.push_back(linked);
-        if (k + 1 < units.size())
-        {
-            this->data.buffers.emplace_back();
-        }
-        this->names.push_back(name);
-        described += (described.empty() ? "" : " -> ") + name + " (" + datapath + ", L " +
+        names.push_back(name);
+        params.push_back(p);
+        described += (described.empty() ? "" : ", ") + name + " (" + datapath + ", L " +
             std::to_string(c.latency) + ", span " + std::to_string(c.span) + ")";
     }
-    this->rule.configure(cfgs, depths);
-    this->csr_base = this->int_prop(this->get_js_config(), "csr_base", "");
+    if (output == -1)
+    {
+        this->trace.fatal("Property units: no unit has an outer output (every output \"\"): a "
+            "group has one\n");
+    }
+
+    // The links: edges from a unit's output into an input of another that is left ""
+    std::vector<js::Config *> links = this->props.list_prop(this->get_js_config(), "links", "");
+    std::vector<SnaxGroupRule::Link> edges;
+    std::vector<std::vector<int>> fed(units.size());
+    for (size_t k = 0; k < units.size(); k++)
+    {
+        fed[k].assign(params[k].in_types.size(), 0);
+    }
+    for (size_t i = 0; i < links.size(); i++)
+    {
+        std::string w = "links[" + std::to_string(i) + "]";
+        SnaxGroupRule::Link e;
+        int *ends[] = {&e.from, &e.to};
+        const char *keys[] = {"from", "to"};
+        for (int j = 0; j < 2; j++)
+        {
+            std::string name = this->props.str_prop(links[i], keys[j], w);
+            *ends[j] = -1;
+            for (size_t k = 0; k < names.size(); k++)
+            {
+                *ends[j] = names[k] == name ? (int)k : *ends[j];
+            }
+            if (*ends[j] == -1)
+            {
+                this->trace.fatal("Property %s.%s: \"%s\", no unit of the group\n", w.c_str(),
+                    keys[j], name.c_str());
+            }
+        }
+        e.to_input = this->props.int_prop(links[i], "to_input", w);
+        e.depth = this->props.int_prop(links[i], "depth", w);
+        if (e.depth < 0)
+        {
+            this->trace.fatal("Property %s.depth: %d, must be 0 or more\n", w.c_str(), e.depth);
+        }
+        const std::vector<int> &open = linked[e.to];
+        bool is_open = false;
+        for (int x : open)
+        {
+            is_open = is_open || x == e.to_input;
+        }
+        if (!is_open || fed[e.to][e.to_input]++)
+        {
+            this->trace.fatal("Property %s.to_input: %d; units[%d].inputs[%d] is not an input "
+                "left \"\", or another link feeds it\n", w.c_str(), e.to_input, e.to, e.to_input);
+        }
+        const SnaxDatapath *src = this->data.units[e.from].get();
+        const SnaxDatapath *dst = this->data.units[e.to].get();
+        if (src->out_words != dst->in_words[e.to_input])
+        {
+            this->trace.fatal("Property %s: the link carries %d words a beat, units[%d].inputs[%d] "
+                "takes %d\n", w.c_str(), src->out_words, e.to, e.to_input,
+                dst->in_words[e.to_input]);
+        }
+        std::unique_ptr<SnaxDatapath> buffer;
+        if (e.depth > 0)
+        {
+            SnaxDatapathParams b;
+            b.in_types = {params[e.to].in_types[e.to_input]};
+            b.out_type = params[e.to].in_types[e.to_input];
+            b.lanes = params[e.to].lanes;
+            b.depth = e.depth;
+            std::string why;
+            buffer = snax_datapath_new("LinkBuffer", b, &why);
+        }
+        this->data.buffers.push_back(std::move(buffer));
+        edges.push_back(e);
+        described += "; " + names[e.from] + " -> " + names[e.to] + " depth " +
+            std::to_string(e.depth);
+    }
+    for (size_t k = 0; k < units.size(); k++)
+    {
+        for (int i : linked[k])
+        {
+            if (!fed[k][i])
+            {
+                this->trace.fatal("Property units[%ld].inputs[%d]: \"\", but no link feeds it\n",
+                    k, i);
+            }
+        }
+    }
+    std::string refused = this->rule.configure(cfgs, edges, output);
+    if (!refused.empty())
+    {
+        this->trace.fatal("Property units, links: %s\n", refused.c_str());
+    }
+    this->data.wire(this->rule);
+    this->inputs.assign(units.size(), true);
+    this->room.assign(units.size(), true);
+    this->outer.assign(units.size(), {});
+    for (size_t k = 0; k < units.size(); k++)
+    {
+        for (size_t i : this->unit_ins[k])
+        {
+            this->outer[k].push_back(this->in_itf[i].beat.data());
+        }
+    }
+    this->out_beat.assign(this->out_words, 0);
+    this->csr_base = this->props.int_prop(this->get_js_config(), "csr_base", "");
 
     this->new_master_port(out_name, &this->out_itf);
     this->ctrl_itf.set_req_meth(&SnaxGroup::ctrl_req);
@@ -344,74 +408,11 @@ void SnaxGroup::reset(bool active)
 }
 
 
-js::Config *SnaxGroup::prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = config->get(name);
-    if (value == nullptr)
-    {
-        this->trace.fatal("Property %s%s%s: missing\n", where.c_str(), where.empty() ? "" : ".",
-            name);
-    }
-    return value;
-}
-
-
-int SnaxGroup::int_prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigNumber *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s%s%s: not a number\n", where.c_str(),
-            where.empty() ? "" : ".", name);
-    }
-    return value->get_int();
-}
-
-
-bool SnaxGroup::bool_prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigBool *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s.%s: not a bool\n", where.c_str(), name);
-    }
-    return value->get_bool();
-}
-
-
-std::string SnaxGroup::str_prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigString *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s.%s: not a string\n", where.c_str(), name);
-    }
-    return value->get_str();
-}
-
-
-std::vector<js::Config *> SnaxGroup::list_prop(js::Config *config, const char *name,
+SnaxType SnaxGroup::type_prop(js::Config *config, const char *width, const char *is_signed,
     const std::string &where)
 {
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigArray *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s%s%s: not a list\n", where.c_str(), where.empty() ? "" : ".",
-            name);
-    }
-    return value->get_elems();
-}
-
-
-SnaxUnitType SnaxGroup::type_prop(js::Config *config, const char *width, const char *is_signed,
-    const std::string &where)
-{
-    int w = this->int_prop(config, width, where);
-    if (w != 8 && w != 16 && w != 32 && w != 64)
-    {
-        this->trace.fatal("Property %s.%s: %d, must be 8, 16, 32 or 64\n", where.c_str(), width, w);
-    }
-    return {w, this->bool_prop(config, is_signed, where)};
+    return {this->props.width_prop(config, width, where),
+        this->props.bool_prop(config, is_signed, where)};
 }
 
 
@@ -472,7 +473,8 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
 
         default:
         {
-            uint32_t results = _this->rule.counts.back() / _this->rule.beats.back();
+            size_t last = _this->rule.output_unit();
+            uint32_t results = _this->rule.firings_per_run[last] / _this->rule.t[last];
             _this->rate = _this->rule.count() / results;
             _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: JOBS %u, %ld T\n", cycle,
                 jobs, ts.size());
@@ -485,9 +487,9 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
             {
                 _this->busy_itf.sync(true);
             }
-            if (!_this->fire_event.is_enqueued())
+            if (!_this->cycle_event.is_enqueued())
             {
-                _this->fire_event.enqueue(1);
+                _this->cycle_event.enqueue(1);
             }
             return vp::IO_REQ_OK;
         }
@@ -518,36 +520,32 @@ void SnaxGroup::move(vp::IoMaster &port, bool is_write, uint64_t *beat, int word
 
 
 // One busy cycle: probe every outer port, step the rule, move what it says, run the datapaths
-void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
+void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     SnaxGroup *_this = (SnaxGroup *)__this;
     int64_t cycle = _this->clock.get_cycles();
 
     if (_this->rule.busy(cycle))
     {
-        std::vector<bool> inputs(_this->unit_ins.size(), true);
+        std::vector<bool> &inputs = _this->inputs;
+        std::fill(inputs.begin(), inputs.end(), true);
         for (OuterIn &o : _this->in_itf)
         {
             inputs[o.unit] = _this->probe(o.itf, false) && inputs[o.unit];
         }
-        bool room = _this->probe(_this->out_itf, true);
+        _this->room[_this->rule.output_unit()] = _this->probe(_this->out_itf, true);
 
-        SnaxGroupRule::Step step = _this->rule.step(cycle, inputs, room);
-        const SnaxGroupRule::UnitStep &head = step.units.front();
-        const SnaxGroupRule::UnitStep &tail = step.units.back();
+        const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, _this->room);
+        const SnaxGroupRule::UnitStep &head = step.units[_this->rule.topological().front()];
+        const SnaxGroupRule::UnitStep &tail = step.units[_this->rule.output_unit()];
         _this->sigs.set(_this->sig_busy, 1);
         _this->sigs.set(_this->sig_fire, head.fire);
         _this->sigs.set(_this->sig_push, tail.push);
         _this->sigs.set(_this->sig_class, step.cls + 1);
-        if (step.cls != _this->line_class)
-        {
-            _this->line_class = step.cls;
-            _this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld class mode=%s\n", (long)cycle,
-                snax_unit_class_names[step.cls]);
-        }
+        snax_class_line(_this->ev.beats, &_this->line_class, step.cls,
+            snax_group_class_names[step.cls], cycle);
 
-        // The beats of each unit that fires, its outer inputs in port order
-        std::vector<std::vector<const uint64_t *>> outer(_this->unit_ins.size());
+        // The beats of each unit that fires, its outer inputs in port order (outer)
         std::string beats, values;
         bool traced = _this->ev.beats.get_active();
         for (size_t k = 0; k < _this->unit_ins.size(); k++)
@@ -558,18 +556,14 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
                 if (step.units[k].fire)
                 {
                     _this->move(o.itf, false, o.beat.data(), o.words);
-                    if (traced && k == 0)
+                    if (traced && k == _this->rule.topological().front())
                     {
                         bool tagged = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
-                        beats += (beats.empty() ? "" : ",") + std::to_string(tagged
-                            ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L);
-                        for (uint64_t word : o.beat)
-                        {
-                            values += (values.empty() ? "" : ",") + snax_word((uint8_t *)&word, 8);
-                        }
+                        snax_join(beats, std::to_string(tagged
+                            ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L));
+                        snax_join(values, snax_words_text(o.beat.data(), o.beat.size()));
                     }
                 }
-                outer[k].push_back(o.beat.data());
             }
         }
         if (head.fire)
@@ -587,18 +581,15 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             _this->last_fire = cycle;
         }
 
-        std::vector<uint64_t> out = _this->data.cycle(step, outer);
+        const std::vector<uint64_t> &result = _this->data.cycle(step, _this->outer);
         if (tail.push)
         {
-            out.resize(_this->out_words, 0);
+            std::vector<uint64_t> &out = _this->out_beat;
+            std::copy(result.begin(), result.end(), out.begin());
             _this->move(_this->out_itf, true, out.data(), _this->out_words);
             if (_this->ev.beats.get_active())
             {
-                std::string text;
-                for (uint64_t word : out)
-                {
-                    text += (text.empty() ? "" : ",") + snax_word((uint8_t *)&word, 8);
-                }
+                std::string text = snax_words_text(out.data(), out.size());
                 uint32_t first = _this->pushes * _this->rate;
                 _this->ev.beats.msg(vp::Trace::LEVEL_INFO,
                     "%ld push n=%u first=%u last=%u value=%s\n", (long)cycle, _this->pushes,
@@ -608,7 +599,10 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         }
         if (step.end)
         {
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s\n", _this->rule.run_line().c_str());
+            if (_this->trace.get_active())
+            {
+                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s\n", _this->rule.run_line().c_str());
+            }
             _this->ev.events.msg(vp::Trace::LEVEL_INFO,
                 "%ld done firings=%u first=%ld last=%ld\n", (long)cycle, _this->rule.firings(),
                 (long)_this->first_fire, (long)_this->last_fire);
@@ -632,7 +626,7 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
     // Every busy cycle, so it always runs before the streamer's step
     if (_this->rule.busy(cycle + 1))
     {
-        _this->fire_event.enqueue(1);
+        _this->cycle_event.enqueue(1);
     }
 }
 

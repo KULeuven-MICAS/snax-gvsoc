@@ -20,7 +20,10 @@
 // component sets, grouped under the tag snax in its gen_gtkw, dumped with
 // gvrun's --vcd. GVSoC dumps a signal when it is set, so a value known ahead
 // (a pulse that falls, a busy that ends, a queue's count from the next cycle)
-// is queued and set by SnaxSignals' event in its own cycle.
+// is queued and set by SnaxSignals' event in its own cycle. vp::Signal dumps
+// only where CONFIG_GVSOC_EVENT_ACTIVE is defined (the profile and debug
+// models, upstream's Event::dump_value); elsewhere SnaxSignals does nothing,
+// queues nothing and enqueues no event.
 
 #pragma once
 
@@ -35,7 +38,8 @@
 #include <vp/signal.hpp>
 
 
-// The slots: the tag, then the ids it names
+// The slots: the tag, then the ids it names. Kept equal to pulp/pulp/idma/idma.hpp's
+// IDMA_SNAX_ARG_* and IDMA_SNAX_TAG_DMA by hand: an upstream file includes nothing from snax/
 #define SNAX_ARG_TAG (IO_REQ_NB_ARGS - 1)
 #define SNAX_ARG_ID (IO_REQ_NB_ARGS - 2)    // a streamer beat's b, a DMA copy's id
 #define SNAX_ARG_INDEX (IO_REQ_NB_ARGS - 3) // a DMA beat's index within its copy
@@ -90,6 +94,46 @@ inline std::string snax_word(const uint8_t *data, uint64_t size)
 }
 
 
+// item after text's items, comma-joined: a value= or b= field of a beat line
+inline void snax_join(std::string &text, const std::string &item)
+{
+    text += (text.empty() ? "" : ",") + item;
+}
+
+
+// n 64-bit words as a value= field: 0x words, comma-joined
+inline std::string snax_words_text(const uint64_t *words, size_t n)
+{
+    std::string text;
+    for (size_t i = 0; i < n; i++)
+    {
+        snax_join(text, snax_word((const uint8_t *)&words[i], 8));
+    }
+    return text;
+}
+
+
+// A class line on beats (docs/EVENTS.md), "<cycle> class [mover=<mover> ]mode=<name>", when
+// cls is not *line_class, the class of the last line in this run (-1 none), which it becomes
+inline void snax_class_line(vp::Trace &beats, int *line_class, int cls, const char *name,
+    int64_t cycle, const char *mover = nullptr)
+{
+    if (cls == *line_class)
+    {
+        return;
+    }
+    *line_class = cls;
+    if (mover != nullptr)
+    {
+        beats.msg(vp::Trace::LEVEL_INFO, "%ld class mover=%s mode=%s\n", (long)cycle, mover, name);
+    }
+    else
+    {
+        beats.msg(vp::Trace::LEVEL_INFO, "%ld class mode=%s\n", (long)cycle, name);
+    }
+}
+
+
 // One VCD signal, and the values it takes from later cycles, in cycle order
 class SnaxSignal
 {
@@ -116,17 +160,23 @@ public:
     // value from this cycle on, in place of the changes queued up to it
     void set(SnaxSignal &s, uint64_t value)
     {
+#ifdef CONFIG_GVSOC_EVENT_ACTIVE
         int64_t now = this->now();
         while (!s.pending.empty() && s.pending.front().first <= now)
         {
             s.pending.pop_front();
         }
         this->apply(s, value);
+#else
+        (void)s;
+        (void)value;
+#endif
     }
 
     // value from cycle on, in place of the changes queued from it on
     void set_from(SnaxSignal &s, uint64_t value, int64_t cycle)
     {
+#ifdef CONFIG_GVSOC_EVENT_ACTIVE
         int64_t now = this->now();
         if (cycle <= now)
         {
@@ -144,13 +194,22 @@ public:
             s.queued = true;
         }
         this->event.enqueue(cycle - now);
+#else
+        (void)s;
+        (void)value;
+        (void)cycle;
+#endif
     }
 
     // 1 in this cycle only
     void pulse(SnaxSignal &s)
     {
+#ifdef CONFIG_GVSOC_EVENT_ACTIVE
         this->set(s, 1);
         this->set_from(s, 0, this->now() + 1);
+#else
+        (void)s;
+#endif
     }
 
 private:

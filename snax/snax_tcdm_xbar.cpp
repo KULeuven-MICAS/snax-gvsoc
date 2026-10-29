@@ -454,12 +454,14 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Superbank %d: grant dma (%s 0x%lx, %ld B)\n",
         superbank, req->get_is_write() ? "write" : "read", addr, size);
 
-    // Each bank word it covers, as DmaInterleaver did: the largest bank
-    // latency is the answer's
+    // Each bank word it covers, as upstream's DmaInterleaver splits it: the
+    // largest bank latency is the answer's
     uint64_t width = 1ULL << _this->width_bits;
     uint8_t *data = req->get_data();
     int64_t latency = 0;
     uint64_t beat_addr = addr, beat_size = size;
+    // The beat's words for its dma line, only when that line is written
+    bool traced = _this->trace_dma && _this->ev.beats.get_active();
     std::string values;
     while (size > 0)
     {
@@ -482,14 +484,17 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
             return vp::IO_REQ_INVALID;
         }
         latency = std::max(latency, (int64_t)bank_req.get_latency());
-        values += (values.empty() ? "" : ",") + snax_word(data, chunk);
+        if (traced)
+        {
+            snax_join(values, snax_word(data, chunk));
+        }
         addr += chunk;
         data += chunk;
         size -= chunk;
     }
     req->inc_latency(latency);
 
-    if (_this->trace_dma && _this->ev.beats.get_active())
+    if (traced)
     {
         // A beat the iDMA's TCDM backend did not tag has no copy: -1
         bool tagged = snax_arg_get(req, SNAX_ARG_TAG) == SNAX_TAG_DMA;

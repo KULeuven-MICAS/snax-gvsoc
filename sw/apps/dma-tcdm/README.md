@@ -1,6 +1,6 @@
 # dma-tcdm
 
-The DMA against the streamer in the TCDM (SG7 round 4): a DMA beat takes the whole superbank (8 banks, 64 B) it writes in its cycle, and a streamer lane asking for one of those banks is refused and keeps its turn. One ELF per case, as `core-tcdm`. It starts `forge/vecadd/`'s accelerator (a lockstep add) through `forge/vecadd/include/`'s headers; the same ELFs run on `snax_hjson` with `forge/vecadd/snax_forge.hjson` and on snax_cluster's RTL built from snax-forge's vecadd bundle (snax-forge `docs/RUN.md` section 8). Each case prints the value it compares, chosen not to depend on the cores' timing (D123), and runs twice: a first run, then the measured one, from a warm instruction cache.
+The DMA against the streamer in the TCDM: a DMA beat takes the whole superbank (8 banks, 64 B) it writes in its cycle, and a streamer lane asking for one of those banks is refused and keeps its turn. One ELF per case, as `core-tcdm`. It starts `forge/vecadd/`'s accelerator (a lockstep add) through `forge/vecadd/include/`'s headers; the same ELFs run on `snax_hjson` with `forge/vecadd/snax_forge.hjson` and on snax_cluster's RTL built from snax-forge's vecadd bundle (snax-forge `docs/RUN.md` section 8). Each case prints the value it compares, chosen not to depend on the cores' timing (D123), and runs twice: a first run, then the measured one, from a warm instruction cache.
 
 | Case | What | Compare |
 |---|---|---|
