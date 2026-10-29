@@ -17,10 +17,10 @@ is at [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and
 | Path | What |
 |---|---|
 | `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `snax/` | SNAX target and components: the streamer and the TCDM crossbar; `SnaxUnit` (a generic Chisel block's datapath) and `SnaxShell` (its CSR manager); the `snax_hjson` target, any cluster read from its hjson |
+| `snax/` | SNAX target and components: the streamer and the TCDM crossbar; `SnaxGroup` (a group's datapaths under one control model, snax-forge's `<tag>_<group>_ctrl`) and `SnaxShell` (its CSR manager); the `snax_hjson` target, any cluster read from its hjson |
 | `forge/` | Generated accelerators from snax-forge, one design point per folder, checked in as fixtures (`forge/README.md`) |
 | `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and the programs for the SNAX targets in `sw/apps/` |
-| `tests/snax/` | The regression (`regress.py`), the sparse arbiter's check against the RTL (`sparse_arb/`), and `SnaxUnit`'s and `SnaxShell`'s rules against hand-worked cases (`unit/`, `shell/`) |
+| `tests/snax/` | The regression (`regress.py`), the sparse arbiter's check against the RTL (`sparse_arb/`), and the rule of one unit, `SnaxShell`'s, the datapath classes' and the group cases (`unit/`, `shell/`, `datapath/`, `group/`) |
 | `docs/RUN.md` | How to run it, from the container to the regression, each command with its output |
 | `docs/EVENTS.md` | What the SNAX components write about a run (their `summary`, `events`, `beats` and `stalls` traces), line by line |
 | `docs/plans/` | One plan per task, what it built and found (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`, `FLOW3.md`, `GEN2b.md`) |
@@ -55,7 +55,7 @@ regression run on.
 hjson (`snax/snax_cfg.py`), the file given with `--param hjson=<path>`
 (`forge/vecadd/snax_forge.hjson` by default, snax-forge D126): a compute
 core and a DMA core, the compute core's accelerator (the streamer, a
-`SnaxShell` per group and a `SnaxUnit` per unit of its `accelerator.json`); its TCDM ports, the cores' and
+`SnaxShell` and a `SnaxGroup` per group of its `accelerator.json`); its TCDM ports, the cores' and
 the narrow AXI port's go through a crossbar into the banks. With the sparse
 interconnect the crossbar takes the streamer's priority bit first, then
 round robin from the last pick (SG7, `docs/plans/SG7.md`); the cores and
@@ -82,7 +82,7 @@ core.
 
 `sw/apps/snax-shell/` drives `SnaxShell` (GeMMX's shell contract per group,
 snax-forge C§17: START, JOBS, a start held while busy, STATUS with its busy
-and sticky done bits, the COUNTER) and `SnaxUnit` (an ElementwiseLanes add at
+and sticky done bits, the COUNTER) and `SnaxGroup` (one unit, an ElementwiseLanes add at
 L = 0, II 1, 4 lanes of 64 bit) behind the streamer by hand. It runs on
 `snax_hjson` with `forge/vecadd/snax_forge.hjson`, whose `accelerator.json`
 and CSRs (`forge/vecadd/include/`) are that accelerator's; its README has the
@@ -100,7 +100,7 @@ description: groups, units, CSRs; snax-forge C§17), the headers a program drive
 `main.c` with its `data.h` (GEN2a), and `manifest.json` (`forge/README.md`).
 No model is built: `snax_hjson` reads the cluster file and puts the
 standard composite (`snax/snax_unit_acc.py`: the streamer, `SnaxShell` and
-`SnaxUnit`) in the slot, on the installed components (but for vecadd's,
+`SnaxGroup` per group) in the slot, on the installed components (but for vecadd's,
 gvrun warns that the platform tree does not match). The generic app `sw/apps/forge/` builds the
 fixture's `main.c` (`DESIGN=<design>`); `docs/RUN.md` runs `vecadd`.
 

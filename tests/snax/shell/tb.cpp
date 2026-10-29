@@ -6,7 +6,7 @@
 // gives the group's read-write CSRs and the unit behind it, then, per cycle,
 // each input's valid, the output's ready, at most one CSR access with its
 // expected result, and the expected STATUS. The tb steps snax_shell.hpp's rule
-// with snax_unit.hpp's, wired as GVSoC wires them: the shell's accepted start
+// with snax_group.hpp's (a group of one unit), wired as GVSoC wires them: the shell's accepted start
 // (but the empty run) starts the unit with JOBS and JOB_BEATS, and the unit's
 // busy feeds the shell.
 //
@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "snax_shell.hpp"
-#include "snax_unit.hpp"
+#include "snax_group.hpp"
 
 
 struct CycleLine
@@ -188,10 +188,13 @@ static int run(const Case &c)
     SnaxUnitRule unit;
     unit.configure(c.latency, c.ii);
     SnaxShellRule shell;
-    int job_beats = -1;
+    std::vector<int> job_beats;
     for (size_t i = 2; i < c.csrs.size(); i++)
     {
-        job_beats = c.csrs[i] == "JOB_BEATS" ? i : job_beats;
+        if (c.csrs[i] == "JOB_BEATS")
+        {
+            job_beats.push_back(i);
+        }
     }
     shell.configure(c.csrs.size(), job_beats);
     int nb_rw = c.csrs.size();
@@ -205,7 +208,8 @@ static int run(const Case &c)
     // The shell's accepted start in cycle (not the empty run): JOBS and
     // JOB_BEATS to the unit's ctrl
     auto start_unit = [&](int64_t cycle, const CycleLine &l) {
-        SnaxUnitRule::Start answer = unit.start(cycle, shell.jobs(), shell.job_beats());
+        std::vector<uint32_t> w = shell.words();
+        SnaxUnitRule::Start answer = unit.start(cycle, w[0], w[1]);
         if (answer == SnaxUnitRule::REFUSED)
         {
             fail(cycle, l, "the unit refused a start the shell sent while idle");

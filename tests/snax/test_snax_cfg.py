@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "snax"))
 import hjson  # noqa: E402
 import snax_cfg  # noqa: E402
-from snax_cfg import Accelerator, Csr, Group, Port, Unit  # noqa: E402
+from snax_cfg import Accelerator, Csr, Group, Link, Port, Unit  # noqa: E402
 
 CFG = ROOT / "sw" / "cfg"
 FORGE = ROOT / "forge"
@@ -322,6 +322,26 @@ DOT_STREAMER = {
                            "num_channel": [4, 4, 4], "fifo_depth": [8, 8, 8]},
     "data_writer_params": {"spatial_bounds": [[4], [1]], "temporal_dim": [1, 1],
                            "num_channel": [4, 1], "fifo_depth": [8, 8]},
+}
+
+
+# dot 4 (snax-forge C§17's block): one group dot, a Mac unit (JOB_BEATS at 2) wired into a
+# TreeAccumulate unit of fixed T 1 by the link out_partial; readers mac.a, mac.b, writer sum.out
+DOT4 = Accelerator(
+    "dot", "out/design/dot_4/design_point.json", "snax_forge", ["mac.a", "mac.b"], ["sum.out"],
+    [Group("dot", group_csrs(0, 1), [
+        Unit("mac", "mac", "Mac", {p: Port(p, "int64", 4, "out" if p == "out" else "in")
+                                   for p in ("a", "b", "out")}, "int64",
+             {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)], 1),
+        Unit("sum", "accumulate", "TreeAccumulate",
+             {"a": Port("in", "int64", 4, "in"), "out": Port("out", "int64", 1, "out")}, None,
+             {"op": "add", "T": 1}, 1, 1, [], 1),
+    ], [Link("out_partial", "mac.out", "sum.a", 0)])])
+DOT4_STREAMER = {
+    "data_reader_params": {"spatial_bounds": [[4], [4]], "temporal_dim": [1, 1],
+                           "num_channel": [4, 4], "fifo_depth": [8, 8]},
+    "data_writer_params": {"spatial_bounds": [[1]], "temporal_dim": [1], "num_channel": [1],
+                           "fifo_depth": [8]},
 }
 
 

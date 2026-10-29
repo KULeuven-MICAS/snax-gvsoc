@@ -5,54 +5,107 @@
 #
 
 """The standard composite of an accelerator slot with an accelerator.json: the
-CSR mux, the streamer, one SnaxShell per group and one SnaxUnit per unit.
+CSR mux, the streamer, and per group one SnaxShell and one SnaxGroup.
 
     SnaxUnitAcc.for_slot(slot, tcdm_size, file) -> class
 
 The slot (snax_cfg.AccSlot) gives the streamer template and the accelerator
 (snax_cfg.Accelerator), the cluster its TCDM size. Each entry of the
 accelerator's inputs ("<unit>.<port>") takes the streamer's reader of its
-index, each entry of its outputs the writer of its index.
+index, each entry of its outputs the writer of its index; a port on a link
+(snax-forge C§17) is the group's own and meets no streamer.
 
 CSRs: the streamer's from SNAX_CSR_FIRST (nb_csrs of its template); then the
 accelerator's, at the offsets accelerator.json gives: each group's window
 (START, JOBS, its units' R/W CSRs, STATUS, COUNTER) to its shell. The last
 must be at most SNAX_ACC_CSR_LAST (snax_acc.py).
 
-Names: with one group of one unit, the shell is `shell` and the unit `unit`
-(snax_acc<i>/unit, the trace path snax-forge's manifests name); with more,
-`shell_<group>` and `unit_<unit>`.
+Names (component_names): with one group of one unit, the shell is `shell` and
+the group `unit` (snax_acc<i>/unit, the trace path snax-forge's manifests
+name); with several groups of one unit each, `shell_<group>` and
+`unit_<unit>`; a linked group (several units) is `group_<group>`, its shell
+`shell_<group>`.
+
+Each SnaxGroup gets its units as a chain, head first (group_units): per unit
+its datapath, its inputs in BRM port order (an outer one named
+`<unit>_<port>`, the linked one ""), its output (outer, the last unit's), its
+types, timing and t: params.T when the unit has one, 0 for a fold's
+JOB_BEATS, else 1; and each link's depth.
 """
 
 import gvsoc.systree
 import interco.router as router
 from snax_acc import SNAX_ACC_CSR_LAST, SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
-from snax_cfg import CfgTargetError
-from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
+from snax_cfg import DTYPES, CfgTargetError
+from snax_group import SnaxGroup
 from snax_shell import SnaxShell
-from snax_unit import SnaxUnit
+from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
 
 
 def compile_components():
-    """Has the build compile SnaxShell and SnaxUnit, as it would for a target whose tree holds
+    """Has the build compile SnaxShell and SnaxGroup, as it would for a target whose tree holds
     them: a cluster file with an accelerator runs on the installed components, whatever a
     built target's default file holds. The build path only (gvsoc.systree's registry)."""
-    for sources in (SnaxShell.SOURCES, SnaxUnit.SOURCES):
+    for sources in (SnaxShell.SOURCES, SnaxGroup.SOURCES):
         gvsoc.systree.get_generated_component(list(sources), [], [])
 
 
 def component_names(accelerator) -> tuple:
-    """The shells' names by group and the units' by unit: shell and unit for one group of
-    one unit, else shell_<group> and unit_<unit>."""
+    """The shells' and the groups' component names, by group: shell and unit for one group of
+    one unit; else shell_<group>, and unit_<unit> for a group of one unit, group_<group> for a
+    linked group."""
     groups = accelerator.groups
     single = len(groups) == 1 and len(groups[0].units) == 1
     shells = {g.name: 'shell' if single else f'shell_{g.name}' for g in groups}
-    units = {u.name: 'unit' if single else f'unit_{u.name}' for g in groups for u in g.units}
-    return shells, units
+    comps = {g.name: ('unit' if single else f'unit_{g.units[0].name}') if len(g.units) == 1
+             else f'group_{g.name}' for g in groups}
+    return shells, comps
+
+
+def port_dirs(accelerator, unit) -> dict:
+    """Each BRM port of unit's: its dir, as accelerator.json gives it, else from inputs and
+    outputs (a file before dir)."""
+    outs = {p for _, p in accelerator.ports_of(unit.name, accelerator.outputs)}
+    return {name: port.dir or ('out' if name in outs else 'in') for name, port in unit.ports.items()}
+
+
+def group_units(accelerator, group) -> tuple:
+    """SnaxGroup's units and links properties for group (module doc)."""
+    to = {link.to: link for link in group.links}
+    frm = {link.from_: link for link in group.links}
+    units = []
+    for k, u in enumerate(group.units):
+        dirs = port_dirs(accelerator, u)
+        ins = [p for p in u.ports if dirs[p] == 'in']
+        (out,) = [p for p in u.ports if dirs[p] == 'out']
+        in_ports = [u.ports[p] for p in ins]
+        out_port = u.ports[out]
+        op_width, op_signed = DTYPES[u.op_type] if u.op_type else (out_port.width, out_port.signed)
+        fold = any(c.name == 'JOB_BEATS' for c in u.csrs)
+        t = u.params['T'] if 'T' in u.params else 0 if fold else 1
+        units.append({
+            'name': u.name, 'datapath': u.datapath,
+            'inputs': ['' if f'{u.name}.{p}' in to else f'{u.name}_{p}' for p in ins],
+            'output': '' if f'{u.name}.{out}' in frm else f'{u.name}_{out}',
+            'lanes': in_ports[0].lanes,
+            'in_widths': [p.width for p in in_ports], 'in_signed': [p.signed for p in in_ports],
+            'out_width': out_port.width, 'out_signed': out_port.signed,
+            'op_width': op_width, 'op_signed': op_signed,
+            'op': u.params.get('op', 'add'),
+            'accumulate': bool(u.params.get('accumulate', True)),
+            'reg_out': bool(u.params.get('regOut', False)),
+            'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
+        })
+    depths = []
+    for k in range(len(group.units) - 1):
+        a, b = group.units[k].name, group.units[k + 1].name
+        (link,) = [x for x in group.links if x.from_.split('.')[0] == a and x.to.split('.')[0] == b]
+        depths.append(link.depth)
+    return units, depths
 
 
 class SnaxUnitAcc(SnaxAcc):
-    """The CSR mux, the streamer, the shells and units of one slot, ports as SnaxAcc's;
+    """The CSR mux, the streamer, the shells and groups of one slot, ports as SnaxAcc's;
     for_slot gives the slot's class."""
 
     # Set by for_slot: the streamer template, the accelerator, the TCDM size, and
@@ -85,7 +138,7 @@ class SnaxUnitAcc(SnaxAcc):
         acc = self.accelerator
         # The accelerator's first CSR, after the streamer's
         first = SNAX_CSR_FIRST + nb_csrs(self.template)
-        shell_names, unit_names = component_names(acc)
+        shell_names, group_names = component_names(acc)
 
         csr_mux = router.Router(self, 'csr_mux')
         streamer = SnaxStreamer(self, 'streamer', template=self.template,
@@ -93,6 +146,7 @@ class SnaxUnitAcc(SnaxAcc):
         streamer_base = 4 * SNAX_CSR_FIRST
         csr_mux.o_MAP(streamer.i_INPUT(), base=streamer_base, size=4 * first - streamer_base)
 
+        owner = {}
         for k, group in enumerate(acc.groups):
             base = first + group.window[0].offset
             shell = SnaxShell(self, shell_names[group.name], csr_base=base, csrs=group.rw)
@@ -102,26 +156,20 @@ class SnaxUnitAcc(SnaxAcc):
                    else SNAX_CSR_LAST + 1)
             csr_mux.o_MAP(shell.i_INPUT(), base=4 * base, size=4 * (end - base))
 
-            (unit_cfg,) = group.units
-            ins = acc.ports_of(unit_cfg.name, acc.inputs)
-            outs = acc.ports_of(unit_cfg.name, acc.outputs)
-            in_ports = [unit_cfg.ports[p] for _, p in ins]
-            out_ports = [unit_cfg.ports[p] for _, p in outs]
-            unit = SnaxUnit(self, unit_names[unit_cfg.name], datapath=unit_cfg.datapath,
-                inputs=[p for _, p in ins], outputs=[p for _, p in outs],
-                lanes=in_ports[0].lanes, op=unit_cfg.op,
-                in_widths=[p.width for p in in_ports], in_signed=[p.signed for p in in_ports],
-                out_widths=[p.width for p in out_ports],
-                out_signed=[p.signed for p in out_ports],
-                latency=unit_cfg.latency, ii=unit_cfg.ii, csr_base=base)
+            units, links = group_units(acc, group)
+            comp = SnaxGroup(self, group_names[group.name], units=units, links=links,
+                csr_base=base)
+            shell.o_CTRL(comp.i_CTRL())
+            comp.o_BUSY(shell.i_BUSY())
+            for u in group.units:
+                owner[u.name] = comp
 
-            shell.o_CTRL(unit.i_CTRL())
-            unit.o_BUSY(shell.i_BUSY())
-
-            # The beats: the readers into the inputs, the outputs into the writers
-            for i, port in ins:
-                unit.o_PORT(port, streamer.i_READER(i))
-            for j, port in outs:
-                unit.o_PORT(port, streamer.i_WRITER(j))
+        # The beats: the readers into the outer inputs, the outer outputs into the writers
+        for i, entry in enumerate(acc.inputs):
+            unit, port = entry.split('.', 1)
+            owner[unit].o_PORT(f'{unit}_{port}', streamer.i_READER(i))
+        for j, entry in enumerate(acc.outputs):
+            unit, port = entry.split('.', 1)
+            owner[unit].o_PORT(f'{unit}_{port}', streamer.i_WRITER(j))
 
         self.bind_ports(csr_mux, streamer)

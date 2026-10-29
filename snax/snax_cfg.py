@@ -306,11 +306,13 @@ class Csr:
 
 @dataclass(frozen=True)
 class Port:
-    """A unit's BRM port: the datapath's port, its dtype (NumPy's name) and its lanes."""
+    """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes and its
+    direction (in or out; None in a file before dir)."""
 
     port: str
     dtype: str
     lanes: int
+    dir: str = None
 
     @property
     def width(self) -> int:
@@ -335,11 +337,23 @@ class Unit:
     latency: int
     ii: int
     csrs: list
+    span: int = 1
 
     @property
     def op(self) -> str:
         """The op its lanes compute: params.op (a fold's add)."""
         return self.params['op']
+
+
+@dataclass(frozen=True)
+class Link:
+    """A link of a group (C§17): from an out port to an in port, each "<unit>.<port>"; depth
+    0 a wire, >= 1 a buffer of that many beats."""
+
+    name: str
+    from_: str
+    to: str
+    depth: int
 
 
 @dataclass(frozen=True)

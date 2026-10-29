@@ -9,7 +9,8 @@ snax-forge's Chisel specs drive their shell through the same files, from the
 folder `SNAX_GVSOC_SHELL_CASES` names, so both sides read one set of cases
 and the format below is the contract between the two.
 
-- `tb.cpp` steps `SnaxShellRule` with `snax_unit.hpp`'s `SnaxUnitRule`, wired
+- `tb.cpp` steps `SnaxShellRule` with `snax_group.hpp`'s `SnaxUnitRule` (a group of
+  one unit), wired
   as GVSoC wires them: the shell's accepted start, but the empty run, starts
   the unit with JOBS and JOB_BEATS as they stand, and the unit's busy feeds
   the shell (rising in the start's cycle, falling in the run's last cycle

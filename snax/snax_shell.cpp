@@ -5,20 +5,22 @@
  */
 
 // SnaxShell (D130, D146 in snax-forge): the CSRs of one group of an
-// accelerator, in front of its SnaxUnit. Its rule (START, JOBS, the units'
+// accelerator, in front of its SnaxGroup. Its rule (START, JOBS, the units'
 // read-write CSRs, a start held while busy, the empty run, STATUS, COUNTER)
 // is SnaxShellRule in snax_shell.hpp, which tests/snax/shell/ checks against
-// hand-worked cases; this file wires it to the CSR port, the unit's ctrl and
+// hand-worked cases; this file wires it to the CSR port, the group's ctrl and
 // busy ports, and the event that takes a held start in E + 1.
 //
 // Properties (a missing or bad one is a fatal error naming it):
 //   csr_base   the group's first CSR (its START), for the trace
 //   csrs       its read-write CSRs' names in CSR order: START, JOBS, then the
-//              units' (JOB_BEATS, a fold's); STATUS and COUNTER follow
-// An accepted start, but the empty run (JOBS or JOB_BEATS 0), goes to the
-// unit's ctrl as a write of two 32-bit words, JOBS and JOB_BEATS (1 without
-// one).
+//              units' (JOB_BEATS, each fold's without a fixed T, in unit
+//              order); STATUS and COUNTER follow
+// An accepted start, but the empty run (JOBS or a JOB_BEATS 0), goes to the
+// group's ctrl as a write of 32-bit words: JOBS, then every JOB_BEATS in unit
+// order (JOBS and 1 without one: B1's two words).
 
+#include <string>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
@@ -52,7 +54,7 @@ private:
     // The CSRs' decoding, refusals and messages; its registers mirror the
     // rule's, written in the same calls
     SnaxCsrBlock csrs;          // START, JOBS, the units'; STATUS, COUNTER
-    uint32_t config_words[2];   // JOBS, JOB_BEATS
+    std::vector<uint32_t> config_words;     // JOBS, then each JOB_BEATS (or 1)
     vp::IoReq *held_req;        // the held start's request (rule.held)
 };
 
@@ -69,7 +71,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     {
         this->trace.fatal("Property csrs: missing, not a list or shorter than START, JOBS\n");
     }
-    int job_beats = -1;
+    std::vector<int> job_beats;
     for (int i = 0; i < names->get_size(); i++)
     {
         js::Config *name = names->get_elem(i);
@@ -84,7 +86,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
         }
         if (name->get_str() == "JOB_BEATS")
         {
-            job_beats = i;
+            job_beats.push_back(i);
         }
     }
     js::Config *csr_base = this->get_js_config()->get("csr_base");
@@ -124,29 +126,32 @@ void SnaxShell::reset(bool active)
 }
 
 
-// An accepted start in cycle: JOBS and JOB_BEATS to the unit's ctrl, or, for
-// the empty run, nothing (the rule has ended it)
+// An accepted start in cycle: JOBS and every JOB_BEATS to the group's ctrl,
+// or, for the empty run, nothing (the rule has ended it)
 void SnaxShell::send(int64_t cycle, bool empty)
 {
+    this->config_words = this->rule.words();
+    std::string text;
+    for (size_t i = 1; i < this->config_words.size(); i++)
+    {
+        text += " " + std::to_string(this->config_words[i]);
+    }
     if (empty)
     {
         this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %u, "
-            "JOB_BEATS %u, the empty run, done\n", cycle, this->rule.jobs(),
-            this->rule.job_beats());
+            "JOB_BEATS%s, the empty run, done\n", cycle, this->rule.jobs(), text.c_str());
         return;
     }
-    this->config_words[0] = this->rule.jobs();
-    this->config_words[1] = this->rule.job_beats();
     this->ctrl_req.init();
-    this->ctrl_req.set_size(sizeof(this->config_words));
+    this->ctrl_req.set_size(4 * this->config_words.size());
     this->ctrl_req.set_is_write(true);
-    this->ctrl_req.set_data((uint8_t *)this->config_words);
+    this->ctrl_req.set_data((uint8_t *)this->config_words.data());
     if (this->ctrl_itf.req(&this->ctrl_req) != vp::IO_REQ_OK)
     {
-        this->trace.fatal("Start refused by the unit at cycle %ld while idle\n", cycle);
+        this->trace.fatal("Start refused by the group at cycle %ld while idle\n", cycle);
     }
-    this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %u, JOB_BEATS "
-        "%u\n", cycle, this->config_words[0], this->config_words[1]);
+    this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %u, JOB_BEATS%s\n",
+        cycle, this->rule.jobs(), text.c_str());
 }
 
 

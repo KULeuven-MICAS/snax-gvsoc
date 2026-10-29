@@ -99,7 +99,7 @@ a cluster file, its streamer and datapath files, the headers, `main.c` and
     make: Leaving directory '$ROOT/snax-gvsoc/sw/apps/forge'
 
 `snax_hjson` reads the cluster file given with `--param hjson=` and puts the
-standard composite (streamer, `SnaxShell`, `SnaxUnit`) in its accelerator
+standard composite (streamer, `SnaxShell`, `SnaxGroup`) in its accelerator
 slot; `--trace=snax_acc0/unit` turns on the unit's traces (its debug
 `trace`, and its `events` and `summary`, `docs/EVENTS.md`):
 
@@ -204,7 +204,8 @@ snax-forge's flow does both from `--trace LEVEL[:SOURCES]` and `--vcd`
 
 ## 6. The regression
 
-`make regress` runs `SnaxUnit`'s and `SnaxShell`'s rules on their cases, builds `sw/` and every
+`make regress` runs the rules of one unit, of `SnaxShell` and of a group and the datapath classes on
+their cases, builds `sw/` and every
 program, and runs them all: the cluster tests, snax-shell and every
 `forge/` folder on `snax_hjson`
 (their counters checked as in section 5), and the plain tests on `snitch`.
@@ -213,9 +214,13 @@ About two minutes:
     make regress
 
     python3 tests/snax/regress.py 
-    SnaxUnit's rule (tests/snax/unit)
+    The rule of one unit (tests/snax/unit)
       1 run
     SnaxShell's rule (tests/snax/shell)
+      1 run
+    The datapath classes (tests/snax/datapath)
+      1 run
+    SnaxGroupRule's cases (tests/snax/group)
       1 run
     cluster tests on snax_hjson, forge/vecadd/'s cluster file
       13 run
@@ -236,9 +241,13 @@ does not: make reads `-k` itself):
     make regress K=forge
 
     python3 tests/snax/regress.py -k forge
-    SnaxUnit's rule (tests/snax/unit)
+    The rule of one unit (tests/snax/unit)
       0 run
     SnaxShell's rule (tests/snax/shell)
+      0 run
+    The datapath classes (tests/snax/datapath)
+      0 run
+    SnaxGroupRule's cases (tests/snax/group)
       0 run
     cluster tests on snax_hjson, forge/vecadd/'s cluster file
       0 run
@@ -272,8 +281,9 @@ CSR check (`snax_unit_acc.py`, which imports GVSoC from `install/`, so after
 
     OK
 
-`SnaxUnit`'s cycle rule against its hand-worked cases, with g++ (the
-regression's `unit`):
+The rule of one unit (`SnaxGroupRule`'s one-unit case, `SnaxUnitRule`)
+against its hand-worked cases, with g++ (the regression's `unit`; `shell`,
+`datapath` and `group` run the same way, `tests/snax/<name>/run.sh`):
 
     tests/snax/unit/run.sh
 

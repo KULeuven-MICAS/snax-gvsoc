@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SNAX-GVSoC's regression, pass or finish: `make regress`.
 
-First runs SnaxUnit's rule against its hand-worked cases
+First runs the rule of one unit (SnaxGroupRule's one-unit case) against its hand-worked cases
 (tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0), then
 SnaxShell's rule with the unit's against its own (tests/snax/shell/run.sh;
 `shell`, likewise), then the datapath classes against NumPy's vectors
@@ -17,7 +17,7 @@ forge/vecadd/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
 `dma-timing`, `snax-csr`, the seven `stream-timing` cases, the three
 `core-tcdm` cases and the `dma-tcdm` case, each a plain run (exit code
 only); then `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file
-(SHELL_DESIGN: SnaxShell and SnaxUnit, an ElementwiseLanes add), with the unit's
+(SHELL_DESIGN: SnaxShell and SnaxGroup, an ElementwiseLanes add), with the unit's
 trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
 (snax-forge's generated main.c and data.h), named forge.<design>: the
@@ -39,7 +39,7 @@ compared; the comparison with the RTL is made by hand (README, "Comparing
 with the RTL").
 
 The counter check (check_counter): a program on SnaxShell and
-SnaxUnit prints the shell's counter after a unit run; it passes when the
+SnaxGroup prints the shell's counter after a unit run; it passes when the
 counter is busy + stall_in + stall_out + flush of the unit's summary line
 for that run (`run index=<k> ...` in trace.log, docs/EVENTS.md) and that run
 fired the task's beats. The
@@ -316,7 +316,7 @@ def main():
                    help="run only the programs whose name holds SUBSTRING")
     check = Check(p.parse_args().only)
 
-    print("SnaxUnit's rule (tests/snax/unit)")
+    print("The rule of one unit (tests/snax/unit)")
     check.run_script("unit", HERE / "unit" / "run.sh")
     print(f"  {check.count} run")
 
