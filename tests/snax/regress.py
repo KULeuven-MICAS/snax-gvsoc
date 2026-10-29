@@ -7,7 +7,8 @@
 First runs SnaxUnit's rule against its hand-worked cases
 (tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0), then
 SnaxShell's rule with the unit's against its own (tests/snax/shell/run.sh;
-`shell`, likewise). Then
+`shell`, likewise), then the datapath classes against NumPy's vectors
+(tests/snax/datapath/run.sh; `datapath`). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
 sw/apps/, then runs the cluster tests on `snax_hjson` with
@@ -321,6 +322,11 @@ def main():
     count = check.count
     print("SnaxShell's rule (tests/snax/shell)")
     check.run_script("shell", HERE / "shell" / "run.sh")
+    print(f"  {check.count - count} run")
+
+    count = check.count
+    print("The datapath classes (tests/snax/datapath)")
+    check.run_script("datapath", HERE / "datapath" / "run.sh")
     print(f"  {check.count - count} run")
 
     make(SW)
