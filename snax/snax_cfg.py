@@ -53,15 +53,20 @@ accelerator.json (snax-forge C§17), what the standard composite
     inputs, outputs           the outer ports, "<unit>.<port>", in the
                               streamer's reader and writer order
     groups[]                  Group: name, csrs (START, JOBS, STATUS,
-                              COUNTER), units, links ([]: links come with
-                              snax-forge's B3)
-    groups[].units[]          Unit: name, brm, datapath (ElementwiseLanes or
-                              TreeAccumulate), ports (per BRM port: port, the
-                              datapath's; dtype, NumPy's name; lanes), opType
-                              (ElementwiseLanes only), params (op: every
-                              unit's; a TreeAccumulate's add), timing
-                              (latency, ii), csrs (its R/W ones: JOB_BEATS, a
-                              TreeAccumulate's)
+                              COUNTER), units, links
+    groups[].units[]          Unit: name, brm, datapath (a unit datapath of
+                              snax_datapath.hpp's registry: ElementwiseLanes,
+                              TreeAccumulate, Mac, SerialAccumulate), ports
+                              (per BRM port: port, the datapath's; dir, in or
+                              out, optional before B1x; dtype, NumPy's name;
+                              lanes), opType (ElementwiseLanes and Mac),
+                              params (op: ElementwiseLanes' and
+                              TreeAccumulate's, add; accumulate, regOut: Mac's;
+                              T: a fold's rate fixed at design time), timing
+                              (latency, ii, span: 1 when missing), csrs (its
+                              R/W ones: JOB_BEATS, a fold's without T)
+    groups[].links[]          Link: name, from (an out port, "<unit>.<port>"),
+                              to (an in port), depth (0 a wire, >= 1 a buffer)
     a CSR                     Csr: name, access (rw, ro), offset (from the
                               accelerator's first CSR), width (rw only), pin
 
@@ -74,20 +79,27 @@ spatial_bounds multiply to its num_channel (snax_cluster's StreamerParam);
 snax_tcdm_ports is the streamer's num_channel summed over its movers, and the
 narrow and wide ports or the sparse config's widths add up to it; with
 accelerator.json, inputs and outputs are the streamer's readers and writers
-in number, each naming a port of a unit once; each port's words per beat
+in number; they are exactly the ports on no link, group by group, unit by
+unit in port order (gen.outer), each link goes from an out port to an in port
+of its group's units with the same dtype and lanes (gen.link), no port is on
+two links (gen.link_port) and a group's links connect its units (gen.group),
+the codes snax-forge's reader gives; each outer port's words per beat
 (lanes * its dtype's bits / 64) are its mover's num_channel (a fold's
-one-lane output: 1), since SnaxUnit has no FIFO slicer; snax_num_rw_csr and
+one-lane output: 1), since SnaxGroup has no FIFO slicer; snax_num_rw_csr and
 snax_num_ro_csr are the file's R/W and R/O CSRs. An ElementwiseLanes unit's
-opType is its inputs' NumPy result type (snax_unit.hpp's
-snax_unit_result_type: a signed type with uint64 has none).
+opType is its inputs' NumPy result type (snax_types.hpp's
+snax_unit_result_type: a signed type with uint64 has none), a Mac's that of a
+and b.
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
 resolve), CfgKeyError (a key missing), CfgTypeError (a value of the wrong
 type), CfgSlotError (slot counts or CSRs that disagree with the files); a
-target refuses what it cannot model with CfgTargetError (a datapath other
-than the two, a TreeAccumulate op other than add, links, a unit CSR other
-than a fold's JOB_BEATS, a group of more than one unit). The datapath block before accelerator.json
+target refuses what it cannot model with CfgTargetError (a datapath not in
+the registry, a TreeAccumulate op other than add, a unit CSR other than a
+fold's JOB_BEATS, a latency or span other than its datapath's, a group whose
+links are not a chain in unit order, the last unit's output the only outer
+one, or a unit of span > 1 fed by the streamer: SnaxGroup's shape). The datapath block before accelerator.json
 (<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key.
 """
 
@@ -137,15 +149,18 @@ class CfgTargetError(SnaxCfgError):
 # refused
 MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
-# The datapaths SnaxUnit models (snax-forge's catalogue, D147)
-DATAPATHS = ('ElementwiseLanes', 'TreeAccumulate')
+# The unit datapaths SnaxGroup models: snax_datapath.hpp's registry but LinkBuffer, a link's
+# (snax-forge's catalogue, D147, D149)
+DATAPATHS = ('ElementwiseLanes', 'TreeAccumulate', 'Mac', 'SerialAccumulate')
+# The folds: a result every T firings, T a JOB_BEATS CSR or params.T
+FOLDS = ('TreeAccumulate', 'SerialAccumulate')
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
 # read-only, last (C§17)
 GROUP_RW = ('START', 'JOBS')
 GROUP_RO = ('STATUS', 'COUNTER')
 # The unit CSRs modelled: a fold's JOB_BEATS
 UNIT_RW = ('JOB_BEATS',)
-# The op names (snax_unit.hpp's snax_unit_op_names)
+# The op names (snax_types.hpp's snax_unit_op_names)
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
 # The keys of the datapath block accelerator.json replaced: refused at their key
 OLD_DATAPATH_KEYS = ('unit', 'control', 'config', 'wait', 'fields')
@@ -515,7 +530,7 @@ DTYPES = {type_name(w, s): (w, s) for w in (8, 16, 32, 64) for s in (True, False
 
 
 def result_type(a: tuple, b: tuple):
-    """NumPy's result type of two integer types (width, signed), as snax_unit.hpp's
+    """NumPy's result type of two integer types (width, signed), as snax_types.hpp's
     snax_unit_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
     if a[1] == b[1]:
         return max(a[0], b[0]), a[1]
@@ -551,39 +566,65 @@ def _port(node: _Node) -> Port:
     lanes = node.get('lanes', int)
     if lanes < 1:
         raise CfgTypeError(node.file, node.where('lanes'), f'{lanes}, must be 1 or more')
-    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes)
+    direction = node.get('dir', str, None)
+    if direction not in (None, 'in', 'out'):
+        raise CfgTypeError(node.file, node.where('dir'), f'{direction!r}, must be in or out')
+    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction)
+
+
+def _is_fold(datapath: str, params: dict) -> bool:
+    """A unit that gives a result every T firings: a tree, a serial sum, an accumulating Mac."""
+    return datapath in FOLDS or (datapath == 'Mac' and params.get('accumulate', True))
+
+
+# Each datapath's latency and span from its params and lanes (snax-forge's catalogue)
+def _timing(datapath: str, params: dict, lanes: int) -> tuple:
+    if datapath == 'ElementwiseLanes':
+        return 0, 1
+    if datapath == 'Mac':
+        return int(bool(params.get('accumulate', True)) or bool(params.get('regOut', False))), 1
+    return 1, lanes if datapath == 'SerialAccumulate' else 1
 
 
 def _unit(node: _Node) -> Unit:
     datapath = node.get('datapath', str)
     if datapath not in DATAPATHS:
         raise CfgTargetError(node.file, node.where('datapath'),
-            f'{datapath!r}, not a datapath SnaxUnit models ({", ".join(DATAPATHS)})')
+            f'{datapath!r}, not a datapath SnaxGroup models ({", ".join(DATAPATHS)})')
     ports = node.node('ports')
     if not ports.value:
         raise CfgTypeError(node.file, node.where('ports'), 'no port')
     timing = node.node('timing')
     latency, ii = timing.get('latency', int), timing.get('ii', int)
+    span = timing.get('span', int, 1)
     if latency < 0:
         raise CfgTypeError(node.file, timing.where('latency'), f'{latency}, must be 0 or more')
     if ii < 1:
         raise CfgTypeError(node.file, timing.where('ii'), f'{ii}, must be 1 or more')
+    if span < 1:
+        raise CfgTypeError(node.file, timing.where('span'), f'{span}, must be 1 or more')
     params = node.node('params')
+    takes_op = datapath in ('ElementwiseLanes', 'TreeAccumulate')
     op = params.get('op', str, None)
-    fold = datapath == 'TreeAccumulate'
-    if op is None:
+    if takes_op and op is None:
         raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
-    if op not in OPS:
+    if op is not None and op not in OPS:
         raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)})')
-    if fold and op != 'add':
+    if datapath == 'TreeAccumulate' and op != 'add':
         raise CfgTargetError(node.file, params.where('op'),
             f'{op!r}: TreeAccumulate adds; a fold of another op is not modelled')
+    for key in ('accumulate', 'regOut'):
+        params.get(key, bool, None)
+    t = params.get('T', int, None)
+    if t is not None and t < 1:
+        raise CfgTypeError(node.file, params.where('T'), f'{t}, must be 1 or more')
     op_type = node.get('opType', str, None)
-    if fold and op_type is not None:
-        raise CfgTypeError(node.file, node.where('opType'), 'a TreeAccumulate unit has none')
-    if not fold and op_type is None:
+    typed = datapath in ('ElementwiseLanes', 'Mac')
+    if not typed and op_type is not None:
+        raise CfgTypeError(node.file, node.where('opType'), f'a {datapath} unit has none')
+    if typed and op_type is None:
         raise CfgKeyError(node.file, node.where('opType'),
-            'missing: an ElementwiseLanes unit runs its op at its inputs\' result type')
+            f'missing: a {datapath} unit runs its op at its inputs\' result type')
     if op_type is not None and op_type not in DTYPES:
         raise CfgTypeError(node.file, node.where('opType'), f'{op_type!r}, not a NumPy integer type')
     csrs = [_csr(c) for c in node.nodes('csrs')]
@@ -591,24 +632,36 @@ def _unit(node: _Node) -> Unit:
         if c.name not in UNIT_RW or c.access != 'rw':
             raise CfgTargetError(node.file, f'{node.where("csrs")}[{i}]',
                 f'{c.name} ({c.access}): the unit CSRs modelled are {", ".join(UNIT_RW)} (rw)')
-    if fold != (('JOB_BEATS' in [c.name for c in csrs])):
+    fold = _is_fold(datapath, params.value)
+    if (fold and t is None) != ('JOB_BEATS' in [c.name for c in csrs]):
         raise CfgSlotError(node.file, node.where('csrs'),
-            f'{[c.name for c in csrs]}: a TreeAccumulate unit has JOB_BEATS, an ElementwiseLanes '
-            'unit none')
+            f'{[c.name for c in csrs]}: a fold without params.T has JOB_BEATS, any other unit '
+            'none')
+    unit_ports = {key: _port(ports.node(key)) for key in ports.value}
+    want = _timing(datapath, params.value, next(iter(unit_ports.values())).lanes)
+    if (latency, ii, span) != (*want[:1], 1, want[1]):
+        raise CfgTargetError(node.file, node.where('timing'),
+            f'gen.timing: latency {latency}, ii {ii}, span {span}; {datapath} here is latency '
+            f'{want[0]}, ii 1, span {want[1]}')
     return Unit(name=node.get('name', str), brm=node.get('brm', str), datapath=datapath,
-                ports={key: _port(ports.node(key)) for key in ports.value},
-                op_type=op_type, params=dict(params.value), latency=latency, ii=ii, csrs=csrs)
+                ports=unit_ports, op_type=op_type, params=dict(params.value), latency=latency,
+                ii=ii, csrs=csrs, span=span)
+
+
+def _link(node: _Node) -> Link:
+    depth = node.get('depth', int)
+    if depth < 0:
+        raise CfgSlotError(node.file, node.where('depth'),
+                           f'gen.link: depth {depth}; 0 is a wire, >= 1 a buffer')
+    return Link(name=node.get('name', str), from_=node.get('from', str), to=node.get('to', str),
+                depth=depth)
 
 
 def _group(node: _Node) -> Group:
-    links = node.get('links', list)
-    if links:
-        raise CfgTargetError(node.file, node.where('links'),
-            f'{len(links)} links: not modelled yet (snax-forge B3)')
+    links = [_link(k) for k in node.nodes('links')]
     units = [_unit(u) for u in node.nodes('units')]
-    if len(units) != 1:
-        raise CfgTargetError(node.file, node.where('units'),
-            f'{len(units)} units: without links a group is one unit')
+    if not units:
+        raise CfgTypeError(node.file, node.where('units'), 'no unit')
     csrs = [_csr(c) for c in node.nodes('csrs')]
     own = [(c.name, c.access) for c in csrs]
     want = [(n, 'rw') for n in GROUP_RW] + [(n, 'ro') for n in GROUP_RO]
@@ -645,8 +698,13 @@ def _accelerator(node: _Node) -> Accelerator:
                 'order (per group START, JOBS, the units\' R/W CSRs, STATUS, COUNTER): the '
                 'offsets must be contiguous from 0')
 
-    # The outer ports: every unit's ports once, the datapath's shape
-    units = {u.name: u for g in acc.groups for u in g.units}
+    # The outer ports: each names a port of a unit, once; unit names are unique
+    units = {}
+    for g in acc.groups:
+        for u in g.units:
+            if u.name in units:
+                raise CfgSlotError(node.file, node.where('groups'), f'unit {u.name!r} twice')
+            units[u.name] = u
     seen = set()
     for key in ('inputs', 'outputs'):
         for i, entry in enumerate(getattr(acc, key)):
@@ -657,38 +715,124 @@ def _accelerator(node: _Node) -> Accelerator:
             if entry in seen:
                 raise CfgSlotError(node.file, f'{node.where(key)}[{i}]', f'{entry!r} twice')
             seen.add(entry)
+    _check_links(node, acc)
     for u in units.values():
-        missing = [p for p in u.ports if f'{u.name}.{p}' not in seen]
-        if missing:
-            raise CfgSlotError(node.file, node.where('inputs'),
-                f'unit {u.name}\'s ports {missing} are in neither inputs nor outputs')
-        ins = [u.ports[p] for _, p in acc.ports_of(u.name, acc.inputs)]
-        outs = [u.ports[p] for _, p in acc.ports_of(u.name, acc.outputs)]
-        n_in = 1 if u.datapath == 'TreeAccumulate' else 2
-        if (len(ins), len(outs)) != (n_in, 1):
-            raise CfgTargetError(node.file, node.where('inputs'),
-                f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
-                f'{n_in} and 1')
-        if u.datapath == 'TreeAccumulate':
-            if outs[0].lanes != 1:
-                raise CfgTargetError(node.file, node.where('outputs'),
-                    f'unit {u.name}: a fold\'s output has 1 lane, not {outs[0].lanes}')
-        else:
-            if len({p.lanes for p in (*ins, *outs)}) != 1:
-                raise CfgTargetError(node.file, node.where('inputs'),
-                    f'unit {u.name}: lanes {[p.lanes for p in (*ins, *outs)]}; ElementwiseLanes '
-                    'has one lane count on every port')
-            a, b = ((p.width, p.signed) for p in ins)
-            t = result_type(a, b)
-            if t is None:
-                raise CfgTypeError(node.file, node.where('groups'),
-                    f'unit {u.name}: {type_name(*a)} with {type_name(*b)} has no integer result '
-                    'type (NumPy gives float64)')
-            if u.op_type != type_name(*t):
-                raise CfgSlotError(node.file, node.where('groups'),
-                    f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
-                    f'{type_name(*t)} (snax_unit_result_type)')
+        _check_shape(node, acc, u)
     return acc
+
+
+def dirs_of(acc: Accelerator, unit: Unit) -> dict:
+    """Each BRM port of unit's: its dir, as accelerator.json gives it, else from inputs and
+    outputs (a file before dir)."""
+    outs = {p for _, p in acc.ports_of(unit.name, acc.outputs)}
+    return {name: port.dir or ('out' if name in outs else 'in') for name, port in unit.ports.items()}
+
+
+def _check_links(node: _Node, acc: Accelerator):
+    """The links, the outer ports and each group's connectedness, with snax-forge's codes
+    (its gen/accelerator.py's reader); then the chain SnaxGroup models."""
+    def fail(key, why):
+        raise CfgSlotError(node.file, node.where(key), why)
+
+    linked = set()
+    outer = {'in': [], 'out': []}
+    for g in acc.groups:
+        ports = {f'{u.name}.{k}': (p, dirs_of(acc, u)[k]) for u in g.units
+                 for k, p in u.ports.items()}
+        parent = {u.name: u.name for u in g.units}
+
+        def root(name):
+            while parent[name] != name:
+                name = parent[name]
+            return name
+
+        for k in g.links:
+            what = f'gen.link: group {g.name}\'s link {k.name}'
+            a, b = ports.get(k.from_), ports.get(k.to)
+            if a is None or b is None or a[1] != 'out' or b[1] != 'in':
+                fail('groups', f'{what} goes from {k.from_} to {k.to}; a link goes from an out '
+                     'port to an in port of the group\'s units')
+            if (a[0].dtype, a[0].lanes) != (b[0].dtype, b[0].lanes):
+                fail('groups', f'{what}: {k.from_} is {a[0].lanes} lanes of {a[0].dtype}, '
+                     f'{k.to} {b[0].lanes} of {b[0].dtype}; both ends are the same')
+            for end in (k.from_, k.to):
+                if end in linked:
+                    fail('groups', f'gen.link_port: group {g.name}\'s link {k.name}: port {end} '
+                         'is on another link too')
+                linked.add(end)
+            parent[root(k.from_.split('.')[0])] = root(k.to.split('.')[0])
+        if len({root(u.name) for u in g.units}) > 1:
+            fail('groups', f'gen.group: group {g.name}\'s units {[u.name for u in g.units]} are '
+                 'not connected by its links')
+        for name, (_, direction) in ports.items():
+            if name not in linked:
+                outer[direction].append(name)
+    for key, direction in (('inputs', 'in'), ('outputs', 'out')):
+        if list(getattr(acc, key)) != outer[direction]:
+            fail(key, f'gen.outer: {list(getattr(acc, key))}; the unlinked ports are '
+                 f'{outer[direction]}, in group, unit and port order')
+
+    # SnaxGroup's shape: a chain in unit order, the last unit's output the outer one
+    for g in acc.groups:
+        for k, (a, b) in enumerate(zip(g.units, g.units[1:])):
+            chain = [x for x in g.links if x.from_.split('.')[0] == a.name
+                     and x.to.split('.')[0] == b.name]
+            if len(chain) != 1:
+                raise CfgTargetError(node.file, node.where('groups'),
+                    f'group {g.name}: no one link from {a.name} to {b.name}; SnaxGroup models '
+                    'a chain of units in their order')
+        if len(g.links) != len(g.units) - 1:
+            raise CfgTargetError(node.file, node.where('groups'),
+                f'group {g.name}: {len(g.links)} links for {len(g.units)} units; SnaxGroup '
+                'models a chain')
+        for k, u in enumerate(g.units):
+            outs = [p for p, d in dirs_of(acc, u).items() if d == 'out']
+            outer_out = [p for p in outs if f'{u.name}.{p}' not in linked]
+            if bool(outer_out) != (k == len(g.units) - 1):
+                raise CfgTargetError(node.file, node.where('outputs'),
+                    f'group {g.name}: unit {u.name}\'s outer outputs {outer_out}; in SnaxGroup '
+                    'only the last unit\'s output is outer')
+            ins = [p for p, d in dirs_of(acc, u).items() if d == 'in']
+            if u.span > 1 and any(f'{u.name}.{p}' not in linked for p in ins):
+                raise CfgTargetError(node.file, node.where('inputs'),
+                    f'unit {u.name}: span {u.span} reads its input in place; its input is a '
+                    'link, not a streamer\'s')
+
+
+def _check_shape(node: _Node, acc: Accelerator, u: Unit):
+    """A unit's ports against its datapath: their number, lanes and types."""
+    dirs = dirs_of(acc, u)
+    ins = [u.ports[p] for p in u.ports if dirs[p] == 'in']
+    outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
+    plain = u.datapath == 'Mac' and not u.params.get('accumulate', True)
+    n_in = {'ElementwiseLanes': 2, 'Mac': 3 if plain else 2}.get(u.datapath, 1)
+    if (len(ins), len(outs)) != (n_in, 1):
+        raise CfgTargetError(node.file, node.where('inputs'),
+            f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
+            f'{n_in} and 1')
+    if u.datapath in FOLDS:
+        if outs[0].lanes != 1:
+            raise CfgTargetError(node.file, node.where('outputs'),
+                f'unit {u.name}: a fold\'s output has 1 lane, not {outs[0].lanes}')
+        return
+    if len({p.lanes for p in (*ins, *outs)}) != 1:
+        raise CfgTargetError(node.file, node.where('inputs'),
+            f'unit {u.name}: lanes {[p.lanes for p in (*ins, *outs)]}; {u.datapath} has one lane '
+            'count on every port')
+    if plain and (ins[2].dtype != outs[0].dtype):
+        raise CfgTargetError(node.file, node.where('inputs'),
+            f'unit {u.name}: c is {ins[2].dtype}, out {outs[0].dtype}; a plain Mac\'s c is '
+            'out\'s type')
+    a, b = ((p.width, p.signed) for p in ins[:2])
+    t = result_type(a, b)
+    if t is None:
+        raise CfgTypeError(node.file, node.where('groups'),
+            f'unit {u.name}: {type_name(*a)} with {type_name(*b)} has no integer result type '
+            '(NumPy gives float64)')
+    if u.op_type != type_name(*t):
+        raise CfgSlotError(node.file, node.where('groups'),
+            f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
+            f'{type_name(*t)} (snax_unit_result_type)')
 
 
 def _slot(acc: _Node) -> AccSlot:
@@ -755,7 +899,7 @@ def _check_slot(acc: _Node, slot: AccSlot):
 
 def _check_accelerator(acc: _Node, slot: AccSlot):
     """accelerator.json against the slot: its outer ports against the streamer's movers, each
-    port's words per beat against its mover's num_channel (SnaxUnit has no FIFO slicer, so
+    port's words per beat against its mover's num_channel (SnaxGroup has no FIFO slicer, so
     they must match: the streamer would refuse the beat's size mid-run), and the CSR counts."""
     accelerator = slot.accelerator
 
@@ -774,7 +918,7 @@ def _check_accelerator(acc: _Node, slot: AccSlot):
             unit, _, name = entry.partition('.')
             u = accelerator.unit(unit)
             port = u.ports[name]
-            if u.datapath == 'TreeAccumulate' and key == 'outputs':
+            if u.datapath in FOLDS and key == 'outputs':
                 if channels[i] != 1:
                     fail(f'snax_datapath_cfg.{key}[{i}]', f"{entry}: a fold's output is one "
                          f'64-bit word per beat, but {mover}[{i}] has num_channel {channels[i]}')
@@ -786,7 +930,7 @@ def _check_accelerator(acc: _Node, slot: AccSlot):
             if bits // 64 != channels[i]:
                 fail(f'snax_datapath_cfg.{key}[{i}]', f'{entry}: lanes {port.lanes} x '
                      f'{port.width} bits is {bits // 64} 64-bit words per beat, but {mover}[{i}] '
-                     f'has num_channel {channels[i]}: SnaxUnit has no FIFO slicer, so they must '
+                     f'has num_channel {channels[i]}: SnaxGroup has no FIFO slicer, so they must '
                      'match')
     if slot.num_rw_csr != accelerator.num_rw:
         fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but accelerator.json has '
