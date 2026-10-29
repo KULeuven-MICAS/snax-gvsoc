@@ -85,6 +85,7 @@
 #include <vp/itf/wire.hpp>
 #include "snax_events.hpp"
 #include "snax_group.hpp"
+#include "snax_props.hpp"
 
 
 class SnaxGroup : public vp::Component
@@ -97,18 +98,13 @@ private:
     static void fire_handler(vp::Block *__this, vp::ClockEvent *event);
     void reset(bool active) override;
 
-    js::Config *prop(js::Config *config, const char *name, const std::string &where);
-    int int_prop(js::Config *config, const char *name, const std::string &where);
-    bool bool_prop(js::Config *config, const char *name, const std::string &where);
-    std::string str_prop(js::Config *config, const char *name, const std::string &where);
-    std::vector<js::Config *> list_prop(js::Config *config, const char *name,
-        const std::string &where);
     SnaxUnitType type_prop(js::Config *config, const char *width, const char *is_signed,
         const std::string &where);
     bool probe(vp::IoMaster &port, bool is_write);
     void move(vp::IoMaster &port, bool is_write, uint64_t *beat, int words);
 
     vp::Trace trace;
+    SnaxProps props;
     SnaxEvents ev;
     vp::IoSlave ctrl_itf;
     vp::WireMaster<bool> busy_itf;
@@ -152,6 +148,7 @@ private:
 
 SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     : vp::Component(config),
+      props(&this->trace),
       fire_event(this, &SnaxGroup::fire_handler),
       sigs(this),
       sig_busy(*this, "busy", 1),
@@ -162,7 +159,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
     this->ev.declare(this);
 
-    std::vector<js::Config *> units = this->list_prop(this->get_js_config(), "units", "");
+    std::vector<js::Config *> units = this->props.list_prop(this->get_js_config(), "units", "");
     if (units.empty())
     {
         this->trace.fatal("Property units: no unit\n");
@@ -172,7 +169,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     size_t nb_in = 0;
     for (size_t k = 0; k < units.size(); k++)
     {
-        for (js::Config *p : this->list_prop(units[k], "inputs", "units[" + std::to_string(k) + "]"))
+        for (js::Config *p : this->props.list_prop(units[k], "inputs", "units[" + std::to_string(k) + "]"))
         {
             nb_in += dynamic_cast<js::ConfigString *>(p) != nullptr && !p->get_str().empty();
         }
@@ -191,13 +188,13 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     {
         std::string w = "units[" + std::to_string(k) + "]";
         js::Config *u = units[k];
-        std::string name = this->str_prop(u, "name", w);
-        std::string datapath = this->str_prop(u, "datapath", w);
+        std::string name = this->props.str_prop(u, "name", w);
+        std::string datapath = this->props.str_prop(u, "datapath", w);
         SnaxDatapathParams p;
-        p.lanes = this->int_prop(u, "lanes", w);
-        std::vector<js::Config *> ins = this->list_prop(u, "inputs", w);
-        std::vector<js::Config *> widths = this->list_prop(u, "in_widths", w);
-        std::vector<js::Config *> signs = this->list_prop(u, "in_signed", w);
+        p.lanes = this->props.int_prop(u, "lanes", w);
+        std::vector<js::Config *> ins = this->props.list_prop(u, "inputs", w);
+        std::vector<js::Config *> widths = this->props.list_prop(u, "in_widths", w);
+        std::vector<js::Config *> signs = this->props.list_prop(u, "in_signed", w);
         if (widths.size() != ins.size() || signs.size() != ins.size())
         {
             this->trace.fatal("Property %s.in_widths, in_signed: one per input (%ld)\n",
@@ -206,13 +203,9 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         this->unit_ins.emplace_back();
         for (size_t i = 0; i < ins.size(); i++)
         {
-            int width = widths[i]->get_int();
-            if (width != 8 && width != 16 && width != 32 && width != 64)
-            {
-                this->trace.fatal("Property %s.in_widths[%ld]: %d, must be 8, 16, 32 or 64\n",
-                    w.c_str(), i, width);
-            }
-            p.in_types.push_back({width, signs[i]->get_bool()});
+            std::string at_i = "[" + std::to_string(i) + "]";
+            p.in_types.push_back({this->props.as_width(widths[i], w + ".in_widths" + at_i),
+                this->props.as_bool(signs[i], w + ".in_signed" + at_i)});
             std::string port = dynamic_cast<js::ConfigString *>(ins[i]) ? ins[i]->get_str() : "";
             if (port.empty())
             {
@@ -228,7 +221,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         }
         p.out_type = this->type_prop(u, "out_width", "out_signed", w);
         p.op_type = this->type_prop(u, "op_width", "op_signed", w);
-        std::string op = this->str_prop(u, "op", w);
+        std::string op = this->props.str_prop(u, "op", w);
         p.op = -1;
         for (int i = 0; i < UNIT_NB_OPS; i++)
         {
@@ -239,8 +232,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             this->trace.fatal("Property %s.op: \"%s\", not an op (add, sub, mul, and, or, xor, "
                 "min, max)\n", w.c_str(), op.c_str());
         }
-        p.accumulate = this->bool_prop(u, "accumulate", w);
-        p.reg_out = this->bool_prop(u, "reg_out", w);
+        p.accumulate = this->props.bool_prop(u, "accumulate", w);
+        p.reg_out = this->props.bool_prop(u, "reg_out", w);
         std::string why;
         std::unique_ptr<SnaxDatapath> dp = snax_datapath_new(datapath, p, &why);
         if (!dp)
@@ -249,9 +242,9 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 why.c_str());
         }
         SnaxGroupRule::UnitCfg c;
-        c.latency = this->int_prop(u, "latency", w);
-        c.ii = this->int_prop(u, "ii", w);
-        c.span = this->int_prop(u, "span", w);
+        c.latency = this->props.int_prop(u, "latency", w);
+        c.ii = this->props.int_prop(u, "ii", w);
+        c.span = this->props.int_prop(u, "span", w);
         if (c.latency != dp->latency || c.ii != 1 || c.span != dp->span)
         {
             this->trace.fatal("Property %s.latency, ii, span: %d, %d, %d; %s is %d, 1, %d\n",
@@ -263,13 +256,13 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 "its input is a link, not a streamer's\n", w.c_str(), c.span);
         }
         cfgs.push_back(c);
-        int t = this->int_prop(u, "t", w);
+        int t = this->props.int_prop(u, "t", w);
         if (t < 0)
         {
             this->trace.fatal("Property %s.t: %d, must be 0 or more\n", w.c_str(), t);
         }
         this->fixed_t.push_back(t);
-        std::string out = this->str_prop(u, "output", w);
+        std::string out = this->props.str_prop(u, "output", w);
         if (!out.empty())
         {
             if (output != -1)
@@ -295,7 +288,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     }
 
     // The links: edges from a unit's output into an input of another that is left ""
-    std::vector<js::Config *> links = this->list_prop(this->get_js_config(), "links", "");
+    std::vector<js::Config *> links = this->props.list_prop(this->get_js_config(), "links", "");
     std::vector<SnaxGroupRule::Link> edges;
     std::vector<std::vector<int>> fed(units.size());
     for (size_t k = 0; k < units.size(); k++)
@@ -310,7 +303,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         const char *keys[] = {"from", "to"};
         for (int j = 0; j < 2; j++)
         {
-            std::string name = this->str_prop(links[i], keys[j], w);
+            std::string name = this->props.str_prop(links[i], keys[j], w);
             *ends[j] = -1;
             for (size_t k = 0; k < names.size(); k++)
             {
@@ -322,8 +315,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                     keys[j], name.c_str());
             }
         }
-        e.to_input = this->int_prop(links[i], "to_input", w);
-        e.depth = this->int_prop(links[i], "depth", w);
+        e.to_input = this->props.int_prop(links[i], "to_input", w);
+        e.depth = this->props.int_prop(links[i], "depth", w);
         if (e.depth < 0)
         {
             this->trace.fatal("Property %s.depth: %d, must be 0 or more\n", w.c_str(), e.depth);
@@ -391,7 +384,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         }
     }
     this->out_beat.assign(this->out_words, 0);
-    this->csr_base = this->int_prop(this->get_js_config(), "csr_base", "");
+    this->csr_base = this->props.int_prop(this->get_js_config(), "csr_base", "");
 
     this->new_master_port(out_name, &this->out_itf);
     this->ctrl_itf.set_req_meth(&SnaxGroup::ctrl_req);
@@ -415,74 +408,11 @@ void SnaxGroup::reset(bool active)
 }
 
 
-js::Config *SnaxGroup::prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = config->get(name);
-    if (value == nullptr)
-    {
-        this->trace.fatal("Property %s%s%s: missing\n", where.c_str(), where.empty() ? "" : ".",
-            name);
-    }
-    return value;
-}
-
-
-int SnaxGroup::int_prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigNumber *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s%s%s: not a number\n", where.c_str(),
-            where.empty() ? "" : ".", name);
-    }
-    return value->get_int();
-}
-
-
-bool SnaxGroup::bool_prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigBool *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s.%s: not a bool\n", where.c_str(), name);
-    }
-    return value->get_bool();
-}
-
-
-std::string SnaxGroup::str_prop(js::Config *config, const char *name, const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigString *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s.%s: not a string\n", where.c_str(), name);
-    }
-    return value->get_str();
-}
-
-
-std::vector<js::Config *> SnaxGroup::list_prop(js::Config *config, const char *name,
-    const std::string &where)
-{
-    js::Config *value = this->prop(config, name, where);
-    if (dynamic_cast<js::ConfigArray *>(value) == nullptr)
-    {
-        this->trace.fatal("Property %s%s%s: not a list\n", where.c_str(), where.empty() ? "" : ".",
-            name);
-    }
-    return value->get_elems();
-}
-
-
 SnaxUnitType SnaxGroup::type_prop(js::Config *config, const char *width, const char *is_signed,
     const std::string &where)
 {
-    int w = this->int_prop(config, width, where);
-    if (w != 8 && w != 16 && w != 32 && w != 64)
-    {
-        this->trace.fatal("Property %s.%s: %d, must be 8, 16, 32 or 64\n", where.c_str(), width, w);
-    }
-    return {w, this->bool_prop(config, is_signed, where)};
+    return {this->props.width_prop(config, width, where),
+        this->props.bool_prop(config, is_signed, where)};
 }
 
 

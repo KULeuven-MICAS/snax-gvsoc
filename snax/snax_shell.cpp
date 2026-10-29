@@ -26,6 +26,7 @@
 #include <vp/itf/io.hpp>
 #include <vp/itf/wire.hpp>
 #include "snax_csr_block.hpp"
+#include "snax_props.hpp"
 #include "snax_shell.hpp"
 
 
@@ -65,39 +66,33 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
 {
     this->traces.new_trace("trace", &this->trace, vp::DEBUG);
 
-    js::Config *names = this->get_js_config()->get("csrs");
-    if (names == nullptr || dynamic_cast<js::ConfigArray *>(names) == nullptr ||
-        names->get_size() < 2)
+    SnaxProps props(&this->trace);
+    std::vector<std::string> names;
+    for (js::Config *name : props.list_prop(this->get_js_config(), "csrs", ""))
     {
-        this->trace.fatal("Property csrs: missing, not a list or shorter than START, JOBS\n");
+        names.push_back(props.as_str(name, "csrs[" + std::to_string(names.size()) + "]"));
+    }
+    if (names.size() < 2 || names[0] != "START" || names[1] != "JOBS")
+    {
+        this->trace.fatal("Property csrs: must start with START, JOBS\n");
     }
     std::vector<int> job_beats;
-    for (int i = 0; i < names->get_size(); i++)
+    for (size_t i = 0; i < names.size(); i++)
     {
-        js::Config *name = names->get_elem(i);
-        if (dynamic_cast<js::ConfigString *>(name) == nullptr || name->get_str().empty())
+        if (names[i].empty())
         {
-            this->trace.fatal("Property csrs: not a list of CSR names\n");
+            this->trace.fatal("Property csrs[%ld]: an empty CSR name\n", i);
         }
-        if ((i == 0 && name->get_str() != "START") || (i == 1 && name->get_str() != "JOBS"))
-        {
-            this->trace.fatal("Property csrs: must start with START, JOBS, not %s\n",
-                name->get_str().c_str());
-        }
-        if (name->get_str() == "JOB_BEATS")
+        if (names[i] == "JOB_BEATS")
         {
             job_beats.push_back(i);
         }
     }
-    js::Config *csr_base = this->get_js_config()->get("csr_base");
-    if (csr_base == nullptr || dynamic_cast<js::ConfigNumber *>(csr_base) == nullptr)
-    {
-        this->trace.fatal("Property csr_base: missing or not a number\n");
-    }
+    int csr_base = props.int_prop(this->get_js_config(), "csr_base", "");
 
-    this->nb_rw = names->get_size();
+    this->nb_rw = names.size();
     this->rule.configure(this->nb_rw, job_beats);
-    this->csrs.configure(&this->trace, csr_base->get_int(), this->nb_rw, 2);
+    this->csrs.configure(&this->trace, csr_base, this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxShell::csr_req);
     this->new_slave_port("input", &this->csr_itf);
@@ -108,7 +103,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     for (int i = 0; i < this->nb_rw; i++)
     {
         this->trace.msg(vp::Trace::LEVEL_DEBUG, "CSR %d: %s\n", this->csrs.csr(i),
-            names->get_elem(i)->get_str().c_str());
+            names[i].c_str());
     }
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "CSR %d: STATUS, CSR %d: COUNTER\n",
         this->csrs.csr(this->nb_rw), this->csrs.csr(this->nb_rw + 1));

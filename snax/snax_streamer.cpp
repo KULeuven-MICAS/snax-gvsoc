@@ -100,6 +100,7 @@
 #include <vp/itf/io.hpp>
 #include "snax_csr_block.hpp"
 #include "snax_events.hpp"
+#include "snax_props.hpp"
 
 
 // A beat word in a lane's queue, and the first cycle it can leave
@@ -263,25 +264,31 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     this->ev.declare(this);
 
     js::Config *cfg = this->get_js_config();
-    int addr_bits = cfg->get_child_int("addr_bits");
+    SnaxProps props(&this->trace);
+    int addr_bits = props.int_prop(cfg, "addr_bits", "");
     this->addr_mask = (uint32_t)((1ULL << addr_bits) - 1);
 
     int csr = 0;
     int nb_channels = 0;
-    for (auto m : cfg->get("movers")->get_elems())
+    std::vector<js::Config *> movers = props.list_prop(cfg, "movers", "");
+    for (size_t i = 0; i < movers.size(); i++)
     {
+        js::Config *m = movers[i];
+        std::string w = "movers[" + std::to_string(i) + "]";
         Mover mover = {};
-        mover.name = m->get_child_str("name");
-        mover.is_reader = m->get_child_bool("is_reader");
-        for (auto b : m->get("spatial_bounds")->get_elems())
+        mover.name = props.str_prop(m, "name", w);
+        mover.is_reader = props.bool_prop(m, "is_reader", w);
+        std::vector<js::Config *> bounds = props.list_prop(m, "spatial_bounds", w);
+        for (size_t j = 0; j < bounds.size(); j++)
         {
-            mover.spatial_bounds.push_back(b->get_int());
+            mover.spatial_bounds.push_back(props.as_int(bounds[j],
+                w + ".spatial_bounds[" + std::to_string(j) + "]"));
         }
-        mover.temporal_dim = m->get_child_int("temporal_dim");
-        mover.num_channel = m->get_child_int("num_channel");
-        mover.fifo_depth = m->get_child_int("fifo_depth");
-        mover.dynamic_priority = m->get_child_bool("dynamic_priority");
-        mover.higher_static_priority = m->get_child_bool("higher_static_priority");
+        mover.temporal_dim = props.int_prop(m, "temporal_dim", w);
+        mover.num_channel = props.int_prop(m, "num_channel", w);
+        mover.fifo_depth = props.int_prop(m, "fifo_depth", w);
+        mover.dynamic_priority = props.bool_prop(m, "dynamic_priority", w);
+        mover.higher_static_priority = props.bool_prop(m, "higher_static_priority", w);
         mover.csr_first = csr;
         mover.first_channel = nb_channels;
         // Pointer low and high, spatial strides, temporal bounds and strides
@@ -291,7 +298,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     }
     // The start CSR
     this->nb_rw = csr + 1;
-    this->csrs.configure(&this->trace, cfg->get_child_int("csr_base"), this->nb_rw, 2);
+    this->csrs.configure(&this->trace, props.int_prop(cfg, "csr_base", ""), this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxStreamer::csr_req);
     this->new_slave_port("input", &this->csr_itf);
