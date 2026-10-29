@@ -97,9 +97,10 @@ resolve), CfgKeyError (a key missing), CfgTypeError (a value of the wrong
 type), CfgSlotError (slot counts or CSRs that disagree with the files); a
 target refuses what it cannot model with CfgTargetError (a datapath not in
 the registry, a TreeAccumulate op other than add, a unit CSR other than a
-fold's JOB_BEATS, a latency or span other than its datapath's, a group whose
-links are not a chain in unit order, the last unit's output the only outer
-one, or a unit of span > 1 fed by the streamer: SnaxGroup's shape). The datapath block before accelerator.json
+fold's JOB_BEATS, a latency or span other than its datapath's, and SnaxGroup's
+shape with snax-forge's codes and wording: gen.chain, a group whose links are
+not a chain in unit order with the last unit's output the only outer one;
+gen.span, a unit of span > 1 fed by the streamer). The datapath block before accelerator.json
 (<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key.
 """
 
@@ -772,31 +773,28 @@ def _check_links(node: _Node, acc: Accelerator):
             fail(key, f'gen.outer: {list(getattr(acc, key))}; the unlinked ports are '
                  f'{outer[direction]}, in group, unit and port order')
 
-    # SnaxGroup's shape: a chain in unit order, the last unit's output the outer one
+    # SnaxGroup's shape, with snax-forge's codes and wording (its gen/accelerator.py's
+    # _check_chain): gen.chain, a chain in unit order whose last unit's output alone is outer;
+    # gen.span, a unit of span > 1 reads from a link
     for g in acc.groups:
-        for k, (a, b) in enumerate(zip(g.units, g.units[1:])):
-            chain = [x for x in g.links if x.from_.split('.')[0] == a.name
-                     and x.to.split('.')[0] == b.name]
-            if len(chain) != 1:
-                raise CfgTargetError(node.file, node.where('groups'),
-                    f'group {g.name}: no one link from {a.name} to {b.name}; SnaxGroup models '
-                    'a chain of units in their order')
-        if len(g.links) != len(g.units) - 1:
-            raise CfgTargetError(node.file, node.where('groups'),
-                f'group {g.name}: {len(g.links)} links for {len(g.units)} units; SnaxGroup '
-                'models a chain')
+        names = [u.name for u in g.units]
+        hops = [(k.from_.split('.')[0], k.to.split('.')[0]) for k in g.links]
+        chain = sorted(hops) == sorted(zip(names, names[1:]))
         for k, u in enumerate(g.units):
-            outs = [p for p, d in dirs_of(acc, u).items() if d == 'out']
-            outer_out = [p for p in outs if f'{u.name}.{p}' not in linked]
-            if bool(outer_out) != (k == len(g.units) - 1):
-                raise CfgTargetError(node.file, node.where('outputs'),
-                    f'group {g.name}: unit {u.name}\'s outer outputs {outer_out}; in SnaxGroup '
-                    'only the last unit\'s output is outer')
-            ins = [p for p, d in dirs_of(acc, u).items() if d == 'in']
-            if u.span > 1 and any(f'{u.name}.{p}' not in linked for p in ins):
+            outer_out = [p for p, d in dirs_of(acc, u).items()
+                         if d == 'out' and f'{u.name}.{p}' not in linked]
+            chain = chain and bool(outer_out) == (k == len(g.units) - 1)
+        if not chain:
+            raise CfgTargetError(node.file, node.where('groups'),
+                f"gen.chain: accelerator {acc.name}: group {g.name}'s links {hops} over its "
+                f'units {names}: a group is a chain until tier A (fork and join)')
+        for u in g.units:
+            outer_in = [p for p, d in dirs_of(acc, u).items()
+                        if d == 'in' and f'{u.name}.{p}' not in linked]
+            if u.span > 1 and outer_in:
                 raise CfgTargetError(node.file, node.where('inputs'),
-                    f'unit {u.name}: span {u.span} reads its input in place; its input is a '
-                    'link, not a streamer\'s')
+                    f'gen.span: accelerator {acc.name}: unit {u.name} (span {u.span}) reads '
+                    f'{outer_in} from the streamer: a unit with span > 1 reads from a link until B2')
 
 
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):

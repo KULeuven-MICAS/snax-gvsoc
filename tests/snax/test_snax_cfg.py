@@ -606,6 +606,32 @@ class LinkedGroup(unittest.TestCase):
         self.acc["outputs"] = ["mac.out", "sum.out"]
         self.fails(snax_cfg.CfgSlotError, "gen.group:")
 
+    def test_gen_chain(self):
+        """The link mac -> sum over the units in the order sum, mac: not a chain in unit order,
+        snax-forge's gen.chain in its words."""
+        self.acc["groups"][0]["units"].reverse()
+        self.fails(snax_cfg.CfgTargetError,
+                   "gen.chain: accelerator dot: group dot's links [('mac', 'sum')] over its units "
+                   "['sum', 'mac']: a group is a chain until tier A (fork and join)")
+
+    def test_gen_span(self):
+        """A SerialAccumulate of 4 lanes (span 4) fed by the streamer: snax-forge's gen.span in
+        its words."""
+        serial = Unit("acc", "accumulate", "SerialAccumulate",
+                      {"a": Port("in", "int64", 4, "in"), "out": Port("out", "int64", 1, "out")},
+                      None, {}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)], 4)
+        streamer = {
+            "data_reader_params": {"spatial_bounds": [[4]], "temporal_dim": [1],
+                                   "num_channel": [4], "fifo_depth": [8]},
+            "data_writer_params": {"spatial_bounds": [[1]], "temporal_dim": [1],
+                                   "num_channel": [1], "fifo_depth": [8]},
+        }
+        acc = acc_json(accelerator("serial", serial, between=1))
+        with self.assertRaises(snax_cfg.CfgTargetError) as ctx:
+            snax_cfg.load(write_design(self.dir, acc, streamer, 3, 2))
+        self.assertIn("gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the streamer: "
+                      "a unit with span > 1 reads from a link until B2", ctx.exception.why)
+
     def test_a_datapath_is_the_registrys(self):
         self.acc["groups"][0]["units"][0]["datapath"] = "LinkBuffer"
         self.fails(snax_cfg.CfgTargetError, "not a datapath SnaxGroup models")
