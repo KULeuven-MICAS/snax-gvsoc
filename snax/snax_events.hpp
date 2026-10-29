@@ -93,6 +93,46 @@ inline std::string snax_word(const uint8_t *data, uint64_t size)
 }
 
 
+// item after text's items, comma-joined: a value= or b= field of a beat line
+inline void snax_join(std::string &text, const std::string &item)
+{
+    text += (text.empty() ? "" : ",") + item;
+}
+
+
+// n 64-bit words as a value= field: 0x words, comma-joined
+inline std::string snax_words_text(const uint64_t *words, size_t n)
+{
+    std::string text;
+    for (size_t i = 0; i < n; i++)
+    {
+        snax_join(text, snax_word((const uint8_t *)&words[i], 8));
+    }
+    return text;
+}
+
+
+// A class line on beats (docs/EVENTS.md), "<cycle> class [mover=<mover> ]mode=<name>", when
+// cls is not *line_class, the class of the last line in this run (-1 none), which it becomes
+inline void snax_class_line(vp::Trace &beats, int *line_class, int cls, const char *name,
+    int64_t cycle, const char *mover = nullptr)
+{
+    if (cls == *line_class)
+    {
+        return;
+    }
+    *line_class = cls;
+    if (mover != nullptr)
+    {
+        beats.msg(vp::Trace::LEVEL_INFO, "%ld class mover=%s mode=%s\n", (long)cycle, mover, name);
+    }
+    else
+    {
+        beats.msg(vp::Trace::LEVEL_INFO, "%ld class mode=%s\n", (long)cycle, name);
+    }
+}
+
+
 // One VCD signal, and the values it takes from later cycles, in cycle order
 class SnaxSignal
 {

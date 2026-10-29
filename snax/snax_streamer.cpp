@@ -699,12 +699,8 @@ void SnaxStreamer::classify(Mover &mover, CycleClass cls, int64_t first, int64_t
         return;
     }
     mover.classes[cls] += cycles;
-    if (cls != mover.line_class)
-    {
-        mover.line_class = cls;
-        this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld class mover=%s mode=%s\n", (long)first,
-            mover.name.c_str(), class_names[cls]);
-    }
+    snax_class_line(this->ev.beats, &mover.line_class, cls, class_names[cls], first,
+        mover.name.c_str());
 }
 
 

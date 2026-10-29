@@ -542,12 +542,8 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         _this->sigs.set(_this->sig_fire, head.fire);
         _this->sigs.set(_this->sig_push, tail.push);
         _this->sigs.set(_this->sig_class, step.cls + 1);
-        if (step.cls != _this->line_class)
-        {
-            _this->line_class = step.cls;
-            _this->ev.beats.msg(vp::Trace::LEVEL_INFO, "%ld class mode=%s\n", (long)cycle,
-                snax_unit_class_names[step.cls]);
-        }
+        snax_class_line(_this->ev.beats, &_this->line_class, step.cls,
+            snax_unit_class_names[step.cls], cycle);
 
         // The beats of each unit that fires, its outer inputs in port order (outer)
         std::string beats, values;
@@ -563,12 +559,9 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
                     if (traced && k == _this->rule.topological().front())
                     {
                         bool tagged = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
-                        beats += (beats.empty() ? "" : ",") + std::to_string(tagged
-                            ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L);
-                        for (uint64_t word : o.beat)
-                        {
-                            values += (values.empty() ? "" : ",") + snax_word((uint8_t *)&word, 8);
-                        }
+                        snax_join(beats, std::to_string(tagged
+                            ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L));
+                        snax_join(values, snax_words_text(o.beat.data(), o.beat.size()));
                     }
                 }
             }
@@ -596,11 +589,7 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
             _this->move(_this->out_itf, true, out.data(), _this->out_words);
             if (_this->ev.beats.get_active())
             {
-                std::string text;
-                for (uint64_t word : out)
-                {
-                    text += (text.empty() ? "" : ",") + snax_word((uint8_t *)&word, 8);
-                }
+                std::string text = snax_words_text(out.data(), out.size());
                 uint32_t first = _this->pushes * _this->rate;
                 _this->ev.beats.msg(vp::Trace::LEVEL_INFO,
                     "%ld push n=%u first=%u last=%u value=%s\n", (long)cycle, _this->pushes,

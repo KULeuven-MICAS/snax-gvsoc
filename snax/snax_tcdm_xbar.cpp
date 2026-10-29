@@ -486,7 +486,7 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
         latency = std::max(latency, (int64_t)bank_req.get_latency());
         if (traced)
         {
-            values += (values.empty() ? "" : ",") + snax_word(data, chunk);
+            snax_join(values, snax_word(data, chunk));
         }
         addr += chunk;
         data += chunk;
