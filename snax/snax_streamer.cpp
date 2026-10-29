@@ -717,6 +717,10 @@ void SnaxStreamer::summary_handler(vp::Block *__this, vp::ClockEvent *event)
         {
             _this->count_flush(_this->channel(mover, lane));
         }
+        if (!_this->trace.get_active() && !_this->ev.summary.get_active())
+        {
+            continue;
+        }
         for (int lane = 0; lane < mover.num_channel; lane++)
         {
             std::string count = std::to_string(_this->channel(mover, lane).max_count);

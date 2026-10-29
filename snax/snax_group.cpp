@@ -599,7 +599,10 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
         }
         if (step.end)
         {
-            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s\n", _this->rule.run_line().c_str());
+            if (_this->trace.get_active())
+            {
+                _this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s\n", _this->rule.run_line().c_str());
+            }
             _this->ev.events.msg(vp::Trace::LEVEL_INFO,
                 "%ld done firings=%u first=%ld last=%ld\n", (long)cycle, _this->rule.firings(),
                 (long)_this->first_fire, (long)_this->last_fire);

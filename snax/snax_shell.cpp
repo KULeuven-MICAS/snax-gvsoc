@@ -126,8 +126,9 @@ void SnaxShell::reset(bool active)
 void SnaxShell::send(int64_t cycle, bool empty)
 {
     this->config_words = this->rule.words();
+    // The JOB_BEATS words, for the debug lines below
     std::string text;
-    for (size_t i = 1; i < this->config_words.size(); i++)
+    for (size_t i = 1; this->trace.get_active() && i < this->config_words.size(); i++)
     {
         text += " " + std::to_string(this->config_words[i]);
     }
