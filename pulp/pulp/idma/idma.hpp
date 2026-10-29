@@ -27,6 +27,7 @@
 // SNAX: the argument slots a TCDM beat carries to the SNAX crossbar's dma line, the same as
 // snax/snax_events.hpp's SNAX_ARG_TAG, SNAX_ARG_ID, SNAX_ARG_INDEX, SNAX_ARG_L2 and
 // SNAX_TAG_DMA (docs/EVENTS.md)
+// Kept equal to snax/snax_events.hpp's by hand: an upstream file includes nothing from snax/
 #define IDMA_SNAX_ARG_TAG (IO_REQ_NB_ARGS - 1)
 #define IDMA_SNAX_ARG_ID (IO_REQ_NB_ARGS - 2)
 #define IDMA_SNAX_ARG_INDEX (IO_REQ_NB_ARGS - 3)
