@@ -8,7 +8,7 @@ The control model of a group (`snax/snax_group.hpp`'s `SnaxGroupRule`, snax-forg
 
 ## The rule in one paragraph
 
-A group is a chain of units, head first, each link a wire (depth 0) or a buffer of D beats. A start carries JOBS and each unit's T; unit k fires JOBS * prod T_v times over itself and the units after it, gives a result on every T-th firing and pushes it L cycles later, its pipeline stalling as a whole when its head has no room. A unit gives into a wire only when the next unit takes in that cycle, into a buffer when it has room or the next unit takes; a unit of span S (SerialAccumulate) reads lane l of its input in place, one a cycle, and takes the beat on lane S - 1, so a wire's producer holds its result until the last lane. The group is busy from the cycle after the start to the push of the last unit's last result; its classes are judged at its boundary (docs/EVENTS.md).
+A group is a graph of units whose links are edges, each a wire (depth 0) or a buffer of D beats; until tier A it is one chain (a fork or a join is refused). A start carries JOBS and each unit's T; unit k fires JOBS * prod T_v times over itself and the units after it, gives a result on every T-th firing and pushes it L cycles later, its pipeline stalling as a whole when its head has no room. A unit gives into a wire only when the next unit takes in that cycle, into a buffer when it has room or the next unit takes; a unit of span S (SerialAccumulate) reads lane l of its input in place, one a cycle, and takes the beat on lane S - 1, so a wire's producer holds its result until the last lane. The group is busy from the cycle after the start to the push of the last unit's last result; its classes are judged at its boundary (docs/EVENTS.md).
 
 ## A case file
 
@@ -17,7 +17,7 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 | Line | What |
 |---|---|
 | `unit NAME DATAPATH latency L ii N span S t T inputs I` | a unit, head first: its catalogue datapath, timing, T (a result every T-th firing) and number of outer inputs |
-| `link FROM TO depth D` | the link from one unit to the next (one fewer than the units, in order): 0 a wire, >= 1 a buffer |
+| `link FROM TO depth D` | an edge from unit FROM's output to unit TO's input after its outer ones (a chain: one fewer than the units): 0 a wire, >= 1 a buffer; the occupancy columns follow the links' order |
 | `jobs J` | the start's JOBS |
 | `start CYCLE taken\|ignored\|refused` | the start, offered in that cycle, and its expected answer |
 | `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the run line expected at the end of run I (`firings` the head's) |

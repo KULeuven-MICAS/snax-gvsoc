@@ -170,6 +170,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         }
         depths.push_back(links[k]->get_int());
     }
+    std::vector<SnaxGroupRule::Link> edges(depths.size());
 
     // The outer inputs, counted first: in_itf is sized once
     size_t nb_in = 0;
@@ -290,6 +291,10 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             out_name = output;
             this->out_words = dp->out_words;
         }
+        if (k > 0)
+        {
+            edges[k - 1] = {(int)k - 1, (int)k, linked, depths[k - 1]};
+        }
         if (k > 0 && depths[k - 1] > 0)
         {
             SnaxDatapathParams b;
@@ -310,7 +315,6 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             }
         }
         this->data.units.push_back(std::move(dp));
-        this->data.linked.push_back(linked);
         if (k + 1 < units.size())
         {
             this->data.buffers.emplace_back();
@@ -319,7 +323,12 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         described += (described.empty() ? "" : " -> ") + name + " (" + datapath + ", L " +
             std::to_string(c.latency) + ", span " + std::to_string(c.span) + ")";
     }
-    this->rule.configure(cfgs, depths);
+    std::string refused = this->rule.configure(cfgs, edges);
+    if (!refused.empty())
+    {
+        this->trace.fatal("Property units, links: %s\n", refused.c_str());
+    }
+    this->data.wire(this->rule);
     this->csr_base = this->int_prop(this->get_js_config(), "csr_base", "");
 
     this->new_master_port(out_name, &this->out_itf);
@@ -472,7 +481,8 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
 
         default:
         {
-            uint32_t results = _this->rule.counts.back() / _this->rule.beats.back();
+            size_t last = _this->rule.output_unit();
+            uint32_t results = _this->rule.counts[last] / _this->rule.beats[last];
             _this->rate = _this->rule.count() / results;
             _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: JOBS %u, %ld T\n", cycle,
                 jobs, ts.size());
@@ -530,11 +540,12 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
         {
             inputs[o.unit] = _this->probe(o.itf, false) && inputs[o.unit];
         }
-        bool room = _this->probe(_this->out_itf, true);
+        std::vector<bool> room(_this->unit_ins.size(), true);
+        room[_this->rule.output_unit()] = _this->probe(_this->out_itf, true);
 
         SnaxGroupRule::Step step = _this->rule.step(cycle, inputs, room);
-        const SnaxGroupRule::UnitStep &head = step.units.front();
-        const SnaxGroupRule::UnitStep &tail = step.units.back();
+        const SnaxGroupRule::UnitStep &head = step.units[_this->rule.topological().front()];
+        const SnaxGroupRule::UnitStep &tail = step.units[_this->rule.output_unit()];
         _this->sigs.set(_this->sig_busy, 1);
         _this->sigs.set(_this->sig_fire, head.fire);
         _this->sigs.set(_this->sig_push, tail.push);
@@ -558,7 +569,7 @@ void SnaxGroup::fire_handler(vp::Block *__this, vp::ClockEvent *event)
                 if (step.units[k].fire)
                 {
                     _this->move(o.itf, false, o.beat.data(), o.words);
-                    if (traced && k == 0)
+                    if (traced && k == _this->rule.topological().front())
                     {
                         bool tagged = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
                         beats += (beats.empty() ? "" : ",") + std::to_string(tagged

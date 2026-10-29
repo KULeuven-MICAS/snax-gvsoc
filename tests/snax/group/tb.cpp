@@ -4,7 +4,9 @@
 
 // SnaxGroupRule (snax/snax_group.hpp) against the shared group cases
 // (README.md): each case gives the group (its units, head first, with their
-// datapath, L, II, span, T and outer inputs; its links' depths; JOBS), the
+// datapath, L, II, span, T and outer inputs; its links, the edges the rule
+// takes, each into the input after its consumer's outer ones, as SnaxGroup
+// numbers a unit's inputs; JOBS), the
 // start and, per cycle, the outer inputs' valid and the outer output's
 // ready, then per unit whether it fires and gives (pushes a result into its
 // link or the outer output), per buffer its occupancy after the cycle, and
@@ -53,7 +55,7 @@ struct Case
 {
     std::string name;
     std::vector<UnitLine> units;
-    std::vector<int> depths;
+    std::vector<SnaxGroupRule::Link> links;
     uint32_t jobs = 1;
     int64_t start_cycle = -1;
     std::string start_result;
@@ -121,9 +123,9 @@ static bool parse(const std::string &path, Case &c)
             // V... READY | F G | F G ... | OCC... | BUSY
             std::vector<std::string> cols = fields(line, '|');
             size_t buffers = 0;
-            for (int d : c.depths)
+            for (const SnaxGroupRule::Link &e : c.links)
             {
-                buffers += d > 0;
+                buffers += e.depth > 0;
             }
             size_t want = 2 + c.units.size() + (buffers ? 1 : 0);
             CycleLine l;
@@ -179,10 +181,21 @@ static bool parse(const std::string &path, Case &c)
             // link FROM TO depth D
             std::string from, to, k1;
             int depth;
-            ok = (bool)(ss >> from >> to >> k1 >> depth) && k1 == "depth" && depth >= 0 &&
-                c.units.size() >= c.depths.size() + 2 &&
-                from == c.units[c.depths.size()].name && to == c.units[c.depths.size() + 1].name;
-            c.depths.push_back(depth);
+            SnaxGroupRule::Link e;
+            e.from = e.to = -1;
+            ok = (bool)(ss >> from >> to >> k1 >> depth) && k1 == "depth" && depth >= 0;
+            for (size_t k = 0; k < c.units.size(); k++)
+            {
+                e.from = c.units[k].name == from ? (int)k : e.from;
+                e.to = c.units[k].name == to ? (int)k : e.to;
+            }
+            ok = ok && e.from != -1 && e.to != -1;
+            if (ok)
+            {
+                e.to_input = c.units[e.to].inputs;
+                e.depth = depth;
+                c.links.push_back(e);
+            }
         }
         else if (key == "jobs") { ok = (bool)(ss >> c.jobs); }
         else if (key == "start")
@@ -207,10 +220,9 @@ static bool parse(const std::string &path, Case &c)
             return false;
         }
     }
-    if (c.units.empty() || c.depths.size() + 1 != c.units.size())
+    if (c.units.empty())
     {
-        fprintf(stderr, "%s: %zu units and %zu links: a chain has one link fewer\n",
-            path.c_str(), c.units.size(), c.depths.size());
+        fprintf(stderr, "%s: no unit\n", path.c_str());
         return false;
     }
     return true;
@@ -226,10 +238,11 @@ static int64_t b_of(int i) { return (i * 5) % 11 - 5; }
 
 // The group's datapaths for the dot shape: the head's two inputs a and b, the next unit's
 // one the link; nullptr when the case is not a dot (no data check then)
-static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c)
+static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const SnaxGroupRule &rule)
 {
     const SnaxUnitType i64 = {64, true};
-    if (c.units.size() != 2 || c.units[0].inputs != 2 || c.units[1].inputs != 0)
+    if (c.units.size() != 2 || c.units[0].inputs != 2 || c.units[1].inputs != 0 ||
+        c.links.size() != 1 || c.links[0].from != 0)
     {
         return nullptr;
     }
@@ -246,33 +259,48 @@ static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c)
         {
             return nullptr;
         }
-        g->linked.push_back(k == 0 ? -1 : 0);
     }
     SnaxDatapathParams p;
     p.in_types = {i64};
     p.lanes = LANES;
-    p.depth = c.depths[0];
+    p.depth = c.links[0].depth;
     std::string why;
-    g->buffers.push_back(c.depths[0] ? snax_datapath_new("LinkBuffer", p, &why) : nullptr);
+    g->buffers.push_back(c.links[0].depth ? snax_datapath_new("LinkBuffer", p, &why) : nullptr);
+    g->wire(rule);
     return g;
+}
+
+// The rule of the case's group; "" or why it refuses the graph
+static std::string configure(const Case &c, SnaxGroupRule &rule)
+{
+    std::vector<SnaxGroupRule::UnitCfg> cfgs;
+    for (const UnitLine &u : c.units)
+    {
+        cfgs.push_back(u.cfg);
+    }
+    return rule.configure(cfgs, c.links);
 }
 
 static int run(const Case &c)
 {
     SnaxGroupRule rule;
-    std::vector<SnaxGroupRule::UnitCfg> cfgs;
     std::vector<uint32_t> ts;
     for (const UnitLine &u : c.units)
     {
-        cfgs.push_back(u.cfg);
         ts.push_back(u.t);
     }
-    rule.configure(cfgs, c.depths);
+    std::string refused = configure(c, rule);
+    if (!refused.empty())
+    {
+        printf("%s: the group is refused: %s\n", c.name.c_str(), refused.c_str());
+        return 1;
+    }
+    size_t output = rule.output_unit();
 
     int errors = 0;
     size_t next_expect = 0;
     long run_busy = 0;
-    std::unique_ptr<SnaxGroupDatapaths> data = dot_datapaths(c);
+    std::unique_ptr<SnaxGroupDatapaths> data = dot_datapaths(c, rule);
     int head_fired = 0, pushed = 0;
     // Each job's sum: the head fires n / JOBS beats a job
     uint32_t per_job = c.jobs ? ts[0] * ts[1] : 0;
@@ -314,7 +342,9 @@ static int run(const Case &c)
                 }
                 inputs.push_back(all);
             }
-            step = rule.step(cycle, inputs, l.ready);
+            std::vector<bool> room(c.units.size(), true);
+            room[output] = l.ready;
+            step = rule.step(cycle, inputs, room);
             if (data)
             {
                 std::vector<uint64_t> a(LANES), bb(LANES);
@@ -325,7 +355,7 @@ static int run(const Case &c)
                 }
                 const std::vector<uint64_t> &out = data->cycle(step, {{a.data(), bb.data()}, {}});
                 head_fired += step.units[0].fire;
-                if (step.units.back().push)
+                if (step.units[output].push)
                 {
                     int64_t want = 0;
                     for (uint32_t i = pushed * per_job * LANES; i < (pushed + 1) * per_job * LANES; i++)
@@ -356,9 +386,9 @@ static int run(const Case &c)
             }
         }
         size_t b = 0;
-        for (size_t k = 0; busy && k < c.depths.size(); k++)
+        for (size_t k = 0; busy && k < c.links.size(); k++)
         {
-            if (c.depths[k] == 0)
+            if (c.links[k].depth == 0)
             {
                 continue;
             }
@@ -414,9 +444,11 @@ int main(int argc, char **argv)
             return 2;
         }
         int errors = run(c);
+        SnaxGroupRule rule;
+        bool data = configure(c, rule).empty() && dot_datapaths(c, rule);
         printf("%s %s: %zu units, %zu cycles, %zu run(s)%s\n", errors ? "FAIL" : "PASS",
             c.name.c_str(), c.units.size(), c.cycles.size(), c.expects.size(),
-            dot_datapaths(c) ? ", data" : "");
+            data ? ", data" : "");
         failed += errors != 0;
         passed += errors == 0;
     }

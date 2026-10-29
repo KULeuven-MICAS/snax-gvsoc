@@ -11,25 +11,28 @@
 // standalone tests (tests/snax/unit/, tests/snax/group/) run the same code,
 // as snax_sparse_arb.hpp. SnaxUnitRule, below, is its one-unit case.
 //
-// A group is a chain of units, unit 0 the head: link k (if the group has
-// more than one unit) joins unit k's output to unit k + 1's input, of depth D
-// (0 a wire, >= 1 a buffer of D beats, a LinkBuffer). Each unit has its
-// latency L, its II, its span (the cycles it reads one input beat in place,
+// A group is a graph of units and links: a link is an edge from one unit's
+// output to an input of another (Link: from, to, to_input, depth; depth 0 a
+// wire, >= 1 a buffer of D beats, a LinkBuffer). Each unit has its latency L,
+// its II, its span (the cycles it reads one input beat in place,
 // SerialAccumulate's lanes) and, per run, its T: a result every T-th firing
 // (a fold's JOB_BEATS or params.T; 1 for a unit without a fold). Each unit's
-// outer inputs, if any, come from the streamer; the last unit's output is the
-// group's outer output.
+// outer inputs, if any, come from the streamer; one unit owns the group's
+// outer output (by default the sink, the unit without an out-edge). Until
+// tier A a group is one chain: configure() refuses a unit with two out-edges
+// (a fork) or two in-edges (a join), a cycle, and units no link joins.
 //
 // A run (snax-forge D146): a start offered in cycle s carries JOBS and each
-// unit's T; unit k fires n_k = JOBS * prod T_v times over k and every unit v
-// after it (C§17's firings; the head's n is JOBS * prod T). It is taken only
-// when the group is idle in s and no number is 0 (JOBS 0 or any T 0 is the
-// empty run, which the shell ends without the group: here it is ignored, busy
-// stays 0); a start while busy is refused. The group is busy from s + 1 to the
-// run's last cycle E, the push of the last unit's n-th result (done is the
-// last unit's JOBS-th result). step() is called once per busy cycle with,
-// per unit, whether its outer inputs all have a beat, and whether the outer
-// output has room.
+// unit's T; unit k fires n_k times, JOBS * T for the sink, n_succ * T_k for a
+// unit before it (each firing of its consumer takes one of its results): over
+// a chain, JOBS * prod T_v over k and every unit after it (C§17's firings).
+// It is taken only when the group is idle in s and no number is 0 (JOBS 0 or
+// any T 0 is the empty run, which the shell ends without the group: here it
+// is ignored, busy stays 0); a start while busy is refused. The group is busy
+// from s + 1 to the run's last cycle E, when every unit has fired its n and
+// nothing is in flight. step() is called once per busy cycle with, per unit,
+// whether its outer inputs all have a beat and whether its outer output has
+// room (true for a unit without one).
 //
 // Per unit (C§17): its beat digit d (its firings mod T: first = [d = 0], it
 // gives a result on firings with d = T - 1), an L-deep pipeline that stalls
@@ -37,39 +40,40 @@
 // II counts cycles from the unit's last firing; a stall does not restart it,
 // and it carries over to the next run), and a lane counter when span > 1. A
 // unit wants to fire while it has firings left and its II allows. Its input
-// has a beat when each of its outer inputs has one and, for unit k > 0, its
-// link offers one: a wire offers what unit k - 1 presents this cycle (its
-// pipeline's head, or with L = 0 a firing that gives a result), a buffer its
-// oldest beat (occupancy > 0: a beat written in an earlier cycle). A unit of
-// span 1 fires when it wants to and its input has a beat; one of span S reads
-// lane l of the beat in place (the lane counter) in each such cycle and fires
-// (takes the beat) on lane S - 1, so its throughput is one beat per
-// max(II, S). A result from a firing in t is pushed in t + L when nothing
-// stalls, into the outer output (the last unit) or the link: a unit gives
-// into a link when it has room or the next unit takes in that cycle (a wire:
-// only when the next unit takes; a buffer: occupancy < D, or a take). So at
-// depth 0 a unit holds its result until its reader takes it, at span S its
-// last lane. With L = 0 a firing that gives a result with no room is a stall
-// (L = 0, II 1 is lockstep). A firing enters slot 0 in the cycle the head is
-// pushed: with L = 1 and II 1 the next input is taken as a result leaves.
-// A wire chain is B1's nest with L = sum L_k, plus one enable per stage:
-// fire_{k+1}(c) = fire_k(c - L_k) and gives_k(c - L_k).
+// has a beat when each of its outer inputs has one and each in-edge offers
+// one: a wire offers what its producer presents this cycle (its pipeline's
+// head, or with L = 0 a firing that gives a result), a buffer its oldest beat
+// (occupancy > 0: a beat written in an earlier cycle). A unit of span 1 fires
+// when it wants to and its input has a beat; one of span S reads lane l of
+// the beat in place (the lane counter) in each such cycle and fires (takes
+// the beat) on lane S - 1, so its throughput is one beat per max(II, S). A
+// result from a firing in t is pushed in t + L when nothing stalls. A unit
+// has room when its outer output (if it owns it) has room and each out-edge
+// takes: a wire when its consumer fires, a buffer when occupancy < D or its
+// consumer fires. So at depth 0 a unit holds its result until its reader
+// takes it, at span S its last lane. With L = 0 a firing that gives a result
+// with no room is a stall (L = 0, II 1 is lockstep). A firing enters slot 0
+// in the cycle the head is pushed: with L = 1 and II 1 the next input is
+// taken as a result leaves. A wire chain is B1's nest with L = sum L_k, plus
+// one enable per stage: fire_{k+1}(c) = fire_k(c - L_k) and gives_k(c - L_k).
 //
-// The cycle is decided in two passes: forward, what each unit offers on its
-// output whatever its room (its head, or with L = 0 a firing that gives), so
-// each unit knows whether its input has a beat; backward from the last unit,
-// whether each is frozen (its head, or with L = 0 a giving firing, has no
-// room), fires and reads, and so whether it takes, which is its producer's
-// room. Then each buffer's occupancy: + 1 on a load (its producer's push), -
-// 1 on a take, its write and read slots a ring.
+// The cycle is decided in two passes over the units in a topological order:
+// forward, what each unit offers on its output whatever its room, so each
+// unit knows whether its input has a beat (avail_k = inputs_k and the offer
+// of every in-edge); backward, in reverse order, its room (room_k =
+// outer_room_k and the take of every out-edge), whether it is frozen (its
+// head, or with L = 0 a giving firing, has no room), fires and reads. Then
+// each buffer's occupancy: + 1 on a load (its producer's push), - 1 on a take
+// (its consumer's firing), its write and read slots a ring.
 //
-// Each busy cycle is one class, judged at the group's boundary, in D59's
-// order: stall_out (the last unit has a result and no room: it is frozen) >
+// Each busy cycle is one class, judged at the unit owning the outer output,
+// in D59's order: stall_out (it has a result and no room: it is frozen) >
 // busy (any unit fires or reads, or is in its II gap) > stall_in (a unit with
 // outer inputs wants to fire and one of them has no beat) > flush (results in
 // flight, beats in a buffer: accel.py's idle). For one unit these are
 // SnaxUnitRule's classes as they were. busy + stall_in + stall_out + flush
-// is the run's busy cycles, E - s; the run line's firings are the head's.
+// is the run's busy cycles, E - s; the run line's firings are the head's (the
+// first unit in the topological order).
 
 #pragma once
 
@@ -99,6 +103,16 @@ public:
         int span = 1;
     };
 
+    // An edge: unit from's output into input to_input of unit to (its index among the
+    // unit's inputs, for the datapaths; the rule does not read it)
+    struct Link
+    {
+        int from = 0;
+        int to = 0;
+        int to_input = 0;
+        int depth = 0;
+    };
+
     // What one unit does in a busy cycle: its datapath's enables are fire,
     // first, read and lane (snax_datapath.hpp's SnaxEnables; en = fire for a
     // plain Mac's output register)
@@ -113,7 +127,7 @@ public:
         bool frozen = false;    // its head (or, L = 0, a giving firing) had no room
     };
 
-    // What one buffer does: its LinkBuffer's load, wslot, rslot
+    // What one buffer does: its LinkBuffer's load, wslot, rslot (a wire's stays all 0)
     struct LinkStep
     {
         bool load = false;
@@ -131,18 +145,89 @@ public:
         bool end = false;       // the run's last cycle: idle from the next one
     };
 
-    // The units, head first, and the depth of each link (one fewer)
-    void configure(const std::vector<UnitCfg> &units, const std::vector<int> &depths)
+    // The units, the links between them, and the unit owning the outer output (-1: the
+    // sink). Returns why the graph is refused, or "" (then the rule is configured).
+    std::string configure(const std::vector<UnitCfg> &units, const std::vector<Link> &links,
+        int output = -1)
     {
-        this->cfg = units;
-        this->depths = depths;
-        this->u.assign(units.size(), UnitState());
-        for (size_t k = 0; k < units.size(); k++)
+        size_t n = units.size();
+        std::vector<std::vector<int>> ins(n), outs(n);
+        for (size_t i = 0; i < links.size(); i++)
         {
-            this->u[k].slots.assign(units[k].latency, false);
+            const Link &e = links[i];
+            if (e.from < 0 || e.from >= (int)n || e.to < 0 || e.to >= (int)n || e.depth < 0)
+            {
+                return "link " + std::to_string(i) + ": no such unit, or a depth below 0";
+            }
+            outs[e.from].push_back(i);
+            ins[e.to].push_back(i);
         }
-        this->l.assign(depths.size(), LinkState());
+        for (size_t k = 0; k < n; k++)
+        {
+            if (outs[k].size() > 1 || ins[k].size() > 1)
+            {
+                bool fork = outs[k].size() > 1;
+                return "unit " + std::to_string(k) + " has " +
+                    std::to_string(fork ? outs[k].size() : ins[k].size()) +
+                    (fork ? " out-edges (a fork)" : " in-edges (a join)") +
+                    ": until tier A a group is a chain";
+            }
+        }
+        // Kahn's order, the lowest index first among the units ready
+        std::vector<size_t> order, need(n);
+        std::vector<size_t> ready;
+        for (size_t k = 0; k < n; k++)
+        {
+            need[k] = ins[k].size();
+            if (!need[k])
+            {
+                ready.push_back(k);
+            }
+        }
+        for (size_t r = 0; r < ready.size(); r++)
+        {
+            size_t k = ready[r];
+            order.push_back(k);
+            for (int i : outs[k])
+            {
+                if (--need[links[i].to] == 0)
+                {
+                    ready.push_back(links[i].to);
+                }
+            }
+        }
+        if (order.size() != n)
+        {
+            return "the links form a cycle";
+        }
+        size_t sinks = 0, sink = 0;
+        for (size_t k = 0; k < n; k++)
+        {
+            if (outs[k].empty())
+            {
+                sinks++;
+                sink = k;
+            }
+        }
+        if (sinks != 1)
+        {
+            return std::to_string(sinks) + " units have no out-edge: until tier A a group is "
+                "one chain";
+        }
+        if (output >= (int)n)
+        {
+            return "the outer output's unit " + std::to_string(output) + ": no such unit";
+        }
+        this->cfg = units;
+        this->links = links;
+        this->ins = ins;
+        this->outs = outs;
+        this->order = order;
+        this->output = output < 0 ? sink : output;
+        this->u.assign(n, UnitState());
+        this->l.assign(links.size(), LinkState());
         this->reset();
+        return "";
     }
 
     void reset()
@@ -170,6 +255,11 @@ public:
     }
 
     size_t nb_units() const { return this->cfg.size(); }
+
+    // The units in topological order, the head first; the unit owning the outer output
+    const std::vector<size_t> &topological() const { return this->order; }
+    size_t output_unit() const { return this->output; }
+    const std::vector<Link> &edges() const { return this->links; }
 
     // Idle in cycle: no run, or the last one ended before it
     bool idle(int64_t cycle) const
@@ -206,11 +296,12 @@ public:
         this->end_cycle = -1;
         this->jobs = jobs;
         this->beats = t;
-        uint32_t n = jobs;
-        for (size_t k = this->cfg.size(); k-- > 0;)
+        // From the sink back: each firing of a consumer takes one result of its producer
+        for (size_t r = this->order.size(); r-- > 0;)
         {
-            n *= t[k];
-            this->counts[k] = n;
+            size_t k = this->order[r];
+            uint32_t n = this->outs[k].empty() ? jobs : this->counts[this->links[this->outs[k][0]].to];
+            this->counts[k] = n * t[k];
         }
         for (size_t k = 0; k < this->u.size(); k++)
         {
@@ -225,24 +316,26 @@ public:
     }
 
     // One busy cycle: inputs[k], every outer input of unit k has a beat (true
-    // for a unit without one); room, the outer output has room
-    Step step(int64_t cycle, const std::vector<bool> &inputs, bool room)
+    // for a unit without one); outer_room[k], unit k's outer output has room
+    // (true for a unit without one)
+    Step step(int64_t cycle, const std::vector<bool> &inputs, const std::vector<bool> &outer_room)
     {
         size_t n = this->cfg.size();
         Step s;
         s.units.assign(n, UnitStep());
-        s.links.assign(this->depths.size(), LinkStep());
+        s.links.assign(this->links.size(), LinkStep());
         std::vector<bool> avail(n), wants(n), would_fire(n), gives(n), head(n), offer(n);
 
         // Forward: what each unit offers whatever its room
-        for (size_t k = 0; k < n; k++)
+        for (size_t k : this->order)
         {
             const UnitCfg &c = this->cfg[k];
             UnitState &us = this->u[k];
             bool linked = true;
-            if (k > 0)
+            for (int i : this->ins[k])
             {
-                linked = this->depths[k - 1] == 0 ? offer[k - 1] : this->l[k - 1].occupancy > 0;
+                const Link &e = this->links[i];
+                linked = linked && (e.depth == 0 ? offer[e.from] : this->l[i].occupancy > 0);
             }
             avail[k] = inputs[k] && linked;
             bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
@@ -253,15 +346,22 @@ public:
             offer[k] = c.latency > 0 ? head[k] : gives[k];
         }
 
-        // Backward: frozen, fire, read, push; each unit's take is its producer's room
-        bool unit_room = room;
+        // Backward: room, frozen, fire, read, push; an out-edge takes on its consumer's firing
         bool busy = false, waits = false;
-        for (size_t k = n; k-- > 0;)
+        for (size_t r = n; r-- > 0;)
         {
+            size_t k = this->order[r];
             const UnitCfg &c = this->cfg[k];
             UnitState &us = this->u[k];
             UnitStep &st = s.units[k];
-            st.frozen = c.latency > 0 ? head[k] && !unit_room : gives[k] && !unit_room;
+            bool room = outer_room[k];
+            for (int i : this->outs[k])
+            {
+                const Link &e = this->links[i];
+                bool take = s.units[e.to].fire;
+                room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
+            }
+            st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
             st.first = us.firings % this->beats[k] == 0;
             if (!st.frozen)
             {
@@ -293,42 +393,35 @@ public:
             {
                 us.lane++;
             }
-            if (k > 0)
-            {
-                bool take = st.fire;
-                const LinkState &ls = this->l[k - 1];
-                unit_room = this->depths[k - 1] == 0 ? take
-                    : ls.occupancy < this->depths[k - 1] || take;
-            }
         }
 
         // The buffers: a load is the producer's push, a take the consumer's firing
-        for (size_t k = 0; k < this->depths.size(); k++)
+        for (size_t i = 0; i < this->links.size(); i++)
         {
-            int depth = this->depths[k];
-            LinkStep &ls = s.links[k];
-            LinkState &state = this->l[k];
-            if (depth == 0)
+            const Link &e = this->links[i];
+            LinkStep &ls = s.links[i];
+            LinkState &state = this->l[i];
+            if (e.depth == 0)
             {
                 continue;
             }
-            ls.load = s.units[k].push;
-            ls.take = s.units[k + 1].fire;
+            ls.load = s.units[e.from].push;
+            ls.take = s.units[e.to].fire;
             ls.wslot = state.wptr;
             ls.rslot = state.rptr;
             if (ls.load)
             {
-                state.wptr = (state.wptr + 1) % depth;
+                state.wptr = (state.wptr + 1) % e.depth;
             }
             if (ls.take)
             {
-                state.rptr = (state.rptr + 1) % depth;
+                state.rptr = (state.rptr + 1) % e.depth;
             }
             state.occupancy += (int)ls.load - (int)ls.take;
             ls.occupancy = state.occupancy;
         }
 
-        s.cls = s.units[n - 1].frozen ? STALL_OUT : busy ? BUSY : waits ? STALL_IN : FLUSH;
+        s.cls = s.units[this->output].frozen ? STALL_OUT : busy ? BUSY : waits ? STALL_IN : FLUSH;
         this->classes[s.cls]++;
         if (this->finished())
         {
@@ -339,10 +432,9 @@ public:
         return s;
     }
 
-    // The head unit's firings in this run
-    uint32_t firings() const { return this->u.empty() ? 0 : this->u[0].firings; }
-    uint32_t unit_firings(size_t k) const { return this->u[k].firings; }
-    uint32_t count() const { return this->counts.empty() ? 0 : this->counts[0]; }
+    // The head unit's firings in this run, and its count n
+    uint32_t firings() const { return this->order.empty() ? 0 : this->u[this->order[0]].firings; }
+    uint32_t count() const { return this->order.empty() ? 0 : this->counts[this->order[0]]; }
 
     // The summary line of the run that ended, run index from 0
     // (docs/EVENTS.md): its classes add up to its busy cycles
@@ -412,7 +504,10 @@ private:
     }
 
     std::vector<UnitCfg> cfg;
-    std::vector<int> depths;
+    std::vector<Link> links;
+    std::vector<std::vector<int>> ins, outs;    // per unit, its in- and out-edges (link indices)
+    std::vector<size_t> order;                  // the units in topological order
+    size_t output = 0;                          // the unit owning the outer output
     std::vector<UnitState> u;
     std::vector<LinkState> l;
     bool started = false;
@@ -478,7 +573,7 @@ public:
 
     Step step(int64_t cycle, bool inputs, bool room)
     {
-        SnaxGroupRule::Step g = this->group.step(cycle, {inputs}, room);
+        SnaxGroupRule::Step g = this->group.step(cycle, {inputs}, {room});
         this->sync();
         const SnaxGroupRule::UnitStep &u = g.units[0];
         return {u.fire, u.result, u.push, g.cls, g.end};
@@ -528,18 +623,36 @@ private:
 //
 // An input's source is an outer port (the streamer's beat, moved when the
 // unit fires), a wire (the producer's output from its eval this cycle) or a
-// buffer (its slot rslot, written in an earlier cycle). Unit k > 0 takes its
-// link on input `linked[k]`; its other inputs, and all of the head's, are
-// outer, in port order.
+// buffer (its slot rslot, written in an earlier cycle). A unit takes each
+// in-edge on that edge's to_input; its other inputs are outer, in port order.
+// wire() takes the edges and the order from the configured rule.
 class SnaxGroupDatapaths
 {
 public:
     std::vector<std::unique_ptr<SnaxDatapath>> units;
     std::vector<std::unique_ptr<SnaxDatapath>> buffers;     // per link; null for a wire
-    std::vector<int> linked;                                // per unit; -1 for the head
+
+    // The rule's links, its topological order and the unit owning the outer output; per
+    // unit and input, the link feeding it (-1: an outer input)
+    void wire(const SnaxGroupRule &rule)
+    {
+        this->links = rule.edges();
+        this->order = rule.topological();
+        this->output = rule.output_unit();
+        this->feeds.assign(this->units.size(), {});
+        for (size_t k = 0; k < this->units.size(); k++)
+        {
+            this->feeds[k].assign(this->units[k]->in_words.size(), -1);
+        }
+        for (size_t i = 0; i < this->links.size(); i++)
+        {
+            this->feeds[this->links[i].to][this->links[i].to_input] = i;
+        }
+    }
 
     // One cycle with the rule's step; outer[k], unit k's outer inputs' beats in port order
-    // (any words when it does not fire). The last unit's output, valid when it pushes.
+    // (any words when it does not fire). The outer output's unit's output, valid when it
+    // pushes.
     const std::vector<uint64_t> &cycle(const SnaxGroupRule::Step &step,
         const std::vector<std::vector<const uint64_t *>> &outer)
     {
@@ -553,22 +666,22 @@ public:
             en[k].lane = u.lane;
             en[k].en = u.fire;
         }
-        for (size_t k = 0; k < this->buffers.size(); k++)
+        for (size_t i = 0; i < this->buffers.size(); i++)
         {
-            ben[k].load = step.links[k].load;
-            ben[k].wslot = step.links[k].wslot;
-            ben[k].rslot = step.links[k].rslot;
+            ben[i].load = step.links[i].load;
+            ben[i].wslot = step.links[i].wslot;
+            ben[i].rslot = step.links[i].rslot;
         }
-        for (size_t k = 0; k < this->units.size(); k++)
+        for (size_t k : this->order)
         {
             std::vector<const uint64_t *> in;
             size_t o = 0;
-            for (size_t i = 0; i < this->units[k]->in_words.size(); i++)
+            for (int i : this->feeds[k])
             {
-                if ((int)i == this->linked[k])
+                if (i >= 0)
                 {
-                    const SnaxDatapath *src = this->buffers[k - 1] ? this->buffers[k - 1].get()
-                        : this->units[k - 1].get();
+                    const SnaxDatapath *src = this->buffers[i] ? this->buffers[i].get()
+                        : this->units[this->links[i].from].get();
                     in.push_back(src->out().data());
                 }
                 else
@@ -577,22 +690,31 @@ public:
                 }
             }
             this->units[k]->eval(in, en[k]);
-            if (k < this->buffers.size() && this->buffers[k])
+            for (size_t i = 0; i < this->links.size(); i++)
             {
-                this->buffers[k]->eval({this->units[k]->out().data()}, ben[k]);
+                if (this->links[i].from == (int)k && this->buffers[i])
+                {
+                    this->buffers[i]->eval({this->units[k]->out().data()}, ben[i]);
+                }
             }
         }
         for (size_t k = 0; k < this->units.size(); k++)
         {
             this->units[k]->commit(en[k]);
         }
-        for (size_t k = 0; k < this->buffers.size(); k++)
+        for (size_t i = 0; i < this->buffers.size(); i++)
         {
-            if (this->buffers[k])
+            if (this->buffers[i])
             {
-                this->buffers[k]->commit(ben[k]);
+                this->buffers[i]->commit(ben[i]);
             }
         }
-        return this->units.back()->out();
+        return this->units[this->output]->out();
     }
+
+private:
+    std::vector<SnaxGroupRule::Link> links;
+    std::vector<size_t> order;
+    size_t output = 0;
+    std::vector<std::vector<int>> feeds;
 };
