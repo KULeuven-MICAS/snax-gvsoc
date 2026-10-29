@@ -38,7 +38,7 @@ its index in that unit's inputs.
 import gvsoc.systree
 import interco.router as router
 from snax_acc import SNAX_ACC_CSR_LAST, SNAX_CSR_FIRST, SNAX_CSR_LAST, SnaxAcc
-from snax_cfg import DTYPES, CfgTargetError
+from snax_cfg import CATALOGUE, DTYPES, CfgTargetError
 from snax_group import SnaxGroup
 from snax_shell import SnaxShell
 from snax_streamer import SnaxStreamer, nb_csrs, nb_tcdm_ports, tcdm_port_names
@@ -74,9 +74,10 @@ def group_units(accelerator, group) -> tuple:
         (out,) = [p for p, port in u.ports.items() if port.dir == 'out']
         in_ports = [u.ports[p] for p in ins]
         out_port = u.ports[out]
-        op_width, op_signed = DTYPES[u.op_type] if u.op_type else (out_port.width, out_port.signed)
-        fold = any(c.name == 'JOB_BEATS' for c in u.csrs)
-        t = u.params['T'] if 'T' in u.params else 0 if fold else 1
+        facts = CATALOGUE[u.datapath]
+        op_width, op_signed = (DTYPES[u.op_type] if facts.typed
+                               else (out_port.width, out_port.signed))
+        t = u.params['T'] if 'T' in u.params else 0 if facts.is_fold(u.params) else 1
         units.append({
             'name': u.name, 'datapath': u.datapath,
             'inputs': ['' if f'{u.name}.{p}' in to else f'{u.name}_{p}' for p in ins],

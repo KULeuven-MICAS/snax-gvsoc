@@ -149,11 +149,40 @@ class CfgTargetError(SnaxCfgError):
 # refused
 MOVERS = ('data_reader_params', 'data_writer_params')
 UNMODELLED_MOVERS = ('data_reader_writer_params',)
-# The unit datapaths SnaxGroup models: snax_datapath.hpp's registry but LinkBuffer, a link's
-# (snax-forge's catalogue, D147, D149)
-DATAPATHS = ('ElementwiseLanes', 'TreeAccumulate', 'Mac', 'SerialAccumulate')
-# The folds: a result every T firings, T a JOB_BEATS CSR or params.T
-FOLDS = ('TreeAccumulate', 'SerialAccumulate')
+
+
+@dataclass(frozen=True)
+class Datapath:
+    """A unit datapath's facts (snax-forge's catalogue, D147, D149), each from its params
+    (accelerator.json's unit params: accumulate, regOut) where it depends on them."""
+
+    nb_inputs: object           # params -> its input ports
+    is_fold: object             # params -> a result every T firings (a JOB_BEATS CSR or params.T)
+    latency: object             # params -> its latency
+    serial: bool = False        # span = lanes (it reads a beat's lanes one a cycle), else 1
+    reduces: bool = False       # its output is one lane, one 64-bit word (the lanes summed)
+    typed: bool = False         # it runs its op at an opType, its inputs' result type
+    needs_op: bool = False      # params.op is given
+    only_op: str = None         # the one op it computes
+
+
+def _accumulates(params: dict) -> bool:
+    return bool(params.get('accumulate', True))
+
+
+# The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
+# LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
+CATALOGUE = {
+    'ElementwiseLanes': Datapath(nb_inputs=lambda p: 2, is_fold=lambda p: False,
+                                 latency=lambda p: 0, typed=True, needs_op=True),
+    'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
+                               latency=lambda p: 1, reduces=True, needs_op=True, only_op='add'),
+    'Mac': Datapath(nb_inputs=lambda p: 2 if _accumulates(p) else 3, is_fold=_accumulates,
+                    latency=lambda p: int(_accumulates(p) or bool(p.get('regOut', False))),
+                    typed=True),
+    'SerialAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
+                                 latency=lambda p: 1, serial=True, reduces=True),
+}
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
 # read-only, last (C§17)
 GROUP_RW = ('START', 'JOBS')
@@ -572,25 +601,12 @@ def _port(node: _Node) -> Port:
     return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction)
 
 
-def _is_fold(datapath: str, params: dict) -> bool:
-    """A unit that gives a result every T firings: a tree, a serial sum, an accumulating Mac."""
-    return datapath in FOLDS or (datapath == 'Mac' and params.get('accumulate', True))
-
-
-# Each datapath's latency and span from its params and lanes (snax-forge's catalogue)
-def _timing(datapath: str, params: dict, lanes: int) -> tuple:
-    if datapath == 'ElementwiseLanes':
-        return 0, 1
-    if datapath == 'Mac':
-        return int(bool(params.get('accumulate', True)) or bool(params.get('regOut', False))), 1
-    return 1, lanes if datapath == 'SerialAccumulate' else 1
-
-
 def _unit(node: _Node) -> Unit:
     datapath = node.get('datapath', str)
-    if datapath not in DATAPATHS:
+    if datapath not in CATALOGUE:
         raise CfgTargetError(node.file, node.where('datapath'),
-            f'{datapath!r}, not a datapath SnaxGroup models ({", ".join(DATAPATHS)})')
+            f'{datapath!r}, not a datapath SnaxGroup models ({", ".join(CATALOGUE)})')
+    facts = CATALOGUE[datapath]
     ports = node.node('ports')
     if not ports.value:
         raise CfgTypeError(node.file, node.where('ports'), 'no port')
@@ -604,22 +620,21 @@ def _unit(node: _Node) -> Unit:
     if span < 1:
         raise CfgTypeError(node.file, timing.where('span'), f'{span}, must be 1 or more')
     params = node.node('params')
-    takes_op = datapath in ('ElementwiseLanes', 'TreeAccumulate')
     op = params.get('op', str, None)
-    if takes_op and op is None:
+    if facts.needs_op and op is None:
         raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
     if op is not None and op not in OPS:
         raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)})')
-    if datapath == 'TreeAccumulate' and op != 'add':
+    if facts.only_op is not None and op != facts.only_op:
         raise CfgTargetError(node.file, params.where('op'),
-            f'{op!r}: TreeAccumulate adds; a fold of another op is not modelled')
+            f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
     for key in ('accumulate', 'regOut'):
         params.get(key, bool, None)
     t = params.get('T', int, None)
     if t is not None and t < 1:
         raise CfgTypeError(node.file, params.where('T'), f'{t}, must be 1 or more')
     op_type = node.get('opType', str, None)
-    typed = datapath in ('ElementwiseLanes', 'Mac')
+    typed = facts.typed
     if not typed and op_type is not None:
         raise CfgTypeError(node.file, node.where('opType'), f'a {datapath} unit has none')
     if typed and op_type is None:
@@ -632,13 +647,14 @@ def _unit(node: _Node) -> Unit:
         if c.name not in UNIT_RW or c.access != 'rw':
             raise CfgTargetError(node.file, f'{node.where("csrs")}[{i}]',
                 f'{c.name} ({c.access}): the unit CSRs modelled are {", ".join(UNIT_RW)} (rw)')
-    fold = _is_fold(datapath, params.value)
+    fold = facts.is_fold(params.value)
     if (fold and t is None) != ('JOB_BEATS' in [c.name for c in csrs]):
         raise CfgSlotError(node.file, node.where('csrs'),
             f'{[c.name for c in csrs]}: a fold without params.T has JOB_BEATS, any other unit '
             'none')
     unit_ports = {key: _port(ports.node(key)) for key in ports.value}
-    want = _timing(datapath, params.value, next(iter(unit_ports.values())).lanes)
+    lanes = next(iter(unit_ports.values())).lanes
+    want = (facts.latency(params.value), lanes if facts.serial else 1)
     if (latency, ii, span) != (*want[:1], 1, want[1]):
         raise CfgTargetError(node.file, node.where('timing'),
             f'gen.timing: latency {latency}, ii {ii}, span {span}; {datapath} here is latency '
@@ -799,13 +815,14 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     dirs = dirs_of(u)
     ins = [u.ports[p] for p in u.ports if dirs[p] == 'in']
     outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
-    plain = u.datapath == 'Mac' and not u.params.get('accumulate', True)
-    n_in = {'ElementwiseLanes': 2, 'Mac': 3 if plain else 2}.get(u.datapath, 1)
+    facts = CATALOGUE[u.datapath]
+    plain = facts.nb_inputs(u.params) == 3
+    n_in = facts.nb_inputs(u.params)
     if (len(ins), len(outs)) != (n_in, 1):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
             f'{n_in} and 1')
-    if u.datapath in FOLDS:
+    if facts.reduces:
         if outs[0].lanes != 1:
             raise CfgTargetError(node.file, node.where('outputs'),
                 f'unit {u.name}: a fold\'s output has 1 lane, not {outs[0].lanes}')
@@ -913,7 +930,7 @@ def _check_accelerator(acc: _Node, slot: AccSlot):
             unit, _, name = entry.partition('.')
             u = accelerator.unit(unit)
             port = u.ports[name]
-            if u.datapath in FOLDS and key == 'outputs':
+            if CATALOGUE[u.datapath].reduces and key == 'outputs':
                 if channels[i] != 1:
                     fail(f'snax_datapath_cfg.{key}[{i}]', f"{entry}: a fold's output is one "
                          f'64-bit word per beat, but {mover}[{i}] has num_channel {channels[i]}')

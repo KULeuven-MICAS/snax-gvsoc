@@ -323,10 +323,17 @@ private:
 };
 
 
-// The registry: catalogue name -> a datapath built from params, or an empty
-// pointer and *why set when the params do not fit it
+// The registry: catalogue name -> its facts and a datapath built from params,
+// or an empty pointer and *why set when the params do not fit it. Its Python
+// side is snax_cfg.py's CATALOGUE: a new datapath is an entry in each.
 using SnaxDatapathFactory =
     std::function<std::unique_ptr<SnaxDatapath>(const SnaxDatapathParams &, std::string *)>;
+
+struct SnaxDatapathEntry
+{
+    bool whole_words;           // each input's lanes fill whole 64-bit words
+    SnaxDatapathFactory make;
+};
 
 // Whether the elements of lanes of t fill whole 64-bit words
 inline bool snax_whole_words(int lanes, SnaxUnitType t)
@@ -334,10 +341,10 @@ inline bool snax_whole_words(int lanes, SnaxUnitType t)
     return lanes > 0 && lanes * t.width % 64 == 0;
 }
 
-inline const std::map<std::string, SnaxDatapathFactory> &snax_datapaths()
+inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
 {
-    static const std::map<std::string, SnaxDatapathFactory> registry = {
-        {"ElementwiseLanes", [](const SnaxDatapathParams &p, std::string *why) {
+    static const std::map<std::string, SnaxDatapathEntry> registry = {
+        {"ElementwiseLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
             SnaxUnitType t;
             if (p.in_types.size() != 2 || !snax_unit_result_type(p.in_types[0], p.in_types[1], &t))
             {
@@ -345,16 +352,16 @@ inline const std::map<std::string, SnaxDatapathFactory> &snax_datapaths()
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxElementwiseLanes(p));
-        }},
-        {"TreeAccumulate", [](const SnaxDatapathParams &p, std::string *why) {
+        }}},
+        {"TreeAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
             if (p.in_types.size() != 1 || p.op != UNIT_ADD)
             {
                 *why = "one input, op add";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxTreeAccumulate(p));
-        }},
-        {"Mac", [](const SnaxDatapathParams &p, std::string *why) {
+        }}},
+        {"Mac", {true, [](const SnaxDatapathParams &p, std::string *why) {
             size_t n = p.accumulate ? 2 : 3;
             if (p.in_types.size() != n || (p.accumulate && p.reg_out) ||
                 (!p.accumulate && (p.in_types[2].width != p.out_type.width ||
@@ -364,23 +371,24 @@ inline const std::map<std::string, SnaxDatapathFactory> &snax_datapaths()
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxMac(p));
-        }},
-        {"SerialAccumulate", [](const SnaxDatapathParams &p, std::string *why) {
+        }}},
+        {"SerialAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
             if (p.in_types.size() != 1)
             {
                 *why = "one input";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxSerialAccumulate(p));
-        }},
-        {"LinkBuffer", [](const SnaxDatapathParams &p, std::string *why) {
+        }}},
+        // A link's buffer holds the beat as it comes, whatever its packing
+        {"LinkBuffer", {false, [](const SnaxDatapathParams &p, std::string *why) {
             if (p.depth < 1)
             {
                 *why = "depth 1 or more";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxLinkBuffer(p));
-        }},
+        }}},
     };
     return registry;
 }
@@ -397,11 +405,11 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
     }
     for (const SnaxUnitType &t : p.in_types)
     {
-        if (name != "LinkBuffer" && !snax_whole_words(p.lanes, t))
+        if (it->second.whole_words && !snax_whole_words(p.lanes, t))
         {
             *why = "an input's lanes are not whole 64-bit words";
             return nullptr;
         }
     }
-    return it->second(p, why);
+    return it->second.make(p, why);
 }
