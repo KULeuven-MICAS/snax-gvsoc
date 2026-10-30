@@ -1,4 +1,4 @@
-# SnaxUnit's rule
+# The rule of one unit
 
 The cycle rule of one unit (`snax/snax_group.hpp`'s `SnaxGroupRule` with one unit and no links, as `SnaxGroup` (`snax/snax_group.cpp`) runs a group of one unit) against hand-worked cases, with g++ only; the arithmetic of `snax/snax_types.hpp` is checked once, by `tests/snax/datapath/`. `make regress` runs it first, as `unit`. snax-forge's Chisel specs drive its nest controller and datapaths through the same files (`SNAX_GVSOC_UNIT_CASES`), so the format below is the contract between the two.
 

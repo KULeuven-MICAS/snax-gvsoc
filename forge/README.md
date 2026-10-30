@@ -57,10 +57,4 @@ From a snax-forge checkout next to this one (snax-forge README, "Refreshing a fi
 
 ## How it runs
 
-Never through `TARGETS`: no model is compiled (D134). The generic app builds the program and its own runtime (`libsnRuntime.a`, beside the ELF) against the folder's two cluster headers, so the stacks sit at the end of the design's L1; gvrun runs the installed `snax_hjson` on the cluster file:
-
-    make -C sw/apps/forge DESIGN=vecadd
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
-        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
-
-The reader resolves the `$ref`s (relative to the cluster file), the slot's `accelerator.json` gets the standard composite on the installed components. The target's default file is `vecadd/`'s cluster (installed from here, snax-forge D126), so `vecadd/` runs on the build's platform tree; for the others gvrun warns that the platform tree does not match and runs them on the JSON config.
+`make regress` runs every folder as `forge.<design>` (`tests/snax/regress.py`): the generic app builds its `main.c` and a runtime against its two cluster headers (`make -C sw/apps/forge DESIGN=<design>`), the installed `snax_hjson` runs it on the folder's cluster file (`--param hjson=`) with the traces `manifest.json` names, and each `forge counter` line must equal its unit's run. No model is compiled (D134): vecadd's folder runs on the build's platform tree, the others on the JSON config, with gvrun's warning.
