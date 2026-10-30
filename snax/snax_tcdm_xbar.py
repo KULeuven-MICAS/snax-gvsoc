@@ -18,7 +18,7 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
     after the grant. A request that loses is dropped and sent again by its
     master the next cycle, or, on an input that holds, kept for the next
     cycle's arbitration. The DMA's beat takes every bank of its superbank in its
-    cycle, and a narrow winner there is refused and keeps its turn (docs/plans/SG7.md).
+    cycle, and a narrow winner there is refused and keeps its turn (docs/notes/NOTES.md).
 
     Parameters
     ----------

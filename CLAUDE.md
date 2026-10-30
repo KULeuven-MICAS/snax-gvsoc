@@ -8,7 +8,7 @@ A detached copy of upstream [GVSoC](https://github.com/gvsoc/gvsoc) (at `93cedc4
 - `tests/snax/`: the testbenches (`unit/`, `group/`, `shell/`, `datapath/`, `sparse_arb/`), the Python unit tests (`test_*.py`) and the regression, `regress.py`.
 - `sw/apps/`: our programs for the SNAX targets.
 - `forge/`: one folder per snax-forge design point, the generator's output checked in as fixtures (D134). Never edited by hand: snax-forge writes them again (`forge/README.md`, the only hand-written file there).
-- `docs/`: `RUN.md` (how to run it), `EVENTS.md` (what the SNAX components write about a run), `notes/NOTES.md` (the log).
+- `docs/`: `RUN.md` (how to run it), `EVENTS.md` (what the SNAX components write about a run), `notes/NOTES.md` (what was measured and still holds).
 
 ## What is not ours
 

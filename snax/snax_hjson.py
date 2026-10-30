@@ -78,7 +78,7 @@ DEFAULT_HJSON = 'forge/vecadd/snax_forge.hjson'
 # queues the hjson's. A DMA read's first beat comes 5 cycles after
 # its request from L1 and 11 from DRAM: the 5 common to both are the DMA's own
 # read path (read_latency), the other 6 are the DRAM's. From the RTL's DMA write
-# path (docs/plans/SG7.md): a beat reaches L1 2 cycles after the DMA sends
+# path (docs/notes/NOTES.md, The DMA): a beat reaches L1 2 cycles after the DMA sends
 # it, the wide crossbar's cut and axi_to_mem_interleaved, and the DMA is done at
 # the send (tcdm_write_latency); the DMA's midend, backend and AXI read each
 # take a cycle, whatever else the DMA is doing (one_cycle_per_stage).
