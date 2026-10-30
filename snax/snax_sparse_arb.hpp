@@ -9,7 +9,8 @@
 // PriorityRoundRobinArbiter.scala, RoundRobinArbiter.scala). Plain C++, so
 // the crossbar (snax_tcdm_xbar.cpp) and the winner check against the RTL
 // (tests/snax/sparse_arb/) run the same code. Priority is one bit, as
-// snaxgen elaborates it. docs/plans/SG7.md has the reading.
+// snaxgen elaborates it. docs/notes/NOTES.md (The crossbar and the sparse
+// interconnect) has the reading and the check against the RTL.
 
 #pragma once
 

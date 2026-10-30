@@ -15,7 +15,6 @@ It starts as a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at `93ce
 | `tests/snax/` | The regression (`regress.py`), the sparse arbiter's check against the RTL (`sparse_arb/`), and the rule of one unit, `SnaxShell`'s, the datapath classes' and the group cases (`unit/`, `shell/`, `datapath/`, `group/`) |
 | `docs/RUN.md` | How to run it, from the container to the regression, each command with its output |
 | `docs/EVENTS.md` | What the SNAX components write about a run (their `summary`, `events`, `beats` and `stalls` traces), line by line |
-| `docs/plans/` | One plan per task, what it built and found (`SG0.md` to `SG7.md`, `CI1.md`, `GEN3.md`, `LNK2a.md`, `GEN2a.md`, `FLOW3.md`, `GEN2b.md`) |
 | `docs/notes/NOTES.md` | The log: what was run and what came out |
 | `build/`, `install/` | GVSoC's build and run output, the programs (`build/sw/`), and what GVSoC installs; not tracked |
 
