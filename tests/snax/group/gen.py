@@ -13,10 +13,14 @@ Control, not from snax/snax_group.hpp) steps each case, whose cycle table is
 written with a comment per cycle; every dot variant's busy cycles E - s are
 checked against C§17's formulas before a file is written, so a case never
 states a total the formula does not give. The files are checked in; tb.cpp reads them.
+The W = 1 cases carry their data: seeded random int64 beats and each job's sum from numpy
+(so this script needs numpy).
 """
 
 import sys
 from pathlib import Path
+
+import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "snax"))
@@ -34,14 +38,25 @@ VARIANTS = {
 }
 
 
-def formula(v, t, j):
-    """C§17's busy cycles E - s of dot variant v."""
-    return {2: j * t + 2, 3: j * t + 1, 4: j * t + 2, 5: j * (t + W - 1) + 2,
-            6: (j - 1) * max(t, W) + t + W + 2}[v]
+def formula(v, t, j, w=W):
+    """C§17's busy cycles E - s of dot variant v at w lanes."""
+    return {2: j * t + 2, 3: j * t + 1, 4: j * t + 2, 5: j * (t + w - 1) + 2,
+            6: (j - 1) * max(t, w) + t + w + 2}[v]
+
+
+def dot_data(seed, jobs, beats, lanes):
+    """Random int64 beats of a and b (lane l of beat i is element i * lanes + l) and each job's
+    sum of products over its beats, wrapping at int64 as the datapaths do."""
+    rng = np.random.default_rng(seed)
+    i64 = np.iinfo(np.int64)
+    a, b = (rng.integers(i64.min, i64.max, size=jobs * beats * lanes, dtype=np.int64,
+                         endpoint=True) for _ in range(2))
+    sums = (a * b).reshape(jobs, beats * lanes).sum(axis=1, dtype=np.int64)
+    return {"lanes": lanes, "a": a.tolist(), "b": b.tolist(), "sums": sums.tolist()}
 
 
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
-          formula_total=None, comment=()):
+          formula_total=None, comment=(), data=None):
     # A chain: link k joins unit k to unit k + 1's only input
     links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
              for k, d in enumerate(depths)]
@@ -75,6 +90,10 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
                      f"stall_in={classes['stall_in']} stall_out={classes['stall_out']} "
                      f"flush={classes['flush']}")
         lines.append(f"# E - s = {total}" + (f", C§17's formula" if formula_total else ""))
+    if data is not None:
+        lines.append(f"lanes {data['lanes']}")
+        lines += [f"data {x} " + " ".join(map(str, data[x])) for x in ("a", "b")]
+        lines.append("sums " + " ".join(map(str, data["sums"])))
     lines += ["", "# a b ready | " + " | ".join(f"{u[0]} fire give" for u in units)
               + (" | " + " ".join(f"occ{k}" for k, d in enumerate(depths) if d) if any(depths) else "")
               + " | busy", "cycles"]
@@ -107,6 +126,17 @@ def main():
     write("dot6_input_gap", "dot 6 at N = 16 (T = 4), JOBS 2, reader a without a beat in "
           "cycle 3", u6, [1], 2, [4, 1], valid=lambda c: (0, 1) if c == 3 else (1, 1),
           comment=["mac waits a cycle for a (stall_in while nothing else fires)"])
+    # SerialAccumulate at lanes 1 (span 1): it reads (and fires) once per beat
+    for v, seed in ((5, 5), (6, 6)):
+        units = [("mac", "Mac", 1, 1, 2), ("sum", "SerialAccumulate", 1, 1, 0)]
+        depth, t, j = VARIANTS[v][1], 4, 2
+        link = "a buffer of depth 1" if depth else "a wire"
+        write(f"dot{v}_w1_j{j}", f"dot {v} at N = 4, W = 1 (T = {t}), JOBS {j}: mac -> {link} "
+              f"-> SerialAccumulate sum at span 1", units, [depth], j, [t, 1],
+              formula_total=formula(v, t, j, 1),
+              comment=[f"C§17: busy cycles E - s = {formula(v, t, j, 1)}",
+                       f"random int64 data (numpy seed {seed}); each job's sum of a * b"],
+              data=dot_data(seed, j, t, 1))
     write("dot4_jobs0", "dot 4, JOBS 0: the empty run, ignored; busy never rises", u4, [0], 0,
           [2, 1], comment=["the shell ends it in its own cycle (tests/snax/shell)"])
     print("T, J | " + " | ".join(f"dot {v}" for v in VARIANTS))

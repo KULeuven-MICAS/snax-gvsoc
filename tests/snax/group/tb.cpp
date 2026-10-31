@@ -14,9 +14,10 @@
 // every cycle and the run line at the end of each run, whose classes must add
 // up to the run's busy cycles in the file. It also runs the group's datapaths
 // with the rule's enables (snax_group.hpp's SnaxGroupDatapaths, as the
-// component does) on a dot product of int64 at 4 lanes, beat i of a and b the
-// head's i-th firing's, and checks each result the last unit pushes against
-// the sum of its job's products.
+// component does) on a dot product of int64, beat i of a and b the head's i-th
+// firing's, and checks each result the last unit pushes against its job's sum:
+// the case's own data when it has some (lanes, data a, data b, sums), else 4
+// lanes of a_of and b_of and the sum of each job's products.
 //
 //   tb CASE...
 //
@@ -61,6 +62,8 @@ struct Case
     std::string start_result;
     std::vector<std::string> expects;
     std::vector<CycleLine> cycles;
+    int lanes = 0;                      // 0: no data of its own
+    std::vector<int64_t> a, b, sums;    // a and b element i * lanes + l, a job's sum each
 };
 
 static std::string base_of(const std::string &path)
@@ -81,6 +84,16 @@ static std::vector<std::string> fields(const std::string &line, char sep)
         out.push_back(part);
     }
     return out;
+}
+
+static bool int64s(std::istringstream &ss, std::vector<int64_t> &v)
+{
+    long long x;
+    while (ss >> x)
+    {
+        v.push_back(x);
+    }
+    return ss.eof() && !v.empty();
 }
 
 static std::vector<int> ints(const std::string &text)
@@ -212,6 +225,14 @@ static bool parse(const std::string &path, Case &c)
             size_t last = rest.find_last_not_of(" \t\r");
             c.expects.push_back(first == std::string::npos ? "" : rest.substr(first, last - first + 1));
         }
+        else if (key == "lanes") { ok = (bool)(ss >> c.lanes) && c.lanes > 0; }
+        else if (key == "data")
+        {
+            std::string name;
+            ok = (bool)(ss >> name) && (name == "a" || name == "b") &&
+                int64s(ss, name == "a" ? c.a : c.b);
+        }
+        else if (key == "sums") { ok = int64s(ss, c.sums); }
         else if (key == "cycles") { in_cycles = true; }
         else { ok = false; }
         if (!ok)
@@ -225,12 +246,20 @@ static bool parse(const std::string &path, Case &c)
         fprintf(stderr, "%s: no unit\n", path.c_str());
         return false;
     }
+    if ((c.lanes || !c.a.empty() || !c.b.empty() || !c.sums.empty()) &&
+        (!c.lanes || c.a.size() != c.b.size() || c.a.size() % c.lanes || c.sums.size() != c.jobs))
+    {
+        fprintf(stderr, "%s: lanes, data a, data b and sums do not fit (a JOBS of sums)\n",
+            path.c_str());
+        return false;
+    }
     return true;
 }
 
 static const char *start_names[] = {"taken", "ignored", "refused"};
 
-// The dot product the data check runs: 4 lanes of int64, a head of two outer inputs
+// The dot product the data check runs without data of the case's own: 4 lanes of int64, a
+// head of two outer inputs
 static const int LANES = 4;
 
 static int64_t a_of(int i) { return (i * 7) % 13 - 6; }
@@ -251,7 +280,7 @@ static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const Sn
     {
         SnaxDatapathParams p;
         p.in_types.assign(k == 0 ? 2 : 1, i64);
-        p.lanes = LANES;
+        p.lanes = c.lanes ? c.lanes : LANES;
         p.op = c.units[k].datapath == "ElementwiseLanes" ? SNAX_OP_MUL : SNAX_OP_ADD;
         std::string why;
         g->units.push_back(snax_datapath_new(c.units[k].datapath, p, &why));
@@ -262,7 +291,7 @@ static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const Sn
     }
     SnaxDatapathParams p;
     p.in_types = {i64};
-    p.lanes = LANES;
+    p.lanes = c.lanes ? c.lanes : LANES;
     p.depth = c.links[0].depth;
     std::string why;
     g->buffers.push_back(c.links[0].depth ? snax_datapath_new("LinkBuffer", p, &why) : nullptr);
@@ -304,6 +333,7 @@ static int run(const Case &c)
     int head_fired = 0, pushed = 0;
     // Each job's sum: the head fires n / JOBS beats a job
     uint32_t per_job = c.jobs ? ts[0] * ts[1] : 0;
+    const int lanes = c.lanes ? c.lanes : LANES;
     for (size_t t = 0; t < c.cycles.size(); t++)
     {
         int64_t cycle = t;
@@ -347,20 +377,37 @@ static int run(const Case &c)
             step = rule.step(cycle, inputs, room);
             if (data)
             {
-                std::vector<uint64_t> a(LANES), bb(LANES);
-                for (int lane = 0; lane < LANES; lane++)
+                std::vector<uint64_t> a(lanes), bb(lanes);
+                for (int lane = 0; lane < lanes; lane++)
                 {
-                    a[lane] = a_of(head_fired * LANES + lane);
-                    bb[lane] = b_of(head_fired * LANES + lane);
+                    size_t i = (size_t)head_fired * lanes + lane;
+                    if (c.lanes)
+                    {
+                        // past the last beat the head does not fire: any words
+                        a[lane] = i < c.a.size() ? (uint64_t)c.a[i] : 0;
+                        bb[lane] = i < c.b.size() ? (uint64_t)c.b[i] : 0;
+                    }
+                    else
+                    {
+                        a[lane] = a_of(i);
+                        bb[lane] = b_of(i);
+                    }
                 }
                 const std::vector<uint64_t> &out = data->cycle(step, {{a.data(), bb.data()}, {}});
                 head_fired += step.units[0].fire;
                 if (step.units[output].push)
                 {
                     int64_t want = 0;
-                    for (uint32_t i = pushed * per_job * LANES; i < (pushed + 1) * per_job * LANES; i++)
+                    if (c.lanes)
                     {
-                        want += a_of(i) * b_of(i);
+                        want = (size_t)pushed < c.sums.size() ? c.sums[pushed] : 0;
+                    }
+                    else
+                    {
+                        for (uint32_t i = pushed * per_job * LANES; i < (pushed + 1) * per_job * LANES; i++)
+                        {
+                            want += a_of(i) * b_of(i);
+                        }
                     }
                     if ((int64_t)out[0] != want)
                     {
@@ -418,6 +465,12 @@ static int run(const Case &c)
             }
             next_expect++;
         }
+    }
+    if (data && c.lanes && (size_t)pushed != c.sums.size())
+    {
+        printf("%s: %d result(s) pushed, %zu sums in the case\n", c.name.c_str(), pushed,
+            c.sums.size());
+        errors++;
     }
     if (next_expect < c.expects.size())
     {

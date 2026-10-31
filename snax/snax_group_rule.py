@@ -26,7 +26,9 @@ Each cycle has two passes over the units in a topological order:
 - backward, in reverse order, whether each unit has room (room_k): the outer output's ready for
   the unit owning it, and every out-edge takes, a wire when its consumer fires, a buffer when
   occupancy < D or its consumer fires; a unit whose head (or with L = 0 a giving firing) has no
-  room is frozen.
+  room is frozen. A unit not frozen reads its input when it wants to and its input has a beat,
+  at every span: lane l in place at span S, firing on lane S - 1; at span 1 the read is its
+  firing.
 
 Unit k fires n_k times per run: JOBS * T for the sink, n_succ * T_k for a unit before it (each
 firing of its consumer takes one of its results, one per T_k firings). The cycle's class is
@@ -144,7 +146,7 @@ class GroupRule:
                 if not frozen[k]:
                     fire = wfire[k]
                     push = head[k] if u["L"] > 0 else gives[k]
-                    read = u["span"] > 1 and wants[k] and avail[k]
+                    read = wants[k] and avail[k]
                     if u["L"] > 0:
                         slots[k] = [gives[k] and fire] + slots[k][:-1]
                     gap = last[k] is not None and c < last[k] + u["ii"]
