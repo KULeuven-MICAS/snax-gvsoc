@@ -49,7 +49,7 @@ What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC 
 
 ## The group and its datapaths
 
-- **One rule on three sides.** The group control rule (`snax/snax_group.hpp`'s `SnaxGroupRule`, `snax/snax_group_rule.py`, snax-forge's Chisel `GroupRule`) is checked by the 23 group cases (`tests/snax/group/`), the unit cases (`tests/snax/unit/`) and the shell cases (`tests/snax/shell/`); the datapath classes (`snax/snax_datapath.hpp`) against NumPy's vectors (`tests/snax/datapath/`).
+- **One rule on three sides.** The group control rule (`snax/snax_group.hpp`'s `SnaxGroupRule`, `snax/snax_group_rule.py`, snax-forge's Chisel `GroupRule`) is checked by the 25 group cases (`tests/snax/group/`), the unit cases (`tests/snax/unit/`) and the shell cases (`tests/snax/shell/`); the datapath classes (`snax/snax_datapath.hpp`) against NumPy's vectors (`tests/snax/datapath/`).
 - **The shell.** A start while busy is answered pending and sent in E + 1; the counter is reset by an accepted start and counts the busy cycles (`snax-shell`: counter 17, the held start's span 19).
 - **The arithmetic** (PACK0, on forge/'s int32 and int8 fixtures, `forge data: 0 errors`): an elementwise op at NumPy's result type of its inputs, then cast to the output's; a fold's lanes cast to its output's type before its tree; a signed type with uint64 refused (NumPy gives float64).
 - **The counter** (B1x, every forge/ variant at W = 4 and 8): C§17's cycles plus the streamers' fill, 3 cycles, 2 for a unit with one input. `make regress` checks each forge/ run's counters against its tasks.

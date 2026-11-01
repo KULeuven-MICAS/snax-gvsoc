@@ -1,0 +1,32 @@
+# dot 6 at N = 4, W = 1 (T = 4), JOBS 2: mac -> a buffer of depth 1 -> SerialAccumulate sum at span 1
+# C§17: busy cycles E - s = 11
+# random int64 data (numpy seed 6); each job's sum of a * b
+
+unit mac Mac latency 1 ii 1 span 1 t 4 inputs 2
+unit sum SerialAccumulate latency 1 ii 1 span 1 t 1 inputs 0
+link mac sum depth 1
+jobs 2
+start 0 taken
+expect run index=0 firings=8 busy=9 stall_in=0 stall_out=0 flush=2
+# E - s = 11, C§17's formula
+lanes 1
+data a 704008024342037246 -2891142153448451873 -2415283118359038993 -2315126045623110811 8991772983981613421 2448920984963642835 3215708931939523818 -3136620621682344247
+data b 3318895049833111673 -6954932109174513026 -8269136133320522219 6459890151409359892 -9059273388813122841 8831702690425992540 6032141128612719464 5261213573710757988
+sums -3139554215570931121 -6572512497251672637
+
+# a b ready | mac fire give | sum fire give | occ0 | busy
+cycles
+1 1 1 | 0 0 | 0 0 | 0 | 0    # 0: idle
+1 1 1 | 1 0 | 0 0 | 0 | 1    # 1: mac fires 0
+1 1 1 | 1 0 | 0 0 | 0 | 1    # 2: mac fires 1
+1 1 1 | 1 0 | 0 0 | 0 | 1    # 3: mac fires 2
+1 1 1 | 1 0 | 0 0 | 0 | 1    # 4: mac fires 3 (gives)
+1 1 1 | 1 1 | 0 0 | 1 | 1    # 5: mac pushes; mac fires 4
+1 1 1 | 1 0 | 1 0 | 0 | 1    # 6: mac fires 5; sum fires 0 (gives)
+1 1 1 | 1 0 | 0 1 | 0 | 1    # 7: mac fires 6; sum pushes
+1 1 1 | 1 0 | 0 0 | 0 | 1    # 8: mac fires 7 (gives)
+1 1 1 | 0 1 | 0 0 | 1 | 1    # 9: mac pushes
+1 1 1 | 0 0 | 1 0 | 0 | 1    # 10: sum fires 1 (gives)
+1 1 1 | 0 0 | 0 1 | 0 | 1    # 11: sum pushes
+1 1 1 | 0 0 | 0 0 | 0 | 0    # 12: idle
+1 1 1 | 0 0 | 0 0 | 0 | 0    # 13: idle

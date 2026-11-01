@@ -45,10 +45,11 @@
 // has a beat when each of its outer inputs has one and each in-edge offers
 // one: a wire offers what its producer presents this cycle (its pipeline's
 // head, or with L = 0 a firing that gives a result), a buffer its oldest beat
-// (occupancy > 0: a beat written in an earlier cycle). A unit of span 1 fires
-// when it wants to and its input has a beat; one of span S reads lane l of
-// the beat in place (the lane counter) in each such cycle and fires (takes
-// the beat) on lane S - 1, so its throughput is one beat per max(II, S). A
+// (occupancy > 0: a beat written in an earlier cycle). A unit reads its
+// input in each cycle it wants to, its input has a beat and it is not frozen,
+// at every span: one of span S reads lane l of the beat in place (the lane
+// counter) and fires (takes the beat) on lane S - 1, so its throughput is one
+// beat per max(II, S); at span 1 the read is its firing. A
 // result from a firing in t is pushed in t + L when nothing stalls. A unit
 // has room when its outer output (if it owns it) has room and each out-edge
 // takes: a wire when its consumer fires, a buffer when occupancy < D or its
@@ -124,7 +125,7 @@ public:
         bool fire = false;      // a beat taken from its input (the last lane's read at span > 1)
         bool gives = false;     // the firing gives a result (d = T - 1)
         bool push = false;      // a result given to the outer output or the link
-        bool read = false;      // span > 1: lane `lane` read in place
+        bool read = false;      // lane `lane` read in place (at span 1, the firing)
         int lane = 0;
         bool first = false;     // the beat fired or read is its job's first (d = 0)
         bool frozen = false;    // its head (or, L = 0, a giving firing) had no room
@@ -373,7 +374,7 @@ public:
                 st.fire = would_fire[k];
                 st.gives = gives[k];
                 st.push = c.latency > 0 ? head[k] : gives[k];
-                st.read = c.span > 1 && wants[k] && avail[k];
+                st.read = wants[k] && avail[k];
                 st.lane = us.lane;
                 for (int i = c.latency - 1; i > 0; i--)
                 {
