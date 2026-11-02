@@ -44,6 +44,8 @@ struct Case
     int latency = 0;
     int ii = 1;
     int inputs = 2;
+    int job_width = 32;         // JOBS and JOB_BEATS (START is 1)
+    int counter_width = 32;     // COUNTER
     std::vector<CycleLine> cycles;
 };
 
@@ -171,6 +173,14 @@ static bool parse(const std::string &path, Case &c)
         else if (key == "latency") { ok = (bool)(ss >> c.latency); }
         else if (key == "ii") { ok = (bool)(ss >> c.ii); }
         else if (key == "inputs") { ok = (bool)(ss >> c.inputs) && c.inputs > 0; }
+        else if (key == "job_width")
+        {
+            ok = (bool)(ss >> c.job_width) && c.job_width >= 1 && c.job_width <= 32;
+        }
+        else if (key == "counter_width")
+        {
+            ok = (bool)(ss >> c.counter_width) && c.counter_width >= 1 && c.counter_width <= 32;
+        }
         else if (key == "cycles") { in_cycles = true; }
         else { ok = false; }
         if (!ok)
@@ -199,7 +209,12 @@ static int run(const Case &c)
             job_beats.push_back(i);
         }
     }
-    shell.configure(c.csrs.size(), job_beats);
+    std::vector<int> widths = {1};
+    for (size_t i = 1; i < c.csrs.size(); i++)
+    {
+        widths.push_back(c.job_width);
+    }
+    shell.configure(c.csrs.size(), job_beats, widths, c.counter_width);
     int nb_rw = c.csrs.size();
 
     int errors = 0;

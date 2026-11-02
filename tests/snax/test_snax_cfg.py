@@ -51,8 +51,9 @@ STREAMER = {
 
 def group_csrs(base: int, between: int = 0) -> list:
     """A group's own CSRs from offset base, with between unit CSRs after JOBS."""
-    return [Csr("START", "rw", base, 32), Csr("JOBS", "rw", base + 1, 32),
-            Csr("STATUS", "ro", base + 2 + between), Csr("COUNTER", "ro", base + 3 + between)]
+    return [Csr("START", "rw", base, 1), Csr("JOBS", "rw", base + 1, 32),
+            Csr("STATUS", "ro", base + 2 + between, 2),
+            Csr("COUNTER", "ro", base + 3 + between, 32)]
 
 
 def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
@@ -155,6 +156,9 @@ class Fixtures(unittest.TestCase):
         self.assertEqual([c.name for c in slot.accelerator.csrs],
                          ["START", "JOBS", "JOB_BEATS", "STATUS", "COUNTER"])
         self.assertEqual(slot.accelerator.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
+        # The widths (D152): START a strobe, JOBS and JOB_BEATS job_width, COUNTER counter_width
+        self.assertEqual(slot.accelerator.groups[0].rw_widths, [1, 32, 32])
+        self.assertEqual(slot.accelerator.groups[0].counter_width, 32)
 
     def test_every_fixture_reads(self):
         for folder in sorted(p for p in FORGE.iterdir() if p.is_dir()):
@@ -430,11 +434,11 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, COUNTER")
 
     def test_csr_fields(self):
-        del self.acc["groups"][0]["csrs"][1]["width"]
-        self.fails(snax_cfg.CfgKeyError, "groups[0].csrs[1].width", "a read-write CSR has a width")
+        del self.acc["groups"][0]["csrs"][2]["width"]
+        self.fails(snax_cfg.CfgKeyError, "groups[0].csrs[2].width", "every CSR has a width")
         self.acc = acc_json(VECADD)
-        self.acc["groups"][0]["csrs"][2]["width"] = 32
-        self.fails(snax_cfg.CfgTypeError, "groups[0].csrs[2].width", "a read-only CSR has no width")
+        self.acc["groups"][0]["csrs"][3]["width"] = 33
+        self.fails(snax_cfg.CfgTypeError, "groups[0].csrs[3].width", "must be 1 to 32 bits")
         self.acc = acc_json(VECADD)
         self.acc["groups"][0]["csrs"][0]["access"] = "wo"
         self.fails(snax_cfg.CfgTypeError, "groups[0].csrs[0].access", "rw or ro")

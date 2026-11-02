@@ -1,6 +1,6 @@
 # SnaxShell's rule
 
-The rule of `snax/snax_shell.hpp`, the code `SnaxShell` (`snax/snax_shell.cpp`) runs for one group of an accelerator (snax-forge C§17, D146: START, JOBS, the units' read-write CSRs, STATUS, COUNTER; a start, a start held while busy, the empty run, the sticky done bit, the counter), against hand-worked cases, with g++ only. `make regress` runs it after `unit`, as `shell`. snax-forge's Chisel specs drive their shell through the same files, from the folder `SNAX_GVSOC_SHELL_CASES` names, so both sides read one set of cases and the format below is the contract between the two.
+The rule of `snax/snax_shell.hpp`, the code `SnaxShell` (`snax/snax_shell.cpp`) runs for one group of an accelerator (snax-forge C§17, D146, D152: START, a strobe that reads 0, JOBS, the units' read-write CSRs at their widths, STATUS, COUNTER; a start, a start held while busy, the empty run, the sticky done bit, the counter, saturating at its width), against hand-worked cases, with g++ only. `make regress` runs it after `unit`, as `shell`. snax-forge's Chisel specs drive their shell through the same files, from the folder `SNAX_GVSOC_SHELL_CASES` names, so both sides read one set of cases and the format below is the contract between the two.
 
 - `tb.cpp` steps `SnaxShellRule` with `snax_group.hpp`'s `SnaxGroupRule` (one unit, no links), wired as GVSoC wires them: the shell's accepted start, but the empty run, starts the unit with JOBS and JOB_BEATS as they stand, and the unit's busy feeds the shell (rising in the start's cycle, falling in the run's last cycle E). Every cycle it takes a held start in E + 1, then the cycle's CSR access, then the unit's step, and compares each access's result and STATUS.
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/shell`) and runs it on every `cases/*.txt`; exit 1 on any difference.
@@ -13,6 +13,7 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 |---|---|
 | `csrs START JOBS [NAME...]` | the group's read-write CSRs in CSR order (default `START JOBS`); `JOB_BEATS` among them is the fold's job_beats, otherwise 1 |
 | `latency`, `ii`, `inputs` | the unit, as `tests/snax/unit/`'s cases give it (defaults 0, 1, 2) |
+| `job_width`, `counter_width` | the widths, 1 to 32 (default 32 each): JOBS and JOB_BEATS keep a write's low `job_width` bits, COUNTER saturates at 2^`counter_width` − 1; START is 1 bit and reads 0 |
 | `cycles` | the cycle lines follow |
 
 The offsets follow from `csrs`: its names from 0 in order, then STATUS, then COUNTER (the default: `0` START, `1` JOBS, `2` STATUS, `3` COUNTER, vecadd's group; with `JOB_BEATS`: `2` JOB_BEATS, `3` STATUS, `4` COUNTER, vsum's).
@@ -30,8 +31,9 @@ Values may be decimal or `0x` hex. One access per cycle: the core issues CSR acc
 
 | Case | What |
 |---|---|
-| `field_read_back` | JOBS read back as written (all 32 bits); START written with bit 0 clear reads back too |
-| `start_bit0_clear` | START with bit 0 clear: a plain write, no run, the counter never reset (0) |
+| `field_read_back` | JOBS read back as written (all 32 bits); START written with bit 0 clear starts nothing and reads 0 |
+| `start_bit0_clear` | START with bit 0 clear: no run, the counter never reset (0), START reads 0 |
+| `start_reads_0` | START, a strobe, reads 0 before a run, while busy and after |
 | `start_held` | a start while busy held through E and answered in E + 1, then its run |
 | `read_busy` | STATUS 0 before the start, 1 from the cycle after it to E, 2 (done) after |
 | `counter` | the counter reset by an accepted start, counting busy cycles, holding after the run, reset by the next |
@@ -40,6 +42,7 @@ Values may be decimal or `0x` hex. One access per cycle: the core issues CSR acc
 | `counter_after_start` | the counter read in the first cycle after an accepted start, taken at once and held: 0 whatever the last run counted (a read in the start's own cycle cannot happen: its write is that cycle's access) |
 | `status_sticky` | done set at E + 1, kept through writes to JOBS and to START with bit 0 clear, cleared by the next accepted start |
 | `jobs_zero` | a fold group (with JOB_BEATS): a start with JOBS 0, then one with JOB_BEATS 0 after a run: STATUS 2 from a + 1, COUNTER 0 |
+| `counter_saturates` | at `job_width` 8 a JOBS write of 0x105 keeps 5 and runs 5 jobs; at `counter_width` 2 COUNTER reads 0, 1, 2, 3, then 3 held |
 
 ## Running
 
@@ -47,4 +50,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/shell/run.sh
 
-It prints `PASS` per case and ends with `10 passed, 0 failed`.
+It prints `PASS` per case and ends with `12 passed, 0 failed`.

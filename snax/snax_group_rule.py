@@ -8,7 +8,7 @@
 snax_group.hpp's SnaxGroupRule, with no GVSoC import, so tests/snax/group/gen.py writes the
 group cases from it and snax-forge can import it from the submodule.
 
-    GroupRule(units, links, output=None).run(jobs, ts, valid, ready, cycles) -> (rows, end)
+    GroupRule(units, links, output=None).run(jobs, job_beats, valid, ready, cycles) -> (rows, end)
 
 A unit is a dict: ``name``, ``L`` (latency), ``ii``, ``span`` (the cycles it reads one beat in
 place) and ``inputs`` (its count of outer inputs, from the streamer). A link is an edge
@@ -46,8 +46,8 @@ class GroupError(ValueError):
 
 
 class GroupRule:
-    """C§17's Control over edges: per unit its beat digit, its L-deep pipeline, its II gap and
-    lane counter; per buffer its occupancy."""
+    """C§17's Control over edges: per unit its firings (its job_beats_counter their remainder
+    mod T), its L-deep pipeline, its II gap and lane counter; per buffer its occupancy."""
 
     def __init__(self, units, links, output=None):
         self.units = units
@@ -93,27 +93,28 @@ class GroupRule:
             raise GroupError("the links form a cycle")
         return order
 
-    def firings_per_run(self, jobs, ts):
-        """Each unit's firings n_k in a run of ``jobs``, unit k a result every ts[k] firings."""
-        counts = [0] * len(self.units)
+    def firings_per_run(self, jobs, job_beats):
+        """Each unit's firings n_k in a run of ``jobs``, unit k a result every job_beats[k]
+        firings."""
+        n = [0] * len(self.units)
         for k in reversed(self.order):
             succ = [self.links[i]["dst"] for i in self.outs[k]]
-            counts[k] = (jobs if not succ else counts[succ[0]]) * ts[k]
-        return counts
+            n[k] = (jobs if not succ else n[succ[0]]) * job_beats[k]
+        return n
 
-    def run(self, jobs, ts, valid, ready, cycles):
+    def run(self, jobs, job_beats, valid, ready, cycles):
         """Steps a run started in cycle 0 for ``cycles`` cycles: valid(c) the outer inputs'
         valids (a unit with outer inputs has its beat when all are 1), ready(c) the outer
         output's. Rows of (valids, ready, per unit (fire, give), per link its occupancy, busy,
         class, notes) and the run's last cycle E (None when it does not end)."""
         n, links = len(self.units), self.links
-        counts = self.firings_per_run(jobs, ts)
+        firings_per_run = self.firings_per_run(jobs, job_beats)
         fired, lane = [0] * n, [0] * n
         slots = [[False] * u["L"] for u in self.units]
         last = [None] * n
         occ = [0] * len(links)
         rows, end = [], None
-        empty = jobs == 0 or 0 in ts
+        empty = jobs == 0 or 0 in job_beats
         for c in range(cycles):
             v, r = valid(c), ready(c)
             busy = c >= 1 and not empty and (end is None or c <= end)
@@ -127,9 +128,9 @@ class GroupRule:
                 avail[k] = ins[k] and all(offer[links[i]["src"]] if links[i]["depth"] == 0
                                           else occ[i] > 0 for i in self.ins[k])
                 ii_ok = last[k] is None or c >= last[k] + u["ii"]
-                wants[k] = fired[k] < counts[k] and ii_ok
+                wants[k] = fired[k] < firings_per_run[k] and ii_ok
                 wfire[k] = wants[k] and avail[k] and (u["span"] == 1 or lane[k] == u["span"] - 1)
-                gives[k] = wfire[k] and (fired[k] + 1) % ts[k] == 0
+                gives[k] = wfire[k] and (fired[k] + 1) % job_beats[k] == 0
                 head[k] = u["L"] > 0 and slots[k][-1]
                 offer[k] = head[k] if u["L"] > 0 else gives[k]
             out, notes = [None] * n, []
@@ -173,7 +174,7 @@ class GroupRule:
                     occ[i] += out[e["src"]][1] - out[e["dst"]][0]
             cls = ("stall_out" if frozen[self.output] else "busy" if busy_cls else
                    "stall_in" if waits else "flush")
-            done = (all(fired[k] == counts[k] and not any(slots[k]) for k in range(n))
+            done = (all(fired[k] == firings_per_run[k] and not any(slots[k]) for k in range(n))
                     and not any(occ))
             if done:
                 end = c
