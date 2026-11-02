@@ -36,8 +36,10 @@
 // outer inputs all have a beat and whether its outer output has room (true for
 // a unit without one).
 //
-// Per unit (C§17): its beat digit d (its firings mod T: first = [d = 0], it
-// gives a result on firings with d = T - 1), an L-deep pipeline that stalls
+// Per unit (C§17): its job_beats_counter d (its firings mod T, here derived
+// from its firings; first = [d = 0], it gives a result on firings with d =
+// T - 1; the Chisel keeps it as a counter, and counts each unit's results in
+// nested counters, never against n_k: D153), an L-deep pipeline that stalls
 // as a whole when its head cannot be pushed, at most one firing per II (the
 // II counts cycles from the unit's last firing; a stall does not restart it,
 // and it carries over to the next run), and a lane counter when span > 1. A
@@ -245,7 +247,7 @@ public:
     {
         this->span.reset();
         this->jobs = 0;
-        this->t.assign(this->cfg.size(), 1);
+        this->job_beats.assign(this->cfg.size(), 1);
         this->firings_per_run.assign(this->cfg.size(), 0);
         for (size_t k = 0; k < this->u.size(); k++)
         {
@@ -276,16 +278,16 @@ public:
     // Busy in cycle: from the cycle after the start to the run's last cycle
     bool busy(int64_t cycle) const { return this->span.busy(cycle); }
 
-    // A start of jobs, unit k a result every t[k] firings, offered in cycle;
+    // A start of jobs, unit k a result every job_beats[k] firings, offered in cycle;
     // the caller keeps every n_k within 32 bits
-    Start start(int64_t cycle, uint32_t jobs, const std::vector<uint32_t> &t)
+    Start start(int64_t cycle, uint32_t jobs, const std::vector<uint32_t> &job_beats)
     {
         if (!this->idle(cycle))
         {
             return REFUSED;
         }
         bool empty = jobs == 0;
-        for (uint32_t x : t)
+        for (uint32_t x : job_beats)
         {
             empty = empty || x == 0;
         }
@@ -295,14 +297,14 @@ public:
         }
         this->span.start(cycle);
         this->jobs = jobs;
-        this->t = t;
+        this->job_beats = job_beats;
         // From the sink back: each firing of a consumer takes one result of its producer
         for (size_t r = this->order.size(); r-- > 0;)
         {
             size_t k = this->order[r];
             uint32_t n = this->outs[k].empty() ? jobs
                 : this->firings_per_run[this->links[this->outs[k][0]].to];
-            this->firings_per_run[k] = n * t[k];
+            this->firings_per_run[k] = n * job_beats[k];
         }
         for (size_t k = 0; k < this->u.size(); k++)
         {
@@ -347,7 +349,7 @@ public:
             bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
             wants[k] = us.firings < this->firings_per_run[k] && ii_ok;
             would_fire[k] = wants[k] && avail[k] && (c.span == 1 || us.lane == c.span - 1);
-            gives[k] = would_fire[k] && (us.firings + 1) % this->t[k] == 0;
+            gives[k] = would_fire[k] && (us.firings + 1) % this->job_beats[k] == 0;
             head[k] = c.latency > 0 && us.slots[c.latency - 1];
             offer[k] = c.latency > 0 ? head[k] : gives[k];
         }
@@ -368,7 +370,7 @@ public:
                 room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
             }
             st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
-            st.first = us.firings % this->t[k] == 0;
+            st.first = us.firings % this->job_beats[k] == 0;
             if (!st.frozen)
             {
                 st.fire = would_fire[k];
@@ -459,7 +461,7 @@ public:
     // unit's T and n, and its cycles per class; runs ended so far
     SnaxRunSpan span;
     uint32_t jobs;
-    std::vector<uint32_t> t;                // per unit, its T: a result every T-th firing
+    std::vector<uint32_t> job_beats;        // per unit, its T: a result every T-th firing
     std::vector<uint32_t> firings_per_run;  // per unit, its n
     int64_t classes[NB_CLASSES];
     int runs;

@@ -474,7 +474,7 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
         default:
         {
             size_t last = _this->rule.output_unit();
-            uint32_t results = _this->rule.firings_per_run[last] / _this->rule.t[last];
+            uint32_t results = _this->rule.firings_per_run[last] / _this->rule.job_beats[last];
             _this->rate = _this->rule.count() / results;
             _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: JOBS %u, %ld T\n", cycle,
                 jobs, ts.size());
