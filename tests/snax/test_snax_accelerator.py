@@ -86,7 +86,8 @@ class Built(unittest.TestCase):
         self.assertEqual(sorted(acc.components), ["csr_mux", "shell", "streamer", "unit"])
         first = SNAX_CSR_FIRST + nb_csrs(STREAMER)
         self.assertEqual(acc.components["shell"].properties,
-                         {"csr_base": first, "csrs": ["START", "JOBS"]})
+                         {"csr_base": first, "csrs": ["START", "JOBS"], "widths": [1, 32],
+                          "counter_width": 32})
         group = acc.components["unit"].properties
         (unit,) = group["units"]
         self.assertEqual((group["links"], group["csr_base"]), ([], first))
@@ -105,9 +106,11 @@ class Built(unittest.TestCase):
                                                   "streamer", "unit_mul", "unit_sum"])
         first = SNAX_CSR_FIRST + nb_csrs(slot.streamer)
         self.assertEqual(acc.components["shell_mul"].properties,
-                         {"csr_base": first, "csrs": ["START", "JOBS"]})
+                         {"csr_base": first, "csrs": ["START", "JOBS"], "widths": [1, 32],
+                          "counter_width": 32})
         self.assertEqual(acc.components["shell_sum"].properties,
-                         {"csr_base": first + 4, "csrs": ["START", "JOBS", "JOB_BEATS"]})
+                         {"csr_base": first + 4, "csrs": ["START", "JOBS", "JOB_BEATS"],
+                          "widths": [1, 32, 32], "counter_width": 32})
         (mul,), (total,) = (acc.components[n].properties["units"] for n in ("unit_mul", "unit_sum"))
         self.assertEqual((mul["datapath"], mul["inputs"], mul["op"], mul["t"]),
                          ("ElementwiseLanes", ["mul_a", "mul_b"], "mul", 1))
@@ -129,7 +132,8 @@ class Built(unittest.TestCase):
                                                   "streamer"])
         first = SNAX_CSR_FIRST + nb_csrs(DOT4_STREAMER)
         self.assertEqual(acc.components["shell_dot"].properties,
-                         {"csr_base": first, "csrs": ["START", "JOBS", "JOB_BEATS"]})
+                         {"csr_base": first, "csrs": ["START", "JOBS", "JOB_BEATS"],
+                          "widths": [1, 32, 32], "counter_width": 32})
         group = acc.components["group_dot"].properties
         mac, total = group["units"]
         self.assertEqual((group["links"], group["csr_base"]),
