@@ -67,7 +67,9 @@ accelerator.json (snax-forge C§17), what the standard composite
     groups[].links[]          Link: name, from (an out port, "<unit>.<port>"),
                               to (an in port), depth (0 a wire, >= 1 a buffer)
     a CSR                     Csr: name, access (rw, ro), offset (from the
-                              accelerator's first CSR), width (rw only), pin
+                              accelerator's first CSR), width (its bits, every
+                              CSR: START 1, JOBS and JOB_BEATS job_width, STATUS
+                              2, COUNTER counter_width; D152), pin
 
 Per group the CSRs in CSR order are START, JOBS, its units' R/W CSRs, STATUS,
 COUNTER, and the offsets over all groups in that order are contiguous from 0:
@@ -339,7 +341,7 @@ class Dram:
 @dataclass(frozen=True)
 class Csr:
     """A CSR of accelerator.json: its offset from the accelerator's first CSR, its width
-    (rw only) and a scalar's datapath pin (None)."""
+    (its bits; a read gives them, the upper bits 0) and a scalar's datapath pin (None)."""
 
     name: str
     access: str
@@ -420,6 +422,16 @@ class Group:
     def rw(self) -> list:
         """Its read-write CSRs' names in CSR order: START, JOBS, the units'."""
         return [c.name for c in self.window if c.access == 'rw']
+
+    @property
+    def rw_widths(self) -> list:
+        """Its read-write CSRs' widths, in the order of rw."""
+        return [c.width for c in self.window if c.access == 'rw']
+
+    @property
+    def counter_width(self) -> int:
+        """Its COUNTER's width: the counter saturates at 2^width - 1."""
+        return next(c.width for c in self.csrs if c.name == 'COUNTER')
 
 
 @dataclass(frozen=True)
@@ -611,11 +623,9 @@ def _csr(node: _Node) -> Csr:
     if access not in ('rw', 'ro'):
         raise CfgTypeError(node.file, node.where('access'), f'{access!r}, must be rw or ro')
     width = node.get('width', int, None)
-    if access == 'rw' and width is None:
-        raise CfgKeyError(node.file, node.where('width'), 'missing: a read-write CSR has a width')
-    if access == 'ro' and width is not None:
-        raise CfgTypeError(node.file, node.where('width'), 'a read-only CSR has no width')
-    if width is not None and not 1 <= width <= 32:
+    if width is None:
+        raise CfgKeyError(node.file, node.where('width'), 'missing: every CSR has a width')
+    if not 1 <= width <= 32:
         raise CfgTypeError(node.file, node.where('width'), f'{width}, must be 1 to 32 bits')
     offset = node.get('offset', int)
     if offset < 0:

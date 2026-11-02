@@ -168,7 +168,8 @@ class SnaxAccelerator(gvsoc.systree.Component):
         owner = {}
         for k, group in enumerate(acc.groups):
             base = first + group.window[0].offset
-            shell = SnaxShell(self, shell_names[group.name], csr_base=base, csrs=group.rw)
+            shell = SnaxShell(self, shell_names[group.name], csr_base=base, csrs=group.rw,
+                widths=group.rw_widths, counter_width=group.counter_width)
             # The group's window; past the last group, everything to the last SNAX CSR,
             # which its shell refuses
             end = (first + acc.groups[k + 1].window[0].offset if k + 1 < len(acc.groups)

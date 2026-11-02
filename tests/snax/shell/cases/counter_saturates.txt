@@ -1,0 +1,19 @@
+# Narrow CSRs (D152): at job_width 8 JOBS keeps a write's low 8 bits (0x105
+# reads 5, and the start runs 5 jobs); at counter_width 2 COUNTER saturates
+# at 3. c3's start: busy c4 .. c8 (E = 8), so the busy cycles before c are 0,
+# 1, 2, 3, 4, 5 in c4 .. c9, and COUNTER reads 0, 1, 2, 3, 3, 3, then holds.
+job_width 8
+counter_width 2
+cycles
+# a b out  access     result  status
+1 1 1      w 1 0x105  0       0     # 0: JOBS: its low 8 bits, 5
+1 1 1      r 1        5       0     # 1: as kept
+1 1 1      -          -       0     # 2
+1 1 1      w 0 1      3       0     # 3: start accepted; busy from 4
+1 1 1      r 3        0       1     # 4: fires
+1 1 1      r 3        1       1     # 5: fires
+1 1 1      r 3        2       1     # 6: fires
+1 1 1      r 3        3       1     # 7: fires; 2^2 - 1
+1 1 1      r 3        3       1     # 8: fires, E; 4 busy cycles, saturated
+1 1 1      r 3        3       2     # 9: 5, saturated
+1 1 1      r 3        3       2     # 10: held
