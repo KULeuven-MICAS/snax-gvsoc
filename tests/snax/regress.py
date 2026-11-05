@@ -113,7 +113,8 @@ SHELL_BEATS = 16
 # POSIX basic regexes: no +, no |): docs/EVENTS.md's only, not the components'
 # own `comp` and `trace` lines, so every line of trace.log has its grammar
 UNIT_TRACES = ("summary", "events", "beats")
-CLASS_TRACES = [f"snax_acc[0-9]*/streamer/{t}$" for t in ("summary", "events", "beats")]
+# A streamer per set, snax_acc<i>/streamer_<set>
+CLASS_TRACES = [f"snax_acc[0-9]*/streamer_[^/]*/{t}$" for t in ("summary", "events", "beats")]
 # The cluster tests built once into one ELF per case, <program>-<case>.elf
 CASES = [
     ("stream-timing", ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",

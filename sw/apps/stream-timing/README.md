@@ -32,4 +32,4 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from `sw/` fi
         --param chip/soc/binary=$PWD/build/sw/apps/stream-timing/stream-timing-$c.elf run
     done
 
-`--trace="snax_xbar:<file>"` writes the crossbar's grants per bank and cycle, with the inputs held, each named by its owner (`snax_acc0.streamer.reader0.lane0`); `--trace="snax_acc0/streamer:<file>"` the streamer's start, AGUs, end and per mover the cycle classes and the highest queue counts. With `--trace-level=trace` they add each read's response (`Resp`) and each lane queue's count (`Queue`).
+`--trace="snax_xbar:<file>"` writes the crossbar's grants per bank and cycle, with the inputs held, each named by its owner (`snax_acc0.streamer_acc.reader0.lane0`); `--trace="snax_acc0/streamer_acc:<file>"` the streamer's start, AGUs, end and per mover the cycle classes and the highest queue counts. With `--trace-level=trace` they add each read's response (`Resp`) and each lane queue's count (`Queue`).

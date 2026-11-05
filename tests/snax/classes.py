@@ -31,6 +31,8 @@ from collections import namedtuple
 
 LINE = re.compile(r"^ *\d+: +-?\d+: \[(?:\x1b\[\d+m)?(?P<path>\S+)/(?P<trace>\w+) *(?:\x1b\[\d+m)?\]"
                   r" (?P<cycle>-?\d+) (?P<kind>\w+)(?P<fields>(?: [^\s=]+=\S+)*)$")
+# A streamer's path: snax_acc<i>/streamer_<set>, one per streamer set
+STREAMER = re.compile(r"/streamer_\w+$")
 UNIT_CLASSES = ["busy", "stall_in", "stall_out", "flush"]
 MOVER_CLASSES = ["busy", "stall_xbar", "stall_fifo", "idle"]
 # The fields a line of these kinds must have, and those of them that are counts
@@ -56,7 +58,7 @@ def parse(text, name="trace.log"):
             raise LineError(f"{name} line {number}: not a trace line: {line!r}")
         fields = dict(f.split("=", 1) for f in m.group("fields").split())
         kind, path = m.group("kind"), m.group("path")
-        need = FIELDS.get(kind, []) + (["mover"] if kind == "class" and path.endswith("/streamer")
+        need = FIELDS.get(kind, []) + (["mover"] if kind == "class" and STREAMER.search(path)
                                        else [])
         missing = [f for f in need if f not in fields]
         if missing:

@@ -56,9 +56,9 @@ A group of one unit gives the lines below as B1's unit did. A linked group's `fi
 
 A linked group's run line (`snax/snax_group.hpp`'s `SnaxGroupRule`) judges each busy cycle at the group's boundary, in D59's order: `stall_out` (the last unit has a result and no room), `busy` (any unit fires, reads a lane in place, or is in its II gap), `stall_in` (a unit with outer inputs wants to fire and one of them has no beat), `flush` (otherwise: results in flight, beats in a buffer). Its `firings` are the head unit's. For one unit these are the unit's classes above. Per-unit events of a linked group are parked (snax-forge open item 96).
 
-### Streamer (`snax_acc<i>/streamer`, `snax/snax_streamer.cpp`)
+### Streamer (`snax_acc<i>/streamer_<set>`, `snax/snax_streamer.cpp`)
 
-Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
+One streamer per streamer set of the slot (snax-forge D157), named after the set (`streamer_acc` for a one-accelerator design, `streamer_vmul` and `streamer_vsum` for dot 1), each with the lines below. Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
@@ -80,7 +80,7 @@ Both arbiters. Counted over the whole simulation, written at its end:
 
 | Trace | Kind | Fields |
 |---|---|---|
-| `summary` | `input` | `index`, `name` (its owner: `snax_acc<i>.streamer.<mover>.lane<l>`, `core<i>`, `axi`), `grants`, `stalls` (cycles it requested and was not granted), `stalls_dma` (the part refused or lost on a bank the DMA's superbank took), `whole_run` (1 for the cores and AXI, whose traffic starts at boot) |
+| `summary` | `input` | `index`, `name` (its owner: `snax_acc<i>.streamer_<set>.<mover>.lane<l>`, `core<i>`, `axi`), `grants`, `stalls` (cycles it requested and was not granted), `stalls_dma` (the part refused or lost on a bank the DMA's superbank took), `whole_run` (1 for the cores and AXI, whose traffic starts at boot) |
 | `summary` | `bank` | `index`, `reads`, `writes` (a SNAX input's grant or a DMA beat's word on the bank), `conflicts` (cycles with two or more of those requests on the bank) |
 
 The banks count the SNAX inputs and the DMA only; the cores' and AXI's accesses are in their own `input` lines.

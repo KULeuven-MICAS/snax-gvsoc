@@ -21,7 +21,7 @@ import classes  # noqa: E402
 import regress  # noqa: E402
 
 UNIT = "/chip/soc/cluster_0/snax_acc0/unit"
-STREAMER = "/chip/soc/cluster_0/snax_acc0/streamer"
+STREAMER = "/chip/soc/cluster_0/snax_acc0/streamer_acc"
 
 
 def line(path, trace, cycle, rest):
