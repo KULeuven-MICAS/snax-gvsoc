@@ -42,7 +42,7 @@ What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC 
 
 ## The streamer
 
-- **From the hjson** (`snax_cfg.py`): the streamer's CSRs first, from 960, then the accelerator's. Start, AGU pace, end rule and the round-robin order match the RTL: `stream-timing`'s five counters 0, 9, 9, 10, 12 equal (snax_cluster `b2672f8`, common_cells 1.40.0).
+- **From the hjson** (`snax_cfg.py`): one streamer per streamer set (snax-forge D157), one set per accelerator of `accelerator.json`, the slot's TCDM ports the sets' channels in set order. Per set its streamer's CSRs first, then its accelerator's, packed from 960 (`snax_accelerator.py`'s `csr_layout`, snax_cluster's `csr_range_table`): dot 1's `vmul` streamer 960–977 and CSRs 978–981, `vsum` 982–994 and 995–999; a design of one accelerator keeps the numbers it had with one streamer. Start, AGU pace, end rule and the round-robin order match the RTL: `stream-timing`'s five counters 0, 9, 9, 10, 12 equal (snax_cluster `b2672f8`, common_cells 1.40.0).
 - **Per mover** a class each cycle, `busy` > `stall_xbar` > `stall_fifo` > `idle`.
 - **The queue count.** A writer's push and pop share a cycle, push first, so its data queue holds two words where the RTL counts one; `qmax` reports the RTL's count.
 - **Widths** (PACK0): a b-bit input port takes lanes × b / 64 words; each mover's spatial bounds multiply to its `num_channel`, and each datapath port's words equal its mover's `num_channel` (`snax_cfg.py` refuses the rest at load).
