@@ -2,10 +2,12 @@
 // out/design/vecadd_i32/design_point.json. Do not edit: run `pixi run gen-gvsoc
 // out/design/vecadd_i32/design_point.json` again.
 // The cluster snax_forge_cluster: platforms/snax_forge_cluster.hjson with
-// platform snax_forge's values and the slot snax_forge set for instance acc,
-// BRM elementwise_add, implementation chisel_tiled_spatial, datapath
-// ElementwiseLanes; its streamer in snax_forge_streamer.hjson, its accelerator
-// in accelerator.json.
+// platform snax_forge's values and its slot the entry snax_forge_vecadd_i32,
+// one streamer set per accelerator: accelerator acc: instance acc, BRM
+// elementwise_add, implementation chisel_tiled_spatial, datapath
+// ElementwiseLanes; each set's streamer in
+// snax_forge_vecadd_i32_streamer_<set>.hjson, the accelerators in
+// accelerator.json.
 {
  "nr_s1_quadrant": 1,
  "s1_quadrant": {"nr_clusters": 1},
@@ -75,14 +77,19 @@
   "xfvec": false,
   "snax_acc_cfg": [
    {
-    "snax_acc_name": "snax_forge",
+    "snax_acc_name": "snax_forge_vecadd_i32",
     "snax_tcdm_ports": 6,
     "sparse_interconnect_config": [[6, 1]],
-    "snax_num_rw_csr": 2,
-    "snax_num_ro_csr": 2,
     "snax_disable_csr_manager": true,
     "snax_forge_rtl": "rtl/files.f",
-    "snax_streamer_cfg": {"$ref": "snax_forge_streamer.hjson"},
+    "snax_streamer_sets": [
+     {
+      "name": "acc",
+      "snax_streamer_cfg": {"$ref": "snax_forge_vecadd_i32_streamer_acc.hjson"},
+      "snax_num_rw_csr": 2,
+      "snax_num_ro_csr": 2
+     }
+    ],
     "snax_datapath_cfg": {"$ref": "accelerator.json"}
    }
   ],

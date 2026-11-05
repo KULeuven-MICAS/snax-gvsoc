@@ -83,7 +83,7 @@ The crossbar writes its lines for the SNAX ports and the DMA unless `--param chi
 `make regress` runs the testbenches (`unit`, `shell`, `datapath`, `group`), builds `sw/` and every program, and runs the cluster tests, `snax-shell` and every `forge/` folder on `snax_hjson` (their counters checked against their units' run lines) and the plain tests on `snitch`; `tests/snax/regress.py` says what each checks. It ends:
 
     forge/'s accelerators: forge.dot_1, forge.dot_2, ...
-      28 run
+      29 run
     plain tests on snitch (build/sw/tests)
       17 run
     regression passed

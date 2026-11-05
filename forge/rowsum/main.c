@@ -11,33 +11,33 @@
 
 #include "data.h"
 #include "acc_csr.h"
-#include "streamer_csr_addr_map.h"
+#include "streamer_acc_csr_addr_map.h"
 
 // Each accelerator task's counter, stored right after the wait that covers it
 static uint32_t forge_counter[1];
 
 // Core 0: the accelerator acc
 static __attribute__((noinline)) int forge_core_0(void) {
-    csrw_ss(BASE_PTR_READER_0_LOW, 0x10000000);
-    csrw_ss(BASE_PTR_READER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_0_0, 8);
-    csrw_ss(T_BOUND_READER_0_0, 16);
-    csrw_ss(T_BOUND_READER_0_1, 8);
-    csrw_ss(T_STRIDE_READER_0_0, 32);
-    csrw_ss(T_STRIDE_READER_0_1, 512);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10001000);
-    csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(T_BOUND_WRITER_0_0, 8);
-    csrw_ss(T_STRIDE_WRITER_0_0, 8);
+    csrw_ss(ACC_BASE_PTR_READER_0_LOW, 0x10000000);
+    csrw_ss(ACC_BASE_PTR_READER_0_HIGH, 0);
+    csrw_ss(ACC_S_STRIDE_READER_0_0, 8);
+    csrw_ss(ACC_T_BOUND_READER_0_0, 16);
+    csrw_ss(ACC_T_BOUND_READER_0_1, 8);
+    csrw_ss(ACC_T_STRIDE_READER_0_0, 32);
+    csrw_ss(ACC_T_STRIDE_READER_0_1, 512);
+    csrw_ss(ACC_BASE_PTR_WRITER_0_LOW, 0x10001000);
+    csrw_ss(ACC_BASE_PTR_WRITER_0_HIGH, 0);
+    csrw_ss(ACC_S_STRIDE_WRITER_0_0, 8);
+    csrw_ss(ACC_T_BOUND_WRITER_0_0, 8);
+    csrw_ss(ACC_T_STRIDE_WRITER_0_0, 8);
     csrw_ss(ACC_RW_JOBS, 8);
     csrw_ss(ACC_RW_JOB_BEATS, 16);
     snrt_cluster_hw_barrier();
-    csrw_ss(STREAMER_START_CSR, 1);
+    csrw_ss(ACC_STREAMER_START_CSR, 1);
     csrw_ss(ACC_RW_START, 1);
     while (csrr_ss(ACC_RO_STATUS) & 1) {
     }
-    while (csrr_ss(STREAMER_BUSY_CSR)) {
+    while (csrr_ss(ACC_STREAMER_BUSY_CSR)) {
     }
     forge_counter[0] = csrr_ss(ACC_RO_COUNTER);
     snrt_cluster_hw_barrier();

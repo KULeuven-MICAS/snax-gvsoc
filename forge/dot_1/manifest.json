@@ -3,30 +3,33 @@
  "design_point": "out/design/dot_1/design_point.json",
  "symbols": {"N": 64},
  "cluster": "snax_forge.hjson",
- "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "accelerator.json", "include/streamer_csr_addr_map.h", "include/dot_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "files": ["snax_forge.hjson", "snax_forge_dot_1_streamer_vmul.hjson", "snax_forge_dot_1_streamer_vsum.hjson", "accelerator.json", "include/streamer_vmul_csr_addr_map.h", "include/vmul_csr.h", "include/streamer_vsum_csr_addr_map.h", "include/vsum_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
  "program": "main.c",
  "trace": "snax_acc0",
  "csrs": {
-  "streamer": {"first": 960, "last": 987},
+  "streamers": [
+   {"name": "vmul", "first": 960, "last": 977, "trace": "snax_acc0/streamer_vmul"},
+   {"name": "vsum", "first": 982, "last": 994, "trace": "snax_acc0/streamer_vsum"}
+  ],
   "accelerator": {
-   "DOT_RW_MUL_START": 988,
-   "DOT_RW_MUL_JOBS": 989,
-   "DOT_RO_MUL_STATUS": 990,
-   "DOT_RO_MUL_COUNTER": 991,
-   "DOT_RW_SUM_START": 992,
-   "DOT_RW_SUM_JOBS": 993,
-   "DOT_RW_SUM_JOB_BEATS": 994,
-   "DOT_RO_SUM_STATUS": 995,
-   "DOT_RO_SUM_COUNTER": 996
+   "VMUL_RW_START": 978,
+   "VMUL_RW_JOBS": 979,
+   "VMUL_RO_STATUS": 980,
+   "VMUL_RO_COUNTER": 981,
+   "VSUM_RW_START": 995,
+   "VSUM_RW_JOBS": 996,
+   "VSUM_RW_JOB_BEATS": 997,
+   "VSUM_RO_STATUS": 998,
+   "VSUM_RO_COUNTER": 999
   }
  },
  "tasks": [
-  {"name": "mult_mul", "beats": 16, "csrs": {"JOBS": 16}, "trace": "snax_acc0/unit_mul"},
+  {"name": "mult_vmul", "beats": 16, "csrs": {"JOBS": 16}, "trace": "snax_acc0/unit_vmul"},
   {
-   "name": "sum_sum",
+   "name": "sum_vsum",
    "beats": 16,
    "csrs": {"JOBS": 1, "JOB_BEATS": 16},
-   "trace": "snax_acc0/unit_sum"
+   "trace": "snax_acc0/unit_vsum"
   }
  ]
 }

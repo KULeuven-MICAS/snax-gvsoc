@@ -32,7 +32,7 @@ snax_cluster's `sw/` and `target/snitch_cluster/sw/` are merged here, so every r
 | `LICENSE` | `sw/LICENSE` |
 | `docs/schema/X` | `sw/docs/schema/X` |
 
-`sw/cfg/snax_forge/` is snax_cluster's copy of its vecadd fixture, kept for the sync's diff and the generated headers below; SNAX-GVSoC never reads its cluster files: the `snax_hjson` target's default and `test_snax_cfg` read `forge/vecadd/` (the cluster file, the streamer file and `accelerator.json`), refreshed from snax-forge itself (snax-forge D126). Since snax_cluster's #664 the copy is in snax-forge's B1 format (`accelerator.json`).
+`sw/cfg/snax_forge/` is snax_cluster's copy of its vecadd fixture, kept for the sync's diff and the generated headers below; SNAX-GVSoC never reads its cluster files: the `snax_hjson` target's default and `test_snax_cfg` read `forge/vecadd/` (the cluster file, its one streamer set's file and `accelerator.json`), refreshed from snax-forge itself (snax-forge D126). Since snax_cluster's #664 the copy is in snax-forge's B1 format (`accelerator.json`).
 
 ## Licences
 

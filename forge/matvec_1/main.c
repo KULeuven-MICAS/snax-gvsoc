@@ -11,95 +11,95 @@
 
 #include "data.h"
 #include "matvec_csr.h"
-#include "streamer_csr_addr_map.h"
+#include "streamer_matvec_csr_addr_map.h"
 
 // Each accelerator task's counter, stored right after the wait that covers it
 static uint32_t forge_counter[2];
 
 // Core 0: the accelerator matvec
 static __attribute__((noinline)) int forge_core_0(void) {
-    csrw_ss(BASE_PTR_READER_0_LOW, 0x10000000);
-    csrw_ss(BASE_PTR_READER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_0_0, 8);
-    csrw_ss(T_BOUND_READER_0_0, 128);
-    csrw_ss(T_BOUND_READER_0_1, 8);
-    csrw_ss(T_STRIDE_READER_0_0, 32);
-    csrw_ss(T_STRIDE_READER_0_1, 4096);
-    csrw_ss(BASE_PTR_READER_1_LOW, 0x10008000);
-    csrw_ss(BASE_PTR_READER_1_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_1_0, 8);
-    csrw_ss(T_BOUND_READER_1_0, 128);
-    csrw_ss(T_BOUND_READER_1_1, 8);
-    csrw_ss(T_STRIDE_READER_1_0, 32);
-    csrw_ss(T_STRIDE_READER_1_1, 0);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10009040);
-    csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(T_BOUND_WRITER_0_0, 128);
-    csrw_ss(T_BOUND_WRITER_0_1, 8);
-    csrw_ss(T_STRIDE_WRITER_0_0, 32);
-    csrw_ss(T_STRIDE_WRITER_0_1, 4096);
-    csrw_ss(BASE_PTR_READER_2_LOW, 0x00000000);
-    csrw_ss(BASE_PTR_READER_2_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_2_0, 0);
-    csrw_ss(T_BOUND_READER_2_0, 0);
-    csrw_ss(T_BOUND_READER_2_1, 0);
-    csrw_ss(T_STRIDE_READER_2_0, 8);
-    csrw_ss(T_STRIDE_READER_2_1, 8);
-    csrw_ss(BASE_PTR_WRITER_1_LOW, 0x00000000);
-    csrw_ss(BASE_PTR_WRITER_1_HIGH, 0);
-    csrw_ss(S_STRIDE_WRITER_1_0, 0);
-    csrw_ss(T_BOUND_WRITER_1_0, 0);
-    csrw_ss(T_STRIDE_WRITER_1_0, 8);
+    csrw_ss(MATVEC_BASE_PTR_READER_0_LOW, 0x10000000);
+    csrw_ss(MATVEC_BASE_PTR_READER_0_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_0_0, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_0_0, 128);
+    csrw_ss(MATVEC_T_BOUND_READER_0_1, 8);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_0, 32);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_1, 4096);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_LOW, 0x10008000);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_1_0, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_1_0, 128);
+    csrw_ss(MATVEC_T_BOUND_READER_1_1, 8);
+    csrw_ss(MATVEC_T_STRIDE_READER_1_0, 32);
+    csrw_ss(MATVEC_T_STRIDE_READER_1_1, 0);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_LOW, 0x10009040);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_WRITER_0_0, 8);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_0, 128);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_1, 8);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_0_0, 32);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_0_1, 4096);
+    csrw_ss(MATVEC_BASE_PTR_READER_2_LOW, 0x00000000);
+    csrw_ss(MATVEC_BASE_PTR_READER_2_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_2_0, 0);
+    csrw_ss(MATVEC_T_BOUND_READER_2_0, 0);
+    csrw_ss(MATVEC_T_BOUND_READER_2_1, 0);
+    csrw_ss(MATVEC_T_STRIDE_READER_2_0, 8);
+    csrw_ss(MATVEC_T_STRIDE_READER_2_1, 8);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_1_LOW, 0x00000000);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_1_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_WRITER_1_0, 0);
+    csrw_ss(MATVEC_T_BOUND_WRITER_1_0, 0);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_1_0, 8);
     csrw_ss(MATVEC_RW_MUL_JOBS, 1024);
     snrt_cluster_hw_barrier();
-    csrw_ss(STREAMER_START_CSR, 1);
+    csrw_ss(MATVEC_STREAMER_START_CSR, 1);
     csrw_ss(MATVEC_RW_MUL_START, 1);
-    csrw_ss(BASE_PTR_READER_0_LOW, 0x00000000);
-    csrw_ss(BASE_PTR_READER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_0_0, 0);
-    csrw_ss(T_BOUND_READER_0_0, 0);
-    csrw_ss(T_BOUND_READER_0_1, 0);
-    csrw_ss(T_STRIDE_READER_0_0, 8);
-    csrw_ss(T_STRIDE_READER_0_1, 8);
-    csrw_ss(BASE_PTR_READER_1_LOW, 0x00000000);
-    csrw_ss(BASE_PTR_READER_1_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_1_0, 0);
-    csrw_ss(T_BOUND_READER_1_0, 0);
-    csrw_ss(T_BOUND_READER_1_1, 0);
-    csrw_ss(T_STRIDE_READER_1_0, 8);
-    csrw_ss(T_STRIDE_READER_1_1, 8);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x00000000);
-    csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_WRITER_0_0, 0);
-    csrw_ss(T_BOUND_WRITER_0_0, 0);
-    csrw_ss(T_BOUND_WRITER_0_1, 0);
-    csrw_ss(T_STRIDE_WRITER_0_0, 8);
-    csrw_ss(T_STRIDE_WRITER_0_1, 8);
-    csrw_ss(BASE_PTR_READER_2_LOW, 0x10009040);
-    csrw_ss(BASE_PTR_READER_2_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_2_0, 8);
-    csrw_ss(T_BOUND_READER_2_0, 128);
-    csrw_ss(T_BOUND_READER_2_1, 8);
-    csrw_ss(T_STRIDE_READER_2_0, 32);
-    csrw_ss(T_STRIDE_READER_2_1, 4096);
-    csrw_ss(BASE_PTR_WRITER_1_LOW, 0x10009000);
-    csrw_ss(BASE_PTR_WRITER_1_HIGH, 0);
-    csrw_ss(S_STRIDE_WRITER_1_0, 8);
-    csrw_ss(T_BOUND_WRITER_1_0, 8);
-    csrw_ss(T_STRIDE_WRITER_1_0, 8);
+    csrw_ss(MATVEC_BASE_PTR_READER_0_LOW, 0x00000000);
+    csrw_ss(MATVEC_BASE_PTR_READER_0_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_0_0, 0);
+    csrw_ss(MATVEC_T_BOUND_READER_0_0, 0);
+    csrw_ss(MATVEC_T_BOUND_READER_0_1, 0);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_0, 8);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_1, 8);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_LOW, 0x00000000);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_1_0, 0);
+    csrw_ss(MATVEC_T_BOUND_READER_1_0, 0);
+    csrw_ss(MATVEC_T_BOUND_READER_1_1, 0);
+    csrw_ss(MATVEC_T_STRIDE_READER_1_0, 8);
+    csrw_ss(MATVEC_T_STRIDE_READER_1_1, 8);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_LOW, 0x00000000);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_WRITER_0_0, 0);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_0, 0);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_1, 0);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_0_0, 8);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_0_1, 8);
+    csrw_ss(MATVEC_BASE_PTR_READER_2_LOW, 0x10009040);
+    csrw_ss(MATVEC_BASE_PTR_READER_2_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_2_0, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_2_0, 128);
+    csrw_ss(MATVEC_T_BOUND_READER_2_1, 8);
+    csrw_ss(MATVEC_T_STRIDE_READER_2_0, 32);
+    csrw_ss(MATVEC_T_STRIDE_READER_2_1, 4096);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_1_LOW, 0x10009000);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_1_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_WRITER_1_0, 8);
+    csrw_ss(MATVEC_T_BOUND_WRITER_1_0, 8);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_1_0, 8);
     csrw_ss(MATVEC_RW_SUM_JOBS, 8);
     csrw_ss(MATVEC_RW_SUM_JOB_BEATS, 128);
     while (csrr_ss(MATVEC_RO_MUL_STATUS) & 1) {
     }
-    while (csrr_ss(STREAMER_BUSY_CSR)) {
+    while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
     }
     forge_counter[0] = csrr_ss(MATVEC_RO_MUL_COUNTER);
-    csrw_ss(STREAMER_START_CSR, 1);
+    csrw_ss(MATVEC_STREAMER_START_CSR, 1);
     csrw_ss(MATVEC_RW_SUM_START, 1);
     while (csrr_ss(MATVEC_RO_SUM_STATUS) & 1) {
     }
-    while (csrr_ss(STREAMER_BUSY_CSR)) {
+    while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
     }
     forge_counter[1] = csrr_ss(MATVEC_RO_SUM_COUNTER);
     snrt_cluster_hw_barrier();

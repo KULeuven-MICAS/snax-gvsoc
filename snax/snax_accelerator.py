@@ -5,26 +5,36 @@
 #
 
 """The standard composite of an accelerator slot with an accelerator.json: the
-CSR mux, the streamer, and per group one SnaxShell and one SnaxGroup.
+CSR mux, one streamer per streamer set, and per group one SnaxShell and one
+SnaxGroup.
 
     SnaxAccelerator.for_slot(slot, tcdm_size, file) -> class
 
-The slot (snax_cfg.AccSlot) gives the streamer template and the accelerator
-(snax_cfg.Accelerator), the cluster its TCDM size. Each entry of the
-accelerator's inputs ("<unit>.<port>") takes the streamer's reader of its
-index, each entry of its outputs the writer of its index; a port on a link
-(snax-forge C§17) is the group's own and meets no streamer.
+The slot (snax_cfg.AccSlot) gives its streamer sets and the description
+(snax_cfg.Description), one accelerator per set in the sets' order, the
+cluster its TCDM size. Set k's streamer is `streamer_<set>`; each entry of
+its accelerator's inputs ("<unit>.<port>") takes that streamer's reader of
+its index, each entry of its outputs the writer of its index; a port on a
+link (snax-forge C§17) is the group's own and meets no streamer.
 
-CSRs: the streamer's from SNAX_CSR_FIRST (nb_csrs of its template); then the
-accelerator's, at the offsets accelerator.json gives: each group's window
-(START, JOBS, its units' R/W CSRs, STATUS, COUNTER) to its shell. The last
-must be at most SNAX_ACC_CSR_LAST.
+CSRs (snax-forge D157, snax_cluster's csr_range_table; csr_layout): set k
+holds [b_k, b_k + s_k + c_k), its streamer's s_k CSRs (nb_csrs of its
+template) from b_k, then its accelerator's c_k from b_k + s_k; b_0 is
+SNAX_CSR_FIRST (960) and b_{k+1} = b_k + s_k + c_k. accelerator.json's
+offsets run over all the accelerators from 0 (the shell's view): an
+accelerator's CSR at offset o is at b_k + s_k + o - o_k, o_k its first
+offset. Each group's window (START, JOBS, its units' R/W CSRs, STATUS,
+COUNTER) goes to its shell. The last CSR must be at most SNAX_ACC_CSR_LAST.
 
-Names (component_names): with one group of one unit, the shell is `shell` and
-the group `unit` (snax_acc<i>/unit, the trace path snax-forge's manifests
-name); with several groups of one unit each, `shell_<group>` and
-`unit_<unit>`; a linked group (several units) is `group_<group>`, its shell
-`shell_<group>`.
+The TCDM ports are the streamers' channels, set after set, each streamer's
+readers first: the cluster names port p by its owner,
+`streamer_<set>.<mover>.lane<l>`.
+
+Names (component_names, over every group of the description): with one
+group of one unit, the shell is `shell` and the group `unit`
+(snax_acc<i>/unit, the trace path snax-forge's manifests name); with several
+groups of one unit each, `shell_<group>` and `unit_<unit>`; a linked group
+(several units) is `group_<group>`, its shell `shell_<group>`.
 
 Each SnaxGroup gets its units in the group's order (group_units): per unit
 its datapath, its inputs in BRM port order (an outer one named
@@ -34,6 +44,8 @@ JOB_BEATS, else 1; and its links as edges, each {from, to, to_input, depth}:
 the producer's and the consumer's names and the consumer's input it feeds,
 its index in that unit's inputs.
 """
+
+from dataclasses import dataclass
 
 import gvsoc.systree
 import interco.router as router
@@ -61,11 +73,48 @@ def compile_components():
         gvsoc.systree.get_generated_component(list(sources), [], [])
 
 
-def component_names(accelerator) -> tuple:
+@dataclass(frozen=True)
+class SetLayout:
+    """A streamer set's CSRs (module doc): its name, streamer template and accelerator, its
+    first CSR b_k (its streamer's), s_k its streamer's CSRs, c_k its accelerator's."""
+
+    name: str
+    template: dict
+    accelerator: object
+    first: int
+    streamer_csrs: int
+    own_csrs: int
+
+    @property
+    def own(self) -> int:
+        """Its accelerator's first CSR: b_k + s_k."""
+        return self.first + self.streamer_csrs
+
+    @property
+    def end(self) -> int:
+        """The CSR after its last: b_{k+1}."""
+        return self.own + self.own_csrs
+
+    def csr(self, offset: int) -> int:
+        """The CSR of its accelerator's CSR at accelerator.json's offset."""
+        return self.own + offset - self.accelerator.csrs[0].offset
+
+
+def csr_layout(slot) -> list:
+    """The slot's sets' CSRs (SetLayout), packed from SNAX_CSR_FIRST."""
+    layout, first = [], SNAX_CSR_FIRST
+    for s, acc in zip(slot.sets, slot.description.accelerators):
+        row = SetLayout(s.name, s.streamer, acc, first, nb_csrs(s.streamer), len(acc.csrs))
+        layout.append(row)
+        first = row.end
+    return layout
+
+
+def component_names(description) -> tuple:
     """The shells' and the groups' component names, by group: shell and unit for one group of
     one unit; else shell_<group>, and unit_<unit> for a group of one unit, group_<group> for a
     linked group."""
-    groups = accelerator.groups
+    groups = description.groups
     single = len(groups) == 1 and len(groups[0].units) == 1
     shells = {g.name: 'shell' if single else f'shell_{g.name}' for g in groups}
     comps = {g.name: ('unit' if single else f'unit_{g.units[0].name}') if len(g.units) == 1
@@ -110,8 +159,8 @@ def group_units(accelerator, group) -> tuple:
 
 
 class SnaxAccelerator(gvsoc.systree.Component):
-    """The CSR mux, the streamer, the shells and groups of one slot, bound to a core's
-    snax_csr port, its streamer's channels leaving it as its TCDM ports; for_slot gives the
+    """The CSR mux, the streamers, the shells and groups of one slot, bound to a core's
+    snax_csr port, its streamers' channels leaving it as its TCDM ports; for_slot gives the
     slot's class.
 
     Ports
@@ -119,16 +168,16 @@ class SnaxAccelerator(gvsoc.systree.Component):
     input : io slave
         The compute core's CSR accesses, a 32-bit request at 4 * CSR number.
     tcdm_<i> : io master
-        The streamer's TCDM ports (nb_tcdm_ports of them).
+        The streamers' TCDM ports (nb_tcdm_ports of them), set after set.
     tcdm_prio_<i> : wire<bool> master
         The priority bit of each TCDM port's request.
     """
 
-    # Set by for_slot: the streamer template, the accelerator, the TCDM size, and the TCDM
-    # ports the cluster binds (snax_tcdm_ports in the hjson), named in the crossbar's trace by
-    # their owner
-    template = None
-    accelerator = None
+    # Set by for_slot: the sets' CSR layout (SetLayout), the description, the TCDM size, and
+    # the TCDM ports the cluster binds (snax_tcdm_ports in the hjson), named in the crossbar's
+    # trace by their owner
+    layout = []
+    description = None
     tcdm_size = None
     nb_tcdm_ports = 0
     tcdm_port_names = []
@@ -137,70 +186,70 @@ class SnaxAccelerator(gvsoc.systree.Component):
     def for_slot(cls, slot, tcdm_size: int, file='?'):
         """The class of the slot's composite, with the class attributes the cluster reads
         (nb_tcdm_ports, tcdm_port_names)."""
-        accelerator = slot.accelerator
-        last = SNAX_CSR_FIRST + nb_csrs(slot.streamer) + len(accelerator.csrs) - 1
+        layout = csr_layout(slot)
+        last = layout[-1].end - 1
         if last > SNAX_ACC_CSR_LAST:
             raise CfgTargetError(file, slot.at,
                 f"the accelerator's last CSR {last} is past {SNAX_ACC_CSR_LAST}, the last an "
-                "accelerator may use")
+                "accelerator may use (sets " + ', '.join(
+                    f'{row.name} {row.first}-{row.end - 1}' for row in layout) + ')')
         return type(f'SnaxAccelerator_{slot.name}', (cls,), {
-            'template': slot.streamer,
-            'accelerator': accelerator,
+            'layout': layout,
+            'description': slot.description,
             'tcdm_size': tcdm_size,
-            'nb_tcdm_ports': streamer_channels(slot.streamer),
-            'tcdm_port_names': ['streamer.' + name for name in tcdm_port_names(slot.streamer)],
+            'nb_tcdm_ports': sum(streamer_channels(row.template) for row in layout),
+            'tcdm_port_names': [f'streamer_{row.name}.{name}' for row in layout
+                                for name in tcdm_port_names(row.template)],
         })
 
     def __init__(self, parent: gvsoc.systree.Component, name: str):
         super().__init__(parent, name)
 
-        acc = self.accelerator
-        # The accelerator's first CSR, after the streamer's
-        first = SNAX_CSR_FIRST + nb_csrs(self.template)
-        shell_names, group_names = component_names(acc)
-
+        shell_names, group_names = component_names(self.description)
         csr_mux = router.Router(self, 'csr_mux')
-        streamer = SnaxStreamer(self, 'streamer', template=self.template,
-            csr_base=SNAX_CSR_FIRST, tcdm_size=self.tcdm_size)
-        streamer_base = 4 * SNAX_CSR_FIRST
-        csr_mux.o_MAP(streamer.i_INPUT(), base=streamer_base, size=4 * first - streamer_base)
-
-        owner = {}
-        for k, group in enumerate(acc.groups):
-            base = first + group.window[0].offset
-            shell = SnaxShell(self, shell_names[group.name], csr_base=base, csrs=group.rw,
-                widths=group.rw_widths, counter_width=group.counter_width)
-            # The group's window; past the last group, everything to the last SNAX CSR,
-            # which its shell refuses
-            end = (first + acc.groups[k + 1].window[0].offset if k + 1 < len(acc.groups)
-                   else SNAX_CSR_LAST + 1)
-            csr_mux.o_MAP(shell.i_INPUT(), base=4 * base, size=4 * (end - base))
-
-            units, links = group_units(acc, group)
-            comp = SnaxGroup(self, group_names[group.name], units=units, links=links,
-                csr_base=base)
-            shell.o_CTRL(comp.i_CTRL())
-            comp.o_BUSY(shell.i_BUSY())
-            for u in group.units:
-                owner[u.name] = comp
-
-        # The beats: the readers into the outer inputs, the outer outputs into the writers
-        for i, entry in enumerate(acc.inputs):
-            unit, port = entry.split('.', 1)
-            owner[unit].o_PORT(f'{unit}_{port}', streamer.i_READER(i))
-        for j, entry in enumerate(acc.outputs):
-            unit, port = entry.split('.', 1)
-            owner[unit].o_PORT(f'{unit}_{port}', streamer.i_WRITER(j))
-
-        self.bind_ports(csr_mux, streamer)
-
-    def bind_ports(self, csr_mux, streamer):
-        """The composite's input into csr_mux, and the streamer's TCDM ports out as its own."""
         self.bind(self, 'input', csr_mux, 'input')
 
-        for port in range(0, self.nb_tcdm_ports):
-            streamer.o_TCDM(port, self.i_TCDM_INTERNAL(port))
-            streamer.o_TCDM_PRIORITY(port, self.i_TCDM_PRIORITY_INTERNAL(port))
+        port = 0
+        for k, row in enumerate(self.layout):
+            streamer = SnaxStreamer(self, f'streamer_{row.name}', template=row.template,
+                csr_base=row.first, tcdm_size=self.tcdm_size)
+            csr_mux.o_MAP(streamer.i_INPUT(), base=4 * row.first, size=4 * row.streamer_csrs)
+
+            acc = row.accelerator
+            owner = {}
+            for j, group in enumerate(acc.groups):
+                base = row.csr(group.window[0].offset)
+                shell = SnaxShell(self, shell_names[group.name], csr_base=base, csrs=group.rw,
+                    widths=group.rw_widths, counter_width=group.counter_width)
+                # The group's window; the set's last group's to the next set's streamer, and
+                # past the last set's, everything to the last SNAX CSR, which its shell refuses
+                end = (row.csr(acc.groups[j + 1].window[0].offset) if j + 1 < len(acc.groups)
+                       else row.end if k + 1 < len(self.layout) else SNAX_CSR_LAST + 1)
+                csr_mux.o_MAP(shell.i_INPUT(), base=4 * base, size=4 * (end - base))
+
+                units, links = group_units(acc, group)
+                comp = SnaxGroup(self, group_names[group.name], units=units, links=links,
+                    csr_base=base)
+                shell.o_CTRL(comp.i_CTRL())
+                comp.o_BUSY(shell.i_BUSY())
+                for u in group.units:
+                    owner[u.name] = comp
+
+            # The beats: the set's readers into its outer inputs, its outer outputs into its
+            # writers
+            for i, entry in enumerate(acc.inputs):
+                unit, port_name = entry.split('.', 1)
+                owner[unit].o_PORT(f'{unit}_{port_name}', streamer.i_READER(i))
+            for j, entry in enumerate(acc.outputs):
+                unit, port_name = entry.split('.', 1)
+                owner[unit].o_PORT(f'{unit}_{port_name}', streamer.i_WRITER(j))
+
+            # Its TCDM ports out as the composite's, after the previous sets'
+            channels = streamer_channels(row.template)
+            for p in range(channels):
+                streamer.o_TCDM(p, self.i_TCDM_INTERNAL(port + p))
+                streamer.o_TCDM_PRIORITY(p, self.i_TCDM_PRIORITY_INTERNAL(port + p))
+            port += channels
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, 'input', signature='io')
