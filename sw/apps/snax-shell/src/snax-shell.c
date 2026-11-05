@@ -26,7 +26,7 @@
 
 #include "acc_csr.h"
 #include "data.h"
-#include "streamer_csr_addr_map.h"
+#include "streamer_acc_csr_addr_map.h"
 
 // Three unit runs on one streamer run (LOOP_ITER is a uint64_t)
 #define RUN_BEATS ((uint32_t)(LOOP_ITER / 3))
@@ -50,24 +50,24 @@ int main() {
     snrt_cluster_hw_barrier();
 
     if (snrt_is_compute_core()) {
-        csrw_ss(BASE_PTR_READER_0_LOW, (uint32_t)local_a);
-        csrw_ss(BASE_PTR_READER_0_HIGH, 0);
-        csrw_ss(S_STRIDE_READER_0_0, 8);
-        csrw_ss(T_BOUND_READER_0_0, LOOP_ITER);
-        csrw_ss(T_STRIDE_READER_0_0, 32);
-        csrw_ss(BASE_PTR_READER_1_LOW, (uint32_t)local_b);
-        csrw_ss(BASE_PTR_READER_1_HIGH, 0);
-        csrw_ss(S_STRIDE_READER_1_0, 8);
-        csrw_ss(T_BOUND_READER_1_0, LOOP_ITER);
-        csrw_ss(T_STRIDE_READER_1_0, 32);
-        csrw_ss(BASE_PTR_WRITER_0_LOW, (uint32_t)local_o);
-        csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
-        csrw_ss(S_STRIDE_WRITER_0_0, 8);
-        csrw_ss(T_BOUND_WRITER_0_0, LOOP_ITER);
-        csrw_ss(T_STRIDE_WRITER_0_0, 32);
+        csrw_ss(ACC_BASE_PTR_READER_0_LOW, (uint32_t)local_a);
+        csrw_ss(ACC_BASE_PTR_READER_0_HIGH, 0);
+        csrw_ss(ACC_S_STRIDE_READER_0_0, 8);
+        csrw_ss(ACC_T_BOUND_READER_0_0, LOOP_ITER);
+        csrw_ss(ACC_T_STRIDE_READER_0_0, 32);
+        csrw_ss(ACC_BASE_PTR_READER_1_LOW, (uint32_t)local_b);
+        csrw_ss(ACC_BASE_PTR_READER_1_HIGH, 0);
+        csrw_ss(ACC_S_STRIDE_READER_1_0, 8);
+        csrw_ss(ACC_T_BOUND_READER_1_0, LOOP_ITER);
+        csrw_ss(ACC_T_STRIDE_READER_1_0, 32);
+        csrw_ss(ACC_BASE_PTR_WRITER_0_LOW, (uint32_t)local_o);
+        csrw_ss(ACC_BASE_PTR_WRITER_0_HIGH, 0);
+        csrw_ss(ACC_S_STRIDE_WRITER_0_0, 8);
+        csrw_ss(ACC_T_BOUND_WRITER_0_0, LOOP_ITER);
+        csrw_ss(ACC_T_STRIDE_WRITER_0_0, 32);
         csrw_ss(ACC_RW_JOBS, RUN_BEATS);
 
-        csrw_ss(STREAMER_START_CSR, 1);
+        csrw_ss(ACC_STREAMER_START_CSR, 1);
 
         // Run 1 alone: its counter, then STATUS done
         csrw_ss(ACC_RW_START, 1);
@@ -91,7 +91,7 @@ int main() {
 
         while (csrr_ss(ACC_RO_STATUS) & 1) {
         };
-        while (csrr_ss(STREAMER_BUSY_CSR)) {
+        while (csrr_ss(ACC_STREAMER_BUSY_CSR)) {
         };
 
         int data_errors = 0;

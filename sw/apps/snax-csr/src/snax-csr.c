@@ -17,23 +17,26 @@
 #include "snrt.h"
 
 #include "acc_csr.h"
-#include "streamer_csr_addr_map.h"
+#include "streamer_acc_csr_addr_map.h"
 
 // The read-write CSRs of the streamer and the shell, without the two start
-// CSRs (STREAMER_START_CSR, ACC_RW_START): every pattern has bit 0 set, which
-// would start the block.
-#define RW_CSRS(X)                                                            \
-    X(BASE_PTR_READER_0_LOW) X(BASE_PTR_READER_0_HIGH) X(S_STRIDE_READER_0_0) \
-    X(T_BOUND_READER_0_0) X(T_STRIDE_READER_0_0)                              \
-    X(BASE_PTR_READER_1_LOW) X(BASE_PTR_READER_1_HIGH) X(S_STRIDE_READER_1_0) \
-    X(T_BOUND_READER_1_0) X(T_STRIDE_READER_1_0)                              \
-    X(BASE_PTR_WRITER_0_LOW) X(BASE_PTR_WRITER_0_HIGH) X(S_STRIDE_WRITER_0_0) \
-    X(T_BOUND_WRITER_0_0) X(T_STRIDE_WRITER_0_0) X(ACC_RW_JOBS)
-#define RO_CSRS(X)                                                \
-    X(STREAMER_BUSY_CSR) X(STREAMER_PERFORMANCE_COUNTER_CSR)      \
+// CSRs (ACC_STREAMER_START_CSR, ACC_RW_START): every pattern has bit 0 set,
+// which would start the block.
+#define RW_CSRS(X)                                                  \
+    X(ACC_BASE_PTR_READER_0_LOW) X(ACC_BASE_PTR_READER_0_HIGH)      \
+    X(ACC_S_STRIDE_READER_0_0) X(ACC_T_BOUND_READER_0_0)            \
+    X(ACC_T_STRIDE_READER_0_0)                                      \
+    X(ACC_BASE_PTR_READER_1_LOW) X(ACC_BASE_PTR_READER_1_HIGH)      \
+    X(ACC_S_STRIDE_READER_1_0) X(ACC_T_BOUND_READER_1_0)            \
+    X(ACC_T_STRIDE_READER_1_0)                                      \
+    X(ACC_BASE_PTR_WRITER_0_LOW) X(ACC_BASE_PTR_WRITER_0_HIGH)      \
+    X(ACC_S_STRIDE_WRITER_0_0) X(ACC_T_BOUND_WRITER_0_0)            \
+    X(ACC_T_STRIDE_WRITER_0_0) X(ACC_RW_JOBS)
+#define RO_CSRS(X)                                                  \
+    X(ACC_STREAMER_BUSY_CSR) X(ACC_STREAMER_PERFORMANCE_COUNTER_CSR) \
     X(ACC_RO_STATUS) X(ACC_RO_COUNTER)
 // Part 3's CSRs: a read-write one, and the group's read-only COUNTER
-#define ONE_RW BASE_PTR_READER_0_LOW
+#define ONE_RW ACC_BASE_PTR_READER_0_LOW
 #define ONE_RO ACC_RO_COUNTER
 
 #define STR(x) #x

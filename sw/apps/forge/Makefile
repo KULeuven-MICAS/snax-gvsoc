@@ -1,6 +1,6 @@
 # Builds the program snax-forge generates for a design point:
 # forge/$(DESIGN)/main.c, with the fixture's folder (its data.h) and include/
-# (streamer_csr_addr_map.h, <instance>_csr.h, snitch_cluster_cfg.h,
+# (streamer_<set>_csr_addr_map.h, <set>_csr.h, snitch_cluster_cfg.h,
 # snitch_cluster_addrmap.h) before sw/generated/, from sw/ (../../common.mk)
 # into build/sw/apps/forge/$(DESIGN)/, and links a runtime built against the
 # fixture's two cluster headers (`make -C sw runtime`), so its stacks sit at
