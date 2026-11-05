@@ -3,11 +3,11 @@
  "design_point": "out/design/matvec_1/design_point.json",
  "symbols": {"M": 8, "N": 512},
  "cluster": "snax_forge.hjson",
- "files": ["snax_forge.hjson", "snax_forge_streamer.hjson", "accelerator.json", "include/streamer_csr_addr_map.h", "include/matvec_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "files": ["snax_forge.hjson", "snax_forge_matvec_1_streamer_matvec.hjson", "accelerator.json", "include/streamer_matvec_csr_addr_map.h", "include/matvec_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
  "program": "main.c",
  "trace": "snax_acc0",
  "csrs": {
-  "streamer": {"first": 960, "last": 995},
+  "streamers": [{"name": "matvec", "first": 960, "last": 995, "trace": "snax_acc0/streamer_matvec"}],
   "accelerator": {
    "MATVEC_RW_MUL_START": 996,
    "MATVEC_RW_MUL_JOBS": 997,

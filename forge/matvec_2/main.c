@@ -11,40 +11,40 @@
 
 #include "data.h"
 #include "matvec_csr.h"
-#include "streamer_csr_addr_map.h"
+#include "streamer_matvec_csr_addr_map.h"
 
 // Each accelerator task's counter, stored right after the wait that covers it
 static uint32_t forge_counter[1];
 
 // Core 0: the accelerator matvec
 static __attribute__((noinline)) int forge_core_0(void) {
-    csrw_ss(BASE_PTR_READER_0_LOW, 0x10000000);
-    csrw_ss(BASE_PTR_READER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_0_0, 8);
-    csrw_ss(T_BOUND_READER_0_0, 128);
-    csrw_ss(T_BOUND_READER_0_1, 16);
-    csrw_ss(T_STRIDE_READER_0_0, 32);
-    csrw_ss(T_STRIDE_READER_0_1, 4096);
-    csrw_ss(BASE_PTR_READER_1_LOW, 0x10010000);
-    csrw_ss(BASE_PTR_READER_1_HIGH, 0);
-    csrw_ss(S_STRIDE_READER_1_0, 8);
-    csrw_ss(T_BOUND_READER_1_0, 128);
-    csrw_ss(T_BOUND_READER_1_1, 16);
-    csrw_ss(T_STRIDE_READER_1_0, 32);
-    csrw_ss(T_STRIDE_READER_1_1, 0);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, 0x10011000);
-    csrw_ss(BASE_PTR_WRITER_0_HIGH, 0);
-    csrw_ss(S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(T_BOUND_WRITER_0_0, 16);
-    csrw_ss(T_STRIDE_WRITER_0_0, 8);
+    csrw_ss(MATVEC_BASE_PTR_READER_0_LOW, 0x10000000);
+    csrw_ss(MATVEC_BASE_PTR_READER_0_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_0_0, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_0_0, 128);
+    csrw_ss(MATVEC_T_BOUND_READER_0_1, 16);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_0, 32);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_1, 4096);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_LOW, 0x10010000);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_READER_1_0, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_1_0, 128);
+    csrw_ss(MATVEC_T_BOUND_READER_1_1, 16);
+    csrw_ss(MATVEC_T_STRIDE_READER_1_0, 32);
+    csrw_ss(MATVEC_T_STRIDE_READER_1_1, 0);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_LOW, 0x10011000);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_HIGH, 0);
+    csrw_ss(MATVEC_S_STRIDE_WRITER_0_0, 8);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_0, 16);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_0_0, 8);
     csrw_ss(MATVEC_RW_JOBS, 16);
     csrw_ss(MATVEC_RW_SUM_JOB_BEATS, 128);
     snrt_cluster_hw_barrier();
-    csrw_ss(STREAMER_START_CSR, 1);
+    csrw_ss(MATVEC_STREAMER_START_CSR, 1);
     csrw_ss(MATVEC_RW_START, 1);
     while (csrr_ss(MATVEC_RO_STATUS) & 1) {
     }
-    while (csrr_ss(STREAMER_BUSY_CSR)) {
+    while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
     }
     forge_counter[0] = csrr_ss(MATVEC_RO_COUNTER);
     snrt_cluster_hw_barrier();
