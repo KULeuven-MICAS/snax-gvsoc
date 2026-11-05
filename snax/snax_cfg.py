@@ -842,7 +842,7 @@ def _description(node: _Node) -> Description:
     # The offsets in CSR order over every accelerator, contiguous from 0: read, never computed
     for i, csr in enumerate(desc.csrs):
         if csr.offset != i:
-            group = next(g.name for g in desc.groups if csr in g.window)
+            group = next(g.name for g in desc.groups if any(c is csr for c in g.window))
             raise CfgSlotError(node.file, node.where('accelerators'),
                 f'group {group}\'s {csr.name} has offset {csr.offset}, but is CSR {i} in CSR '
                 'order (accelerator by accelerator, per group START, JOBS, the units\' R/W CSRs, '
@@ -1108,8 +1108,9 @@ def _check_description(acc: _Node, slot: AccSlot):
             fail('snax_streamer_cfg', f'one streamer, but accelerator.json has the accelerators '
                  f'{names}: give snax_streamer_sets, one set per accelerator')
     elif [s.name for s in slot.sets] != names:
-        fail('snax_streamer_sets', f'the sets {[s.name for s in slot.sets]}, but accelerator.json\'s '
-             f'accelerators are {names}: one set per accelerator, named after it, in its order')
+        fail('snax_streamer_sets', f'the sets {[s.name for s in slot.sets]}, but '
+             f"accelerator.json's accelerators are {names}: one set per accelerator, named "
+             'after it, in its order')
     for k, (s, accelerator) in enumerate(zip(slot.sets, desc.accelerators)):
         at = f'snax_datapath_cfg.accelerators[{k}]'
         for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
