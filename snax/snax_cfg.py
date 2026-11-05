@@ -9,12 +9,14 @@
     load(path) -> ClusterCfg
 
 The hjson is the contract: snax_cluster's clustergen and snaxgen read the
-same file. A design is three files: the cluster file, named after its base
-platform (snax_forge.hjson), the streamer file, named after its slot
-(snax_forge_streamer.hjson, the streamer template), and accelerator.json,
-the accelerator's one description (snax-forge C§17, D145). The cluster's
-snax_acc_cfg entry (the slot) keeps the slot keys; its snax_streamer_cfg and
-snax_datapath_cfg are $refs to the other two, each the whole file.
+same file. A design is the cluster file, named after its base platform
+(snax_forge.hjson), one streamer file per streamer set, named after the
+slot's tag and the set (snax_forge_<design>_streamer_<set>.hjson, the set's
+streamer template), and accelerator.json, the accelerators' one description
+(snax-forge C§17, D145, D157). The cluster's snax_acc_cfg entry (the slot)
+keeps the slot keys; each of its snax_streamer_sets has its name, its
+snax_streamer_cfg (a $ref to its streamer file) and its own CSR counts, and
+its snax_datapath_cfg is a $ref to accelerator.json, each the whole file.
 
 $ref: {$ref: "#/a/b"} is the value at /a/b of the file it is in;
 {$ref: "other.hjson#/a/b"} the value at /a/b of other.hjson, a path relative
@@ -41,18 +43,26 @@ What is read, and how a target uses it:
                                           slots of snax_acc_cfg (AccSlot)
     dram.address, dram.length             dram.address, dram.length
 
-A slot (AccSlot): snax_acc_name, snax_tcdm_ports, snax_narrow_tcdm_ports and
-snax_wide_tcdm_ports or sparse_interconnect_config, snax_num_rw_csr,
-snax_num_ro_csr, snax_streamer_cfg (the streamer template, as the hjson has
-it) and snax_datapath_cfg (accelerator.json, optional; Accelerator).
+A slot (AccSlot): snax_acc_name (the tag), snax_tcdm_ports,
+snax_narrow_tcdm_ports and snax_wide_tcdm_ports or sparse_interconnect_config,
+its streamer sets (AccSlot.sets, StreamerSet: name, streamer, num_rw_csr,
+num_ro_csr) and snax_datapath_cfg (accelerator.json, optional; Description).
+The sets are snax_streamer_sets, each {name, snax_streamer_cfg (the streamer
+template, as the hjson has it), snax_num_rw_csr, snax_num_ro_csr} (snax_cluster's
+schema; the slot needs snax_disable_csr_manager); a slot with
+snax_streamer_cfg in their place is one set, named after the slot, with the
+slot's snax_num_rw_csr and snax_num_ro_csr, as snax_cluster's snaxgen reads it.
 
-accelerator.json (snax-forge C§17), what the standard composite
-(snax_accelerator.py) builds the slot's shells and units from:
+accelerator.json (snax-forge C§17, D157), what the standard composite
+(snax_accelerator.py) builds the slot's streamers, shells and units from:
 
-    name, design_point, tag   Accelerator.name (the header's <ACC>), ...
-    inputs, outputs           the outer ports, "<unit>.<port>", in the
+    design_point, tag         Description.design_point, .tag
+    accelerators[]            Accelerator, one per streamer set, in the
+                              sets' order:
+      name                    Accelerator.name (the header's <ACC>, the set's)
+      inputs, outputs         the outer ports, "<unit>.<port>", in its set's
                               streamer's reader and writer order
-    groups[]                  Group: name, csrs (START, JOBS, STATUS,
+      groups[]                Group: name, csrs (START, JOBS, STATUS,
                               COUNTER), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
                               snax_datapath.hpp's registry: ElementwiseLanes,
@@ -72,22 +82,26 @@ accelerator.json (snax-forge C§17), what the standard composite
                               2, COUNTER counter_width; D152), pin
 
 Per group the CSRs in CSR order are START, JOBS, its units' R/W CSRs, STATUS,
-COUNTER, and the offsets over all groups in that order are contiguous from 0:
-they are read, never computed (a group's window starts at its START).
+COUNTER, and the offsets over all groups of all accelerators in that order
+are contiguous from 0 (the shell's view, D157): they are read, never computed
+(a group's window starts at its START). Unit, group and accelerator names
+are each the file's once.
 
 The slot's counts must agree with what its refs give: each mover's
 spatial_bounds multiply to its num_channel (snax_cluster's StreamerParam);
-snax_tcdm_ports is the streamer's num_channel summed over its movers, and the
+snax_tcdm_ports is num_channel summed over every set's movers, and the
 narrow and wide ports or the sparse config's widths add up to it; with
-accelerator.json, inputs and outputs are the streamer's readers and writers
-in number; they are exactly the ports on no link, group by group, unit by
-unit in port order (gen.outer), each link goes from an out port to an in port
-of its group's units with the same dtype and lanes (gen.link), no port is on
-two links (gen.link_port) and a group's links connect its units (gen.group),
-the codes snax-forge's reader gives; each outer port's words per beat
-(lanes * its dtype's bits / 64) are its mover's num_channel (a fold's
-one-lane output: 1), since SnaxGroup has no FIFO slicer; snax_num_rw_csr and
-snax_num_ro_csr are the file's R/W and R/O CSRs. An ElementwiseLanes unit's
+accelerator.json, the sets' names and order are the accelerators' (a slot of
+one snax_streamer_cfg takes one accelerator, whatever its name); each
+accelerator's inputs and outputs are its set's readers and writers in number;
+they are exactly the ports on no link, group by group, unit by unit in port
+order (gen.outer), each link goes from an out port to an in port of its
+group's units with the same dtype and lanes (gen.link), no port is on two
+links (gen.link_port) and a group's links connect its units (gen.group), the
+codes snax-forge's reader gives; each outer port's words per beat (lanes *
+its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
+1), since SnaxGroup has no FIFO slicer; each set's snax_num_rw_csr and
+snax_num_ro_csr are its accelerator's R/W and R/O CSRs. An ElementwiseLanes unit's
 opType is its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
 and b.
@@ -95,17 +109,21 @@ and b.
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
 resolve), CfgKeyError (a key missing), CfgTypeError (a value of the wrong
-type), CfgSlotError (slot counts or CSRs that disagree with the files); a
+type), CfgSlotError (slot counts, sets or CSRs that disagree with the files,
+or both snax_streamer_cfg and snax_streamer_sets); a
 target refuses what it cannot model with CfgTargetError (a datapath not in
 the registry, a TreeAccumulate op other than add, a unit CSR other than a
 fold's JOB_BEATS, a latency or span other than its datapath's, and SnaxGroup's
 shape with snax-forge's codes and wording: gen.chain, a group whose links are
 not a chain in unit order with the last unit's output the only outer one;
 gen.span, a unit of span > 1 fed by the streamer). The datapath block before accelerator.json
-(<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key.
+(<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key,
+and so is accelerator.json's form before D157 (name, inputs, outputs, groups
+at the top, no accelerators).
 """
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -299,6 +317,8 @@ class _Node:
     def nodes(self, key, default=...):
         """A list of objects."""
         values = self.get(key, list, default)
+        if values is None:
+            return None
         out = []
         for i, value in enumerate(values):
             if not isinstance(value, dict):
@@ -436,18 +456,17 @@ class Group:
 
 @dataclass(frozen=True)
 class Accelerator:
-    """accelerator.json; see the module doc."""
+    """An accelerator of accelerator.json, one streamer set's: its outer ports, in its set's
+    reader and writer order, and its groups."""
 
     name: str
-    design_point: str
-    tag: str
     inputs: list
     outputs: list
     groups: list
 
     @property
     def csrs(self) -> list:
-        """Every CSR in CSR order."""
+        """Its CSRs in CSR order."""
         return [c for g in self.groups for c in g.window]
 
     @property
@@ -468,20 +487,68 @@ class Accelerator:
 
 
 @dataclass(frozen=True)
+class Description:
+    """accelerator.json (snax-forge C§17, D157): the design point, the tag and the
+    accelerators, one per streamer set, in the sets' order."""
+
+    design_point: str
+    tag: str
+    accelerators: list
+
+    @property
+    def groups(self) -> list:
+        """Every group, accelerator by accelerator."""
+        return [g for a in self.accelerators for g in a.groups]
+
+    @property
+    def csrs(self) -> list:
+        """Every CSR in CSR order: the offsets 0, 1, ..."""
+        return [c for a in self.accelerators for c in a.csrs]
+
+    def unit(self, name: str) -> Unit:
+        return next(u for g in self.groups for u in g.units if u.name == name)
+
+
+@dataclass(frozen=True)
+class StreamerSet:
+    """A streamer set of a slot (snax_streamer_sets[k]; a slot's snax_streamer_cfg is one):
+    its name, its streamer template as the hjson has it, its accelerator's own CSR counts,
+    and the key its values are at, from the slot ('' for the slot's own keys)."""
+
+    name: str
+    streamer: dict
+    num_rw_csr: int
+    num_ro_csr: int
+    at: str = ''
+
+    def key(self, key: str) -> str:
+        """key's path from the slot."""
+        return f'{self.at}.{key}' if self.at else key
+
+
+@dataclass(frozen=True)
 class AccSlot:
-    """One snax_acc_cfg entry of a core: the slot's keys, the streamer template as the hjson
-    has it, and its accelerator.json when the slot has one (None otherwise)."""
+    """One snax_acc_cfg entry of a core: the slot's keys, its streamer sets in order, and its
+    accelerator.json when the slot has one (None otherwise)."""
 
     name: str
     tcdm_ports: int
     narrow_tcdm_ports: int
     wide_tcdm_ports: int
     sparse_config: list
-    num_rw_csr: int
-    num_ro_csr: int
-    streamer: dict
-    accelerator: Accelerator
+    sets: list
+    description: Description
     at: str
+
+    @property
+    def num_rw_csr(self) -> int:
+        """The sets' read-write CSRs, their streamers' not counted."""
+        return sum(s.num_rw_csr for s in self.sets)
+
+    @property
+    def num_ro_csr(self) -> int:
+        """The sets' read-only CSRs, their streamers' not counted."""
+        return sum(s.num_ro_csr for s in self.sets)
 
 
 @dataclass(frozen=True)
@@ -736,52 +803,83 @@ def _group(node: _Node) -> Group:
 
 
 def _accelerator(node: _Node) -> Accelerator:
-    """accelerator.json, checked on its own (the slot's checks: _check_slot)."""
-    for key in OLD_DATAPATH_KEYS:
-        if key in node.value:
-            raise CfgTypeError(node.file, node.where(key), 'a key of the datapath block, which '
-                'accelerator.json replaced (snax-forge C§17, D145): regenerate the design point')
+    """An entry of accelerator.json's accelerators."""
     acc = Accelerator(
         name=node.get('name', str),
-        design_point=node.get('design_point', str),
-        tag=node.get('tag', str),
         inputs=_names(node, 'inputs'),
         outputs=_names(node, 'outputs'),
         groups=[_group(g) for g in node.nodes('groups')],
     )
     if not acc.groups:
         raise CfgTypeError(node.file, node.where('groups'), 'no group')
+    return acc
 
-    # The offsets in CSR order, contiguous from 0: read, never computed
-    for i, csr in enumerate(acc.csrs):
+
+# The top-level keys of accelerator.json before D157 (one accelerator, no accelerators list)
+FLAT_KEYS = ('name', 'inputs', 'outputs', 'groups')
+
+
+def _description(node: _Node) -> Description:
+    """accelerator.json, checked on its own (the slot's checks: _check_slot)."""
+    for key in OLD_DATAPATH_KEYS:
+        if key in node.value:
+            raise CfgTypeError(node.file, node.where(key), 'a key of the datapath block, which '
+                'accelerator.json replaced (snax-forge C§17, D145): regenerate the design point')
+    for key in FLAT_KEYS:
+        if key in node.value:
+            raise CfgTypeError(node.file, node.where(key), 'a top-level key of accelerator.json '
+                'before streamer sets (snax-forge D157), whose accelerators now hold it: '
+                'regenerate the design point')
+    nodes = node.nodes('accelerators')
+    desc = Description(
+        design_point=node.get('design_point', str),
+        tag=node.get('tag', str),
+        accelerators=[_accelerator(a) for a in nodes],
+    )
+    if not desc.accelerators:
+        raise CfgTypeError(node.file, node.where('accelerators'), 'no accelerator')
+
+    # The offsets in CSR order over every accelerator, contiguous from 0: read, never computed
+    for i, csr in enumerate(desc.csrs):
         if csr.offset != i:
-            group = next(g.name for g in acc.groups if csr in g.window)
-            raise CfgSlotError(node.file, node.where('groups'),
+            group = next(g.name for g in desc.groups if csr in g.window)
+            raise CfgSlotError(node.file, node.where('accelerators'),
                 f'group {group}\'s {csr.name} has offset {csr.offset}, but is CSR {i} in CSR '
-                'order (per group START, JOBS, the units\' R/W CSRs, STATUS, COUNTER): the '
-                'offsets must be contiguous from 0')
+                'order (accelerator by accelerator, per group START, JOBS, the units\' R/W CSRs, '
+                'STATUS, COUNTER): the offsets must be contiguous from 0')
 
-    # The outer ports: each names a port of a unit, once; unit names are unique
+    # Names: an accelerator's, a group's (its components') and a unit's are the file's once
+    for what, names in (('accelerator', [a.name for a in desc.accelerators]),
+                        ('group', [g.name for g in desc.groups])):
+        twice = sorted({n for n in names if names.count(n) > 1})
+        if twice:
+            raise CfgSlotError(node.file, node.where('accelerators'),
+                f'{what} {twice[0]!r} twice: names are the file\'s once')
     units = {}
-    for g in acc.groups:
+    for g in desc.groups:
         for u in g.units:
             if u.name in units:
-                raise CfgSlotError(node.file, node.where('groups'), f'unit {u.name!r} twice')
+                raise CfgSlotError(node.file, node.where('accelerators'), f'unit {u.name!r} twice')
             units[u.name] = u
-    seen = set()
-    for key in ('inputs', 'outputs'):
-        for i, entry in enumerate(getattr(acc, key)):
-            unit, _, port = entry.partition('.')
-            if unit not in units or port not in units[unit].ports:
-                raise CfgSlotError(node.file, f'{node.where(key)}[{i}]',
-                    f'{entry!r} names no port of a unit ({", ".join(units)})')
-            if entry in seen:
-                raise CfgSlotError(node.file, f'{node.where(key)}[{i}]', f'{entry!r} twice')
-            seen.add(entry)
-    _check_links(node, acc)
-    for u in units.values():
-        _check_shape(node, acc, u)
-    return acc
+
+    # Per accelerator, its outer ports: each names a port of one of its units, once
+    for acc, at in zip(desc.accelerators, nodes):
+        own = {u.name: u for g in acc.groups for u in g.units}
+        seen = set()
+        for key in ('inputs', 'outputs'):
+            for i, entry in enumerate(getattr(acc, key)):
+                unit, _, port = entry.partition('.')
+                if unit not in own or port not in own[unit].ports:
+                    raise CfgSlotError(node.file, f'{at.where(key)}[{i}]',
+                        f'{entry!r} names no port of accelerator {acc.name}\'s units '
+                        f'({", ".join(own)})')
+                if entry in seen:
+                    raise CfgSlotError(node.file, f'{at.where(key)}[{i}]', f'{entry!r} twice')
+                seen.add(entry)
+        _check_links(at, acc)
+        for u in own.values():
+            _check_shape(at, acc, u)
+    return desc
 
 
 def dirs_of(unit: Unit) -> dict:
@@ -894,6 +992,41 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
             f'{type_name(*t)} (snax_op_result_type)')
 
 
+def _sets(acc: _Node) -> list:
+    """The slot's streamer sets (StreamerSet), as snax_cluster's snaxgen reads them: its
+    snax_streamer_sets, or its snax_streamer_cfg as one set named after the slot with the
+    slot's CSR counts, or none."""
+    streamer = acc.get('snax_streamer_cfg', dict, None)
+    nodes = acc.nodes('snax_streamer_sets', None)
+    if nodes is None:
+        name = acc.get('snax_acc_name', str)
+        rw, ro = acc.get('snax_num_rw_csr', int), acc.get('snax_num_ro_csr', int)
+        return [] if streamer is None else [StreamerSet(name, streamer, rw, ro)]
+    if streamer is not None:
+        raise CfgSlotError(acc.file, acc.where('snax_streamer_sets'),
+            'the slot has both snax_streamer_cfg and snax_streamer_sets; give one')
+    if not nodes:
+        raise CfgSlotError(acc.file, acc.where('snax_streamer_sets'), 'no set')
+    if not acc.get('snax_disable_csr_manager', bool, False):
+        raise CfgSlotError(acc.file, acc.where('snax_streamer_sets'), 'streamer sets need the '
+            "shell's own CSRs: snax_disable_csr_manager must be true (snax_cluster's schema)")
+    sets = []
+    for k, node in enumerate(nodes):
+        name = node.get('name', str)
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
+            raise CfgTypeError(acc.file, node.where('name'),
+                f'{name!r}, not a C identifier (it prefixes the set\'s header macros)')
+        if any(s.name == name for s in sets):
+            raise CfgSlotError(acc.file, node.where('name'), f'set {name!r} twice')
+        rw, ro = node.get('snax_num_rw_csr', int), node.get('snax_num_ro_csr', int)
+        for key, n in (('snax_num_rw_csr', rw), ('snax_num_ro_csr', ro)):
+            if n < 0:
+                raise CfgTypeError(acc.file, node.where(key), f'{n}, must be 0 or more')
+        sets.append(StreamerSet(name, node.get('snax_streamer_cfg', dict), rw, ro,
+                                f'snax_streamer_sets[{k}]'))
+    return sets
+
+
 def _slot(acc: _Node) -> AccSlot:
     ports = acc.get('snax_tcdm_ports', int)
     sparse = acc.get('sparse_interconnect_config', list, None)
@@ -903,18 +1036,15 @@ def _slot(acc: _Node) -> AccSlot:
                     and all(isinstance(v, int) and not isinstance(v, bool) for v in entry)):
                 raise CfgTypeError(acc.file, f'{acc.where("sparse_interconnect_config")}[{i}]',
                     f'must be [width, granularity], got {entry!r}')
-    streamer = acc.get('snax_streamer_cfg', dict, None)
-    accelerator = acc.node('snax_datapath_cfg', None)
+    description = acc.node('snax_datapath_cfg', None)
     slot = AccSlot(
         name=acc.get('snax_acc_name', str),
         tcdm_ports=ports,
         narrow_tcdm_ports=acc.get('snax_narrow_tcdm_ports', int, None),
         wide_tcdm_ports=acc.get('snax_wide_tcdm_ports', int, None),
         sparse_config=sparse,
-        num_rw_csr=acc.get('snax_num_rw_csr', int),
-        num_ro_csr=acc.get('snax_num_ro_csr', int),
-        streamer=streamer,
-        accelerator=None if accelerator is None else _accelerator(accelerator),
+        sets=_sets(acc),
+        description=None if description is None else _description(description),
         at=acc.at,
     )
     _check_slot(acc, slot)
@@ -922,26 +1052,29 @@ def _slot(acc: _Node) -> AccSlot:
 
 
 def _check_slot(acc: _Node, slot: AccSlot):
-    """The slot's counts against its streamer, ports and datapath."""
+    """The slot's counts against its streamers, ports and datapath."""
     def fail(key, why):
         raise CfgSlotError(acc.file, acc.where(key), why)
 
-    if slot.streamer is not None:
+    for s in slot.sets:
         for mover in UNMODELLED_MOVERS:
-            if mover in slot.streamer:
-                raise CfgTargetError(acc.file, acc.where(f'snax_streamer_cfg.{mover}'),
+            if mover in s.streamer:
+                raise CfgTargetError(acc.file, acc.where(s.key(f'snax_streamer_cfg.{mover}')),
                     f'not modelled: the streamer has {", ".join(MOVERS)}')
         for mover in MOVERS:
-            params = slot.streamer.get(mover, {})
+            params = s.streamer.get(mover, {})
             for i, (bounds, channels) in enumerate(zip(params.get('spatial_bounds', []),
                                                        params.get('num_channel', []))):
                 why = spatial_mismatch(bounds, channels)
                 if why is not None:
-                    fail(f'snax_streamer_cfg.{mover}.spatial_bounds[{i}]', why)
-        channels = streamer_channels(slot.streamer)
-        if channels != slot.tcdm_ports:
-            fail('snax_tcdm_ports', f'{slot.tcdm_ports}, but the streamer has {channels} '
-                'channels (num_channel over its movers)')
+                    fail(s.key(f'snax_streamer_cfg.{mover}.spatial_bounds[{i}]'), why)
+    if slot.sets:
+        channels = [streamer_channels(s.streamer) for s in slot.sets]
+        if sum(channels) != slot.tcdm_ports:
+            fail('snax_tcdm_ports', f'{slot.tcdm_ports}, but the streamers have {sum(channels)} '
+                 'channels (num_channel over their movers' + (
+                     f', set by set {dict(zip((s.name for s in slot.sets), channels))})'
+                     if len(slot.sets) > 1 else ')'))
     if slot.narrow_tcdm_ports is not None or slot.wide_tcdm_ports is not None:
         narrow, wide = slot.narrow_tcdm_ports or 0, slot.wide_tcdm_ports or 0
         if narrow + wide != slot.tcdm_ports:
@@ -952,51 +1085,65 @@ def _check_slot(acc: _Node, slot: AccSlot):
         if widths != slot.tcdm_ports:
             fail('sparse_interconnect_config', f'widths add up to {widths}, not '
                 f'snax_tcdm_ports {slot.tcdm_ports}')
-    if slot.accelerator is not None:
-        _check_accelerator(acc, slot)
+    if slot.description is not None:
+        _check_description(acc, slot)
 
 
-def _check_accelerator(acc: _Node, slot: AccSlot):
-    """accelerator.json against the slot: its outer ports against the streamer's movers, each
-    port's words per beat against its mover's num_channel (SnaxGroup has no FIFO slicer, so
-    they must match: the streamer would refuse the beat's size mid-run), and the CSR counts."""
-    accelerator = slot.accelerator
+def _check_description(acc: _Node, slot: AccSlot):
+    """accelerator.json against the slot: one accelerator per set, in the sets' order; each
+    accelerator's outer ports against its set's movers, each port's words per beat against
+    its mover's num_channel (SnaxGroup has no FIFO slicer, so they must match: the streamer
+    would refuse the beat's size mid-run), and each set's CSR counts."""
+    desc = slot.description
 
     def fail(key, why):
         raise CfgSlotError(acc.file, acc.where(key), why)
 
-    if slot.streamer is None:
-        fail('snax_streamer_cfg', 'missing: accelerator.json needs the streamer it is fed by')
-    for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
-        names = getattr(accelerator, key)
-        channels = slot.streamer.get(mover, {}).get('num_channel', [])
-        if len(names) != len(channels):
-            fail(f'snax_datapath_cfg.{key}', f'{names}, but the streamer has {len(channels)} '
-                 f'{mover}: one port each, in order')
-        for i, entry in enumerate(names):
-            unit, _, name = entry.partition('.')
-            u = accelerator.unit(unit)
-            port = u.ports[name]
-            if CATALOGUE[u.datapath].reduces and key == 'outputs':
-                if channels[i] != 1:
-                    fail(f'snax_datapath_cfg.{key}[{i}]', f"{entry}: a fold's output is one "
-                         f'64-bit word per beat, but {mover}[{i}] has num_channel {channels[i]}')
-                continue
-            bits = port.lanes * port.width
-            if bits % 64 != 0:
-                fail(f'snax_datapath_cfg.{key}[{i}]', f'{entry}: lanes {port.lanes} x '
-                     f'{port.width} bits is not a whole number of 64-bit channel words')
-            if bits // 64 != channels[i]:
-                fail(f'snax_datapath_cfg.{key}[{i}]', f'{entry}: lanes {port.lanes} x '
-                     f'{port.width} bits is {bits // 64} 64-bit words per beat, but {mover}[{i}] '
-                     f'has num_channel {channels[i]}: SnaxGroup has no FIFO slicer, so they must '
-                     'match')
-    if slot.num_rw_csr != accelerator.num_rw:
-        fail('snax_num_rw_csr', f'{slot.num_rw_csr}, but accelerator.json has '
-             f'{accelerator.num_rw} read-write CSRs')
-    if slot.num_ro_csr != accelerator.num_ro:
-        fail('snax_num_ro_csr', f'{slot.num_ro_csr}, but accelerator.json has '
-             f'{accelerator.num_ro} read-only CSRs (STATUS and COUNTER per group)')
+    names = [a.name for a in desc.accelerators]
+    if not slot.sets:
+        fail('snax_streamer_sets', 'missing: accelerator.json needs the streamers it is fed by '
+             '(snax_streamer_sets, or snax_streamer_cfg for one accelerator)')
+    if not slot.sets[0].at:
+        if len(names) != 1:
+            fail('snax_streamer_cfg', f'one streamer, but accelerator.json has the accelerators '
+                 f'{names}: give snax_streamer_sets, one set per accelerator')
+    elif [s.name for s in slot.sets] != names:
+        fail('snax_streamer_sets', f'the sets {[s.name for s in slot.sets]}, but accelerator.json\'s '
+             f'accelerators are {names}: one set per accelerator, named after it, in its order')
+    for k, (s, accelerator) in enumerate(zip(slot.sets, desc.accelerators)):
+        at = f'snax_datapath_cfg.accelerators[{k}]'
+        for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
+            ports = getattr(accelerator, key)
+            channels = s.streamer.get(mover, {}).get('num_channel', [])
+            if len(ports) != len(channels):
+                fail(f'{at}.{key}', f'{ports}, but set {s.name}\'s streamer has '
+                     f'{len(channels)} {mover}: one port each, in order')
+            for i, entry in enumerate(ports):
+                unit, _, name = entry.partition('.')
+                u = accelerator.unit(unit)
+                port = u.ports[name]
+                if CATALOGUE[u.datapath].reduces and key == 'outputs':
+                    if channels[i] != 1:
+                        fail(f'{at}.{key}[{i}]', f"{entry}: a fold's output is one 64-bit word "
+                             f"per beat, but set {s.name}'s {mover}[{i}] has num_channel "
+                             f'{channels[i]}')
+                    continue
+                bits = port.lanes * port.width
+                if bits % 64 != 0:
+                    fail(f'{at}.{key}[{i}]', f'{entry}: lanes {port.lanes} x {port.width} bits '
+                         'is not a whole number of 64-bit channel words')
+                if bits // 64 != channels[i]:
+                    fail(f'{at}.{key}[{i}]', f'{entry}: lanes {port.lanes} x {port.width} bits '
+                         f"is {bits // 64} 64-bit words per beat, but set {s.name}'s {mover}[{i}] "
+                         f'has num_channel {channels[i]}: SnaxGroup has no FIFO slicer, so they '
+                         'must match')
+        if s.num_rw_csr != accelerator.num_rw:
+            fail(s.key('snax_num_rw_csr'), f'{s.num_rw_csr}, but accelerator '
+                 f'{accelerator.name} has {accelerator.num_rw} read-write CSRs')
+        if s.num_ro_csr != accelerator.num_ro:
+            fail(s.key('snax_num_ro_csr'), f'{s.num_ro_csr}, but accelerator '
+                 f'{accelerator.name} has {accelerator.num_ro} read-only CSRs (STATUS and '
+                 'COUNTER per group)')
 
 
 def _core(core: _Node) -> Core:
