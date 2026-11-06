@@ -28,7 +28,7 @@
 //                                   element type (snax_types.hpp: 8 to 64
 //                                   bits, signed or not)
 //                lanes              elements per input beat
-//                op                 ElementwiseLanes' op (add ... max); a
+//                op                 SimdLanes' op (add ... max); a
 //                                   fold's add
 //                accumulate, reg_out  Mac's variant
 //                latency, ii, span  C§17's timing

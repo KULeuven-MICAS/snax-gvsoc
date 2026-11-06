@@ -243,7 +243,7 @@ static int check_registry(int *count)
     link.in_types = {i64};
     link.depth = 2;
     std::vector<Case> cases = {
-        {"ElementwiseLanes", two, true, 0, 1}, {"TreeAccumulate", one, true, 1, 1},
+        {"SimdLanes", two, true, 0, 1}, {"TreeAccumulate", one, true, 1, 1},
         {"Mac", two, true, 1, 1}, {"Mac", plain, true, 1, 1}, {"Mac", plain_bad, false, 0, 0},
         {"Mac", one, false, 0, 0}, {"SerialAccumulate", serial, true, 1, 4},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},
@@ -373,7 +373,7 @@ static int check_types(int *count)
 // Whole beats on fixed vectors, the 64-bit channel words lane 0 lowest: an
 // elementwise op (a op b at their result type, cast to out), or a fold
 // (folds firings of the same beat a into one output word). Those the NumPy
-// vectors cover are not here: add int32 -> int32 (elementwise_add_int32_w8),
+// vectors cover are not here: add int32 -> int32 (simd_add_int32_w8),
 // a fold add int32 -> int64 (tree_int32_to_int64_w4)
 static int check_beats(int *count)
 {

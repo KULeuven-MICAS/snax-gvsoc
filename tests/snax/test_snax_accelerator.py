@@ -134,7 +134,7 @@ class Built(unittest.TestCase):
         self.assertEqual((group["links"], group["csr_base"]), ([], first))
         self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"],
                           unit["lanes"], unit["latency"], unit["ii"], unit["span"], unit["t"]),
-                         ("ElementwiseLanes", ["acc_a", "acc_b"], "acc_out", "add", 4, 0, 1, 1,
+                         ("SimdLanes", ["acc_a", "acc_b"], "acc_out", "add", 4, 0, 1, 1,
                           1))
         self.assertEqual(mappings(acc), [(960, 18), (978, 0x600 - 978)])
         self.assertEqual(acc.tcdm_port_names[:2], ["streamer_acc.reader0.lane0",
@@ -186,7 +186,7 @@ class Built(unittest.TestCase):
         (mul,), (total,) = (acc.components[n].properties["units"]
                             for n in ("unit_vmul", "unit_vsum"))
         self.assertEqual((mul["datapath"], mul["inputs"], mul["op"], mul["t"]),
-                         ("ElementwiseLanes", ["vmul_a", "vmul_b"], "mul", 1))
+                         ("SimdLanes", ["vmul_a", "vmul_b"], "mul", 1))
         self.assertEqual((total["datapath"], total["inputs"], total["output"], total["op"],
                           total["lanes"], total["latency"], total["t"]),
                          ("TreeAccumulate", ["vsum_a"], "vsum_out", "add", 4, 1, 0))

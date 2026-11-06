@@ -1,7 +1,7 @@
 # dot 3 at N = 8, W = 4 (T = 2), JOBS 1: mul -> a wire -> TreeAccumulate sum
 # C§17: busy cycles E - s = 3
 
-unit mul ElementwiseLanes latency 0 ii 1 span 1 t 1 inputs 2
+unit mul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2
 unit sum TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 0
 link mul sum depth 0
 jobs 1

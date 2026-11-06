@@ -59,8 +59,8 @@ def en(fire=0, first=0, read=0, lane=0, e=0, load=0, ws=0, rs=0):
     return (fire, first, read, lane, e, load, ws, rs)
 
 
-def elementwise(name, op, t_a, t_b, t_out, lanes, steps=6):
-    t = Test(name, "ElementwiseLanes", [t_a, t_b], np.result_type(NP[t_a], NP[t_b]).name,
+def simd(name, op, t_a, t_b, t_out, lanes, steps=6):
+    t = Test(name, "SimdLanes", [t_a, t_b], np.result_type(NP[t_a], NP[t_b]).name,
              t_out, lanes, op=op)
     for _ in range(steps):
         a, b = rand(t_a, lanes), rand(t_b, lanes)
@@ -199,9 +199,9 @@ def main():
     with np.errstate(over="ignore"):
         for t_in, t_out, sizes in (("int64", "int64", (1, 2, 4)), ("int32", "int32", (2, 4, 8))):
             for lanes in sizes:
-                tests.append(elementwise(f"elementwise_add_{t_in}_w{lanes}", "add", t_in, t_in,
+                tests.append(simd(f"simd_add_{t_in}_w{lanes}", "add", t_in, t_in,
                                          t_out, lanes))
-                tests.append(elementwise(f"elementwise_mul_{t_in}_w{lanes}", "mul", t_in, t_in,
+                tests.append(simd(f"simd_mul_{t_in}_w{lanes}", "mul", t_in, t_in,
                                          t_out, lanes))
                 tests.append(tree(f"tree_{t_in}_w{lanes}", t_in, t_out, lanes, 3))
                 tests.append(mac(f"mac_acc_{t_in}_w{lanes}", t_in, t_in, t_out, lanes, 3))

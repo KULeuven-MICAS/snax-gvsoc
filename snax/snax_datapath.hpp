@@ -26,7 +26,7 @@
 // plain Mac's output register, regOut), load, wslot and rslot (a LinkBuffer's
 // write enable and its ring's write and read slots).
 //
-//   ElementwiseLanes(inTypes, opType, outType, lanes, op)   L 0: per lane
+//   SimdLanes(inTypes, opType, outType, lanes, op)   L 0: per lane
 //       a op b at opType, cast to outType (snax_op_elementwise)
 //   TreeAccumulate(inType, outType, lanes, add)   L 1, pins fire, first: on
 //       fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to outType
@@ -120,10 +120,10 @@ inline int snax_words(int lanes, SnaxType t)
 }
 
 
-class SnaxElementwiseLanes : public SnaxDatapath
+class SnaxSimdLanes : public SnaxDatapath
 {
 public:
-    explicit SnaxElementwiseLanes(const SnaxDatapathParams &p) : p(p)
+    explicit SnaxSimdLanes(const SnaxDatapathParams &p) : p(p)
     {
         this->in_words = {snax_words(p.lanes, p.in_types[0]), snax_words(p.lanes, p.in_types[1])};
         this->out_words = snax_words(p.lanes, p.out_type);
@@ -344,14 +344,14 @@ inline bool snax_whole_words(int lanes, SnaxType t)
 inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
 {
     static const std::map<std::string, SnaxDatapathEntry> registry = {
-        {"ElementwiseLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
+        {"SimdLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
             SnaxType t;
             if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
             {
                 *why = "two inputs with an integer result type";
                 return std::unique_ptr<SnaxDatapath>();
             }
-            return std::unique_ptr<SnaxDatapath>(new SnaxElementwiseLanes(p));
+            return std::unique_ptr<SnaxDatapath>(new SnaxSimdLanes(p));
         }}},
         {"TreeAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
             if (p.in_types.size() != 1 || p.op != SNAX_OP_ADD)

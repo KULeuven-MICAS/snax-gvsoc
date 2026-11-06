@@ -8,7 +8,7 @@
 // (snax_datapath.hpp) and the tests check: NumPy's arithmetic on integer types
 // (SnaxType: 8 to 64 bits, signed or not), each port with its own. A port of W
 // lanes of b bits takes W * b / 64 channel words, lane l at bits
-// [l * b, (l + 1) * b) of them side by side (the wire slice). An elementwise
+// [l * b, (l + 1) * b) of them side by side (the wire slice). A SimdLanes
 // op runs per lane at T, the result type of its two inputs' types
 // (snax_op_result_type; none for a signed type with uint64), each operand
 // extended to T by its own signedness; the result wraps at T and is cast to
@@ -148,7 +148,7 @@ inline void snax_lane_set(uint64_t *words, int width, int lane, uint64_t v)
 }
 
 
-// An elementwise beat, as NumPy's out = (a op b).astype(out_t): per lane, a
+// A SimdLanes beat, as NumPy's out = (a op b).astype(out_t): per lane, a
 // and b each at its own port's type, both extended to T, their result type
 // (snax_op_result_type, which must give one), the op at T, and the result
 // cast to out_t. The words: lanes * width / 64 per port, out's cleared here.

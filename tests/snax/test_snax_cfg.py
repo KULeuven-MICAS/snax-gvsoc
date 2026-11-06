@@ -58,8 +58,8 @@ def group_csrs(base: int, between: int = 0) -> list:
             Csr("COUNTER", "ro", base + 3 + between, 32)]
 
 
-def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
-    return Unit(name, brm or f"elementwise_{op}", "ElementwiseLanes",
+def simd(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
+    return Unit(name, brm or "simd", "SimdLanes",
                 {p: Port(p, dtype, 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
                 dtype, {"op": op}, 0, 1, [])
 
@@ -86,7 +86,7 @@ def accelerator(design: str, unit: Unit, between: int = 0) -> Description:
 
 
 # forge/vecadd/'s accelerator.json, parsed
-VECADD = accelerator("vecadd", elementwise("acc", "add"))
+VECADD = accelerator("vecadd", simd("acc", "add"))
 
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
 
@@ -161,7 +161,7 @@ class Fixtures(unittest.TestCase):
         slot = self.slot("vecmul")
         self.assertEqual(slot.sets[0].streamer, STREAMER)
         self.assertEqual(slot.description,
-                         accelerator("vecmul", elementwise("acc", "mul")))
+                         accelerator("vecmul", simd("acc", "mul")))
 
     def test_vsum_tree_i32(self):
         """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
@@ -356,12 +356,12 @@ def streamer(readers: list, writers: list) -> dict:
     return {"data_reader_params": movers(readers), "data_writer_params": movers(writers)}
 
 
-# dot 1 (snax-forge C§17's table, D157): the units vmul (an ElementwiseLanes mul) and vsum (a
+# dot 1 (snax-forge C§17's table, D157): the units vmul (an SimdLanes mul) and vsum (a
 # TreeAccumulate over 4 lanes, with JOB_BEATS), each an accelerator of one group, in two
 # streamer sets: vmul's CSRs START 0, JOBS 1, STATUS 2, COUNTER 3, vsum's START 4, JOBS 5,
 # JOB_BEATS 6, STATUS 7, COUNTER 8 (the offsets run over both accelerators)
 VMUL = Accelerator("vmul", ["vmul.a", "vmul.b"], ["vmul.out"],
-                   [Group("vmul", group_csrs(0), [elementwise("vmul", "mul")], [])])
+                   [Group("vmul", group_csrs(0), [simd("vmul", "mul")], [])])
 VSUM = Accelerator("vsum", ["vsum.a"], ["vsum.out"],
                    [Group("vsum", group_csrs(4, 1), [fold("vsum", 4, lanes=4)], [])])
 DOT1 = description("dot_1", VMUL, VSUM)
@@ -569,7 +569,7 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.dir", "must be in or out")
 
     def test_unit_csrs(self):
-        """ElementwiseLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
+        """SimdLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
         modelled."""
         self.unit()["csrs"] = [{"name": "JOB_BEATS", "access": "rw", "offset": 2, "width": 32}]
         self.acc["accelerators"][0]["groups"][0]["csrs"][2]["offset"] = 3

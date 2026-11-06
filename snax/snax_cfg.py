@@ -65,11 +65,11 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
       groups[]                Group: name, csrs (START, JOBS, STATUS,
                               COUNTER), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
-                              snax_datapath.hpp's registry: ElementwiseLanes,
+                              snax_datapath.hpp's registry: SimdLanes,
                               TreeAccumulate, Mac, SerialAccumulate), ports
                               (per BRM port: port, the datapath's; dir, in or
-                              out; dtype, NumPy's name; lanes), opType (ElementwiseLanes and Mac),
-                              params (op: ElementwiseLanes' and
+                              out; dtype, NumPy's name; lanes), opType (SimdLanes and Mac),
+                              params (op: SimdLanes' and
                               TreeAccumulate's, add; accumulate, regOut: Mac's;
                               T: a fold's rate fixed at design time), timing
                               (latency, ii, span: 1 when missing), csrs (its
@@ -101,7 +101,7 @@ links (gen.link_port) and a group's links connect its units (gen.group), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
 1), since SnaxGroup has no FIFO slicer; each set's snax_num_rw_csr and
-snax_num_ro_csr are its accelerator's R/W and R/O CSRs. An ElementwiseLanes unit's
+snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
 opType is its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
 and b.
@@ -193,8 +193,8 @@ def _accumulates(params: dict) -> bool:
 # The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
 # LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
 CATALOGUE = {
-    'ElementwiseLanes': Datapath(nb_inputs=lambda p: 2, is_fold=lambda p: False,
-                                 latency=lambda p: 0, typed=True, needs_op=True),
+    'SimdLanes': Datapath(nb_inputs=lambda p: 2, is_fold=lambda p: False,
+                          latency=lambda p: 0, typed=True, needs_op=True),
     'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1, reduces=True, needs_op=True, only_op='add'),
     'Mac': Datapath(nb_inputs=lambda p: 2 if _accumulates(p) else 3, is_fold=_accumulates,
@@ -392,7 +392,7 @@ class Port:
 @dataclass(frozen=True)
 class Unit:
     """A unit of a group: its datapath, its ports by BRM port (in the BRM's order), its op
-    type (ElementwiseLanes; None for a fold), params, timing and its R/W CSRs."""
+    type (SimdLanes; None for a fold), params, timing and its R/W CSRs."""
 
     name: str
     brm: str

@@ -32,7 +32,7 @@ A cycle line: `V... R | F G | F G ... | O... | B`: the outer inputs' valid, unit
 
 | Case | What |
 |---|---|
-| `dot<v>_n<N>_j<J>` | dot variant v = 2 to 6 at W = 4, N = 8 (T = 2) and N = 16 (T = 4), JOBS 1 and 2: dot 2 ElementwiseLanes mul (L 0, T 1) -> buffer of depth 1 -> TreeAccumulate sum (L 1, T = N / W); dot 3 the same with a wire; dot 4 Mac (accumulate, L 1, T = N / W) -> wire -> TreeAccumulate (L 1, T 1); dot 5 Mac -> wire -> SerialAccumulate (L 1, span 4, T 1); dot 6 Mac -> buffer of depth 1 -> SerialAccumulate |
+| `dot<v>_n<N>_j<J>` | dot variant v = 2 to 6 at W = 4, N = 8 (T = 2) and N = 16 (T = 4), JOBS 1 and 2: dot 2 SimdLanes mul (L 0, T 1) -> buffer of depth 1 -> TreeAccumulate sum (L 1, T = N / W); dot 3 the same with a wire; dot 4 Mac (accumulate, L 1, T = N / W) -> wire -> TreeAccumulate (L 1, T 1); dot 5 Mac -> wire -> SerialAccumulate (L 1, span 4, T 1); dot 6 Mac -> buffer of depth 1 -> SerialAccumulate |
 | `dot4_backpressure` | dot 4, T = 2, JOBS 2, the writer not ready for two cycles: the sum's head held (stall_out), the MAC's result behind it |
 | `dot6_input_gap` | dot 6, T = 4, JOBS 2, reader a without a beat for a cycle: stall_in |
 | `dot5_w1_j2`, `dot6_w1_j2` | dot 5 and dot 6 at W = 1, T = 4, JOBS 2: SerialAccumulate at span 1, which reads (and fires) once per beat; random int64 data (numpy, seeded) and each job's sum from numpy |
