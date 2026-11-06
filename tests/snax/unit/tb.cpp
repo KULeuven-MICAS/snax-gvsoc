@@ -53,6 +53,8 @@ struct Case
     int lanes = 1;      // input lanes: the tree in front of a fold, or the op's
     std::vector<SnaxType> types;    // the inputs' then the output's; empty: no data
     int op = SNAX_OP_ADD;
+    bool has_k = false;     // one input, an elementwise op with the constant k (relu's)
+    uint64_t k = 0;         // its 64-bit two's complement
     std::vector<StartLine> starts;
     std::vector<std::string> expects;   // run lines, in order
     std::vector<CycleLine> cycles;
@@ -185,6 +187,16 @@ static bool parse(const std::string &path, Case &c)
             size_t last = rest.find_last_not_of(" \t\r");
             c.expects.push_back(first == std::string::npos ? "" : rest.substr(first, last - first + 1));
         }
+        else if (key == "k")
+        {
+            std::string v;
+            ok = (bool)(ss >> v) && !v.empty();
+            if (ok)
+            {
+                c.k = v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
+                c.has_k = true;
+            }
+        }
         else if (key == "beat") { ok = values_line(ss, c.beats); }
         else if (key == "result") { ok = values_line(ss, c.results); }
         else if (key == "cycles") { in_cycles = true; }
@@ -194,6 +206,11 @@ static bool parse(const std::string &path, Case &c)
             fprintf(stderr, "%s:%d: cannot read \"%s\"\n", path.c_str(), lineno, raw.c_str());
             return false;
         }
+    }
+    if (c.has_k && c.inputs != 1)
+    {
+        fprintf(stderr, "%s: k is one input's constant; inputs is %d\n", path.c_str(), c.inputs);
+        return false;
     }
     if (!c.types.empty() && (int)c.types.size() != c.inputs + 1)
     {
@@ -240,6 +257,14 @@ struct Data
             return;
         }
         SnaxType out_t = this->c.types[this->c.inputs];
+        if (this->c.has_k)  // one input, op(a, k) at a's type
+        {
+            std::vector<uint64_t> out(this->c.lanes * out_t.width / 64 + 1, 0);
+            snax_op_elementwise_k(this->c.op, this->c.lanes, this->c.types[0], this->c.types[0],
+                out_t, this->words(0, it->second).data(), this->c.k, out.data());
+            this->pending.push_back(out);
+            return;
+        }
         if (this->c.inputs == 1)
         {
             this->acc = snax_op_fold(this->c.op, this->c.lanes, this->c.types[0], out_t,
@@ -264,7 +289,7 @@ struct Data
         this->pending.pop_front();
         auto it = this->c.results.find(index);
         SnaxType out_t = this->c.types[this->c.inputs];
-        int lanes = this->c.inputs == 1 ? 1 : this->c.lanes;
+        int lanes = this->c.inputs == 1 && !this->c.has_k ? 1 : this->c.lanes;
         if (it == this->c.results.end() || (int)it->second.size() != lanes)
         {
             printf("%s: cycle %ld: push %d has no result of %d values\n", this->c.name.c_str(),

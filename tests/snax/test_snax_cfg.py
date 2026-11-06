@@ -163,6 +163,16 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(slot.description,
                          accelerator("vecmul", simd("acc", "mul")))
 
+    def test_relu(self):
+        """One stream: SimdLanes with one input a, params op max and k 0, opType int32, a's;
+        a reader and a writer of two channels each."""
+        slot = self.slot("relu")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "out")},
+                    "int32", {"op": "max", "k": 0}, 0, 1, [])
+        self.assertEqual(slot.description, accelerator("relu", unit))
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (4, 2, 2))
+
     def test_vsum_tree_i32(self):
         """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
         slot = self.slot("vsum_tree_i32")
@@ -551,6 +561,21 @@ class AccJson(unittest.TestCase):
         self.unit()["ports"]["b"]["dtype"] = "uint64"
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.accelerators[0].groups",
                    "int64 with uint64 has no integer result type")
+
+    def test_k(self):
+        """k, SimdLanes' constant at one stream: an int of its opType; with it the unit has one
+        input; no other datapath has one."""
+        self.unit()["params"]["k"] = 0
+        self.fails(snax_cfg.CfgTargetError, "snax_datapath_cfg.accelerators[0].inputs",
+                   "2 inputs and 1 outputs; SimdLanes takes 1 and 1")
+        self.unit()["params"]["k"] = 2 ** 63
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "does not fit the opType int64")
+        self.unit()["params"]["k"] = "0"
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "must be")
+        self.acc = acc_json(VECADD)
+        self.unit()["datapath"] = "TreeAccumulate"
+        self.unit()["params"]["k"] = 0
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "a TreeAccumulate unit has no")
 
     def test_dtype_and_op(self):
         self.unit()["ports"]["out"]["dtype"] = "float64"

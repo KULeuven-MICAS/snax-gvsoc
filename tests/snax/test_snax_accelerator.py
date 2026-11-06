@@ -136,9 +136,18 @@ class Built(unittest.TestCase):
                           unit["lanes"], unit["latency"], unit["ii"], unit["span"], unit["t"]),
                          ("SimdLanes", ["acc_a", "acc_b"], "acc_out", "add", 4, 0, 1, 1,
                           1))
+        self.assertEqual(unit["k"], "")  # two streams: no constant
         self.assertEqual(mappings(acc), [(960, 18), (978, 0x600 - 978)])
         self.assertEqual(acc.tcdm_port_names[:2], ["streamer_acc.reader0.lane0",
                                                    "streamer_acc.reader0.lane1"])
+
+    def test_relu_one_stream(self):
+        """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
+        acc = self.build(CLUSTER.parent.parent / "relu" / "snax_forge.hjson")
+        (unit,) = acc.components["unit"].properties["units"]
+        self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"], unit["k"],
+                          unit["in_widths"], unit["op_width"], unit["lanes"]),
+                         ("SimdLanes", ["acc_a"], "acc_out", "max", "0", [32], 32, 4))
 
     def test_dot_1_two_sets(self):
         """dot 1: a streamer per set at its base, a shell per accelerator after it."""

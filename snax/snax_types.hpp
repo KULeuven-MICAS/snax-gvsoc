@@ -171,6 +171,27 @@ inline void snax_op_elementwise(int op, int lanes, SnaxType a_t, SnaxType b_t,
 }
 
 
+// A one-stream SimdLanes beat, as NumPy's out = op(a, k).astype(out_t): per
+// lane, a extended to t (a's own type, its opType), the op at t with the
+// constant k, given as its bits (two's complement in 64 bits, a value of t),
+// and the result cast to out_t. out's words are cleared here.
+inline void snax_op_elementwise_k(int op, int lanes, SnaxType a_t, SnaxType t,
+    SnaxType out_t, const uint64_t *a, uint64_t k, uint64_t *out)
+{
+    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    {
+        out[w] = 0;
+    }
+    uint64_t y = k & snax_lane_mask(t.width);
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
+        snax_lane_set(out, out_t.width, lane,
+            snax_lane_cast(snax_op_compute(op, t, x, y), t, out_t));
+    }
+}
+
+
 // A fold's firing: the beat's lanes, each cast from in_t to out_t, through
 // the tree at out_t; the first firing of an output starts its value with
 // that, the others fold it in, op(acc, x) at out_t. Returns the output's

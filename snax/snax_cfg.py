@@ -70,7 +70,9 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
                               (per BRM port: port, the datapath's; dir, in or
                               out; dtype, NumPy's name; lanes), opType (SimdLanes and Mac),
                               params (op: SimdLanes' and
-                              TreeAccumulate's, add; accumulate, regOut: Mac's;
+                              TreeAccumulate's, add; k: SimdLanes' constant at
+                              one stream, its one input, an int of its opType;
+                              accumulate, regOut: Mac's;
                               T: a fold's rate fixed at design time), timing
                               (latency, ii, span: 1 when missing), csrs (its
                               R/W ones: JOB_BEATS, a fold's without T)
@@ -193,7 +195,7 @@ def _accumulates(params: dict) -> bool:
 # The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
 # LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
 CATALOGUE = {
-    'SimdLanes': Datapath(nb_inputs=lambda p: 2, is_fold=lambda p: False,
+    'SimdLanes': Datapath(nb_inputs=lambda p: 1 if 'k' in p else 2, is_fold=lambda p: False,
                           latency=lambda p: 0, typed=True, needs_op=True),
     'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1, reduces=True, needs_op=True, only_op='add'),
@@ -674,6 +676,13 @@ def type_name(width: int, signed: bool) -> str:
 DTYPES = {type_name(w, s): (w, s) for w in (8, 16, 32, 64) for s in (True, False)}
 
 
+def fits(value: int, t: tuple) -> bool:
+    """value is one of integer type t's (width, signed)."""
+    width, signed = t
+    lo, hi = (-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else (0, (1 << width) - 1)
+    return lo <= value <= hi
+
+
 def result_type(a: tuple, b: tuple):
     """NumPy's result type of two integer types (width, signed), as snax_types.hpp's
     snax_op_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
@@ -744,6 +753,9 @@ def _unit(node: _Node) -> Unit:
             f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
     for key in ('accumulate', 'regOut'):
         params.get(key, bool, None)
+    k = params.get('k', int, None)
+    if k is not None and datapath != 'SimdLanes':
+        raise CfgTypeError(node.file, params.where('k'), f'a {datapath} unit has no constant k')
     t = params.get('T', int, None)
     if t is not None and t < 1:
         raise CfgTypeError(node.file, params.where('T'), f'{t}, must be 1 or more')
@@ -756,6 +768,8 @@ def _unit(node: _Node) -> Unit:
             f'missing: a {datapath} unit runs its op at its inputs\' result type')
     if op_type is not None and op_type not in DTYPES:
         raise CfgTypeError(node.file, node.where('opType'), f'{op_type!r}, not a NumPy integer type')
+    if k is not None and not fits(k, DTYPES[op_type]):
+        raise CfgTypeError(node.file, params.where('k'), f'{k}: does not fit the opType {op_type}')
     csrs = [_csr(c) for c in node.nodes('csrs')]
     for i, c in enumerate(csrs):
         if c.name not in UNIT_RW or c.access != 'rw':
@@ -980,6 +994,13 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: c is {ins[2].dtype}, out {outs[0].dtype}; a plain Mac\'s c is '
             'out\'s type')
+    if n_in == 1:  # one stream: the op at a's type, with the constant k
+        a = (ins[0].width, ins[0].signed)
+        if u.op_type != type_name(*a):
+            raise CfgSlotError(node.file, node.where('groups'),
+                f'unit {u.name}: opType {u.op_type}, but its one input is {type_name(*a)} (the op '
+                'runs at it with k)')
+        return
     a, b = ((p.width, p.signed) for p in ins[:2])
     t = result_type(a, b)
     if t is None:

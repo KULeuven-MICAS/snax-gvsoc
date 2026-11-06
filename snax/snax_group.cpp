@@ -30,6 +30,9 @@
 //                lanes              elements per input beat
 //                op                 SimdLanes' op (add ... max); a
 //                                   fold's add
+//                k                  SimdLanes' constant at one stream,
+//                                   decimal ("0", "-3"), its second operand
+//                                   at opType for every lane; "" at two
 //                accumulate, reg_out  Mac's variant
 //                latency, ii, span  C§17's timing
 //                t                  a result every t-th firing, fixed (1 for a
@@ -78,6 +81,7 @@
 // busy, 2 stall_in, 3 stall_out, 4 flush).
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <vp/vp.hpp>
@@ -234,6 +238,26 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         }
         p.accumulate = this->props.bool_prop(u, "accumulate", w);
         p.reg_out = this->props.bool_prop(u, "reg_out", w);
+        std::string k_text = this->props.str_prop(u, "k", w);
+        if (!k_text.empty())
+        {
+            try
+            {
+                size_t used = 0;
+                p.k = k_text[0] == '-' ? (uint64_t)std::stoll(k_text, &used)
+                    : std::stoull(k_text, &used);
+                p.has_k = used == k_text.size();
+            }
+            catch (const std::exception &)
+            {
+                p.has_k = false;
+            }
+            if (!p.has_k)
+            {
+                this->trace.fatal("Property %s.k: \"%s\", not a decimal integer\n", w.c_str(),
+                    k_text.c_str());
+            }
+        }
         std::string why;
         std::unique_ptr<SnaxDatapath> dp = snax_datapath_new(datapath, p, &why);
         if (!dp)

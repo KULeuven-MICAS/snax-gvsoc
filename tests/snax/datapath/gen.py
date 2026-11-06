@@ -72,6 +72,18 @@ def simd(name, op, t_a, t_b, t_out, lanes, steps=6):
     return t
 
 
+def simd_k(name, op, t_a, t_out, lanes, k, steps=6):
+    """A one-stream SimdLanes: op(a, k) at a's type, k its constant (the header's `k`)."""
+    t = Test(name, "SimdLanes", [t_a], t_a, t_out, lanes, op=op, k=k)
+    y = NP[t_a](k)
+    for _ in range(steps):
+        a = rand(t_a, lanes)
+        r = {"add": a + y, "sub": a - y, "mul": a * y, "min": np.minimum(a, y),
+             "max": np.maximum(a, y)}[op]
+        t.step(en(fire=1), [a], wrap(r, t_out))
+    return t
+
+
 def tree(name, t_in, t_out, lanes, beats, firings=10):
     t = Test(name, "TreeAccumulate", [t_in], t_out, t_out, lanes, op="add")
     acc, d = NP[t_out](0), 0
@@ -216,6 +228,16 @@ def main():
         for depth in (1, 2, 4):
             tests.append(buffer(f"buffer_int64_w4_d{depth}", "int64", 4, depth))
             tests.append(buffer(f"buffer_int32_w4_d{depth}", "int32", 4, depth))
+        # one stream (relu's): every op at int32 and int64, k random and at the edges (drawn
+        # after the tests above, so theirs stay as they were)
+        for t_in, lanes in (("int32", 4), ("int64", 2)):
+            info = np.iinfo(NP[t_in])
+            for op in ("add", "sub", "mul", "min", "max"):
+                ks = [0, -1, int(info.min), int(info.max), int(rand(t_in, 1)[0])]
+                for i, k in enumerate(ks):
+                    tests.append(simd_k(f"simd_k_{op}_{t_in}_w{lanes}_{i}", op, t_in, t_in, lanes,
+                                        k))
+        tests.append(simd_k("simd_k_max_int32_to_int64_w4", "max", "int32", "int64", 4, 0))
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

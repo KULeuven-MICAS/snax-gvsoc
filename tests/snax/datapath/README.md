@@ -14,7 +14,7 @@ The datapaths of `snax/snax_datapath.hpp`, one plain C++ class per entry of snax
     optype int32                 the op's type (Mac, SimdLanes)
     out int64                    the output's type (a LinkBuffer's dtype)
     lanes 4
-    accumulate 1                 Mac only; also regOut, depth (LinkBuffer), op
+    accumulate 1                 Mac only; also regOut, depth (LinkBuffer), op, k (a one-stream SimdLanes' constant)
     step F FI R L E LD WS RS : IN0 ; IN1 ... => OUT
 
 A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEnables`), then each input's lanes, `;` between inputs, then the output lanes eval must give: its registers before the step's clock edge for a registered datapath, the combinational result for SimdLanes and a plain Mac without regOut. A fold's or SerialAccumulate's output is one value.
@@ -22,6 +22,7 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 ## What it covers
 
 - Each class at three sizes, int64 (1, 2, 4 lanes) and int32 (2, 4, 8), random beats and enables; a tree, a MAC and a serial sum from int32 into int64; LinkBuffer at depth 1, 2 and 4.
+- SimdLanes at one stream (relu's, the header's `k`: op(a, k) at a's type): add, sub, mul, min and max at int32 (4 lanes) and int64 (2), each with k = 0, -1, the type's min and max, and a random k; and max(a, 0) from int32 into int64.
 - Mac in its three forms: accumulate, plain, plain with regOut. Plain at W = 4: a = (3, 5, -9, 5), b = (-1, 0, 2, -4), c = (8, -9, -4, -3) give y = (5, -9, -22, -23).
 - Accumulate at W = 2, J = 2, T = 3: A's rows (1, -2, 3, 4, -5, 6) and (2, 2, 2, 2, 2, 2) against p = (2, 1, 0, -1, 3, 2), a beat a cycle, give the partials (-13, 6) and (10, 4); dot's sums of them are q = (-7, 14).
 - The int32 product that wraps, W = 2, T = 8: 46341 x 46341 wraps at int32, and the partials are (-2147478991, 4).
@@ -32,4 +33,4 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 
     tests/snax/datapath/run.sh
 
-It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `60 passed, 0 failed`.
+It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `111 passed, 0 failed`.

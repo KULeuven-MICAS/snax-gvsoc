@@ -148,6 +148,7 @@ def group_units(accelerator, group) -> tuple:
             'op': u.params.get('op', 'add'),
             'accumulate': bool(u.params.get('accumulate', True)),
             'reg_out': bool(u.params.get('regOut', False)),
+            'k': str(u.params['k']) if 'k' in u.params else '',
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
         })
     links = []

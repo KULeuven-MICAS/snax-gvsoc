@@ -16,12 +16,13 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, in any 
 | Line | What |
 |---|---|
 | `latency L`, `ii N` | the unit's L >= 0 and II >= 1 (defaults 0 and 1) |
-| `inputs N` | input columns: 2 (an elementwise op) or 1 (a fold); default 2 |
+| `inputs N` | input columns: 2 (an elementwise op) or 1 (a fold, or with `k` an elementwise op on one input); default 2 |
 | `lanes W` | input lanes (default 1): a fold's tree, or the op's lanes; only the data uses it |
 | `start CYCLE J T taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step) with jobs J and job_beats T, and its expected answer |
 | `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the summary line expected at the end of run I, in order (`docs/EVENTS.md`) |
 | `types IN... OUT` | optional: each input's and the output's NumPy integer type (`int8` .. `uint64`); with it the data below is checked |
 | `op NAME` | the op with `types`: add, sub, mul, and, or, xor, min, max (default add) |
+| `k V` | one input's constant (decimal): the case is a one-stream SimdLanes, each lane op(a, k) at the input's type, W results per push |
 | `beat N V...` | the input lanes of the case's N-th firing (from 0, over every run): W values per input, input 0 first |
 | `result N V...` | the case's N-th pushed result: W values for an elementwise op, one for a fold |
 | `cycles` | the cycle lines follow |
@@ -41,6 +42,7 @@ A cycle line: each input's valid, the output's ready (room), then the expected f
 | `pipelined_tree_tn` | a fold over 4 lanes at J = 1, T = 8: one sum per run, a missing input (stall_in) and a sum with no room (stall_out) |
 | `pipelined_tree_t4` | a fold over 4 lanes at J = 2: T = 4 with the first sum waiting for room, then T = 2 |
 | `empty_run` | jobs 0, job_beats 0 and both: ignored, busy stays 0; a run between them as usual. The only case of the empty run: it is ignored at any L and II |
+| `relu_one_stream` | relu's one-stream SimdLanes (op max, k 0) at W = 4, int32, N = 8: JOBS = 2, T = 1, L = 0; A = (-3, 5, 0, -1 \| 7, -8, 2, -2) gives B = (0, 5, 0, 0 \| 7, 0, 2, 0) |
 | `fold_jobs` | J = 2, T = 3, L = 1, int32 in, int64 out, with data: beats (k, k, k, k) for k = 1 .. 6 give 24 and 60, pushed in the cycles after firings 3 and 6, the next input taken as a result leaves |
 
 ## Running
@@ -49,4 +51,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/unit/run.sh
 
-It prints `PASS` per case and ends with `12 passed, 0 failed`.
+It prints `PASS` per case and ends with `13 passed, 0 failed`.

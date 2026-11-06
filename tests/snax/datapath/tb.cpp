@@ -114,6 +114,17 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         else if (key == "depth") { ok = (bool)(ss >> tests.back().p.depth); }
         else if (key == "accumulate") { int v; ok = (bool)(ss >> v); tests.back().p.accumulate = v; }
         else if (key == "regOut") { int v; ok = (bool)(ss >> v); tests.back().p.reg_out = v; }
+        else if (key == "k")
+        {
+            // a one-stream SimdLanes' constant, decimal, kept as its 64-bit two's complement
+            std::string v;
+            ok = (bool)(ss >> v) && !v.empty();
+            if (ok)
+            {
+                tests.back().p.k = v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
+                tests.back().p.has_k = true;
+            }
+        }
         else if (key == "op")
         {
             std::string name;
@@ -230,9 +241,13 @@ static int check_registry(int *count)
 {
     const SnaxType i64 = {64, true};
     struct Case { const char *name; SnaxDatapathParams p; bool builds; int latency, span; };
-    SnaxDatapathParams two, one, plain, plain_bad, serial, link;
+    SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k;
     two.in_types = {i64, i64};
     one.in_types = {i64};
+    one_k.in_types = {i64};
+    one_k.has_k = true;
+    two_k = two;
+    two_k.has_k = true;
     plain.in_types = {i64, i64, i64};
     plain.accumulate = false;
     plain.reg_out = true;
@@ -243,7 +258,9 @@ static int check_registry(int *count)
     link.in_types = {i64};
     link.depth = 2;
     std::vector<Case> cases = {
-        {"SimdLanes", two, true, 0, 1}, {"TreeAccumulate", one, true, 1, 1},
+        {"SimdLanes", two, true, 0, 1}, {"SimdLanes", one_k, true, 0, 1},
+        {"SimdLanes", one, false, 0, 0}, {"SimdLanes", two_k, false, 0, 0},
+        {"TreeAccumulate", one, true, 1, 1},
         {"Mac", two, true, 1, 1}, {"Mac", plain, true, 1, 1}, {"Mac", plain_bad, false, 0, 0},
         {"Mac", one, false, 0, 0}, {"SerialAccumulate", serial, true, 1, 4},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},

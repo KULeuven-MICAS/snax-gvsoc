@@ -1,0 +1,26 @@
+# relu, one stream (snax-forge's SimdLanes at one input, op max, k 0): B = max(A, 0),
+# W = 4 lanes of int32, N = 8, so JOBS = 2 and T = 1. L = 0, II 1 (lockstep): two
+# firings back to back, each pushed in its own cycle. Worked by hand: A's beats
+# (-3, 5, 0, -1) and (7, -8, 2, -2), each lane max(a, 0) at int32, give
+# (0, 5, 0, 0) and (7, 0, 2, 0)
+latency 0
+ii 1
+inputs 1
+lanes 4
+types int32 int32
+op max
+k 0
+start 0 2 1 taken
+expect run index=0 firings=2 busy=2 stall_in=0 stall_out=0 flush=0
+# each firing's beat: its 4 lanes
+beat 0 -3 5 0 -1
+beat 1 7 -8 2 -2
+# each pushed result: max(a, 0) per lane
+result 0 0 5 0 0
+result 1 7 0 2 0
+cycles
+# a out  fire push busy
+1 1      0 0 0     # 0: start, jobs 2, job_beats 1
+1 1      1 1 1     # 1: firing 0, (-3, 5, 0, -1) -> (0, 5, 0, 0)
+1 1      1 1 1     # 2: firing 1, (7, -8, 2, -2) -> (7, 0, 2, 0); the run's end
+1 1      0 0 0     # 3: idle

@@ -26,8 +26,10 @@
 // plain Mac's output register, regOut), load, wslot and rslot (a LinkBuffer's
 // write enable and its ring's write and read slots).
 //
-//   SimdLanes(inTypes, opType, outType, lanes, op)   L 0: per lane
-//       a op b at opType, cast to outType (snax_op_elementwise)
+//   SimdLanes(inTypes, opType, outType, lanes, op[, k])   L 0: per lane
+//       a op b at opType, cast to outType (snax_op_elementwise); with one
+//       input (one stream), op(a, k) with the constant k at opType, a's type
+//       (snax_op_elementwise_k)
 //   TreeAccumulate(inType, outType, lanes, add)   L 1, pins fire, first: on
 //       fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to outType
 //       first (snax_op_fold); the output, one word, is acc
@@ -87,6 +89,8 @@ struct SnaxDatapathParams
     bool accumulate = true;
     bool reg_out = false;
     int depth = 1;
+    bool has_k = false;     // one stream: SimdLanes' second operand is the constant k
+    uint64_t k = 0;         // its bits, two's complement in 64 bits, a value of op_type
 };
 
 
@@ -125,13 +129,23 @@ class SnaxSimdLanes : public SnaxDatapath
 public:
     explicit SnaxSimdLanes(const SnaxDatapathParams &p) : p(p)
     {
-        this->in_words = {snax_words(p.lanes, p.in_types[0]), snax_words(p.lanes, p.in_types[1])};
+        this->in_words = {snax_words(p.lanes, p.in_types[0])};
+        if (!p.has_k)
+        {
+            this->in_words.push_back(snax_words(p.lanes, p.in_types[1]));
+        }
         this->out_words = snax_words(p.lanes, p.out_type);
         this->out_.assign(this->out_words, 0);
     }
 
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &) override
     {
+        if (this->p.has_k)
+        {
+            snax_op_elementwise_k(this->p.op, this->p.lanes, this->p.in_types[0],
+                this->p.op_type, this->p.out_type, in[0], this->p.k, this->out_.data());
+            return;
+        }
         snax_op_elementwise(this->p.op, this->p.lanes, this->p.in_types[0],
             this->p.in_types[1], this->p.out_type, in[0], in[1], this->out_.data());
     }
@@ -346,9 +360,18 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
     static const std::map<std::string, SnaxDatapathEntry> registry = {
         {"SimdLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
             SnaxType t;
-            if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
+            if (p.has_k)
             {
-                *why = "two inputs with an integer result type";
+                if (p.in_types.size() != 1 || p.op_type.width != p.in_types[0].width ||
+                    p.op_type.is_signed != p.in_types[0].is_signed)
+                {
+                    *why = "one input with k, at its own type";
+                    return std::unique_ptr<SnaxDatapath>();
+                }
+            }
+            else if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
+            {
+                *why = "two inputs with an integer result type, or one with k";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxSimdLanes(p));
