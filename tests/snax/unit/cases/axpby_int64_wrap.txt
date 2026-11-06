@@ -1,0 +1,25 @@
+# axpby with both slots (k1 baked at -2, k2 read from its CSR at 2^62 + 1) at int64, W = 2,
+# J = 2, T = 1, L = 0: k1 * a + k2 * b wraps at int64. Worked by hand, mod 2^64 as signed:
+# beat 0: a = (5, -7), b = (1, 2): -2 * 5 + (2^62 + 1) * 1 = 2^62 - 9 = 4611686018427387895;
+#   -2 * -7 + (2^62 + 1) * 2 = 2^63 + 16, which wraps to -2^63 + 16 = -9223372036854775792
+# beat 1: a = (0, 1), b = (-1, 0): 0 - 2^62 - 1 = -4611686018427387905; -2 + 0 = -2
+latency 0
+ii 1
+inputs 2
+lanes 2
+types int64 int64 int64
+op axpby
+k1 -2
+k2 4611686018427387905 csr
+start 0 2 1 taken
+expect run index=0 firings=2 busy=2 stall_in=0 stall_out=0 flush=0
+beat 0 5 -7 1 2
+beat 1 0 1 -1 0
+result 0 4611686018427387895 -9223372036854775792
+result 1 -4611686018427387905 -2
+cycles
+# a b out  fire push busy
+1 1 1      0 0 0     # 0: start, jobs 2, job_beats 1, K2 sent
+1 1 1      1 1 1     # 1: firing 0
+1 1 1      1 1 1     # 2: firing 1; the run's end
+1 1 1      0 0 0     # 3: idle

@@ -14,15 +14,16 @@
 // Properties (a missing or bad one is a fatal error naming it):
 //   csr_base   the group's first CSR (its START), for the trace
 //   csrs       its read-write CSRs' names in CSR order: START, JOBS, then the
-//              units' (JOB_BEATS, each fold's without a fixed T, in unit
-//              order); STATUS and COUNTER follow
+//              units' (JOB_BEATS, each fold's without a fixed T, then its
+//              scalars', in unit order); STATUS and COUNTER follow
 //   widths     each read-write CSR's width, in the order of csrs, 1 to 32
 //              (accelerator.json's, D152: START 1, JOBS and JOB_BEATS
 //              job_width); a write keeps its low bits
 //   counter_width  COUNTER's width, 1 to 32: it saturates at 2^w - 1
 // An accepted start, but the empty run (JOBS or a JOB_BEATS 0), goes to the
 // group's ctrl as a write of 32-bit words: JOBS, then every JOB_BEATS in unit
-// order (JOBS and 1 without one).
+// order (JOBS and 1 without one), then every unit's scalar CSR (any other
+// name after JOBS: K1, K1_LO, K1_HI) in CSR order.
 
 #include <string>
 #include <vector>
@@ -80,7 +81,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     {
         this->trace.fatal("Property csrs: must start with START, JOBS\n");
     }
-    std::vector<int> job_beats;
+    std::vector<int> job_beats, scalars;
     for (size_t i = 0; i < names.size(); i++)
     {
         if (names[i].empty())
@@ -90,6 +91,10 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
         if (names[i] == "JOB_BEATS")
         {
             job_beats.push_back(i);
+        }
+        else if (i >= 2)    // a unit's scalar (K1, K1_LO, K1_HI), sent after the JOB_BEATS
+        {
+            scalars.push_back(i);
         }
     }
     int csr_base = props.int_prop(this->get_js_config(), "csr_base", "");
@@ -115,7 +120,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     }
 
     this->nb_rw = names.size();
-    this->rule.configure(this->nb_rw, job_beats, widths, counter_width);
+    this->rule.configure(this->nb_rw, job_beats, widths, counter_width, scalars);
     this->csrs.configure(&this->trace, csr_base, this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxShell::csr_req);
@@ -150,7 +155,7 @@ void SnaxShell::reset(bool active)
 void SnaxShell::send(int64_t cycle, bool empty)
 {
     this->config_words = this->rule.words();
-    // The JOB_BEATS words, for the debug lines below
+    // The JOB_BEATS and scalar words, for the debug lines below
     std::string text;
     for (size_t i = 1; this->trace.get_active() && i < this->config_words.size(); i++)
     {

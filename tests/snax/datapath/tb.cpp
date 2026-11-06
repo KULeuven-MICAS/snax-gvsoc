@@ -42,6 +42,7 @@ static bool type_of(const std::string &name, SnaxType &t)
 
 struct Step
 {
+    std::vector<std::pair<std::string, uint64_t>> sets;    // slots set from their CSRs first
     SnaxEnables en;
     std::vector<std::vector<int64_t>> in;   // per input, its lanes
     std::vector<int64_t> out;
@@ -52,7 +53,14 @@ struct Test
     std::string name, datapath;
     SnaxDatapathParams p;
     std::vector<Step> steps;
+    std::vector<std::pair<std::string, uint64_t>> pending;  // `set` lines before the next step
 };
+
+// A decimal integer as its 64-bit two's complement
+static uint64_t bits_of(const std::string &v)
+{
+    return v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
+}
 
 static std::vector<int64_t> numbers(const std::string &text)
 {
@@ -125,11 +133,42 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
                 tests.back().p.has_k = true;
             }
         }
+        else if (key == "k1" || key == "k2")
+        {
+            // axpby's slot: baked (k1 V), or read from its CSR (k1 csr), set by `set` lines
+            std::string v;
+            ok = (bool)(ss >> v) && !v.empty();
+            SnaxDatapathParams &q = tests.back().p;
+            (key == "k1" ? q.has_k1 : q.has_k2) = true;
+            if (ok && v == "csr")
+            {
+                (key == "k1" ? q.k1_csr : q.k2_csr) = true;
+            }
+            else if (ok)
+            {
+                (key == "k1" ? q.k1 : q.k2) = bits_of(v);
+            }
+        }
+        else if (key == "kcsr")
+        {
+            // a one-stream SimdLanes' k read from its CSR, set by `set` lines
+            tests.back().p.has_k = tests.back().p.k_csr = true;
+        }
+        else if (key == "set")
+        {
+            // set SLOT V: the slot's CSR value, given to the datapath before the next step
+            std::string slot, v;
+            ok = (bool)(ss >> slot >> v) && !v.empty();
+            if (ok)
+            {
+                tests.back().pending.push_back({slot, bits_of(v)});
+            }
+        }
         else if (key == "op")
         {
             std::string name;
             ok = (bool)(ss >> name);
-            tests.back().p.op = -1;
+            tests.back().p.op = name == snax_op_axpby_name ? SNAX_OP_AXPBY : -1;
             for (int op = 0; op < SNAX_NB_OPS; op++)
             {
                 tests.back().p.op = name == snax_op_names[op] ? op : tests.back().p.op;
@@ -164,6 +203,7 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
                 }
                 s.out = numbers(line.substr(arrow + 2));
             }
+            s.sets.swap(tests.back().pending);
             tests.back().steps.push_back(s);
         }
         else { ok = false; }
@@ -200,6 +240,15 @@ static int run(const Test &t)
     for (size_t k = 0; k < t.steps.size(); k++)
     {
         const Step &s = t.steps[k];
+        for (const auto &set : s.sets)
+        {
+            if (!dp->set_scalar(set.first, set.second))
+            {
+                printf("%s: step %zu: %s has no slot %s from its CSR\n", t.name.c_str(), k,
+                    t.datapath.c_str(), set.first.c_str());
+                errors++;
+            }
+        }
         std::vector<std::vector<uint64_t>> beats;
         for (size_t i = 0; i < s.in.size(); i++)
         {
@@ -241,13 +290,21 @@ static int check_registry(int *count)
 {
     const SnaxType i64 = {64, true};
     struct Case { const char *name; SnaxDatapathParams p; bool builds; int latency, span; };
-    SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k;
+    SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k, axpby,
+        axpby_no_k1, add_k1;
     two.in_types = {i64, i64};
     one.in_types = {i64};
     one_k.in_types = {i64};
     one_k.has_k = true;
     two_k = two;
     two_k.has_k = true;
+    axpby = two;
+    axpby.op = SNAX_OP_AXPBY;
+    axpby.has_k1 = axpby.k1_csr = true;
+    axpby_no_k1 = two;
+    axpby_no_k1.op = SNAX_OP_AXPBY;
+    add_k1 = two;
+    add_k1.has_k1 = true;
     plain.in_types = {i64, i64, i64};
     plain.accumulate = false;
     plain.reg_out = true;
@@ -260,6 +317,8 @@ static int check_registry(int *count)
     std::vector<Case> cases = {
         {"SimdLanes", two, true, 0, 1}, {"SimdLanes", one_k, true, 0, 1},
         {"SimdLanes", one, false, 0, 0}, {"SimdLanes", two_k, false, 0, 0},
+        {"SimdLanes", axpby, true, 0, 1}, {"SimdLanes", axpby_no_k1, false, 0, 0},
+        {"SimdLanes", add_k1, false, 0, 0},
         {"TreeAccumulate", one, true, 1, 1},
         {"Mac", two, true, 1, 1}, {"Mac", plain, true, 1, 1}, {"Mac", plain_bad, false, 0, 0},
         {"Mac", one, false, 0, 0}, {"SerialAccumulate", serial, true, 1, 4},

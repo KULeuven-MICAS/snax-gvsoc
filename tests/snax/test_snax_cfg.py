@@ -173,6 +173,27 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(slot.description, accelerator("relu", unit))
         self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (4, 2, 2))
 
+    def test_axpy(self):
+        """axpby with k1 read from its CSR: scalars {k1: int32}, the R/W CSR K1 (pin k1, 32
+        bits) after JOBS, so STATUS and COUNTER one later; 3 R/W CSRs."""
+        slot = self.slot("axpy")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                    "int32", {"op": "axpby"}, 0, 1, [Csr("K1", "rw", 2, 32, "k1")],
+                    scalars={"k1": "int32"})
+        self.assertEqual(slot.description, accelerator("axpy", unit, between=1))
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 3, 2))
+        self.assertEqual(unit.slot_params, {"op": "axpby", "k1": None})
+
+    def test_axpy_baked(self):
+        """axpby with k1 baked at 3: params.k1, no scalar, no unit CSR."""
+        slot = self.slot("axpy_baked")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                    "int32", {"op": "axpby", "k1": 3}, 0, 1, [])
+        self.assertEqual(slot.description, accelerator("axpy_baked", unit))
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 2, 2))
+
     def test_vsum_tree_i32(self):
         """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
         slot = self.slot("vsum_tree_i32")
@@ -329,6 +350,8 @@ def acc_json(desc: Description) -> dict:
         d = {"name": c.name, "access": c.access, "offset": c.offset}
         if c.width is not None:
             d["width"] = c.width
+        if c.pin is not None:
+            d["pin"] = c.pin
         return d
 
     def unit(u):
@@ -338,8 +361,10 @@ def acc_json(desc: Description) -> dict:
                        for k, p in u.ports.items()}}
         if u.op_type is not None:
             d["opType"] = u.op_type
-        d.update({"params": dict(u.params),
-                  "timing": {"latency": u.latency, "ii": u.ii, "span": u.span},
+        d["params"] = dict(u.params)
+        if u.scalars:
+            d["scalars"] = dict(u.scalars)
+        d.update({"timing": {"latency": u.latency, "ii": u.ii, "span": u.span},
                   "csrs": [csr(c) for c in u.csrs]})
         return d
 
@@ -576,6 +601,36 @@ class AccJson(unittest.TestCase):
         self.unit()["datapath"] = "TreeAccumulate"
         self.unit()["params"]["k"] = 0
         self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "a TreeAccumulate unit has no")
+
+    def test_axpby_and_scalars(self):
+        """axpby takes k1, baked or from its CSR; k1 and k2 are axpby's; a scalar is a SimdLanes
+        slot not baked, at the opType, and its CSRs (K1, or K1_LO and K1_HI, pin k1) follow
+        the JOB_BEATS."""
+        self.unit()["params"]["op"] = "axpby"
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.k1", "missing: axpby takes k1")
+        self.unit()["scalars"] = {"k1": "int64"}
+        self.fails(snax_cfg.CfgSlotError, "units[0].csrs",
+                   "the scalars {'k1': 'int64'} are the CSRs (name, width, pin) "
+                   "[('K1_LO', 32, 'k1'), ('K1_HI', 32, 'k1')] after the JOB_BEATS")
+        self.unit()["scalars"] = {"k1": "int32"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k1", "a scalar is at the opType, int64")
+        self.unit()["params"]["k1"] = 2
+        self.unit()["scalars"] = {"k1": "int64"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k1", "not a slot of SimdLanes")
+        self.acc = acc_json(VECADD)
+        self.unit()["params"]["k2"] = 2
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k2", "k2 is axpby's, not add's")
+        self.acc = acc_json(VECADD)
+        self.unit()["params"]["op"] = "axpby"
+        self.unit()["params"]["k1"] = 2 ** 63
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k1", "does not fit the opType int64")
+        self.acc = acc_json(VECADD)
+        self.unit()["csrs"] = [{"name": "K1", "access": "rw", "offset": 2, "width": 32}]
+        self.fails(snax_cfg.CfgTargetError, "units[0].csrs[0]", "K1 (rw): the unit CSRs modelled")
+        self.acc = acc_json(VECADD)
+        self.unit()["datapath"] = "TreeAccumulate"
+        self.unit()["scalars"] = {"k": "int64"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k", "not a slot of SimdLanes")
 
     def test_dtype_and_op(self):
         self.unit()["ports"]["out"]["dtype"] = "float64"

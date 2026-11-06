@@ -31,6 +31,11 @@ enum SnaxOp { SNAX_OP_ADD, SNAX_OP_SUB, SNAX_OP_MUL, SNAX_OP_AND, SNAX_OP_OR, SN
 static const char *const snax_op_names[SNAX_NB_OPS] =
     {"add", "sub", "mul", "and", "or", "xor", "min", "max"};
 
+// SimdLanes' one ternary op, k1 * a + k2 * b (no ElementwiseOp encoding):
+// snax-forge's SimdLanes.Axpby, after the ElementwiseOp ones
+static const int SNAX_OP_AXPBY = SNAX_NB_OPS;
+static const char *const snax_op_axpby_name = "axpby";
+
 
 // An element's type: width 8, 16, 32 or 64 bits, and its signedness. A value
 // of a type is held in the low width bits of a uint64_t, zeros above.
@@ -188,6 +193,31 @@ inline void snax_op_elementwise_k(int op, int lanes, SnaxType a_t, SnaxType t,
         uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
         snax_lane_set(out, out_t.width, lane,
             snax_lane_cast(snax_op_compute(op, t, x, y), t, out_t));
+    }
+}
+
+
+// An axpby SimdLanes beat, as NumPy's out = (k1 * a + k2 * b).astype(out_t)
+// (has_k2 false: k1 * a + b): per lane, a and b extended to t (their result
+// type, the opType), the products and the sum at t, wrapping, the result cast
+// to out_t; k1 and k2 given as their bits (a value of t in 64 bits). out's
+// words are cleared here.
+inline void snax_op_axpby(int lanes, SnaxType a_t, SnaxType b_t, SnaxType t, SnaxType out_t,
+    const uint64_t *a, const uint64_t *b, uint64_t k1, bool has_k2, uint64_t k2, uint64_t *out)
+{
+    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    {
+        out[w] = 0;
+    }
+    uint64_t c1 = k1 & snax_lane_mask(t.width);
+    uint64_t c2 = k2 & snax_lane_mask(t.width);
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
+        uint64_t y = snax_lane_cast(snax_lane_get(b, b_t.width, lane), b_t, t);
+        uint64_t scaled = has_k2 ? snax_op_compute(SNAX_OP_MUL, t, c2, y) : y;
+        uint64_t r = snax_op_compute(SNAX_OP_ADD, t, snax_op_compute(SNAX_OP_MUL, t, c1, x), scaled);
+        snax_lane_set(out, out_t.width, lane, snax_lane_cast(r, t, out_t));
     }
 }
 

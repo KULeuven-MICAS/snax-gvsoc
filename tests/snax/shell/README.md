@@ -11,7 +11,8 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 
 | Line | What |
 |---|---|
-| `csrs START JOBS [NAME...]` | the group's read-write CSRs in CSR order (default `START JOBS`); `JOB_BEATS` among them is the fold's job_beats, otherwise 1 |
+| `csrs START JOBS [NAME[:W]...]` | the group's read-write CSRs in CSR order (default `START JOBS`); `JOB_BEATS` among them is the fold's job_beats, otherwise 1; any other name is a unit's scalar (`K1`, `K1_LO`, `K1_HI`), `:W` its width (default `job_width`), sent with every start after the JOB_BEATS |
+| `words W...` | the words a started run (not the empty run) sends the unit, one line per run in order: JOBS, each JOB_BEATS (or 1), then each scalar CSR as it stands |
 | `latency`, `ii`, `inputs` | the unit, as `tests/snax/unit/`'s cases give it (defaults 0, 1, 2) |
 | `job_width`, `counter_width` | the widths, 1 to 32 (default 32 each): JOBS and JOB_BEATS keep a write's low `job_width` bits, COUNTER saturates at 2^`counter_width` − 1; START is 1 bit and reads 0 |
 | `cycles` | the cycle lines follow |
@@ -42,6 +43,8 @@ Values may be decimal or `0x` hex. One access per cycle: the core issues CSR acc
 | `counter_after_start` | the counter read in the first cycle after an accepted start, taken at once and held: 0 whatever the last run counted (a read in the start's own cycle cannot happen: its write is that cycle's access) |
 | `status_sticky` | done set at E + 1, kept through writes to JOBS and to START with bit 0 clear, cleared by the next accepted start |
 | `jobs_zero` | a fold group (with JOB_BEATS): a start with JOBS 0, then one with JOB_BEATS 0 after a run: STATUS 2 from a + 1, COUNTER 0 |
+| `scalar_k1` | axpy's K1 (32 bits) after JOBS at 2, so STATUS 3 and COUNTER 4: read back as written, sent with the start (2 1 3); K1 0 is a value, the next start runs (2 1 0) |
+| `scalar_k1_int64` | a 64-bit scalar as K1_LO at 2 and K1_HI at 3, and an 8-bit K2 at 4 keeping a write's low 8 bits (0x1fe reads 0xfe): STATUS 5, COUNTER 6; the start sends JOBS, 1, K1_LO, K1_HI, K2 |
 | `counter_saturates` | at `job_width` 8 a JOBS write of 0x105 keeps 5 and runs 5 jobs; at `counter_width` 2 COUNTER reads 0, 1, 2, 3, then 3 held |
 
 ## Running
@@ -50,4 +53,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/shell/run.sh
 
-It prints `PASS` per case and ends with `12 passed, 0 failed`.
+It prints `PASS` per case and ends with `14 passed, 0 failed`.

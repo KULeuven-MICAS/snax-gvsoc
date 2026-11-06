@@ -40,7 +40,8 @@ Each SnaxGroup gets its units in the group's order (group_units): per unit
 its datapath, its inputs in BRM port order (an outer one named
 `<unit>_<port>`, a linked one ""), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
-JOB_BEATS, else 1; and its links as edges, each {from, to, to_input, depth}:
+JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
+from its CSRs (scalars, each [slot, words]); and its links as edges, each {from, to, to_input, depth}:
 the producer's and the consumer's names and the consumer's input it feeds,
 its index in that unit's inputs.
 """
@@ -49,7 +50,8 @@ from dataclasses import dataclass
 
 import gvsoc.systree
 import interco.router as router
-from snax_cfg import CATALOGUE, DTYPES, CfgTargetError, dirs_of, streamer_channels
+from snax_cfg import (CATALOGUE, DTYPES, CfgTargetError, dirs_of, scalar_csrs,
+                      streamer_channels)
 from snax_group import SnaxGroup
 from snax_shell import SnaxShell
 from snax_streamer import SnaxStreamer, nb_csrs, tcdm_port_names
@@ -149,6 +151,9 @@ def group_units(accelerator, group) -> tuple:
             'accumulate': bool(u.params.get('accumulate', True)),
             'reg_out': bool(u.params.get('regOut', False)),
             'k': str(u.params['k']) if 'k' in u.params else '',
+            'k1': str(u.params['k1']) if 'k1' in u.params else '',
+            'k2': str(u.params['k2']) if 'k2' in u.params else '',
+            'scalars': [[s, len(scalar_csrs(s, dtype))] for s, dtype in u.scalars.items()],
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
         })
     links = []

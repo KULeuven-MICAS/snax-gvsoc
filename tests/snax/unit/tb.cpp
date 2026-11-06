@@ -55,6 +55,10 @@ struct Case
     int op = SNAX_OP_ADD;
     bool has_k = false;     // one input, an elementwise op with the constant k (relu's)
     uint64_t k = 0;         // its 64-bit two's complement
+    // axpby's k1 and k2 (op axpby): each given, and whether read from its CSR (sent with
+    // each start) rather than baked; the arithmetic is the same
+    bool has_k1 = false, k1_csr = false, has_k2 = false, k2_csr = false;
+    uint64_t k1 = 0, k2 = 0;
     std::vector<StartLine> starts;
     std::vector<std::string> expects;   // run lines, in order
     std::vector<CycleLine> cycles;
@@ -164,7 +168,7 @@ static bool parse(const std::string &path, Case &c)
         {
             std::string name;
             ok = (bool)(ss >> name);
-            c.op = -1;
+            c.op = name == snax_op_axpby_name ? SNAX_OP_AXPBY : -1;
             for (int op = 0; ok && op < SNAX_NB_OPS; op++)
             {
                 c.op = name == snax_op_names[op] ? op : c.op;
@@ -197,6 +201,21 @@ static bool parse(const std::string &path, Case &c)
                 c.has_k = true;
             }
         }
+        else if (key == "k1" || key == "k2")
+        {
+            // k1 V [csr]: axpby's slot, baked, or read from its CSR
+            std::string v, from;
+            ok = (bool)(ss >> v) && !v.empty();
+            bool csr = (bool)(ss >> from);
+            ok = ok && (!csr || from == "csr");
+            if (ok)
+            {
+                uint64_t bits = v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
+                (key == "k1" ? c.k1 : c.k2) = bits;
+                (key == "k1" ? c.has_k1 : c.has_k2) = true;
+                (key == "k1" ? c.k1_csr : c.k2_csr) = csr;
+            }
+        }
         else if (key == "beat") { ok = values_line(ss, c.beats); }
         else if (key == "result") { ok = values_line(ss, c.results); }
         else if (key == "cycles") { in_cycles = true; }
@@ -206,6 +225,13 @@ static bool parse(const std::string &path, Case &c)
             fprintf(stderr, "%s:%d: cannot read \"%s\"\n", path.c_str(), lineno, raw.c_str());
             return false;
         }
+    }
+    if ((c.op == SNAX_OP_AXPBY) != c.has_k1 || (c.has_k2 && !c.has_k1) ||
+        (c.op == SNAX_OP_AXPBY && c.inputs != 2))
+    {
+        fprintf(stderr, "%s: op axpby takes two inputs and k1 (k2 optional), and only it\n",
+            path.c_str());
+        return false;
     }
     if (c.has_k && c.inputs != 1)
     {
@@ -257,6 +283,17 @@ struct Data
             return;
         }
         SnaxType out_t = this->c.types[this->c.inputs];
+        if (this->c.op == SNAX_OP_AXPBY)  // k1 * a + k2 * b at the inputs' result type
+        {
+            SnaxType t;
+            snax_op_result_type(this->c.types[0], this->c.types[1], &t);
+            std::vector<uint64_t> out(this->c.lanes * out_t.width / 64 + 1, 0);
+            snax_op_axpby(this->c.lanes, this->c.types[0], this->c.types[1], t, out_t,
+                this->words(0, it->second).data(), this->words(1, it->second).data(), this->c.k1,
+                this->c.has_k2, this->c.k2, out.data());
+            this->pending.push_back(out);
+            return;
+        }
         if (this->c.has_k)  // one input, op(a, k) at a's type
         {
             std::vector<uint64_t> out(this->c.lanes * out_t.width / 64 + 1, 0);

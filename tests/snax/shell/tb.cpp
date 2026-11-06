@@ -41,6 +41,8 @@ struct Case
 {
     std::string name;
     std::vector<std::string> csrs = {"START", "JOBS"};    // the read-write CSRs
+    std::vector<int> csr_widths = {0, 0};   // a scalar's own width (NAME:W), 0: job_width
+    std::vector<std::vector<uint32_t>> words;   // each started run's expected words, in order
     int latency = 0;
     int ii = 1;
     int inputs = 2;
@@ -161,14 +163,33 @@ static bool parse(const std::string &path, Case &c)
         }
         else if (key == "csrs")
         {
-            // START, JOBS, then the units' (JOB_BEATS)
+            // START, JOBS, then the units' (JOB_BEATS, a scalar's NAME[:W])
             c.csrs.clear();
+            c.csr_widths.clear();
             std::string word;
             while (ss >> word)
             {
-                c.csrs.push_back(word);
+                size_t colon = word.find(':');
+                int w = colon == std::string::npos ? 0 : std::atoi(word.c_str() + colon + 1);
+                c.csrs.push_back(word.substr(0, colon));
+                c.csr_widths.push_back(w);
+                ok = ok && (colon == std::string::npos || (w >= 1 && w <= 32));
             }
-            ok = c.csrs.size() >= 2 && c.csrs[0] == "START" && c.csrs[1] == "JOBS";
+            ok = ok && c.csrs.size() >= 2 && c.csrs[0] == "START" && c.csrs[1] == "JOBS";
+        }
+        else if (key == "words")
+        {
+            // a started run's words, as the shell sends them: JOBS, JOB_BEATS (or 1), scalars
+            std::vector<uint32_t> w;
+            std::string token;
+            int64_t v;
+            while (ss >> token)
+            {
+                ok = ok && number(token, v);
+                w.push_back((uint32_t)v);
+            }
+            ok = ok && w.size() >= 2;
+            c.words.push_back(w);
         }
         else if (key == "latency") { ok = (bool)(ss >> c.latency); }
         else if (key == "ii") { ok = (bool)(ss >> c.ii); }
@@ -201,20 +222,18 @@ static int run(const Case &c)
     cfg.ii = c.ii;
     unit.configure({cfg}, {});
     SnaxShellRule shell;
-    std::vector<int> job_beats;
+    std::vector<int> job_beats, scalars;
     for (size_t i = 2; i < c.csrs.size(); i++)
     {
-        if (c.csrs[i] == "JOB_BEATS")
-        {
-            job_beats.push_back(i);
-        }
+        (c.csrs[i] == "JOB_BEATS" ? job_beats : scalars).push_back(i);
     }
     std::vector<int> widths = {1};
     for (size_t i = 1; i < c.csrs.size(); i++)
     {
-        widths.push_back(c.job_width);
+        widths.push_back(c.csr_widths[i] ? c.csr_widths[i] : c.job_width);
     }
-    shell.configure(c.csrs.size(), job_beats, widths, c.counter_width);
+    shell.configure(c.csrs.size(), job_beats, widths, c.counter_width, scalars);
+    size_t started = 0;
     int nb_rw = c.csrs.size();
 
     int errors = 0;
@@ -227,6 +246,17 @@ static int run(const Case &c)
     // JOB_BEATS to the unit's ctrl
     auto start_unit = [&](int64_t cycle, const CycleLine &l) {
         std::vector<uint32_t> w = shell.words();
+        if (started < c.words.size() && w != c.words[started])
+        {
+            std::string got;
+            for (uint32_t x : w)
+            {
+                got += " " + std::to_string(x);
+            }
+            fail(cycle, l, "the start sends" + got + ", not the case's words line " +
+                std::to_string(started));
+        }
+        started++;
         SnaxGroupRule::Start answer = unit.start(cycle, w[0], {w[1]});
         if (answer == SnaxGroupRule::REFUSED)
         {
@@ -336,6 +366,11 @@ static int run(const Case &c)
             fail(cycle, l, "STATUS " + std::to_string(status) + ", expected " +
                 std::to_string(l.status));
         }
+    }
+    if (!c.words.empty() && started != c.words.size())
+    {
+        printf("%s: %zu runs started, %zu words lines\n", c.name.c_str(), started, c.words.size());
+        errors++;
     }
     if (pending != nullptr)
     {
