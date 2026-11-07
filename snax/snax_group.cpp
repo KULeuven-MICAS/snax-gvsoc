@@ -28,8 +28,17 @@
 //                                   element type (snax_types.hpp: 8 to 64
 //                                   bits, signed or not)
 //                lanes              elements per input beat
-//                op                 ElementwiseLanes' op (add ... max); a
-//                                   fold's add
+//                op                 SimdLanes' op (add ... max, or axpby);
+//                                   a fold's add
+//                k                  SimdLanes' constant at one stream,
+//                                   decimal ("0", "-3"), its second operand
+//                                   at opType for every lane; "" at two
+//                k1, k2             axpby's baked k1 and k2, decimal; ""
+//                                   when not baked
+//                scalars            the slots read from CSRs (k at one
+//                                   stream, k1, k2), in CSR order, each
+//                                   [slot, words]: 1 word, or 2 at 64 bits
+//                                   (low first), sent at each start
 //                accumulate, reg_out  Mac's variant
 //                latency, ii, span  C§17's timing
 //                t                  a result every t-th firing, fixed (1 for a
@@ -51,7 +60,8 @@
 //                  moves unless the rule says so
 //   ctrl           io slave: a start, JOBS then the T of each unit with t 0, in
 //                  unit order, 32-bit words (a group without one: JOBS and a
-//                  word 1, as SnaxShell sends it); refused (DENIED, after a
+//                  word 1, as SnaxShell sends it), then each unit's scalars'
+//                  words in unit and CSR order, which set their slots; refused (DENIED, after a
 //                  warning) while busy. JOBS or any T 0 (the empty run, which
 //                  the shell never sends) is answered and ignored; a firing
 //                  count past 32 bits is a fatal error
@@ -78,7 +88,9 @@
 // busy, 2 stall_in, 3 stall_out, 4 flush).
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
@@ -135,6 +147,9 @@ private:
     std::vector<std::vector<const uint64_t *>> outer;
     std::vector<uint64_t> out_beat;
     std::vector<uint32_t> fixed_t;      // per unit: its t, 0 from the start
+    // per unit, its slots read from CSRs, each (slot, words), in CSR order
+    std::vector<std::vector<std::pair<std::string, int>>> scalars;
+    size_t scalar_words = 0;            // their words, summed: a start's last ones
     uint32_t csr_base;
     SnaxGroupRule rule;
     SnaxGroupDatapaths data;
@@ -222,7 +237,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         p.out_type = this->type_prop(u, "out_width", "out_signed", w);
         p.op_type = this->type_prop(u, "op_width", "op_signed", w);
         std::string op = this->props.str_prop(u, "op", w);
-        p.op = -1;
+        p.op = op == snax_op_axpby_name ? SNAX_OP_AXPBY : -1;
         for (int i = 0; i < SNAX_NB_OPS; i++)
         {
             p.op = op == snax_op_names[i] ? i : p.op;
@@ -230,10 +245,61 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         if (p.op == -1)
         {
             this->trace.fatal("Property %s.op: \"%s\", not an op (add, sub, mul, and, or, xor, "
-                "min, max)\n", w.c_str(), op.c_str());
+                "min, max, axpby)\n", w.c_str(), op.c_str());
         }
         p.accumulate = this->props.bool_prop(u, "accumulate", w);
         p.reg_out = this->props.bool_prop(u, "reg_out", w);
+        // A baked slot: decimal, its bits; "" not baked
+        auto baked = [&](const char *key, bool *has, uint64_t *bits) {
+            std::string text = this->props.str_prop(u, key, w);
+            if (text.empty())
+            {
+                return;
+            }
+            try
+            {
+                size_t used = 0;
+                *bits = text[0] == '-' ? (uint64_t)std::stoll(text, &used)
+                    : std::stoull(text, &used);
+                *has = used == text.size();
+            }
+            catch (const std::exception &)
+            {
+                *has = false;
+            }
+            if (!*has)
+            {
+                this->trace.fatal("Property %s.%s: \"%s\", not a decimal integer\n", w.c_str(),
+                    key, text.c_str());
+            }
+        };
+        baked("k", &p.has_k, &p.k);
+        baked("k1", &p.has_k1, &p.k1);
+        baked("k2", &p.has_k2, &p.k2);
+        this->scalars.emplace_back();
+        std::vector<js::Config *> slots = this->props.list_prop(u, "scalars", w);
+        for (size_t i = 0; i < slots.size(); i++)
+        {
+            std::string at_i = w + ".scalars[" + std::to_string(i) + "]";
+            std::vector<js::Config *> pair = this->props.as_list(slots[i], at_i);
+            if (pair.size() != 2)
+            {
+                this->trace.fatal("Property %s: [slot, words]\n", at_i.c_str());
+            }
+            std::string slot = this->props.as_str(pair[0], at_i);
+            int words = this->props.as_int(pair[1], at_i);
+            bool *has = slot == "k" ? &p.has_k : slot == "k1" ? &p.has_k1 : slot == "k2" ? &p.has_k2
+                : nullptr;
+            if (!has || *has || (words != 1 && words != 2))
+            {
+                this->trace.fatal("Property %s: [\"%s\", %d]: a slot k, k1 or k2 not baked, of 1 "
+                    "or 2 words\n", at_i.c_str(), slot.c_str(), words);
+            }
+            *has = true;
+            (slot == "k" ? p.k_csr : slot == "k1" ? p.k1_csr : p.k2_csr) = true;
+            this->scalars.back().push_back({slot, words});
+            this->scalar_words += words;
+        }
         std::string why;
         std::unique_ptr<SnaxDatapath> dp = snax_datapath_new(datapath, p, &why);
         if (!dp)
@@ -427,12 +493,12 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
     {
         open += t == 0;
     }
-    size_t words = 1 + (open ? open : 1);
+    size_t words = 1 + (open ? open : 1) + _this->scalar_words;
     if (!req->get_is_write() || req->get_size() != 4 * words)
     {
         _this->trace.force_warning("Unexpected access on ctrl (size: %ld, is_write: %d): a "
-            "start is a write of %ld words, JOBS and each fold's JOB_BEATS (or 1)\n",
-            req->get_size(), req->get_is_write(), words);
+            "start is a write of %ld words, JOBS and each fold's JOB_BEATS (or 1), then the "
+            "scalars'\n", req->get_size(), req->get_is_write(), words);
         return vp::IO_REQ_INVALID;
     }
     uint32_t *w = (uint32_t *)req->get_data();
@@ -447,6 +513,18 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
     {
         _this->trace.fatal("Start at cycle %ld: job_beats %u; no unit of the group takes one "
             "(1)\n", cycle, w[1]);
+    }
+    next = 1 + (open ? open : 1);
+    for (size_t k = 0; k < _this->scalars.size(); k++)
+    {
+        for (const std::pair<std::string, int> &slot : _this->scalars[k])
+        {
+            uint64_t bits = w[next] | (slot.second == 2 ? (uint64_t)w[next + 1] << 32 : 0);
+            next += slot.second;
+            _this->data.units[k]->set_scalar(slot.first, bits);
+            _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start at cycle %ld: unit %ld's %s 0x%lx\n",
+                cycle, k, slot.first.c_str(), bits);
+        }
     }
     uint64_t n = jobs;
     for (uint32_t t : ts)

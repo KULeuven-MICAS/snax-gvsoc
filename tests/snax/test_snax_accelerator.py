@@ -134,11 +134,36 @@ class Built(unittest.TestCase):
         self.assertEqual((group["links"], group["csr_base"]), ([], first))
         self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"],
                           unit["lanes"], unit["latency"], unit["ii"], unit["span"], unit["t"]),
-                         ("ElementwiseLanes", ["acc_a", "acc_b"], "acc_out", "add", 4, 0, 1, 1,
+                         ("SimdLanes", ["acc_a", "acc_b"], "acc_out", "add", 4, 0, 1, 1,
                           1))
+        self.assertEqual(unit["k"], "")  # two streams: no constant
         self.assertEqual(mappings(acc), [(960, 18), (978, 0x600 - 978)])
         self.assertEqual(acc.tcdm_port_names[:2], ["streamer_acc.reader0.lane0",
                                                    "streamer_acc.reader0.lane1"])
+
+    def test_axpy_k1_from_its_csr(self):
+        """axpy: the shell's R/W CSRs START, JOBS, K1 (32 bits), sent with each start; the unit
+        at op axpby, k1 read from its CSR (one word), nothing baked."""
+        acc = self.build(CLUSTER.parent.parent / "axpy" / "snax_forge.hjson")
+        shell = acc.components["shell"].properties
+        self.assertEqual((shell["csrs"], shell["widths"]), (["START", "JOBS", "K1"], [1, 32, 32]))
+        (unit,) = acc.components["unit"].properties["units"]
+        self.assertEqual((unit["datapath"], unit["inputs"], unit["op"], unit["k"], unit["k1"],
+                          unit["k2"], unit["scalars"], unit["in_widths"], unit["op_width"]),
+                         ("SimdLanes", ["acc_a", "acc_b"], "axpby", "", "", "", [["k1", 1]],
+                          [32, 32], 32))
+        baked = self.build(CLUSTER.parent.parent / "axpy_baked" / "snax_forge.hjson")
+        (unit,) = baked.components["unit"].properties["units"]
+        self.assertEqual((unit["k1"], unit["scalars"]), ("3", []))
+        self.assertEqual(baked.components["shell"].properties["csrs"], ["START", "JOBS"])
+
+    def test_relu_one_stream(self):
+        """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
+        acc = self.build(CLUSTER.parent.parent / "relu" / "snax_forge.hjson")
+        (unit,) = acc.components["unit"].properties["units"]
+        self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"], unit["k"],
+                          unit["in_widths"], unit["op_width"], unit["lanes"]),
+                         ("SimdLanes", ["acc_a"], "acc_out", "max", "0", [32], 32, 4))
 
     def test_dot_1_two_sets(self):
         """dot 1: a streamer per set at its base, a shell per accelerator after it."""
@@ -186,7 +211,7 @@ class Built(unittest.TestCase):
         (mul,), (total,) = (acc.components[n].properties["units"]
                             for n in ("unit_vmul", "unit_vsum"))
         self.assertEqual((mul["datapath"], mul["inputs"], mul["op"], mul["t"]),
-                         ("ElementwiseLanes", ["vmul_a", "vmul_b"], "mul", 1))
+                         ("SimdLanes", ["vmul_a", "vmul_b"], "mul", 1))
         self.assertEqual((total["datapath"], total["inputs"], total["output"], total["op"],
                           total["lanes"], total["latency"], total["t"]),
                          ("TreeAccumulate", ["vsum_a"], "vsum_out", "add", 4, 1, 0))

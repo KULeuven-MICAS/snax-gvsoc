@@ -26,8 +26,13 @@
 // plain Mac's output register, regOut), load, wslot and rslot (a LinkBuffer's
 // write enable and its ring's write and read slots).
 //
-//   ElementwiseLanes(inTypes, opType, outType, lanes, op)   L 0: per lane
-//       a op b at opType, cast to outType (snax_op_elementwise)
+//   SimdLanes(inTypes, opType, outType, lanes, op[, k])   L 0: per lane
+//       a op b at opType, cast to outType (snax_op_elementwise); with one
+//       input (one stream), op(a, k) with the constant k at opType, a's type
+//       (snax_op_elementwise_k); at op axpby, k1 * a + k2 * b (+ b without k2)
+//       at opType (snax_op_axpby). A slot read from its CSR (k at one stream,
+//       k1, k2) takes its value at each start (set_scalar), as the shell
+//       sends it
 //   TreeAccumulate(inType, outType, lanes, add)   L 1, pins fire, first: on
 //       fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to outType
 //       first (snax_op_fold); the output, one word, is acc
@@ -87,6 +92,15 @@ struct SnaxDatapathParams
     bool accumulate = true;
     bool reg_out = false;
     int depth = 1;
+    bool has_k = false;     // one stream: SimdLanes' second operand is the constant k
+    uint64_t k = 0;         // its bits, two's complement in 64 bits, a value of op_type
+    bool k_csr = false;     // ... k from its CSR, set at each start (has_k too)
+    bool has_k1 = false;    // axpby's k1: baked (k1) or from its CSR (k1_csr)
+    uint64_t k1 = 0;
+    bool k1_csr = false;
+    bool has_k2 = false;    // axpby's k2, as k1; neither: + b
+    uint64_t k2 = 0;
+    bool k2_csr = false;
 };
 
 
@@ -99,6 +113,9 @@ public:
     virtual void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &en) = 0;
     // The clock edge
     virtual void commit(const SnaxEnables &en) = 0;
+    // A slot read from its CSR (k, k1, k2) at a start: its bits; false if the
+    // datapath has no such slot
+    virtual bool set_scalar(const std::string &, uint64_t) { return false; }
 
     const std::vector<uint64_t> &out() const { return this->out_; }
 
@@ -120,23 +137,61 @@ inline int snax_words(int lanes, SnaxType t)
 }
 
 
-class SnaxElementwiseLanes : public SnaxDatapath
+class SnaxSimdLanes : public SnaxDatapath
 {
 public:
-    explicit SnaxElementwiseLanes(const SnaxDatapathParams &p) : p(p)
+    explicit SnaxSimdLanes(const SnaxDatapathParams &p) : p(p)
     {
-        this->in_words = {snax_words(p.lanes, p.in_types[0]), snax_words(p.lanes, p.in_types[1])};
+        this->in_words = {snax_words(p.lanes, p.in_types[0])};
+        if (!p.has_k)
+        {
+            this->in_words.push_back(snax_words(p.lanes, p.in_types[1]));
+        }
         this->out_words = snax_words(p.lanes, p.out_type);
         this->out_.assign(this->out_words, 0);
     }
 
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &) override
     {
+        if (this->p.op == SNAX_OP_AXPBY)
+        {
+            snax_op_axpby(this->p.lanes, this->p.in_types[0], this->p.in_types[1],
+                this->p.op_type, this->p.out_type, in[0], in[1], this->p.k1, this->p.has_k2,
+                this->p.k2, this->out_.data());
+            return;
+        }
+        if (this->p.has_k)
+        {
+            snax_op_elementwise_k(this->p.op, this->p.lanes, this->p.in_types[0],
+                this->p.op_type, this->p.out_type, in[0], this->p.k, this->out_.data());
+            return;
+        }
         snax_op_elementwise(this->p.op, this->p.lanes, this->p.in_types[0],
             this->p.in_types[1], this->p.out_type, in[0], in[1], this->out_.data());
     }
 
     void commit(const SnaxEnables &) override {}
+
+    bool set_scalar(const std::string &slot, uint64_t bits) override
+    {
+        if (slot == "k" && this->p.k_csr)
+        {
+            this->p.k = bits;
+        }
+        else if (slot == "k1" && this->p.k1_csr)
+        {
+            this->p.k1 = bits;
+        }
+        else if (slot == "k2" && this->p.k2_csr)
+        {
+            this->p.k2 = bits;
+        }
+        else
+        {
+            return false;
+        }
+        return true;
+    }
 
 private:
     SnaxDatapathParams p;
@@ -344,14 +399,38 @@ inline bool snax_whole_words(int lanes, SnaxType t)
 inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
 {
     static const std::map<std::string, SnaxDatapathEntry> registry = {
-        {"ElementwiseLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
+        {"SimdLanes", {true, [](const SnaxDatapathParams &p, std::string *why) {
             SnaxType t;
-            if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
+            if (p.op == SNAX_OP_AXPBY)
             {
-                *why = "two inputs with an integer result type";
+                if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t) ||
+                    t.width != p.op_type.width || t.is_signed != p.op_type.is_signed || !p.has_k1 ||
+                    p.has_k)
+                {
+                    *why = "axpby: two inputs at their result type, k1 baked or from its CSR";
+                    return std::unique_ptr<SnaxDatapath>();
+                }
+            }
+            else if (p.has_k1 || p.has_k2)
+            {
+                *why = "k1 and k2 are axpby's";
                 return std::unique_ptr<SnaxDatapath>();
             }
-            return std::unique_ptr<SnaxDatapath>(new SnaxElementwiseLanes(p));
+            else if (p.has_k)
+            {
+                if (p.in_types.size() != 1 || p.op_type.width != p.in_types[0].width ||
+                    p.op_type.is_signed != p.in_types[0].is_signed)
+                {
+                    *why = "one input with k, at its own type";
+                    return std::unique_ptr<SnaxDatapath>();
+                }
+            }
+            else if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
+            {
+                *why = "two inputs with an integer result type, or one with k";
+                return std::unique_ptr<SnaxDatapath>();
+            }
+            return std::unique_ptr<SnaxDatapath>(new SnaxSimdLanes(p));
         }}},
         {"TreeAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
             if (p.in_types.size() != 1 || p.op != SNAX_OP_ADD)

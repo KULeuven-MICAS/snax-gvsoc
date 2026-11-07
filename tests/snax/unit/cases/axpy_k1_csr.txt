@@ -1,0 +1,26 @@
+# axpy (snax-forge's SimdLanes at op axpby, k1 read from its CSR K1): y' = k1 * x + y,
+# W = 2 lanes of int32, N = 4, so JOBS = 2 and T = 1; K1 = 3 (data.h's alpha), written
+# before START, sent with the start. L = 0, II 1 (lockstep): two firings back to back,
+# each pushed in its own cycle. Worked by hand: x's beats (1, -2) and (4, 0), y's
+# (10, 20) and (-5, 7), each lane 3 * a + b at int32, give (13, 14) and (7, 7)
+latency 0
+ii 1
+inputs 2
+lanes 2
+types int32 int32 int32
+op axpby
+k1 3 csr
+start 0 2 1 taken
+expect run index=0 firings=2 busy=2 stall_in=0 stall_out=0 flush=0
+# each firing's beat: a's 2 lanes (x), then b's (y)
+beat 0 1 -2 10 20
+beat 1 4 0 -5 7
+# each pushed result: 3 * a + b per lane
+result 0 13 14
+result 1 7 7
+cycles
+# a b out  fire push busy
+1 1 1      0 0 0     # 0: start, jobs 2, job_beats 1, K1 3
+1 1 1      1 1 1     # 1: firing 0, (1, -2), (10, 20) -> (13, 14)
+1 1 1      1 1 1     # 2: firing 1, (4, 0), (-5, 7) -> (7, 7); the run's end
+1 1 1      0 0 0     # 3: idle

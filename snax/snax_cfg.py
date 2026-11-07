@@ -65,15 +65,22 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
       groups[]                Group: name, csrs (START, JOBS, STATUS,
                               COUNTER), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
-                              snax_datapath.hpp's registry: ElementwiseLanes,
+                              snax_datapath.hpp's registry: SimdLanes,
                               TreeAccumulate, Mac, SerialAccumulate), ports
                               (per BRM port: port, the datapath's; dir, in or
-                              out; dtype, NumPy's name; lanes), opType (ElementwiseLanes and Mac),
-                              params (op: ElementwiseLanes' and
-                              TreeAccumulate's, add; accumulate, regOut: Mac's;
-                              T: a fold's rate fixed at design time), timing
-                              (latency, ii, span: 1 when missing), csrs (its
-                              R/W ones: JOB_BEATS, a fold's without T)
+                              out; dtype, NumPy's name; lanes), opType (SimdLanes and Mac),
+                              params (op: SimdLanes' and
+                              TreeAccumulate's, add, or SimdLanes' axpby, two
+                              inputs, k1 * a + k2 * b; k: SimdLanes' constant at
+                              one stream, its one input, an int of its opType;
+                              k1, k2: axpby's baked; accumulate, regOut: Mac's;
+                              T: a fold's rate fixed at design time), scalars
+                              (SimdLanes' slots read from CSRs, k at one
+                              stream, k1, k2, each at its opType, none baked),
+                              timing (latency, ii, span: 1 when missing), csrs
+                              (its R/W ones: JOB_BEATS, a fold's without T, then
+                              per scalar K1, or K1_LO and K1_HI at 64 bits, its
+                              pin the slot, its width the type's bits, 32 a word)
     groups[].links[]          Link: name, from (an out port, "<unit>.<port>"),
                               to (an in port), depth (0 a wire, >= 1 a buffer)
     a CSR                     Csr: name, access (rw, ro), offset (from the
@@ -101,7 +108,7 @@ links (gen.link_port) and a group's links connect its units (gen.group), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
 1), since SnaxGroup has no FIFO slicer; each set's snax_num_rw_csr and
-snax_num_ro_csr are its accelerator's R/W and R/O CSRs. An ElementwiseLanes unit's
+snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
 opType is its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
 and b.
@@ -193,8 +200,8 @@ def _accumulates(params: dict) -> bool:
 # The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
 # LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
 CATALOGUE = {
-    'ElementwiseLanes': Datapath(nb_inputs=lambda p: 2, is_fold=lambda p: False,
-                                 latency=lambda p: 0, typed=True, needs_op=True),
+    'SimdLanes': Datapath(nb_inputs=lambda p: 1 if 'k' in p else 2, is_fold=lambda p: False,
+                          latency=lambda p: 0, typed=True, needs_op=True),
     'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1, reduces=True, needs_op=True, only_op='add'),
     'Mac': Datapath(nb_inputs=lambda p: 2 if _accumulates(p) else 3, is_fold=_accumulates,
@@ -207,10 +214,20 @@ CATALOGUE = {
 # read-only, last (C§17)
 GROUP_RW = ('START', 'JOBS')
 GROUP_RO = ('STATUS', 'COUNTER')
-# The unit CSRs modelled: a fold's JOB_BEATS
+# The unit CSRs modelled: a fold's JOB_BEATS, then its scalars' (scalar_csrs)
 UNIT_RW = ('JOB_BEATS',)
-# The op names (snax_types.hpp's snax_op_names)
+# The op names (snax_types.hpp's snax_op_names), and SimdLanes' axpby
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
+AXPBY = 'axpby'
+# SimdLanes' slots: k at one stream, axpby's k1 and k2
+SLOTS = ('k', 'k1', 'k2')
+
+
+def scalar_csrs(slot: str, dtype: str) -> list:
+    """A scalar's CSRs (name, width): K1, or K1_LO and K1_HI at 64 bits (low word first)."""
+    width = DTYPES[dtype][0]
+    name = slot.upper()
+    return [(f'{name}_LO', 32), (f'{name}_HI', 32)] if width == 64 else [(name, width)]
 # The keys of the datapath block accelerator.json replaced: refused at their key
 OLD_DATAPATH_KEYS = ('unit', 'control', 'config', 'wait', 'fields')
 
@@ -392,7 +409,7 @@ class Port:
 @dataclass(frozen=True)
 class Unit:
     """A unit of a group: its datapath, its ports by BRM port (in the BRM's order), its op
-    type (ElementwiseLanes; None for a fold), params, timing and its R/W CSRs."""
+    type (SimdLanes; None for a fold), params, timing and its R/W CSRs."""
 
     name: str
     brm: str
@@ -404,11 +421,18 @@ class Unit:
     ii: int
     csrs: list
     span: int = 1
+    scalars: dict = field(default_factory=dict)
 
     @property
     def op(self) -> str:
         """The op its lanes compute: params.op (a fold's add)."""
         return self.params['op']
+
+    @property
+    def slot_params(self) -> dict:
+        """Its params with each scalar's slot (None: read from its CSR), as CATALOGUE's facts
+        read them: a one-stream SimdLanes has k, baked or not."""
+        return {**self.params, **dict.fromkeys(self.scalars)}
 
 
 @dataclass(frozen=True)
@@ -674,6 +698,13 @@ def type_name(width: int, signed: bool) -> str:
 DTYPES = {type_name(w, s): (w, s) for w in (8, 16, 32, 64) for s in (True, False)}
 
 
+def fits(value: int, t: tuple) -> bool:
+    """value is one of integer type t's (width, signed)."""
+    width, signed = t
+    lo, hi = (-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else (0, (1 << width) - 1)
+    return lo <= value <= hi
+
+
 def result_type(a: tuple, b: tuple):
     """NumPy's result type of two integer types (width, signed), as snax_types.hpp's
     snax_op_result_type; None past 64 bits (a signed type with uint64: NumPy's float64)."""
@@ -737,13 +768,29 @@ def _unit(node: _Node) -> Unit:
     op = params.get('op', str, None)
     if facts.needs_op and op is None:
         raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
-    if op is not None and op not in OPS:
-        raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)})')
+    if op is not None and op not in OPS and not (op == AXPBY and datapath == 'SimdLanes'):
+        raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)}; '
+                           f'SimdLanes\' {AXPBY})')
     if facts.only_op is not None and op != facts.only_op:
         raise CfgTargetError(node.file, params.where('op'),
             f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
     for key in ('accumulate', 'regOut'):
         params.get(key, bool, None)
+    k = params.get('k', int, None)
+    if k is not None and datapath != 'SimdLanes':
+        raise CfgTypeError(node.file, params.where('k'), f'a {datapath} unit has no constant k')
+    baked = {s: params.get(s, int, None) for s in SLOTS}
+    scalars = node.get('scalars', dict, {})
+    for s, dtype in scalars.items():
+        if datapath != 'SimdLanes' or s not in SLOTS or baked[s] is not None:
+            raise CfgTypeError(node.file, f'{node.where("scalars")}.{s}',
+                f'not a slot of SimdLanes ({", ".join(SLOTS)}) that is not baked')
+    for s in ('k1', 'k2'):
+        if (baked[s] is not None or s in scalars) and op != AXPBY:
+            raise CfgTypeError(node.file, params.where(s), f'{s} is {AXPBY}\'s, not {op}\'s')
+    if op == AXPBY and baked['k1'] is None and 'k1' not in scalars:
+        raise CfgKeyError(node.file, params.where('k1'),
+            f'missing: {AXPBY} takes k1, baked in params or read from its CSR (scalars)')
     t = params.get('T', int, None)
     if t is not None and t < 1:
         raise CfgTypeError(node.file, params.where('T'), f'{t}, must be 1 or more')
@@ -756,11 +803,26 @@ def _unit(node: _Node) -> Unit:
             f'missing: a {datapath} unit runs its op at its inputs\' result type')
     if op_type is not None and op_type not in DTYPES:
         raise CfgTypeError(node.file, node.where('opType'), f'{op_type!r}, not a NumPy integer type')
+    for s, v in baked.items():
+        if v is not None and not fits(v, DTYPES[op_type]):
+            raise CfgTypeError(node.file, params.where(s), f'{v}: does not fit the opType {op_type}')
+    for s, dtype in scalars.items():
+        if dtype != op_type:
+            raise CfgTypeError(node.file, f'{node.where("scalars")}.{s}',
+                f'{dtype!r}: a scalar is at the opType, {op_type}')
     csrs = [_csr(c) for c in node.nodes('csrs')]
+    own = [c for c in csrs if c.pin is None]
     for i, c in enumerate(csrs):
-        if c.name not in UNIT_RW or c.access != 'rw':
+        if c.access != 'rw' or (c.pin is None and c.name not in UNIT_RW):
             raise CfgTargetError(node.file, f'{node.where("csrs")}[{i}]',
-                f'{c.name} ({c.access}): the unit CSRs modelled are {", ".join(UNIT_RW)} (rw)')
+                f'{c.name} ({c.access}): the unit CSRs modelled are {", ".join(UNIT_RW)} and its '
+                'scalars\' (rw)')
+    want = [(n, w, s) for s, dtype in scalars.items() for n, w in scalar_csrs(s, dtype)]
+    got = [(c.name, c.width, c.pin) for c in csrs if c.pin is not None]
+    if got != want or csrs[:len(own)] != own:
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'{[c.name for c in csrs]}: the scalars {scalars} are the CSRs (name, width, pin) '
+            f'{want} after the JOB_BEATS')
     fold = facts.is_fold(params.value)
     if (fold and t is None) != ('JOB_BEATS' in [c.name for c in csrs]):
         raise CfgSlotError(node.file, node.where('csrs'),
@@ -775,7 +837,7 @@ def _unit(node: _Node) -> Unit:
             f'{want[0]}, ii 1, span {want[1]}')
     return Unit(name=node.get('name', str), brm=node.get('brm', str), datapath=datapath,
                 ports=unit_ports, op_type=op_type, params=dict(params.value), latency=latency,
-                ii=ii, csrs=csrs, span=span)
+                ii=ii, csrs=csrs, span=span, scalars=dict(scalars))
 
 
 def _link(node: _Node) -> Link:
@@ -961,8 +1023,8 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     ins = [u.ports[p] for p in u.ports if dirs[p] == 'in']
     outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
     facts = CATALOGUE[u.datapath]
-    plain = facts.nb_inputs(u.params) == 3
-    n_in = facts.nb_inputs(u.params)
+    plain = facts.nb_inputs(u.slot_params) == 3
+    n_in = facts.nb_inputs(u.slot_params)
     if (len(ins), len(outs)) != (n_in, 1):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
@@ -980,6 +1042,13 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: c is {ins[2].dtype}, out {outs[0].dtype}; a plain Mac\'s c is '
             'out\'s type')
+    if n_in == 1:  # one stream: the op at a's type, with the constant k
+        a = (ins[0].width, ins[0].signed)
+        if u.op_type != type_name(*a):
+            raise CfgSlotError(node.file, node.where('groups'),
+                f'unit {u.name}: opType {u.op_type}, but its one input is {type_name(*a)} (the op '
+                'runs at it with k)')
+        return
     a, b = ((p.width, p.signed) for p in ins[:2])
     t = result_type(a, b)
     if t is None:

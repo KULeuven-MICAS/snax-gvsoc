@@ -281,7 +281,7 @@ static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const Sn
         SnaxDatapathParams p;
         p.in_types.assign(k == 0 ? 2 : 1, i64);
         p.lanes = c.lanes ? c.lanes : LANES;
-        p.op = c.units[k].datapath == "ElementwiseLanes" ? SNAX_OP_MUL : SNAX_OP_ADD;
+        p.op = c.units[k].datapath == "SimdLanes" ? SNAX_OP_MUL : SNAX_OP_ADD;
         std::string why;
         g->units.push_back(snax_datapath_new(c.units[k].datapath, p, &why));
         if (!g->units.back())

@@ -58,8 +58,8 @@ def group_csrs(base: int, between: int = 0) -> list:
             Csr("COUNTER", "ro", base + 3 + between, 32)]
 
 
-def elementwise(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
-    return Unit(name, brm or f"elementwise_{op}", "ElementwiseLanes",
+def simd(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
+    return Unit(name, brm or "simd", "SimdLanes",
                 {p: Port(p, dtype, 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
                 dtype, {"op": op}, 0, 1, [])
 
@@ -86,7 +86,7 @@ def accelerator(design: str, unit: Unit, between: int = 0) -> Description:
 
 
 # forge/vecadd/'s accelerator.json, parsed
-VECADD = accelerator("vecadd", elementwise("acc", "add"))
+VECADD = accelerator("vecadd", simd("acc", "add"))
 
 MISA_RV32IMA = (1 << 30) | (1 << 12) | (1 << 8) | (1 << 0)
 
@@ -161,7 +161,38 @@ class Fixtures(unittest.TestCase):
         slot = self.slot("vecmul")
         self.assertEqual(slot.sets[0].streamer, STREAMER)
         self.assertEqual(slot.description,
-                         accelerator("vecmul", elementwise("acc", "mul")))
+                         accelerator("vecmul", simd("acc", "mul")))
+
+    def test_relu(self):
+        """One stream: SimdLanes with one input a, params op max and k 0, opType int32, a's;
+        a reader and a writer of two channels each."""
+        slot = self.slot("relu")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "out")},
+                    "int32", {"op": "max", "k": 0}, 0, 1, [])
+        self.assertEqual(slot.description, accelerator("relu", unit))
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (4, 2, 2))
+
+    def test_axpy(self):
+        """axpby with k1 read from its CSR: scalars {k1: int32}, the R/W CSR K1 (pin k1, 32
+        bits) after JOBS, so STATUS and COUNTER one later; 3 R/W CSRs."""
+        slot = self.slot("axpy")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                    "int32", {"op": "axpby"}, 0, 1, [Csr("K1", "rw", 2, 32, "k1")],
+                    scalars={"k1": "int32"})
+        self.assertEqual(slot.description, accelerator("axpy", unit, between=1))
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 3, 2))
+        self.assertEqual(unit.slot_params, {"op": "axpby", "k1": None})
+
+    def test_axpy_baked(self):
+        """axpby with k1 baked at 3: params.k1, no scalar, no unit CSR."""
+        slot = self.slot("axpy_baked")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                    "int32", {"op": "axpby", "k1": 3}, 0, 1, [])
+        self.assertEqual(slot.description, accelerator("axpy_baked", unit))
+        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 2, 2))
 
     def test_vsum_tree_i32(self):
         """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
@@ -319,6 +350,8 @@ def acc_json(desc: Description) -> dict:
         d = {"name": c.name, "access": c.access, "offset": c.offset}
         if c.width is not None:
             d["width"] = c.width
+        if c.pin is not None:
+            d["pin"] = c.pin
         return d
 
     def unit(u):
@@ -328,8 +361,10 @@ def acc_json(desc: Description) -> dict:
                        for k, p in u.ports.items()}}
         if u.op_type is not None:
             d["opType"] = u.op_type
-        d.update({"params": dict(u.params),
-                  "timing": {"latency": u.latency, "ii": u.ii, "span": u.span},
+        d["params"] = dict(u.params)
+        if u.scalars:
+            d["scalars"] = dict(u.scalars)
+        d.update({"timing": {"latency": u.latency, "ii": u.ii, "span": u.span},
                   "csrs": [csr(c) for c in u.csrs]})
         return d
 
@@ -356,12 +391,12 @@ def streamer(readers: list, writers: list) -> dict:
     return {"data_reader_params": movers(readers), "data_writer_params": movers(writers)}
 
 
-# dot 1 (snax-forge C§17's table, D157): the units vmul (an ElementwiseLanes mul) and vsum (a
+# dot 1 (snax-forge C§17's table, D157): the units vmul (an SimdLanes mul) and vsum (a
 # TreeAccumulate over 4 lanes, with JOB_BEATS), each an accelerator of one group, in two
 # streamer sets: vmul's CSRs START 0, JOBS 1, STATUS 2, COUNTER 3, vsum's START 4, JOBS 5,
 # JOB_BEATS 6, STATUS 7, COUNTER 8 (the offsets run over both accelerators)
 VMUL = Accelerator("vmul", ["vmul.a", "vmul.b"], ["vmul.out"],
-                   [Group("vmul", group_csrs(0), [elementwise("vmul", "mul")], [])])
+                   [Group("vmul", group_csrs(0), [simd("vmul", "mul")], [])])
 VSUM = Accelerator("vsum", ["vsum.a"], ["vsum.out"],
                    [Group("vsum", group_csrs(4, 1), [fold("vsum", 4, lanes=4)], [])])
 DOT1 = description("dot_1", VMUL, VSUM)
@@ -552,6 +587,51 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.accelerators[0].groups",
                    "int64 with uint64 has no integer result type")
 
+    def test_k(self):
+        """k, SimdLanes' constant at one stream: an int of its opType; with it the unit has one
+        input; no other datapath has one."""
+        self.unit()["params"]["k"] = 0
+        self.fails(snax_cfg.CfgTargetError, "snax_datapath_cfg.accelerators[0].inputs",
+                   "2 inputs and 1 outputs; SimdLanes takes 1 and 1")
+        self.unit()["params"]["k"] = 2 ** 63
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "does not fit the opType int64")
+        self.unit()["params"]["k"] = "0"
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "must be")
+        self.acc = acc_json(VECADD)
+        self.unit()["datapath"] = "TreeAccumulate"
+        self.unit()["params"]["k"] = 0
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "a TreeAccumulate unit has no")
+
+    def test_axpby_and_scalars(self):
+        """axpby takes k1, baked or from its CSR; k1 and k2 are axpby's; a scalar is a SimdLanes
+        slot not baked, at the opType, and its CSRs (K1, or K1_LO and K1_HI, pin k1) follow
+        the JOB_BEATS."""
+        self.unit()["params"]["op"] = "axpby"
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.k1", "missing: axpby takes k1")
+        self.unit()["scalars"] = {"k1": "int64"}
+        self.fails(snax_cfg.CfgSlotError, "units[0].csrs",
+                   "the scalars {'k1': 'int64'} are the CSRs (name, width, pin) "
+                   "[('K1_LO', 32, 'k1'), ('K1_HI', 32, 'k1')] after the JOB_BEATS")
+        self.unit()["scalars"] = {"k1": "int32"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k1", "a scalar is at the opType, int64")
+        self.unit()["params"]["k1"] = 2
+        self.unit()["scalars"] = {"k1": "int64"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k1", "not a slot of SimdLanes")
+        self.acc = acc_json(VECADD)
+        self.unit()["params"]["k2"] = 2
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k2", "k2 is axpby's, not add's")
+        self.acc = acc_json(VECADD)
+        self.unit()["params"]["op"] = "axpby"
+        self.unit()["params"]["k1"] = 2 ** 63
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k1", "does not fit the opType int64")
+        self.acc = acc_json(VECADD)
+        self.unit()["csrs"] = [{"name": "K1", "access": "rw", "offset": 2, "width": 32}]
+        self.fails(snax_cfg.CfgTargetError, "units[0].csrs[0]", "K1 (rw): the unit CSRs modelled")
+        self.acc = acc_json(VECADD)
+        self.unit()["datapath"] = "TreeAccumulate"
+        self.unit()["scalars"] = {"k": "int64"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k", "not a slot of SimdLanes")
+
     def test_dtype_and_op(self):
         self.unit()["ports"]["out"]["dtype"] = "float64"
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.out.dtype", "not a NumPy integer type")
@@ -569,7 +649,7 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.dir", "must be in or out")
 
     def test_unit_csrs(self):
-        """ElementwiseLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
+        """SimdLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
         modelled."""
         self.unit()["csrs"] = [{"name": "JOB_BEATS", "access": "rw", "offset": 2, "width": 32}]
         self.acc["accelerators"][0]["groups"][0]["csrs"][2]["offset"] = 3

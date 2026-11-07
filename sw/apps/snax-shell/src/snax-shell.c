@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The shell program, on snax_hjson with forge/vecadd/snax_forge.hjson: SnaxShell
-// and a SnaxGroup of one unit (ElementwiseLanes add, L = 0, II 1, 4 lanes of 64
+// and a SnaxGroup of one unit (SimdLanes add, L = 0, II 1, 4 lanes of 64
 // bit) behind the streamer (snax/snax_accelerator.py). snax_cluster's snax-alu DMA and
 // streamer setup; the streamer's and the group's CSRs (START, JOBS, STATUS,
 // COUNTER, snax-forge C§17) from forge/vecadd/include/. One streamer run of

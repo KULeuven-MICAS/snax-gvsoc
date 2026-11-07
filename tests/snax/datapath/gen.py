@@ -59,8 +59,8 @@ def en(fire=0, first=0, read=0, lane=0, e=0, load=0, ws=0, rs=0):
     return (fire, first, read, lane, e, load, ws, rs)
 
 
-def elementwise(name, op, t_a, t_b, t_out, lanes, steps=6):
-    t = Test(name, "ElementwiseLanes", [t_a, t_b], np.result_type(NP[t_a], NP[t_b]).name,
+def simd(name, op, t_a, t_b, t_out, lanes, steps=6):
+    t = Test(name, "SimdLanes", [t_a, t_b], np.result_type(NP[t_a], NP[t_b]).name,
              t_out, lanes, op=op)
     for _ in range(steps):
         a, b = rand(t_a, lanes), rand(t_b, lanes)
@@ -69,6 +69,53 @@ def elementwise(name, op, t_a, t_b, t_out, lanes, steps=6):
         r = {"add": x + y, "sub": x - y, "mul": x * y, "min": np.minimum(x, y),
              "max": np.maximum(x, y), "xor": x ^ y}[op]
         t.step(en(fire=1), [a, b], wrap(r, t_out))
+    return t
+
+
+def simd_k(name, op, t_a, t_out, lanes, k, steps=6):
+    """A one-stream SimdLanes: op(a, k) at a's type, k its constant (the header's `k`)."""
+    t = Test(name, "SimdLanes", [t_a], t_a, t_out, lanes, op=op, k=k)
+    y = NP[t_a](k)
+    for _ in range(steps):
+        a = rand(t_a, lanes)
+        r = {"add": a + y, "sub": a - y, "mul": a * y, "min": np.minimum(a, y),
+             "max": np.maximum(a, y)}[op]
+        t.step(en(fire=1), [a], wrap(r, t_out))
+    return t
+
+
+def axpby(name, t_a, t_b, t_out, lanes, k1, k2, steps=6):
+    """SimdLanes at axpby: k1 * a + k2 * b at the inputs' result type (k2 None: + b), each of
+    k1 and k2 an int (baked, the header's) or "csr" (read from its CSR: a random value set
+    before every other step, `set`)."""
+    T = np.result_type(NP[t_a], NP[t_b])
+    kw = {"op": "axpby", "k1": k1} | ({} if k2 is None else {"k2": k2})
+    t = Test(name, "SimdLanes", [t_a, t_b], T.name, t_out, lanes, **kw)
+    now = {s: None for s, v in (("k1", k1), ("k2", k2)) if v == "csr"}
+    for i in range(steps):
+        for s in now:
+            if i % 2 == 0:
+                now[s] = int(rand(T.name, 1)[0])
+                t.lines.append(f"set {s} {now[s]}")
+        c1 = T.type(now.get("k1", k1) if k1 == "csr" else k1)
+        a, b = rand(t_a, lanes), rand(t_b, lanes)
+        x, y = a.astype(T), b.astype(T)
+        scaled = y if k2 is None else T.type(now["k2"] if k2 == "csr" else k2) * y
+        t.step(en(fire=1), [a, b], wrap(c1 * x + scaled, t_out))
+    return t
+
+
+def simd_kcsr(name, op, t_a, lanes, steps=6):
+    """A one-stream SimdLanes with k read from its CSR (kcsr): a random k set before each step."""
+    t = Test(name, "SimdLanes", [t_a], t_a, t_a, lanes, op=op)
+    t.lines.append("kcsr")
+    for _ in range(steps):
+        k = int(rand(t_a, 1)[0])
+        t.lines.append(f"set k {k}")
+        a, y = rand(t_a, lanes), NP[t_a](k)
+        r = {"add": a + y, "sub": a - y, "mul": a * y, "min": np.minimum(a, y),
+             "max": np.maximum(a, y)}[op]
+        t.step(en(fire=1), [a], wrap(r, t_a))
     return t
 
 
@@ -199,9 +246,9 @@ def main():
     with np.errstate(over="ignore"):
         for t_in, t_out, sizes in (("int64", "int64", (1, 2, 4)), ("int32", "int32", (2, 4, 8))):
             for lanes in sizes:
-                tests.append(elementwise(f"elementwise_add_{t_in}_w{lanes}", "add", t_in, t_in,
+                tests.append(simd(f"simd_add_{t_in}_w{lanes}", "add", t_in, t_in,
                                          t_out, lanes))
-                tests.append(elementwise(f"elementwise_mul_{t_in}_w{lanes}", "mul", t_in, t_in,
+                tests.append(simd(f"simd_mul_{t_in}_w{lanes}", "mul", t_in, t_in,
                                          t_out, lanes))
                 tests.append(tree(f"tree_{t_in}_w{lanes}", t_in, t_out, lanes, 3))
                 tests.append(mac(f"mac_acc_{t_in}_w{lanes}", t_in, t_in, t_out, lanes, 3))
@@ -216,6 +263,31 @@ def main():
         for depth in (1, 2, 4):
             tests.append(buffer(f"buffer_int64_w4_d{depth}", "int64", 4, depth))
             tests.append(buffer(f"buffer_int32_w4_d{depth}", "int32", 4, depth))
+        # one stream (relu's): every op at int32 and int64, k random and at the edges (drawn
+        # after the tests above, so theirs stay as they were)
+        for t_in, lanes in (("int32", 4), ("int64", 2)):
+            info = np.iinfo(NP[t_in])
+            for op in ("add", "sub", "mul", "min", "max"):
+                ks = [0, -1, int(info.min), int(info.max), int(rand(t_in, 1)[0])]
+                for i, k in enumerate(ks):
+                    tests.append(simd_k(f"simd_k_{op}_{t_in}_w{lanes}_{i}", op, t_in, t_in, lanes,
+                                        k))
+        tests.append(simd_k("simd_k_max_int32_to_int64_w4", "max", "int32", "int64", 4, 0))
+        # axpby (axpy's): k1 baked or from its CSR, k2 unset, baked or from its CSR, at int32
+        # (2 and 4 lanes), int64 (2) and an int16 b into int64; then one stream with k from its
+        # CSR (drawn after the tests above, so theirs stay as they were)
+        for t_a, t_b, lanes in (("int32", "int32", 2), ("int32", "int32", 4),
+                                ("int64", "int64", 2), ("int64", "int16", 4)):
+            for k1, k2 in ((3, None), ("csr", None), (-7, "csr"), ("csr", "csr"), ("csr", 5)):
+                tag = f"k1{'r' if k1 == 'csr' else k1}" + (
+                    "" if k2 is None else f"_k2{'r' if k2 == 'csr' else k2}")
+                tests.append(axpby(f"axpby_{t_a}x{t_b}_w{lanes}_{tag}".replace("-", "m"), t_a,
+                                   t_b, np.result_type(NP[t_a], NP[t_b]).name, lanes, k1, k2))
+        tests.append(axpby("axpby_int32_to_int64_w4_k1r", "int32", "int32", "int64", 4, "csr",
+                           None))
+        for t_in, lanes in (("int32", 4), ("int64", 2)):
+            for op in ("add", "mul", "max"):
+                tests.append(simd_kcsr(f"simd_kcsr_{op}_{t_in}_w{lanes}", op, t_in, lanes))
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

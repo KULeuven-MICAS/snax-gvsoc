@@ -1,6 +1,6 @@
 # Running SNAX-GVSoC
 
-The usual way to a run of a generated design point is snax-forge's flow (snax-forge D136, its `docs/RUN.md`): with this repository as its submodule, `pixi run flow recipes/vecadd.json --platform platforms/snax_forge.json` generates the design point, builds GVSoC and the program, runs it on `snax_hjson` and takes the program's check. This file runs this repository by hand: each command, then the lines to check.
+The usual way to a run of a generated design point is snax-forge's flow (snax-forge D136, its `docs/RUN.md`): with this repository as its submodule, `pixi run flow recipes/elementwise/vecadd.json --platform platforms/snax_forge.json` generates the design point, builds GVSoC and the program, runs it on `snax_hjson` and takes the program's check. This file runs this repository by hand: each command, then the lines to check.
 
 ## 1. The container
 

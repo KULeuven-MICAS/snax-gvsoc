@@ -26,8 +26,12 @@ class SnaxGroup(gvsoc.systree.Component):
         input its outer port's name, or "" for one a link feeds), output (the
         outer port's name, or "" when linked; one unit has one), lanes,
         in_widths, in_signed, out_width, out_signed, op_width, op_signed, op,
-        accumulate, reg_out, latency, ii, span, and t (a result every t-th
-        firing, fixed; 0 for a fold's JOB_BEATS, from the start).
+        accumulate, reg_out, k (SimdLanes' constant at one stream, decimal;
+        "" at two), k1 and k2 (axpby's baked, decimal; "" when not baked),
+        scalars (the slots read from CSRs, each [slot, words], in CSR order:
+        their words follow a start's JOB_BEATS), latency, ii, span, and t (a
+        result every t-th firing, fixed; 0 for a fold's JOB_BEATS, from the
+        start).
     links : list[dict]
         Each link an edge: from and to (the producer's and the consumer's
         names), to_input (the consumer's input it feeds, an index in its

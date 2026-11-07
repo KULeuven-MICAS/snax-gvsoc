@@ -8,7 +8,7 @@
 // (snax_datapath.hpp) and the tests check: NumPy's arithmetic on integer types
 // (SnaxType: 8 to 64 bits, signed or not), each port with its own. A port of W
 // lanes of b bits takes W * b / 64 channel words, lane l at bits
-// [l * b, (l + 1) * b) of them side by side (the wire slice). An elementwise
+// [l * b, (l + 1) * b) of them side by side (the wire slice). A SimdLanes
 // op runs per lane at T, the result type of its two inputs' types
 // (snax_op_result_type; none for a signed type with uint64), each operand
 // extended to T by its own signedness; the result wraps at T and is cast to
@@ -30,6 +30,11 @@ enum SnaxOp { SNAX_OP_ADD, SNAX_OP_SUB, SNAX_OP_MUL, SNAX_OP_AND, SNAX_OP_OR, SN
 
 static const char *const snax_op_names[SNAX_NB_OPS] =
     {"add", "sub", "mul", "and", "or", "xor", "min", "max"};
+
+// SimdLanes' one ternary op, k1 * a + k2 * b (no ElementwiseOp encoding):
+// snax-forge's SimdLanes.Axpby, after the ElementwiseOp ones
+static const int SNAX_OP_AXPBY = SNAX_NB_OPS;
+static const char *const snax_op_axpby_name = "axpby";
 
 
 // An element's type: width 8, 16, 32 or 64 bits, and its signedness. A value
@@ -148,7 +153,7 @@ inline void snax_lane_set(uint64_t *words, int width, int lane, uint64_t v)
 }
 
 
-// An elementwise beat, as NumPy's out = (a op b).astype(out_t): per lane, a
+// A SimdLanes beat, as NumPy's out = (a op b).astype(out_t): per lane, a
 // and b each at its own port's type, both extended to T, their result type
 // (snax_op_result_type, which must give one), the op at T, and the result
 // cast to out_t. The words: lanes * width / 64 per port, out's cleared here.
@@ -167,6 +172,52 @@ inline void snax_op_elementwise(int op, int lanes, SnaxType a_t, SnaxType b_t,
         uint64_t y = snax_lane_cast(snax_lane_get(b, b_t.width, lane), b_t, t);
         snax_lane_set(out, out_t.width, lane,
             snax_lane_cast(snax_op_compute(op, t, x, y), t, out_t));
+    }
+}
+
+
+// A one-stream SimdLanes beat, as NumPy's out = op(a, k).astype(out_t): per
+// lane, a extended to t (a's own type, its opType), the op at t with the
+// constant k, given as its bits (two's complement in 64 bits, a value of t),
+// and the result cast to out_t. out's words are cleared here.
+inline void snax_op_elementwise_k(int op, int lanes, SnaxType a_t, SnaxType t,
+    SnaxType out_t, const uint64_t *a, uint64_t k, uint64_t *out)
+{
+    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    {
+        out[w] = 0;
+    }
+    uint64_t y = k & snax_lane_mask(t.width);
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
+        snax_lane_set(out, out_t.width, lane,
+            snax_lane_cast(snax_op_compute(op, t, x, y), t, out_t));
+    }
+}
+
+
+// An axpby SimdLanes beat, as NumPy's out = (k1 * a + k2 * b).astype(out_t)
+// (has_k2 false: k1 * a + b): per lane, a and b extended to t (their result
+// type, the opType), the products and the sum at t, wrapping, the result cast
+// to out_t; k1 and k2 given as their bits (a value of t in 64 bits). out's
+// words are cleared here.
+inline void snax_op_axpby(int lanes, SnaxType a_t, SnaxType b_t, SnaxType t, SnaxType out_t,
+    const uint64_t *a, const uint64_t *b, uint64_t k1, bool has_k2, uint64_t k2, uint64_t *out)
+{
+    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    {
+        out[w] = 0;
+    }
+    uint64_t c1 = k1 & snax_lane_mask(t.width);
+    uint64_t c2 = k2 & snax_lane_mask(t.width);
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
+        uint64_t y = snax_lane_cast(snax_lane_get(b, b_t.width, lane), b_t, t);
+        uint64_t scaled = has_k2 ? snax_op_compute(SNAX_OP_MUL, t, c2, y) : y;
+        uint64_t r = snax_op_compute(SNAX_OP_ADD, t, snax_op_compute(SNAX_OP_MUL, t, c1, x), scaled);
+        snax_lane_set(out, out_t.width, lane, snax_lane_cast(r, t, out_t));
     }
 }
 

@@ -1,0 +1,23 @@
+# A unit's scalar CSR (axpy's K1, snax-forge C§17): after JOBS, at offset 2, 32 bits
+# (int32), so STATUS is 3 and COUNTER 4. K1 reads back as written, and a start sends it
+# after JOBS and the 1 of a group without JOB_BEATS: words 2 1 3. K1 0 is a value, not the
+# empty run: the second start (K1 0) runs too, words 2 1 0. Each run of 2 fires in the
+# two cycles after its start (inputs valid): c3's start, busy c4 .. c5 (E = 5); c8's,
+# busy c9 .. c10.
+csrs START JOBS K1:32
+words 2 1 3
+words 2 1 0
+cycles
+# a b out  access          result      status
+1 1 1      w 1 2           0           0     # 0: JOBS 2
+1 1 1      w 2 3           1           0     # 1: K1 3
+1 1 1      r 2             3           0     # 2: as written
+1 1 1      w 0 1           3           0     # 3: start: JOBS 2, 1, K1 3
+1 1 1      r 3             1           1     # 4: STATUS at 3: busy; fires
+1 1 1      r 4             1           1     # 5: COUNTER at 4; fires, E
+1 1 1      r 3             2           2     # 6: done
+1 1 1      w 2 0           7           2     # 7: K1 0
+1 1 1      w 0 1           8           2     # 8: start: JOBS 2, 1, K1 0, a run
+1 1 1      r 4             0           1     # 9: fires
+1 1 1      -               -           1     # 10: fires, E
+1 1 1      r 4             2           2     # 11: two busy cycles

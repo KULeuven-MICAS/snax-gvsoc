@@ -17,9 +17,9 @@ class SnaxShell(gvsoc.systree.Component):
     bits) and COUNTER saturates at its own (accelerator.json's widths, D152).
 
     A start goes to the group's ctrl as JOBS and every JOB_BEATS (JOBS and 1
-    without one) when the group is idle, and is held (the core stalls) while it
-    is busy; JOBS or a JOB_BEATS 0 is the empty run, ended by the shell, as
-    snax_shell.hpp says.
+    without one), then every scalar CSR (K1, or K1_LO and K1_HI), when the
+    group is idle, and is held (the core stalls) while it is busy; JOBS or a
+    JOB_BEATS 0 is the empty run, ended by the shell, as snax_shell.hpp says.
 
     Parameters
     ----------
@@ -27,7 +27,8 @@ class SnaxShell(gvsoc.systree.Component):
         Number of the group's first CSR (its START), for the trace.
     csrs : list[str]
         The group's read-write CSRs in CSR order: START, JOBS, then the
-        units' (JOB_BEATS for each fold without a fixed T, in unit order).
+        units' (JOB_BEATS for each fold without a fixed T, then its scalars',
+        in unit order).
         STATUS and COUNTER follow them.
     widths : list[int]
         Each read-write CSR's width, in the order of csrs (START 1).
@@ -39,7 +40,7 @@ class SnaxShell(gvsoc.systree.Component):
     input : io slave
         CSR accesses, offsets from the group's first CSR.
     ctrl : io master
-        To the group's ctrl: a start, JOBS and every JOB_BEATS.
+        To the group's ctrl: a start, JOBS, every JOB_BEATS and every scalar CSR.
     busy : wire<bool> slave
         The group's busy.
     """

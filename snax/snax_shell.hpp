@@ -14,7 +14,8 @@
 //
 // CSRs, offsets from the group's first CSR (the CSR mux removes it): START,
 // JOBS, then the units' read-write CSRs (JOB_BEATS for each fold without a
-// fixed T, in unit order), each kept at its width (accelerator.json's, D152:
+// fixed T, then its scalars', K1, or K1_LO and K1_HI at 64 bits, in unit
+// order), each kept at its width (accelerator.json's, D152:
 // a write keeps the low bits, a read gives them with the upper bits 0);
 // then STATUS and COUNTER, read-only. START is a strobe: no register, it
 // reads 0.
@@ -29,7 +30,8 @@
 //     answered, in the cycle busy falls: E + 1, E the run's last cycle;
 //   - an accepted start a goes to the group's ctrl as JOBS and every
 //     JOB_BEATS in unit order, as they stand (JOBS and 1 for a group without
-//     one: a start is two words at least), unless one of them is 0: the empty run,
+//     one: a start is two words at least), then every scalar CSR in CSR order
+//     (any value, 0 too), unless JOBS or a JOB_BEATS is 0: the empty run,
 //     which the shell ends in its own cycle (E = a) without the group, so busy
 //     never rises;
 //   - STATUS: bit 0 busy, the unit's busy in c (from a + 1 to E); bit 1 done,
@@ -85,11 +87,14 @@ public:
 
     // nb_rw read-write CSRs (START, JOBS and the units'), the JOB_BEATS ones
     // at job_beats (indices into them, in unit order; none for a group
-    // without); widths, each one's bits (none: all 32), and COUNTER's
+    // without), the scalars' at scalars (in CSR order); widths, each one's
+    // bits (none: all 32), and COUNTER's
     void configure(int nb_rw, const std::vector<int> &job_beats,
-        const std::vector<int> &widths = {}, int counter_width = 32)
+        const std::vector<int> &widths = {}, int counter_width = 32,
+        const std::vector<int> &scalars = {})
     {
         this->job_beats_index = job_beats;
+        this->scalar_index = scalars;
         this->regs.assign(nb_rw, 0);
         this->masks.assign(nb_rw, mask(32));
         for (size_t i = 0; i < widths.size() && i < this->masks.size(); i++)
@@ -127,8 +132,19 @@ public:
     }
 
     // The words an accepted start sends: JOBS, then every JOB_BEATS in unit
-    // order (JOBS and 1 without one)
+    // order (JOBS and 1 without one), then every scalar CSR in CSR order
     std::vector<uint32_t> words() const
+    {
+        std::vector<uint32_t> w = this->config();
+        for (int i : this->scalar_index)
+        {
+            w.push_back(this->regs[i]);
+        }
+        return w;
+    }
+
+    // JOBS and every JOB_BEATS (or 1): what decides the empty run
+    std::vector<uint32_t> config() const
     {
         std::vector<uint32_t> w = {this->jobs()};
         for (int i : this->job_beats_index)
@@ -144,7 +160,7 @@ public:
 
     bool empty() const
     {
-        for (uint32_t w : this->words())
+        for (uint32_t w : this->config())
         {
             if (w == 0)
             {
@@ -283,6 +299,7 @@ private:
     }
 
     std::vector<int> job_beats_index;
+    std::vector<int> scalar_index;
     std::vector<uint32_t> masks;    // per read-write CSR, its width's values
     uint32_t counter_max = 0xffffffffu;
 };
