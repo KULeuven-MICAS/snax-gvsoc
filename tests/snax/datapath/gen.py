@@ -179,6 +179,22 @@ def serial(name, t_in, t_out, lanes, beats, words=4):
     return t
 
 
+def lane_acc(name, t_in, t_out, lanes, beats, firings=12):
+    """LaneAccumulate: per lane s <- first ? a : s + a at t_out, a job every `beats` fires."""
+    t = Test(name, "LaneAccumulate", [t_in], t_out, t_out, lanes)
+    s, d = np.zeros(lanes, NP[t_out]), 0
+    for _ in range(firings):
+        fire = RNG.random() < 0.8
+        a = rand(t_in, lanes)
+        first = d == 0
+        t.step(en(fire=fire, first=first), [a], s)
+        if fire:
+            x = a.astype(NP[t_out])
+            s = x if first else wrap(s + x, t_out)
+            d = (d + 1) % beats
+    return t
+
+
 def buffer(name, dtype, lanes, depth, steps=12):
     t = Test(name, "LinkBuffer", [dtype], dtype, dtype, lanes, depth=depth)
     slots = [np.zeros(lanes, NP[dtype]) for _ in range(depth)]
@@ -238,6 +254,19 @@ def fixed():
     t.step(en(read=1, first=1, lane=1), [[-13, 6]], [-13])
     t.step(EN0, [[0, 0]], [-7])
     out.append(t)
+    # LaneAccumulate, rowsum 2's worked example: W = 2, J = 2, T = 3, a column a beat; A's rows
+    # (1, 2, 3), (4, 5, 6) give 6, 15, then (7, 8, 9), (10, 11, 12) give 24, 33
+    t = Test("lane_acc_rowsum_w2_j2_t3", "LaneAccumulate", ["int64"], "int64", "int64", 2)
+    a = np.arange(1, 13).reshape(4, 3)
+    s = [0, 0]
+    for j in range(2):
+        for k in range(3):
+            col = a[2 * j:2 * j + 2, k].tolist()
+            t.step(en(fire=1, first=k == 0), [col], s)
+            s = col if k == 0 else [x + y for x, y in zip(s, col)]
+        assert s == [[6, 15], [24, 33]][j], s
+    t.step(EN0, [[0, 0]], s)
+    out.append(t)
     return out
 
 
@@ -288,6 +317,13 @@ def main():
         for t_in, lanes in (("int32", 4), ("int64", 2)):
             for op in ("add", "mul", "max"):
                 tests.append(simd_kcsr(f"simd_kcsr_{op}_{t_in}_w{lanes}", op, t_in, lanes))
+        # LaneAccumulate (rowsum 2's) at W 1, 4 and 8: int64, int32 (whole words: 4 and 8) and
+        # int32 into int64 (drawn after the tests above, so theirs stay as they were)
+        for t_in, t_out, sizes in (("int64", "int64", (1, 4, 8)), ("int32", "int32", (4, 8)),
+                                   ("int32", "int64", (4, 8))):
+            for lanes in sizes:
+                name = f"lane_acc_{t_in}" + ("" if t_in == t_out else f"_to_{t_out}")
+                tests.append(lane_acc(f"{name}_w{lanes}", t_in, t_out, lanes, 3))
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

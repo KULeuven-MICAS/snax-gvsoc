@@ -66,7 +66,8 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
                               COUNTER), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
                               snax_datapath.hpp's registry: SimdLanes,
-                              TreeAccumulate, Mac, SerialAccumulate), ports
+                              TreeAccumulate, Mac, SerialAccumulate,
+                              LaneAccumulate), ports
                               (per BRM port: port, the datapath's; dir, in or
                               out; dtype, NumPy's name; lanes), opType (SimdLanes and Mac),
                               params (op: SimdLanes' and
@@ -209,6 +210,8 @@ CATALOGUE = {
                     typed=True),
     'SerialAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                  latency=lambda p: 1, serial=True, reduces=True),
+    'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
+                               latency=lambda p: 1),
 }
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
 # read-only, last (C§17)
@@ -1042,6 +1045,11 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: c is {ins[2].dtype}, out {outs[0].dtype}; a plain Mac\'s c is '
             'out\'s type')
+    if not facts.typed:  # no opType (LaneAccumulate: its input extended to out's type)
+        if u.op_type is not None:
+            raise CfgTypeError(node.file, node.where('groups'),
+                f'unit {u.name}: opType {u.op_type}; a {u.datapath} unit has none')
+        return
     if n_in == 1:  # one stream: the op at a's type, with the constant k
         a = (ins[0].width, ins[0].signed)
         if u.op_type != type_name(*a):

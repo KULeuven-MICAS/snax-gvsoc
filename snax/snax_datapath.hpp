@@ -41,6 +41,10 @@
 //       and first: on fire s <- first ? p : s + p at outType, the output s;
 //       plain, a * b + c at outType (c of out's type and lanes): L 0, or with
 //       regOut L 1, pin en, the output its register
+//   LaneAccumulate(inType, outType, lanes)   L 1, pins fire, first: per lane
+//       x = cast_out(a); on fire s <- first ? x : s + x at outType, the output
+//       s (Mac's accumulating form without the product; rowsum 2's W rows on
+//       W lanes)
 //   SerialAccumulate(inType, outType, lanes)   span = lanes, L 1 after the
 //       last lane, pins read, lane, first: on read acc <- (first and lane = 0)
 //       ? cast_out(x_lane) : acc + cast_out(x_lane); the output, one word, is
@@ -378,6 +382,50 @@ private:
 };
 
 
+class SnaxLaneAccumulate : public SnaxDatapath
+{
+public:
+    explicit SnaxLaneAccumulate(const SnaxDatapathParams &p) : p(p)
+    {
+        this->in_words = {snax_words(p.lanes, p.in_types[0])};
+        this->out_words = snax_words(p.lanes, p.out_type);
+        this->latency = 1;
+        this->out_.assign(this->out_words, 0);
+        this->s.assign(this->out_words, 0);
+        this->next.assign(this->out_words, 0);
+    }
+
+    void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &en) override
+    {
+        const SnaxDatapathParams &p = this->p;
+        int w = p.out_type.width;
+        std::copy(this->s.begin(), this->s.end(), this->out_.begin());
+        std::fill(this->next.begin(), this->next.end(), 0);  // snax_lane_set ORs into a word
+        for (int l = 0; en.fire && l < p.lanes; l++)
+        {
+            uint64_t x = snax_lane_cast(snax_lane_get(in[0], p.in_types[0].width, l),
+                p.in_types[0], p.out_type);
+            uint64_t v = en.first ? x : snax_op_compute(SNAX_OP_ADD, p.out_type,
+                snax_lane_get(this->s.data(), w, l), x);
+            snax_lane_set(this->next.data(), w, l, v);
+        }
+    }
+
+    void commit(const SnaxEnables &en) override
+    {
+        if (en.fire)
+        {
+            std::copy(this->next.begin(), this->next.end(), this->s.begin());
+        }
+    }
+
+private:
+    SnaxDatapathParams p;
+    std::vector<uint64_t> s;
+    std::vector<uint64_t> next;
+};
+
+
 // The registry: catalogue name -> its facts and a datapath built from params,
 // or an empty pointer and *why set when the params do not fit it. Its Python
 // side is snax_cfg.py's CATALOGUE: a new datapath is an entry in each.
@@ -450,6 +498,15 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxMac(p));
+        }}},
+        {"LaneAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
+            if (p.in_types.size() != 1 || p.op != SNAX_OP_ADD ||
+                p.out_type.width < p.in_types[0].width)
+            {
+                *why = "one input, op add, an output at least as wide";
+                return std::unique_ptr<SnaxDatapath>();
+            }
+            return std::unique_ptr<SnaxDatapath>(new SnaxLaneAccumulate(p));
         }}},
         {"SerialAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
             if (p.in_types.size() != 1)

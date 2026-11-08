@@ -53,6 +53,7 @@ struct Case
     int lanes = 1;      // input lanes: the tree in front of a fold, or the op's
     std::vector<SnaxType> types;    // the inputs' then the output's; empty: no data
     int op = SNAX_OP_ADD;
+    bool lane_fold = false; // `fold lanes`: a one-input fold whose lanes each keep their own sum
     bool has_k = false;     // one input, an elementwise op with the constant k (relu's)
     uint64_t k = 0;         // its 64-bit two's complement
     // axpby's k1 and k2 (op axpby): each given, and whether read from its CSR (sent with
@@ -216,6 +217,13 @@ static bool parse(const std::string &path, Case &c)
                 (key == "k1" ? c.k1_csr : c.k2_csr) = csr;
             }
         }
+        else if (key == "fold")
+        {
+            // fold tree (the default: the lanes summed into one) or fold lanes (each its own)
+            std::string how;
+            ok = (bool)(ss >> how) && (how == "tree" || how == "lanes");
+            c.lane_fold = how == "lanes";
+        }
         else if (key == "beat") { ok = values_line(ss, c.beats); }
         else if (key == "result") { ok = values_line(ss, c.results); }
         else if (key == "cycles") { in_cycles = true; }
@@ -231,6 +239,11 @@ static bool parse(const std::string &path, Case &c)
     {
         fprintf(stderr, "%s: op axpby takes two inputs and k1 (k2 optional), and only it\n",
             path.c_str());
+        return false;
+    }
+    if (c.lane_fold && (c.inputs != 1 || c.has_k))
+    {
+        fprintf(stderr, "%s: fold lanes is a one-input fold, without k\n", path.c_str());
         return false;
     }
     if (c.has_k && c.inputs != 1)
@@ -256,6 +269,7 @@ struct Data
     const Case &c;
     std::deque<std::vector<uint64_t>> pending;  // results computed, not pushed: their words
     uint64_t acc = 0;
+    std::vector<uint64_t> lane_acc;             // fold lanes: each lane's sum, at the output type
     int fired = 0, pushed = 0;
     int errors = 0;
 
@@ -302,6 +316,26 @@ struct Data
             this->pending.push_back(out);
             return;
         }
+        if (this->c.inputs == 1 && this->c.lane_fold)  // per lane s <- first ? a : s + a
+        {
+            std::vector<uint64_t> a = this->words(0, it->second);
+            std::vector<uint64_t> next(this->c.lanes * out_t.width / 64 + 1, 0);  // set ORs
+            this->lane_acc.resize(next.size(), 0);
+            for (int l = 0; l < this->c.lanes; l++)
+            {
+                uint64_t x = snax_lane_cast(snax_lane_get(a.data(), this->c.types[0].width, l),
+                    this->c.types[0], out_t);
+                uint64_t s = snax_lane_get(this->lane_acc.data(), out_t.width, l);
+                snax_lane_set(next.data(), out_t.width, l, n % job_beats == 0 ? x :
+                    snax_op_compute(SNAX_OP_ADD, out_t, s, x));
+            }
+            this->lane_acc = next;
+            if (result)
+            {
+                this->pending.push_back(this->lane_acc);
+            }
+            return;
+        }
         if (this->c.inputs == 1)
         {
             this->acc = snax_op_fold(this->c.op, this->c.lanes, this->c.types[0], out_t,
@@ -326,7 +360,7 @@ struct Data
         this->pending.pop_front();
         auto it = this->c.results.find(index);
         SnaxType out_t = this->c.types[this->c.inputs];
-        int lanes = this->c.inputs == 1 && !this->c.has_k ? 1 : this->c.lanes;
+        int lanes = this->c.inputs == 1 && !this->c.has_k && !this->c.lane_fold ? 1 : this->c.lanes;
         if (it == this->c.results.end() || (int)it->second.size() != lanes)
         {
             printf("%s: cycle %ld: push %d has no result of %d values\n", this->c.name.c_str(),

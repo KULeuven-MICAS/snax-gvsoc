@@ -322,6 +322,7 @@ static int check_registry(int *count)
         {"TreeAccumulate", one, true, 1, 1},
         {"Mac", two, true, 1, 1}, {"Mac", plain, true, 1, 1}, {"Mac", plain_bad, false, 0, 0},
         {"Mac", one, false, 0, 0}, {"SerialAccumulate", serial, true, 1, 4},
+        {"LaneAccumulate", one, true, 1, 1}, {"LaneAccumulate", two, false, 0, 0},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},
     };
     int errors = 0;

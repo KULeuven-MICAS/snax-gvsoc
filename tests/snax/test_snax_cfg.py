@@ -125,11 +125,14 @@ class Fixtures(unittest.TestCase):
     snax_forge_<design> set for the design, a streamer set per accelerator, its
     accelerator.json read."""
 
-    def slot(self, design):
-        cfg = snax_cfg.load(FORGE / design / "snax_forge.hjson")
+    def slot(self, folder):
+        """The folder's slot, named after its design (the manifest's: the folder's name but for
+        rowsum_2_padded, rowsum_2 under the padded_rows layout, whose design is rowsum_2)."""
+        cfg = snax_cfg.load(FORGE / folder / "snax_forge.hjson")
         self.assertEqual(cfg.name, "snax_forge_cluster")
         self.assertTrue(cfg.tcdm.sparse_interconnect)
         (slot,) = cfg.cores[0].accelerators
+        design = json.loads((FORGE / folder / "manifest.json").read_text())["design"]
         self.assertEqual(slot.name, f"snax_forge_{design}")
         return slot
 
