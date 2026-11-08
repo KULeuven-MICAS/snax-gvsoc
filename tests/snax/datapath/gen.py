@@ -179,6 +179,43 @@ def serial(name, t_in, t_out, lanes, beats, words=4):
     return t
 
 
+def tree_seed(name, t_in, t_out, lanes, beats, firings=10):
+    """A seeded TreeAccumulate (D149): its second input the seed, one element; a job's first
+    firing starts from it, acc <- seed + tree(a)."""
+    t = Test(name, "TreeAccumulate", [t_in, t_out], t_out, t_out, lanes, op="add", seed=True)
+    acc, d = NP[t_out](0), 0
+    for _ in range(firings):
+        fire = RNG.random() < 0.8
+        a, q = rand(t_in, lanes), rand(t_out, 1)
+        first = d == 0
+        t.step(en(fire=fire, first=first), [a, q], acc)
+        if fire:
+            x = a.astype(NP[t_out]).sum(dtype=NP[t_out])
+            acc = wrap(q[0] + x, t_out) if first else wrap(acc + x, t_out)
+            d = (d + 1) % beats
+    return t
+
+
+def serial_seed(name, t_in, t_out, lanes, beats, words=4):
+    """A seeded SerialAccumulate: lane by lane as unseeded, and the job's first beat's firing
+    (its last lane, fire) adds the seed."""
+    t = Test(name, "SerialAccumulate", [t_in, t_out], t_out, t_out, lanes, seed=True)
+    acc, d = NP[t_out](0), 0
+    for _ in range(words):
+        a, q = rand(t_in, lanes), rand(t_out, 1)
+        first = d == 0
+        for lane in range(lanes):
+            fire = lane == lanes - 1
+            t.step(en(fire=fire, read=1, first=first, lane=lane), [a, q], acc)
+            x = a[lane].astype(NP[t_out])
+            acc = x if (first and lane == 0) else wrap(acc + x, t_out)
+            if first and fire:
+                acc = wrap(acc + q[0], t_out)
+        d = (d + 1) % beats
+    t.step(EN0, [rand(t_in, lanes), rand(t_out, 1)], acc)
+    return t
+
+
 def lane_acc(name, t_in, t_out, lanes, beats, firings=12):
     """LaneAccumulate: per lane s <- first ? a : s + a at t_out, a job every `beats` fires."""
     t = Test(name, "LaneAccumulate", [t_in], t_out, t_out, lanes)
@@ -324,6 +361,21 @@ def main():
             for lanes in sizes:
                 name = f"lane_acc_{t_in}" + ("" if t_in == t_out else f"_to_{t_out}")
                 tests.append(lane_acc(f"{name}_w{lanes}", t_in, t_out, lanes, 3))
+        # the fold's seed (B2 R5, D149): TreeAccumulate and SerialAccumulate at W 1, 2 and 4,
+        # int64, and int32 into int64 (drawn after the tests above, so theirs stay as they were)
+        for t_in, t_out, sizes in (("int64", "int64", (1, 2, 4)), ("int32", "int64", (2, 4))):
+            for lanes in sizes:
+                name = t_in if t_in == t_out else f"{t_in}_to_{t_out}"
+                tests.append(tree_seed(f"tree_seed_{name}_w{lanes}", t_in, t_out, lanes, 3))
+                tests.append(serial_seed(f"serial_seed_{name}_w{lanes}", t_in, t_out, lanes, 2))
+    # matvec_acc's worked example on TreeAccumulate at W = 2: rows (1, 2, 3, 4) . p = (1, 2, 0,
+    # 1) in two beats, q = 1: 1 + 5 = 6, then 6 + 4 = 10
+    t = Test("tree_seed_matvec_w2", "TreeAccumulate", ["int64", "int64"], "int64", "int64", 2,
+             op="add", seed=True)
+    t.step(en(fire=1, first=1), [[1, 4], [1]], [0])
+    t.step(en(fire=1, first=0), [[0, 4], [7]], [6])
+    t.step(EN0, [[0, 0], [0]], [10])
+    tests.append(t)
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

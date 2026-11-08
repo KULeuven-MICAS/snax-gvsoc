@@ -36,6 +36,13 @@
 // outer inputs all have a beat and whether its outer output has room (true for
 // a unit without one).
 //
+// A seeded fold (TreeAccumulate, SerialAccumulate; D149) has one more outer
+// input, its seed, one beat per job: its input has a beat when its other
+// inputs have one and, on its job's first beat (d = 0), its seed has one
+// (fire = a.valid and (not first or seed.valid)); the seed is taken with the
+// job's first firing (seed.ready = fire and first, UnitStep::seed). A seed
+// missing when wanted is stall_in, as a missing outer beat.
+//
 // Per unit (C§17): its job_beats_counter d (its firings mod T, here derived
 // from its firings; first = [d = 0], it gives a result on firings with d =
 // T - 1; the Chisel keeps it as a counter, and counts each unit's results in
@@ -107,6 +114,7 @@ public:
         int latency = 0;
         int ii = 1;
         int span = 1;
+        bool seeded = false;    // one more outer input, its seed, taken once per job
     };
 
     // An edge: unit from's output into input to_input of unit to (its index among the
@@ -131,6 +139,7 @@ public:
         int lane = 0;
         bool first = false;     // the beat fired or read is its job's first (d = 0)
         bool frozen = false;    // its head (or, L = 0, a giving firing) had no room
+        bool seed = false;      // its seed taken (a seeded unit's fire on its job's first beat)
     };
 
     // What one buffer does: its LinkBuffer's load, wslot, rslot (a wire's stays all 0)
@@ -235,7 +244,7 @@ public:
         this->stepped.units.assign(n, UnitStep());
         this->stepped.links.assign(links.size(), LinkStep());
         for (std::vector<bool> *v : {&this->avail, &this->wants, &this->would_fire, &this->gives,
-            &this->head, &this->offer})
+            &this->head, &this->offer, &this->outer_ok})
         {
             v->assign(n, false);
         }
@@ -318,11 +327,20 @@ public:
         return TAKEN;
     }
 
-    // One busy cycle: inputs[k], every outer input of unit k has a beat (true
-    // for a unit without one); outer_room[k], unit k's outer output has room
-    // (true for a unit without one). The step is valid until the next call.
+    // One busy cycle: inputs[k], every outer input of unit k but its seed has
+    // a beat (true for a unit without one); outer_room[k], unit k's outer
+    // output has room (true for a unit without one); seeds[k], a seeded unit's
+    // seed has a beat (any value for one not seeded). The step is valid until
+    // the next call.
     const Step &step(int64_t cycle, const std::vector<bool> &inputs,
         const std::vector<bool> &outer_room)
+    {
+        this->no_seeds.assign(this->cfg.size(), true);
+        return this->step(cycle, inputs, this->no_seeds, outer_room);
+    }
+
+    const Step &step(int64_t cycle, const std::vector<bool> &inputs,
+        const std::vector<bool> &seeds, const std::vector<bool> &outer_room)
     {
         size_t n = this->cfg.size();
         Step &s = this->stepped;
@@ -345,7 +363,10 @@ public:
                 const Link &e = this->links[i];
                 linked = linked && (e.depth == 0 ? offer[e.from] : this->l[i].occupancy > 0);
             }
-            avail[k] = inputs[k] && linked;
+            // a seeded unit's job's first beat waits for its seed too
+            bool first = us.firings % this->job_beats[k] == 0;
+            this->outer_ok[k] = inputs[k] && (!c.seeded || !first || seeds[k]);
+            avail[k] = this->outer_ok[k] && linked;
             bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
             wants[k] = us.firings < this->firings_per_run[k] && ii_ok;
             would_fire[k] = wants[k] && avail[k] && (c.span == 1 || us.lane == c.span - 1);
@@ -388,8 +409,9 @@ public:
                 }
                 bool in_gap = us.has_fired && cycle < us.last_fire + c.ii;
                 busy = busy || st.fire || st.read || in_gap;
-                waits = waits || (wants[k] && !inputs[k]);
+                waits = waits || (wants[k] && !this->outer_ok[k]);
             }
+            st.seed = st.fire && st.first && c.seeded;
             if (st.fire)
             {
                 us.has_fired = true;
@@ -519,7 +541,8 @@ private:
     std::vector<LinkState> l;
     // step()'s, sized at configure: its result and its passes' per-unit values
     Step stepped;
-    std::vector<bool> avail, wants, would_fire, gives, head, offer;
+    std::vector<bool> avail, wants, would_fire, gives, head, offer, outer_ok;
+    std::vector<bool> no_seeds;     // the three-argument step's seeds, all there
 };
 
 

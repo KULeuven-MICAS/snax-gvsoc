@@ -38,7 +38,8 @@ groups of one unit each, `shell_<group>` and `unit_<unit>`; a linked group
 
 Each SnaxGroup gets its units in the group's order (group_units): per unit
 its datapath, its inputs in BRM port order (an outer one named
-`<unit>_<port>`, a linked one ""), its output (outer, or "" when linked), its
+`<unit>_<port>`, a linked one ""), seed (the index of a fold's seed among
+them, the last, or -1), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
 JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
 from its CSRs (scalars, each [slot, words]); and its links as edges, each {from, to, to_input, depth}:
@@ -50,7 +51,7 @@ from dataclasses import dataclass
 
 import gvsoc.systree
 import interco.router as router
-from snax_cfg import (CATALOGUE, DTYPES, CfgTargetError, dirs_of, scalar_csrs,
+from snax_cfg import (CATALOGUE, DTYPES, SEED, CfgTargetError, dirs_of, scalar_csrs,
                       streamer_channels)
 from snax_group import SnaxGroup
 from snax_shell import SnaxShell
@@ -142,6 +143,7 @@ def group_units(accelerator, group) -> tuple:
         units.append({
             'name': u.name, 'datapath': u.datapath,
             'inputs': ['' if f'{u.name}.{p}' in to else f'{u.name}_{p}' for p in ins],
+            'seed': ins.index(SEED) if SEED in ins else -1,
             'output': '' if f'{u.name}.{out}' in frm else f'{u.name}_{out}',
             'lanes': in_ports[0].lanes,
             'in_widths': [p.width for p in in_ports], 'in_signed': [p.signed for p in in_ports],

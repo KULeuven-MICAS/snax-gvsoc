@@ -19,7 +19,10 @@
 //                inputs             per BRM input, in port order: the outer
 //                                   port's name, or "" for an input a link
 //                                   feeds (exactly one; a unit of span > 1
-//                                   has no outer one)
+//                                   has no outer one but its seed)
+//                seed               the index in inputs of a fold's seed (the
+//                                   last, an outer port: one element in one
+//                                   word, taken once per job, D149), or -1
 //                output             the outer output's port name, or ""
 //                                   (linked); exactly one unit has one until
 //                                   tier A
@@ -78,7 +81,8 @@
 // in the run's last busy cycle; there too, the summary's `run` line
 // (SnaxGroupRule::run_line), the classes adding up to the run's busy cycles.
 // Beats: `fire` per head firing (its index n, each outer input's beat b as the
-// streamer hands it back, -1 if it does not, and the words), `push` per
+// streamer hands it back, -1 if it does not, and the words; a seed not taken
+// in that firing, b -1 and its last words), `push` per
 // result the outer output's unit pushes (its index n, the head's firings it folds, the
 // words), and `class` (mode) in the first cycle of each run of one class.
 // Per-unit events of a linked group are parked (snax-forge open item 96).
@@ -128,13 +132,15 @@ private:
     SnaxSignal sig_push;
     SnaxSignal sig_class;
 
-    // An outer input: its port, its unit, its words per beat, the beat taken
+    // An outer input: its port, its unit, its words per beat, the beat taken, and whether it
+    // is the unit's seed (taken once per job)
     struct OuterIn
     {
         vp::IoMaster itf;
         size_t unit;
         int words;
         std::vector<uint64_t> beat;
+        bool seed = false;
     };
 
     std::vector<OuterIn> in_itf;        // sized once, before any port is registered
@@ -143,7 +149,7 @@ private:
     std::vector<std::vector<size_t>> unit_ins;   // per unit, its outer inputs (in_itf indices)
     // cycle_handler's, sized once: per unit whether its outer inputs have a beat and its outer
     // output room, its outer inputs' beats; the outer output's beat
-    std::vector<bool> inputs, room;
+    std::vector<bool> inputs, seeds, room;
     std::vector<std::vector<const uint64_t *>> outer;
     std::vector<uint64_t> out_beat;
     std::vector<uint32_t> fixed_t;      // per unit: its t, 0 from the start
@@ -216,12 +222,25 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 w.c_str(), ins.size());
         }
         this->unit_ins.emplace_back();
+        int seed = this->props.int_prop(u, "seed", w);
+        if (seed != -1 && seed != (int)ins.size() - 1)
+        {
+            this->trace.fatal("Property %s.seed: %d; a fold's seed is its last input (%ld), or "
+                "-1\n", w.c_str(), seed, ins.size() - 1);
+        }
+        p.seed = seed != -1;
         for (size_t i = 0; i < ins.size(); i++)
         {
             std::string at_i = "[" + std::to_string(i) + "]";
             p.in_types.push_back({this->props.as_width(widths[i], w + ".in_widths" + at_i),
                 this->props.as_bool(signs[i], w + ".in_signed" + at_i)});
             std::string port = dynamic_cast<js::ConfigString *>(ins[i]) ? ins[i]->get_str() : "";
+            bool is_seed = p.seed && (int)i == seed;
+            if (port.empty() && is_seed)
+            {
+                this->trace.fatal("Property %s.inputs[%ld]: \"\", but the seed is an outer "
+                    "input (the streamer's)\n", w.c_str(), i);
+            }
             if (port.empty())
             {
                 linked[k].push_back(i);
@@ -229,7 +248,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             }
             OuterIn &o = this->in_itf[at];
             o.unit = k;
-            o.words = snax_words(p.lanes, p.in_types.back());
+            o.seed = is_seed;
+            o.words = is_seed ? 1 : snax_words(p.lanes, p.in_types.back());
             o.beat.assign(o.words, 0);
             this->new_master_port(port, &o.itf);
             this->unit_ins.back().push_back(at++);
@@ -311,12 +331,13 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         c.latency = this->props.int_prop(u, "latency", w);
         c.ii = this->props.int_prop(u, "ii", w);
         c.span = this->props.int_prop(u, "span", w);
+        c.seeded = p.seed;
         if (c.latency != dp->latency || c.ii != 1 || c.span != dp->span)
         {
             this->trace.fatal("Property %s.latency, ii, span: %d, %d, %d; %s is %d, 1, %d\n",
                 w.c_str(), c.latency, c.ii, c.span, datapath.c_str(), dp->latency, dp->span);
         }
-        if (c.span > 1 && !this->unit_ins.back().empty())
+        if (c.span > 1 && this->unit_ins.back().size() > (p.seed ? 1u : 0u))
         {
             this->trace.fatal("Property %s.inputs: a unit of span %d reads its input in place: "
                 "its input is a link, not a streamer's\n", w.c_str(), c.span);
@@ -440,6 +461,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     }
     this->data.wire(this->rule);
     this->inputs.assign(units.size(), true);
+    this->seeds.assign(units.size(), true);
     this->room.assign(units.size(), true);
     this->outer.assign(units.size(), {});
     for (size_t k = 0; k < units.size(); k++)
@@ -605,15 +627,17 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
 
     if (_this->rule.busy(cycle))
     {
-        std::vector<bool> &inputs = _this->inputs;
+        std::vector<bool> &inputs = _this->inputs, &seeds = _this->seeds;
         std::fill(inputs.begin(), inputs.end(), true);
+        std::fill(seeds.begin(), seeds.end(), true);
         for (OuterIn &o : _this->in_itf)
         {
-            inputs[o.unit] = _this->probe(o.itf, false) && inputs[o.unit];
+            std::vector<bool> &has = o.seed ? seeds : inputs;
+            has[o.unit] = _this->probe(o.itf, false) && has[o.unit];
         }
         _this->room[_this->rule.output_unit()] = _this->probe(_this->out_itf, true);
 
-        const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, _this->room);
+        const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, seeds, _this->room);
         const SnaxGroupRule::UnitStep &head = step.units[_this->rule.topological().front()];
         const SnaxGroupRule::UnitStep &tail = step.units[_this->rule.output_unit()];
         _this->sigs.set(_this->sig_busy, 1);
@@ -631,16 +655,19 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
             for (size_t i : _this->unit_ins[k])
             {
                 OuterIn &o = _this->in_itf[i];
-                if (step.units[k].fire)
+                bool moved = o.seed ? step.units[k].seed : step.units[k].fire;
+                if (moved)
                 {
                     _this->move(o.itf, false, o.beat.data(), o.words);
-                    if (traced && k == _this->rule.topological().front())
-                    {
-                        bool tagged = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
-                        snax_join(beats, std::to_string(tagged
-                            ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L));
-                        snax_join(values, snax_words_text(o.beat.data(), o.beat.size()));
-                    }
+                }
+                // the head's firing lists every outer input; a seed not taken in it as -1
+                if (traced && step.units[k].fire && k == _this->rule.topological().front())
+                {
+                    bool tagged = moved &&
+                        snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
+                    snax_join(beats, std::to_string(tagged
+                        ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L));
+                    snax_join(values, snax_words_text(o.beat.data(), o.beat.size()));
                 }
             }
         }

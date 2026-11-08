@@ -60,8 +60,8 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
     # A chain: link k joins unit k to unit k + 1's only input
     links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
              for k, d in enumerate(depths)]
-    m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4])
-                   for u in units], links)
+    m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4],
+                        seed=len(u) > 5 and u[5]) for u in units], links)
     rows, end = m.run(jobs, ts, valid, ready, 64)
     if end is None:
         empty = jobs == 0 or 0 in ts
@@ -78,7 +78,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
     for u in units:
         k = units.index(u)
         lines.append(f"unit {u[0]} {u[1]} latency {u[2]} ii 1 span {u[3]} t {ts[k]} "
-                     f"inputs {u[4]}")
+                     f"inputs {u[4]}" + (" seed 1" if len(u) > 5 and u[5] else ""))
     for e in links:
         lines.append(f"link {e['from']} {e['to']} depth {e['depth']}")
     lines.append(f"jobs {jobs}")
@@ -94,16 +94,53 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
         lines.append(f"lanes {data['lanes']}")
         lines += [f"data {x} " + " ".join(map(str, data[x])) for x in ("a", "b")]
         lines.append("sums " + " ".join(map(str, data["sums"])))
-    lines += ["", "# a b ready | " + " | ".join(f"{u[0]} fire give" for u in units)
+    names = [x for u in units for x in ((["a", "b"][:u[4]] if not (len(u) > 5 and u[5])
+             else [*(["a"] * (u[4] - 1)), f"{u[0]}.seed"]) if u[4] else [])]
+    lines += ["", f"# {' '.join(names)} ready | " + " | ".join(f"{u[0]} fire give" for u in units)
               + (" | " + " ".join(f"occ{k}" for k, d in enumerate(depths) if d) if any(depths) else "")
               + " | busy", "cycles"]
     for c, (v, r, out, occ, busy, cls, note) in enumerate(rows):
-        cols = f"{v[0]} {v[1]} {r} | " + " | ".join(f"{f} {g}" for f, g in out)
+        cols = " ".join(map(str, v)) + f" {r} | " + " | ".join(f"{f} {g}" for f, g in out)
         if any(depths):
             cols += " | " + " ".join(str(occ[k]) for k, d in enumerate(depths) if d)
         lines.append(f"{cols} | {busy}    # {c}: {note}")
     (HERE / "cases" / f"{name}.txt").write_text("\n".join(lines) + "\n")
     return total
+
+
+def seed_cases():
+    """The fold's seed (snax-forge B2 R5, D149): a seeded unit's last outer input is its seed,
+    one beat per job; its job's first beat waits for it (fire = a.valid and (not first or
+    seed.valid)), the firing takes it. Two folds in a chain, acc (TreeAccumulate, T 2) into sum
+    (TreeAccumulate, T 2) by a wire, JOBS 2, unseeded, the first seeded, both seeded: with
+    every seed there from the start the three take the same cycles. A late seed on matvec_seed's
+    sum (TreeAccumulate, T 4, JOBS 2) and on a SerialAccumulate (span 4) after a Mac."""
+    def chain(seed_acc, seed_sum):
+        return [("acc", "TreeAccumulate", 1, 1, 1 + seed_acc, seed_acc),
+                ("sum", "TreeAccumulate", 1, 1, seed_sum, seed_sum)]
+    ones = {(0, 0): (1,), (1, 0): (1, 1), (1, 1): (1, 1, 1)}
+    totals = {}
+    for (sa, ss), name, what in (((0, 0), "seed_none", "neither seeded"),
+                                 ((1, 0), "seed_first", "acc seeded, sum not"),
+                                 ((1, 1), "seed_both", "both seeded")):
+        totals[name] = write(name, f"acc (TreeAccumulate, T 2) -> a wire -> sum (TreeAccumulate, "
+                             f"T 2), JOBS 2: {what}, every seed there", chain(sa, ss), [0], 2,
+                             [2, 2], valid=lambda c, v=ones[(sa, ss)]: v,
+                             comment=["a seeded unit takes its seed with its job's first "
+                                      "firing; the cycles as unseeded"])
+    assert len(set(totals.values())) == 1, totals
+    late = {1, 2, 3, 8, 9}
+    write("seed_late", "matvec_seed's sum: TreeAccumulate, T 4, JOBS 2, its seed missing in "
+          "cycles 1 to 3 and 8 to 9", [("sum", "TreeAccumulate", 1, 1, 2, 1)], [], 2, [4],
+          valid=lambda c: (1, 0 if c in late else 1),
+          comment=["each job's first beat waits for the seed (stall_in); its other beats do "
+                   "not"])
+    serial = [("mac", "Mac", 1, 1, 2), ("sum", "SerialAccumulate", 1, W, 1, 1)]
+    write("seed_serial_late", f"mac (Mac, T 2) -> a wire -> sum (SerialAccumulate, span {W}, "
+          "seeded, T 1), JOBS 2, sum's seed missing in cycles 1 to 4 and 7", serial, [0], 2,
+          [2, 1], valid=lambda c: (1, 1, 0 if c in {1, 2, 3, 4, 7} else 1),
+          comment=["sum reads its job's first beat lane by lane only once its seed is there; "
+                   "mac holds its result"])
 
 
 def main():
@@ -139,6 +176,7 @@ def main():
               data=dot_data(seed, j, t, 1))
     write("dot4_jobs0", "dot 4, JOBS 0: the empty run, ignored; busy never rises", u4, [0], 0,
           [2, 1], comment=["the shell ends it in its own cycle (tests/snax/shell)"])
+    seed_cases()
     print("T, J | " + " | ".join(f"dot {v}" for v in VARIANTS))
     for t in (2, 4):
         for j in (1, 2):

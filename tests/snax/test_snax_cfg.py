@@ -789,6 +789,92 @@ class LinkedGroup(unittest.TestCase):
         self.fails(snax_cfg.CfgTargetError, "gen.timing:")
 
 
+# matvec_seed's sum (snax-forge B2 R5, D149): a TreeAccumulate over 4 lanes with a seed port,
+# one int64 lane read once per job, its one accelerator's readers sum.a and sum.seed
+def seeded(datapath: str = "TreeAccumulate", seed: Port = Port("seed", "int64", 1, "in"),
+           lanes: int = 4, span: int = 1, name: str = "acc") -> Unit:
+    return Unit(name, "accumulate", datapath,
+                {"a": Port("in", "int64", lanes, "in"), "seed": seed,
+                 "out": Port("out", "int64", 1, "out")}, None,
+                {"op": "add"} if datapath == "TreeAccumulate" else {}, 1, 1,
+                [Csr("JOB_BEATS", "rw", 2, 32)], span)
+
+
+SEEDED_STREAMER = streamer([4, 1], [1])
+
+
+class Seed(unittest.TestCase):
+    """A fold's seed port (snax-forge B2 R5, D149): read on TreeAccumulate and
+    SerialAccumulate, one lane at the output's dtype, the last in port, from the streamer
+    (also at span > 1); anything else is gen.seed at the port."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self, acc, streamer=SEEDED_STREAMER):
+        (slot,) = snax_cfg.load(write_design(self.dir, acc, streamer, 3, 2)).cores[0].accelerators
+        return slot.description
+
+    def refused(self, acc, text, streamer=SEEDED_STREAMER):
+        with self.assertRaises(snax_cfg.CfgTargetError) as ctx:
+            self.load(acc, streamer)
+        self.assertIn(text, ctx.exception.why)
+        return ctx.exception
+
+    def test_a_seeded_fold_reads(self):
+        desc = accelerator("matvec_seed", seeded(), between=1)
+        got = self.load(acc_json(desc))
+        self.assertEqual(got, desc)
+        (unit,) = got.groups[0].units
+        self.assertTrue(unit.seeded)
+        self.assertEqual(got.accelerators[0].inputs, ["acc.a", "acc.seed"])
+        self.assertFalse(fold("acc", 0).seeded)
+
+    def test_the_seed_port_is_checked(self):
+        cases = [
+            (Port("seed", "int64", 2, "in"), "gen.seed: 2 lanes, a seed is 1"),
+            (Port("seed", "int32", 1, "in"), "gen.seed: int32, a seed is its output's int64"),
+        ]
+        for port, text in cases:
+            e = self.refused(acc_json(accelerator("matvec_seed", seeded(seed=port), between=1)),
+                             text)
+            self.assertIn("ports.seed", e.path)
+        mac = Unit("acc", "mac", "Mac", {"a": Port("a", "int64", 4, "in"),
+                                          "b": Port("b", "int64", 4, "in"),
+                                          "seed": Port("seed", "int64", 1, "in"),
+                                          "out": Port("out", "int64", 4, "out")}, "int64",
+                   {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)])
+        self.refused(acc_json(accelerator("mac_seed", mac, between=1)),
+                     "gen.seed: Mac takes no seed (TreeAccumulate and SerialAccumulate do, D149)",
+                     streamer([4, 4, 1], [4]))
+        first = acc_json(accelerator("matvec_seed", seeded(), between=1))
+        ports = first["accelerators"][0]["groups"][0]["units"][0]["ports"]
+        first["accelerators"][0]["groups"][0]["units"][0]["ports"] = {
+            "seed": ports["seed"], "a": ports["a"], "out": ports["out"]}
+        first["accelerators"][0]["inputs"] = ["acc.seed", "acc.a"]
+        self.refused(first, "gen.seed: the last in port", streamer([1, 4], [1]))
+
+    def test_a_serial_fold_takes_its_seed_from_the_streamer(self):
+        """A SerialAccumulate of span 4 seeded: its a from a link (a Mac's), its seed from the
+        streamer; with its a from the streamer it is gen.span still."""
+        serial = replace(seeded("SerialAccumulate", span=4, name="sum"), csrs=[], params={"T": 1})
+        mac = DOT4.accelerators[0].groups[0].units[0]
+        desc = description("dot_seed", Accelerator(
+            "dot", ["mac.a", "mac.b", "sum.seed"], ["sum.out"],
+            [Group("dot", group_csrs(0, 1), [mac, serial],
+                   [Link("out_partial", "mac.out", "sum.a", 0)])]))
+        got = self.load(acc_json(desc), streamer([4, 4, 1], [1]))
+        self.assertTrue(got.groups[0].units[1].seeded)
+        alone = acc_json(accelerator("serial_seed", seeded("SerialAccumulate", span=4),
+                                     between=1))
+        self.refused(alone, "gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the "
+                     "streamer")
+
+
 class Dot1(unittest.TestCase):
     """dot 1 (snax-forge C§17's table, D157): two accelerators vmul and vsum in two streamer
     sets; dot_1_enc, the two as one accelerator dot of two groups (D148), one set."""

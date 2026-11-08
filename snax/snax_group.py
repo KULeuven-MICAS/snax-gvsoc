@@ -23,7 +23,8 @@ class SnaxGroup(gvsoc.systree.Component):
     ----------
     units : list[dict]
         Each unit (snax_group.cpp's header): name, datapath, inputs (per BRM
-        input its outer port's name, or "" for one a link feeds), output (the
+        input its outer port's name, or "" for one a link feeds), seed (the
+        index of a fold's seed in inputs, the last, or -1), output (the
         outer port's name, or "" when linked; one unit has one), lanes,
         in_widths, in_signed, out_width, out_signed, op_width, op_signed, op,
         accumulate, reg_out, k (SimdLanes' constant at one stream, decimal;

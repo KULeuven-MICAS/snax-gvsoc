@@ -40,6 +40,7 @@ struct UnitLine
     SnaxGroupRule::UnitCfg cfg;
     uint32_t t = 1;
     int inputs = 0;     // outer inputs
+    bool seed = false;  // the last of them is a fold's seed, one beat per job
 };
 
 struct CycleLine
@@ -181,12 +182,20 @@ static bool parse(const std::string &path, Case &c)
         }
         else if (key == "unit")
         {
-            // unit NAME DATAPATH latency L ii N span S t T inputs I
+            // unit NAME DATAPATH latency L ii N span S t T inputs I [seed 1]
             UnitLine u;
-            std::string k1, k2, k3, k4, k5;
+            std::string k1, k2, k3, k4, k5, k6;
             ok = (bool)(ss >> u.name >> u.datapath >> k1 >> u.cfg.latency >> k2 >> u.cfg.ii >> k3
                 >> u.cfg.span >> k4 >> u.t >> k5 >> u.inputs) && k1 == "latency" && k2 == "ii" &&
                 k3 == "span" && k4 == "t" && k5 == "inputs" && snax_datapaths().count(u.datapath);
+            int seeded = 0;
+            if (ok && ss >> k6)
+            {
+                ok = k6 == "seed" && (bool)(ss >> seeded) && (seeded == 0 || seeded == 1) &&
+                    (!seeded || u.inputs >= 1);
+            }
+            u.seed = seeded;
+            u.cfg.seeded = seeded;
             c.units.push_back(u);
         }
         else if (key == "link")
@@ -361,20 +370,21 @@ static int run(const Case &c)
         step.units.assign(c.units.size(), SnaxGroupRule::UnitStep());
         if (busy)
         {
-            std::vector<bool> inputs;
+            std::vector<bool> inputs, seeds;
             size_t at = 0;
             for (const UnitLine &u : c.units)
             {
                 bool all = true;
-                for (int i = 0; i < u.inputs; i++)
+                for (int i = 0; i < u.inputs - (int)u.seed; i++)
                 {
                     all = all && l.valid[at++];
                 }
                 inputs.push_back(all);
+                seeds.push_back(u.seed ? (bool)l.valid[at++] : true);
             }
             std::vector<bool> room(c.units.size(), true);
             room[output] = l.ready;
-            step = rule.step(cycle, inputs, room);
+            step = rule.step(cycle, inputs, seeds, room);
             if (data)
             {
                 std::vector<uint64_t> a(lanes), bb(lanes);

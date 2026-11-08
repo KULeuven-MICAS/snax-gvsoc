@@ -33,9 +33,11 @@
 //       at opType (snax_op_axpby). A slot read from its CSR (k at one stream,
 //       k1, k2) takes its value at each start (set_scalar), as the shell
 //       sends it
-//   TreeAccumulate(inType, outType, lanes, add)   L 1, pins fire, first: on
-//       fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to outType
-//       first (snax_op_fold); the output, one word, is acc
+//   TreeAccumulate(inType, outType, lanes, add[, seed])   L 1, pins fire,
+//       first: on fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to
+//       outType first (snax_op_fold); the output, one word, is acc. Seeded (a
+//       second input, the seed: one element of its type in one word, read
+//       once per job), the first firing starts from it: acc <- seed + tree(x)
 //   Mac(inTypes, opType, outType, lanes, accumulate, regOut)   per lane
 //       p = cast_out(cast_op(a) * cast_op(b)); with accumulate, L 1, pins fire
 //       and first: on fire s <- first ? p : s + p at outType, the output s;
@@ -45,10 +47,12 @@
 //       x = cast_out(a); on fire s <- first ? x : s + x at outType, the output
 //       s (Mac's accumulating form without the product; rowsum 2's W rows on
 //       W lanes)
-//   SerialAccumulate(inType, outType, lanes)   span = lanes, L 1 after the
-//       last lane, pins read, lane, first: on read acc <- (first and lane = 0)
-//       ? cast_out(x_lane) : acc + cast_out(x_lane); the output, one word, is
-//       acc
+//   SerialAccumulate(inType, outType, lanes[, seed])   span = lanes, L 1
+//       after the last lane, pins read, lane, first: on read acc <- (first and
+//       lane = 0) ? cast_out(x_lane) : acc + cast_out(x_lane); the output, one
+//       word, is acc. Seeded (a second input, as TreeAccumulate's), the job's
+//       first firing (its first beat's last lane, pin fire, when the control
+//       takes the seed) adds the seed too: the job's sum is seed + its lanes
 //   LinkBuffer(depth, lanes, dtype)   D slots of one beat, L 1: the output is
 //       slot rslot, and on load slot wslot takes the input; the occupancy and
 //       the slots are the control model's
@@ -105,6 +109,7 @@ struct SnaxDatapathParams
     bool has_k2 = false;    // axpby's k2, as k1; neither: + b
     uint64_t k2 = 0;
     bool k2_csr = false;
+    bool seed = false;      // a fold's seed: its last input, one element in one word (D149)
 };
 
 
@@ -202,12 +207,24 @@ private:
 };
 
 
+// A seeded fold's seed: lane 0 of its last input, cast to the output's type
+inline uint64_t snax_seed(const SnaxDatapathParams &p, const std::vector<const uint64_t *> &in)
+{
+    const SnaxType &t = p.in_types.back();
+    return snax_lane_cast(snax_lane_get(in.back(), t.width, 0), t, p.out_type);
+}
+
+
 class SnaxTreeAccumulate : public SnaxDatapath
 {
 public:
     explicit SnaxTreeAccumulate(const SnaxDatapathParams &p) : p(p)
     {
         this->in_words = {snax_words(p.lanes, p.in_types[0])};
+        if (p.seed)
+        {
+            this->in_words.push_back(1);
+        }
         this->out_words = 1;
         this->latency = 1;
         this->out_.assign(1, 0);
@@ -215,9 +232,12 @@ public:
 
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &en) override
     {
+        const SnaxDatapathParams &p = this->p;
         this->out_[0] = this->acc;
-        this->next = en.fire ? snax_op_fold(this->p.op, this->p.lanes, this->p.in_types[0],
-            this->p.out_type, in[0], en.first, this->acc) : this->acc;
+        bool seeded = p.seed && en.first;   // the job's first firing starts from the seed
+        uint64_t from = seeded ? snax_seed(p, in) : this->acc;
+        this->next = en.fire ? snax_op_fold(p.op, p.lanes, p.in_types[0], p.out_type, in[0],
+            en.first && !seeded, from) : this->acc;
     }
 
     void commit(const SnaxEnables &en) override
@@ -311,6 +331,10 @@ public:
     explicit SnaxSerialAccumulate(const SnaxDatapathParams &p) : p(p)
     {
         this->in_words = {snax_words(p.lanes, p.in_types[0])};
+        if (p.seed)
+        {
+            this->in_words.push_back(1);
+        }
         this->out_words = 1;
         this->latency = 1;
         this->span = p.lanes;
@@ -328,6 +352,11 @@ public:
                 p.in_types[0], p.out_type);
             this->next = en.first && en.lane == 0 ? x
                 : snax_op_compute(SNAX_OP_ADD, p.out_type, this->acc, x);
+            if (p.seed && en.first && en.fire)  // the job's first beat taken: its seed too
+            {
+                this->next = snax_op_compute(SNAX_OP_ADD, p.out_type, this->next,
+                    snax_seed(p, in));
+            }
         }
     }
 
@@ -481,9 +510,9 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
             return std::unique_ptr<SnaxDatapath>(new SnaxSimdLanes(p));
         }}},
         {"TreeAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
-            if (p.in_types.size() != 1 || p.op != SNAX_OP_ADD)
+            if (p.in_types.size() != (p.seed ? 2u : 1u) || p.op != SNAX_OP_ADD)
             {
-                *why = "one input, op add";
+                *why = "one input (two seeded: a, then the seed), op add";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxTreeAccumulate(p));
@@ -509,9 +538,9 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
             return std::unique_ptr<SnaxDatapath>(new SnaxLaneAccumulate(p));
         }}},
         {"SerialAccumulate", {true, [](const SnaxDatapathParams &p, std::string *why) {
-            if (p.in_types.size() != 1)
+            if (p.in_types.size() != (p.seed ? 2u : 1u))
             {
-                *why = "one input";
+                *why = "one input (two seeded: a, then the seed)";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxSerialAccumulate(p));
@@ -539,9 +568,16 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
         *why = "not a datapath of the catalogue";
         return nullptr;
     }
-    for (const SnaxType &t : p.in_types)
+    if (p.seed && name != "TreeAccumulate" && name != "SerialAccumulate")
     {
-        if (it->second.whole_words && !snax_whole_words(p.lanes, t))
+        *why = "a seed is TreeAccumulate's and SerialAccumulate's (D149)";
+        return nullptr;
+    }
+    for (size_t i = 0; i < p.in_types.size(); i++)
+    {
+        const SnaxType &t = p.in_types[i];
+        bool seed = p.seed && i + 1 == p.in_types.size();  // one element in one word
+        if (it->second.whole_words && !seed && !snax_whole_words(p.lanes, t))
         {
             *why = "an input's lanes are not whole 64-bit words";
             return nullptr;
