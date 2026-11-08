@@ -4,7 +4,7 @@
 // The cluster snax_forge_cluster: platforms/snax_forge_cluster.hjson with
 // platform snax_forge's values and its slot the entry snax_forge_vsum, one
 // streamer set per accelerator: accelerator acc: instance acc, BRM accumulate,
-// implementation chisel_accumulator, datapath TreeAccumulate; each set's
+// implementation chisel_adder_tree, datapath TreeAccumulate; each set's
 // streamer in snax_forge_vsum_streamer_<set>.hjson, the accelerators in
 // accelerator.json.
 {

@@ -6,11 +6,11 @@ Accelerators from snax-forge's design points, one folder per design point, as SN
 |---|---|---|
 | `vecadd/` | `recipes/elementwise/vecadd.json` (W = 4, N = 64, int64) on `platforms/snax_forge.json` | 12 TCDM ports, `START`, `JOBS` |
 | `vecmul/` | `recipes/elementwise/vecmul.json` (W = 4, N = 64, `simd` (op mul)) on `platforms/snax_forge.json` | 12 TCDM ports, `START`, `JOBS` |
-| `vsum/` | `recipes/reduce/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_accumulator`, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
+| `vsum/` | `recipes/reduce/vsum.json` (W = 1, N = 64, `accumulate`'s `chisel_adder_tree` at one lane, T = N) on `platforms/snax_forge.json` | 2 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
 | `vsum_tree/` | `recipes/reduce/vsum_tree.json` (W = 4, N = 64, `accumulate`'s `chisel_adder_tree`, T = N) on `platforms/snax_forge.json` | 5 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
 | `matadd/` | `recipes/elementwise/matadd.json` (W = 4, M = 8, N = 16, int32 since PACK0 R3, two per word, the first 2-D bind: the row loop and the column beats, two temporal loops per streamer) on `platforms/snax_forge.json` | 6 TCDM ports, `START`, `JOBS` |
 | `rowsum/` | `recipes/reduce/rowsum.json` (W = 4, M = 8, N = 64, `accumulate`'s `chisel_adder_tree`, T = N / W = 16: a restart every row, eight sums) on `platforms/snax_forge.json` | 5 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
-| `rowsum_serial/` | `recipes/reduce/rowsum_serial.json` (W = 1, M = 4, N = 16, `accumulate`'s `chisel_accumulator`, T = N = 16: four sums of 16) on `platforms/snax_forge.json` | 2 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
+| `rowsum_serial/` | `recipes/reduce/rowsum_serial.json` (W = 1, M = 4, N = 16, `accumulate`'s `chisel_serial` (SerialAccumulate), T = N = 16: four sums of 16) on `platforms/snax_forge.json` | 2 TCDM ports, `START`, `JOBS`, `JOB_BEATS` |
 | `vecadd_i32/` | `recipes/elementwise/vecadd_i32.json` (W = 4, N = 64, A, B, C int32: two per word) on `platforms/snax_forge.json` | 6 TCDM ports, `START`, `JOBS` |
 | `vecmul_i32/` | `recipes/elementwise/vecmul_i32.json` (W = 4, N = 64, A, B, C int32, `simd` (op mul)) on `platforms/snax_forge.json` | 6 TCDM ports, `START`, `JOBS` |
 | `vecmul_i32_i64/` | `recipes/elementwise/vecmul_i32_i64.json` (W = 4, N = 64, A, B int32 into C int64, `simd` (op mul): the product at int32, the op type, sign-extended into C) on `platforms/snax_forge.json` | 8 TCDM ports (2 + 2 + 4), `START`, `JOBS` |
