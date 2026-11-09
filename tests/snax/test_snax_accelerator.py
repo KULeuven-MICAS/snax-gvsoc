@@ -33,8 +33,9 @@ except ImportError:
     snax_accelerator = None
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
-from test_snax_cfg import (CLUSTER, DOT1, DOT4, DOT4_STREAMER, STREAMER,  # noqa: E402
-                           VECADD, VMUL_STREAMER, VSUM_STREAMER, dot1_cluster, dot_cluster)
+from test_snax_cfg import (CLUSTER, DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER,  # noqa: E402
+                           STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, accelerator,
+                           dot1_cluster, dot_cluster, seeded)
 
 
 def slot_of(description, *streamers):
@@ -242,10 +243,22 @@ class Built(unittest.TestCase):
                          ("Mac", ["mac_a", "mac_b"], "", True, False, 1, 0, 64))
         self.assertEqual((total["datapath"], total["inputs"], total["output"], total["span"],
                           total["t"]), ("TreeAccumulate", [""], "sum_out", 1, 1))
+        self.assertEqual((mac["seed"], total["seed"]), (-1, -1))
         self.assertEqual(snax_accelerator.component_names(DOT4), ({"dot": "shell_dot"},
                                                                {"dot": "group_dot"}))
         # The window: five CSRs, the last at first + 4
         self.assertEqual(len(DOT4.csrs), 5)
+
+    def test_a_seeded_fold(self):
+        """matvec_seed's sum (B2 R5, D163): its inputs a and its seed, both outer, the seed's
+        index 1 (SnaxGroup's seed: the last input, one element in one word)."""
+        desc = accelerator("matvec_seed", seeded(), between=1)
+        cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, SEEDED_STREAMER), 131072)
+        acc = cls(None, "snax_acc0")
+        (unit,) = acc.components["unit"].properties["units"]
+        self.assertEqual((unit["datapath"], unit["inputs"], unit["seed"], unit["in_widths"],
+                          unit["lanes"], unit["output"]),
+                         ("TreeAccumulate", ["acc_a", "acc_seed"], 1, [64, 64], 4, "acc_out"))
 
 
 if __name__ == "__main__":

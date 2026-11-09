@@ -11,7 +11,8 @@ group cases from it and snax-forge can import it from the submodule.
     GroupRule(units, links, output=None).run(jobs, job_beats, valid, ready, cycles) -> (rows, end)
 
 A unit is a dict: ``name``, ``L`` (latency), ``ii``, ``span`` (the cycles it reads one beat in
-place) and ``inputs`` (its count of outer inputs, from the streamer). A link is an edge
+place), ``inputs`` (its count of outer inputs, from the streamer) and ``seed`` (optional, false
+by default: its last outer input is a fold's seed, one beat per job, D163). A link is an edge
 ``{"from", "to", "to_input", "depth"}``: the producer's and the consumer's names, the
 consumer's input it drives (the datapaths use it, the rule does not), and its depth D (0 a
 wire, >= 1 a buffer of D beats). ``output`` names the unit that owns the group's outer output;
@@ -20,7 +21,9 @@ by default the sink, the unit without an out-edge.
 Each cycle has two passes over the units in a topological order:
 
 - forward, what each unit offers whatever its room: unit k's input has a beat (avail_k) when
-  its outer inputs all have one and every in-edge offers one, a wire what its producer offers
+  its outer inputs all have one (a seeded unit's seed only on its job's first beat, d = 0:
+  fire = a.valid and (not first or seed.valid); the seed is taken with that firing,
+  seed.ready = fire and first) and every in-edge offers one, a wire what its producer offers
   this cycle (its pipeline's head, or with L = 0 a firing that gives), a buffer its oldest beat
   (occupancy > 0);
 - backward, in reverse order, whether each unit has room (room_k): the outer output's ready for
@@ -105,8 +108,10 @@ class GroupRule:
     def run(self, jobs, job_beats, valid, ready, cycles):
         """Steps a run started in cycle 0 for ``cycles`` cycles: valid(c) the outer inputs'
         valids (a unit with outer inputs has its beat when all are 1), ready(c) the outer
-        output's. Rows of (valids, ready, per unit (fire, give), per link its occupancy, busy,
-        class, notes) and the run's last cycle E (None when it does not end)."""
+        output's; valid(c) gives every unit's outer inputs in unit and port order, a seeded
+        unit's seed last among its own. Rows of (valids, ready, per unit (fire, give), per
+        link its occupancy, busy, class, notes) and the run's last cycle E (None when it does
+        not end)."""
         n, links = len(self.units), self.links
         firings_per_run = self.firings_per_run(jobs, job_beats)
         fired, lane = [0] * n, [0] * n
@@ -121,7 +126,15 @@ class GroupRule:
             if not busy:
                 rows.append((v, r, [(0, 0)] * n, list(occ), 0, "-", "idle"))
                 continue
-            ins = [all(v) if u["inputs"] else True for u in self.units]
+            ins, seeds, at = [], [], 0
+            for u in self.units:
+                mine = list(v[at:at + u["inputs"]])
+                at += u["inputs"]
+                seeds.append(mine.pop() if u.get("seed") else 1)
+                ins.append(all(mine))
+            for k, u in enumerate(self.units):  # a job's first beat waits for its seed
+                first = fired[k] % job_beats[k] == 0
+                ins[k] = ins[k] and (not u.get("seed") or not first or bool(seeds[k]))
             avail, wants, wfire, gives, head, offer = ([None] * n for _ in range(6))
             for k in self.order:
                 u = self.units[k]
@@ -158,8 +171,10 @@ class GroupRule:
                 if read and not fire:
                     notes.append(f"{u['name']} reads lane {lane[k]}")
                 if fire:
+                    seed = u.get("seed") and fired[k] % job_beats[k] == 0
                     notes.append(f"{u['name']} fires {fired[k]}" + (" (gives)" if gives[k] else "")
-                                 + (f", lane {lane[k]}" if u["span"] > 1 else ""))
+                                 + (f", lane {lane[k]}" if u["span"] > 1 else "")
+                                 + (", takes its seed" if seed else ""))
                     fired[k] += 1
                     last[k] = c
                     lane[k] = 0

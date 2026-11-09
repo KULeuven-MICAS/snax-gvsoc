@@ -122,6 +122,7 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         else if (key == "depth") { ok = (bool)(ss >> tests.back().p.depth); }
         else if (key == "accumulate") { int v; ok = (bool)(ss >> v); tests.back().p.accumulate = v; }
         else if (key == "regOut") { int v; ok = (bool)(ss >> v); tests.back().p.reg_out = v; }
+        else if (key == "seed") { int v; ok = (bool)(ss >> v); tests.back().p.seed = v; }
         else if (key == "k")
         {
             // a one-stream SimdLanes' constant, decimal, kept as its 64-bit two's complement
@@ -322,6 +323,7 @@ static int check_registry(int *count)
         {"TreeAccumulate", one, true, 1, 1},
         {"Mac", two, true, 1, 1}, {"Mac", plain, true, 1, 1}, {"Mac", plain_bad, false, 0, 0},
         {"Mac", one, false, 0, 0}, {"SerialAccumulate", serial, true, 1, 4},
+        {"LaneAccumulate", one, true, 1, 1}, {"LaneAccumulate", two, false, 0, 0},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},
     };
     int errors = 0;

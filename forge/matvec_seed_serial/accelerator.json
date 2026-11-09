@@ -1,0 +1,64 @@
+{
+ "design_point": "out/design/matvec_seed_serial/design_point.json",
+ "tag": "snax_forge_matvec_seed_serial",
+ "accelerators": [
+  {
+   "name": "matvec",
+   "inputs": ["mul.a", "mul.b", "sum.a", "sum.seed"],
+   "outputs": ["mul.out", "sum.out"],
+   "groups": [
+    {
+     "name": "mul",
+     "csrs": [
+      {"name": "START", "access": "rw", "offset": 0, "width": 1},
+      {"name": "JOBS", "access": "rw", "offset": 1, "width": 32},
+      {"name": "STATUS", "access": "ro", "offset": 2, "width": 2},
+      {"name": "COUNTER", "access": "ro", "offset": 3, "width": 32}
+     ],
+     "units": [
+      {
+       "name": "mul",
+       "brm": "simd",
+       "datapath": "SimdLanes",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int64", "lanes": 4},
+        "b": {"port": "b", "dir": "in", "dtype": "int64", "lanes": 4},
+        "out": {"port": "out", "dir": "out", "dtype": "int64", "lanes": 4}
+       },
+       "opType": "int64",
+       "params": {"op": "mul"},
+       "timing": {"latency": 0, "ii": 1, "span": 1},
+       "csrs": []
+      }
+     ],
+     "links": []
+    },
+    {
+     "name": "sum",
+     "csrs": [
+      {"name": "START", "access": "rw", "offset": 4, "width": 1},
+      {"name": "JOBS", "access": "rw", "offset": 5, "width": 32},
+      {"name": "STATUS", "access": "ro", "offset": 7, "width": 2},
+      {"name": "COUNTER", "access": "ro", "offset": 8, "width": 32}
+     ],
+     "units": [
+      {
+       "name": "sum",
+       "brm": "accumulate",
+       "datapath": "SerialAccumulate",
+       "ports": {
+        "a": {"port": "in", "dir": "in", "dtype": "int64", "lanes": 1},
+        "seed": {"port": "seed", "dir": "in", "dtype": "int64", "lanes": 1},
+        "out": {"port": "out", "dir": "out", "dtype": "int64", "lanes": 1}
+       },
+       "params": {},
+       "timing": {"latency": 1, "ii": 1, "span": 1},
+       "csrs": [{"name": "JOB_BEATS", "access": "rw", "offset": 6, "width": 32}]
+      }
+     ],
+     "links": []
+    }
+   ]
+  }
+ ]
+}

@@ -66,9 +66,14 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
                               COUNTER), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
                               snax_datapath.hpp's registry: SimdLanes,
-                              TreeAccumulate, Mac, SerialAccumulate), ports
+                              TreeAccumulate, Mac, SerialAccumulate,
+                              LaneAccumulate), ports
                               (per BRM port: port, the datapath's; dir, in or
-                              out; dtype, NumPy's name; lanes), opType (SimdLanes and Mac),
+                              out; dtype, NumPy's name; lanes; a fold's seed,
+                              the BRM port seed of a TreeAccumulate or
+                              SerialAccumulate, an in port of 1 lane at its
+                              output's dtype, read once per job, D163),
+                              opType (SimdLanes and Mac),
                               params (op: SimdLanes' and
                               TreeAccumulate's, add, or SimdLanes' axpby, two
                               inputs, k1 * a + k2 * b; k: SimdLanes' constant at
@@ -123,7 +128,9 @@ the registry, a TreeAccumulate op other than add, a unit CSR other than a
 fold's JOB_BEATS, a latency or span other than its datapath's, and SnaxGroup's
 shape with snax-forge's codes and wording: gen.chain, a group whose links are
 not a chain in unit order with the last unit's output the only outer one;
-gen.span, a unit of span > 1 fed by the streamer). The datapath block before accelerator.json
+gen.span, a unit of span > 1 fed by the streamer, but for its seed; gen.seed, a
+seed on another datapath, of more than 1 lane, another dtype than its
+output's, or on a link). The datapath block before accelerator.json
 (<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key,
 and so is accelerator.json's form before D157 (name, inputs, outputs, groups
 at the top, no accelerators).
@@ -191,6 +198,7 @@ class Datapath:
     typed: bool = False         # it runs its op at an opType, its inputs' result type
     needs_op: bool = False      # params.op is given
     only_op: str = None         # the one op it computes
+    seedable: bool = False      # it takes a seed port (SEED), its fold's start once per job
 
 
 def _accumulates(params: dict) -> bool:
@@ -203,13 +211,18 @@ CATALOGUE = {
     'SimdLanes': Datapath(nb_inputs=lambda p: 1 if 'k' in p else 2, is_fold=lambda p: False,
                           latency=lambda p: 0, typed=True, needs_op=True),
     'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
-                               latency=lambda p: 1, reduces=True, needs_op=True, only_op='add'),
+                               latency=lambda p: 1, reduces=True, needs_op=True, only_op='add',
+                               seedable=True),
     'Mac': Datapath(nb_inputs=lambda p: 2 if _accumulates(p) else 3, is_fold=_accumulates,
                     latency=lambda p: int(_accumulates(p) or bool(p.get('regOut', False))),
                     typed=True),
     'SerialAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
-                                 latency=lambda p: 1, serial=True, reduces=True),
+                                 latency=lambda p: 1, serial=True, reduces=True, seedable=True),
+    'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
+                               latency=lambda p: 1),
 }
+# A fold's seed port (snax-forge's brm.SEED): one element, read once per job (D163)
+SEED = 'seed'
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
 # read-only, last (C§17)
 GROUP_RW = ('START', 'JOBS')
@@ -427,6 +440,11 @@ class Unit:
     def op(self) -> str:
         """The op its lanes compute: params.op (a fold's add)."""
         return self.params['op']
+
+    @property
+    def seeded(self) -> bool:
+        """It has a seed port (SEED), a fold's start read once per job."""
+        return SEED in self.ports
 
     @property
     def slot_params(self) -> dict:
@@ -830,6 +848,18 @@ def _unit(node: _Node) -> Unit:
             'none')
     unit_ports = {key: _port(ports.node(key)) for key in ports.value}
     lanes = next(iter(unit_ports.values())).lanes
+    if SEED in unit_ports:
+        seed = unit_ports[SEED]
+        outs = [x for x in unit_ports.values() if x.dir == 'out']
+        why = (f'{datapath} takes no seed (TreeAccumulate and SerialAccumulate do, D163)'
+               if not facts.seedable else 'an in port' if seed.dir != 'in'
+               else f'{seed.lanes} lanes, a seed is 1' if seed.lanes != 1
+               else f'{seed.dtype}, a seed is its output\'s {outs[0].dtype}'
+               if outs and seed.dtype != outs[0].dtype
+               else f'the last in port, after {list(unit_ports)}' if
+               [k for k, x in unit_ports.items() if x.dir == 'in'][-1] != SEED else None)
+        if why is not None:
+            raise CfgTargetError(node.file, f'{node.where("ports")}.{SEED}', f'gen.seed: {why}')
     want = (facts.latency(params.value), lanes if facts.serial else 1)
     if (latency, ii, span) != (*want[:1], 1, want[1]):
         raise CfgTargetError(node.file, node.where('timing'),
@@ -1009,8 +1039,12 @@ def _check_links(node: _Node, acc: Accelerator):
                 f"gen.chain: accelerator {acc.name}: group {g.name}'s links {hops} over its "
                 f'units {names}: a group is a chain until tier A (fork and join)')
         for u in g.units:
+            if u.seeded and f'{u.name}.{SEED}' in linked:
+                raise CfgTargetError(node.file, node.where('groups'),
+                    f'gen.seed: accelerator {acc.name}: unit {u.name}\'s seed is on a link; '
+                    'it is read from the streamer')
             outer_in = [p for p, d in dirs_of(u).items()
-                        if d == 'in' and f'{u.name}.{p}' not in linked]
+                        if d == 'in' and f'{u.name}.{p}' not in linked and p != SEED]
             if u.span > 1 and outer_in:
                 raise CfgTargetError(node.file, node.where('inputs'),
                     f'gen.span: accelerator {acc.name}: unit {u.name} (span {u.span}) reads '
@@ -1020,7 +1054,7 @@ def _check_links(node: _Node, acc: Accelerator):
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     """A unit's ports against its datapath: their number, lanes and types."""
     dirs = dirs_of(u)
-    ins = [u.ports[p] for p in u.ports if dirs[p] == 'in']
+    ins = [u.ports[p] for p in u.ports if dirs[p] == 'in' and p != SEED]  # the seed: _unit
     outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
     facts = CATALOGUE[u.datapath]
     plain = facts.nb_inputs(u.slot_params) == 3
@@ -1042,6 +1076,11 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: c is {ins[2].dtype}, out {outs[0].dtype}; a plain Mac\'s c is '
             'out\'s type')
+    if not facts.typed:  # no opType (LaneAccumulate: its input extended to out's type)
+        if u.op_type is not None:
+            raise CfgTypeError(node.file, node.where('groups'),
+                f'unit {u.name}: opType {u.op_type}; a {u.datapath} unit has none')
+        return
     if n_in == 1:  # one stream: the op at a's type, with the constant k
         a = (ins[0].width, ins[0].signed)
         if u.op_type != type_name(*a):

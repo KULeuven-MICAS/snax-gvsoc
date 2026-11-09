@@ -1,0 +1,26 @@
+# acc (TreeAccumulate, T 2) -> a wire -> sum (TreeAccumulate, T 2), JOBS 2: neither seeded, every seed there
+# a seeded unit takes its seed with its job's first firing; the cycles as unseeded
+
+unit acc TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 1
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 0
+link acc sum depth 0
+jobs 2
+start 0 taken
+expect run index=0 firings=8 busy=9 stall_in=0 stall_out=0 flush=1
+# E - s = 10
+
+# a ready | acc fire give | sum fire give | busy
+cycles
+1 1 | 0 0 | 0 0 | 0    # 0: idle
+1 1 | 1 0 | 0 0 | 1    # 1: acc fires 0
+1 1 | 1 0 | 0 0 | 1    # 2: acc fires 1 (gives)
+1 1 | 1 1 | 1 0 | 1    # 3: acc pushes; acc fires 2; sum fires 0
+1 1 | 1 0 | 0 0 | 1    # 4: acc fires 3 (gives)
+1 1 | 1 1 | 1 0 | 1    # 5: acc pushes; acc fires 4; sum fires 1 (gives)
+1 1 | 1 0 | 0 1 | 1    # 6: acc fires 5 (gives); sum pushes
+1 1 | 1 1 | 1 0 | 1    # 7: acc pushes; acc fires 6; sum fires 2
+1 1 | 1 0 | 0 0 | 1    # 8: acc fires 7 (gives)
+1 1 | 0 1 | 1 0 | 1    # 9: acc pushes; sum fires 3 (gives)
+1 1 | 0 0 | 0 1 | 1    # 10: sum pushes
+1 1 | 0 0 | 0 0 | 0    # 11: idle
+1 1 | 0 0 | 0 0 | 0    # 12: idle

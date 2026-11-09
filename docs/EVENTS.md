@@ -50,7 +50,7 @@ A group of one unit gives the lines below as B1's unit did. A linked group's `fi
 | `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS; a linked group's head's), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |
 | `events` | `done` | the run's last busy cycle `E` (idle from `E + 1`) | `firings`; `first` and `last`, the cycles of its first and last firing |
 | `summary` | `run` | `E` | `index` (from 0), `firings`, `busy`, `stall_in`, `stall_out`, `flush` (they add up to `E - s`) |
-| `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order), `value` (each input port's beat words, port order, flat) |
+| `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order; a fold's seed, taken on its job's first firing only, -1 on the others), `value` (each input port's beat words, port order, flat; a seed not taken, its last) |
 | `beats` | `push` | the push | `n` (its index among the run's results), `first`, `last` (the firings it folds; equal at rate 1), `value` (the output beat's words) |
 | `beats` | `class` | the first cycle of a run of one class, from `s + 1` to `E` | `mode` (`busy`, `stall_in`, `stall_out`, `flush`: the class the `run` line counts the cycle in) |
 
