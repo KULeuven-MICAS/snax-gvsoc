@@ -109,7 +109,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
 
 
 def seed_cases():
-    """The fold's seed (snax-forge B2 R5, D149): a seeded unit's last outer input is its seed,
+    """The fold's seed (snax-forge B2 R5, D163): a seeded unit's last outer input is its seed,
     one beat per job; its job's first beat waits for it (fire = a.valid and (not first or
     seed.valid)), the firing takes it. Two folds in a chain, acc (TreeAccumulate, T 2) into sum
     (TreeAccumulate, T 2) by a wire, JOBS 2, unseeded, the first seeded, both seeded: with

@@ -250,7 +250,7 @@ class Built(unittest.TestCase):
         self.assertEqual(len(DOT4.csrs), 5)
 
     def test_a_seeded_fold(self):
-        """matvec_seed's sum (B2 R5, D149): its inputs a and its seed, both outer, the seed's
+        """matvec_seed's sum (B2 R5, D163): its inputs a and its seed, both outer, the seed's
         index 1 (SnaxGroup's seed: the last input, one element in one word)."""
         desc = accelerator("matvec_seed", seeded(), between=1)
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, SEEDED_STREAMER), 131072)

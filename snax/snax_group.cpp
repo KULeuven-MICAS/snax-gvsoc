@@ -22,7 +22,7 @@
 //                                   has no outer one but its seed)
 //                seed               the index in inputs of a fold's seed (the
 //                                   last, an outer port: one element in one
-//                                   word, taken once per job, D149), or -1
+//                                   word, taken once per job, D163), or -1
 //                output             the outer output's port name, or ""
 //                                   (linked); exactly one unit has one until
 //                                   tier A

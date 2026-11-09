@@ -789,7 +789,7 @@ class LinkedGroup(unittest.TestCase):
         self.fails(snax_cfg.CfgTargetError, "gen.timing:")
 
 
-# matvec_seed's sum (snax-forge B2 R5, D149): a TreeAccumulate over 4 lanes with a seed port,
+# matvec_seed's sum (snax-forge B2 R5, D163): a TreeAccumulate over 4 lanes with a seed port,
 # one int64 lane read once per job, its one accelerator's readers sum.a and sum.seed
 def seeded(datapath: str = "TreeAccumulate", seed: Port = Port("seed", "int64", 1, "in"),
            lanes: int = 4, span: int = 1, name: str = "acc") -> Unit:
@@ -804,7 +804,7 @@ SEEDED_STREAMER = streamer([4, 1], [1])
 
 
 class Seed(unittest.TestCase):
-    """A fold's seed port (snax-forge B2 R5, D149): read on TreeAccumulate and
+    """A fold's seed port (snax-forge B2 R5, D163): read on TreeAccumulate and
     SerialAccumulate, one lane at the output's dtype, the last in port, from the streamer
     (also at span > 1); anything else is gen.seed at the port."""
 
@@ -849,7 +849,7 @@ class Seed(unittest.TestCase):
                                           "out": Port("out", "int64", 4, "out")}, "int64",
                    {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)])
         self.refused(acc_json(accelerator("mac_seed", mac, between=1)),
-                     "gen.seed: Mac takes no seed (TreeAccumulate and SerialAccumulate do, D149)",
+                     "gen.seed: Mac takes no seed (TreeAccumulate and SerialAccumulate do, D163)",
                      streamer([4, 4, 1], [4]))
         first = acc_json(accelerator("matvec_seed", seeded(), between=1))
         ports = first["accelerators"][0]["groups"][0]["units"][0]["ports"]

@@ -109,7 +109,7 @@ struct SnaxDatapathParams
     bool has_k2 = false;    // axpby's k2, as k1; neither: + b
     uint64_t k2 = 0;
     bool k2_csr = false;
-    bool seed = false;      // a fold's seed: its last input, one element in one word (D149)
+    bool seed = false;      // a fold's seed: its last input, one element in one word (D163)
 };
 
 
@@ -570,7 +570,7 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
     }
     if (p.seed && name != "TreeAccumulate" && name != "SerialAccumulate")
     {
-        *why = "a seed is TreeAccumulate's and SerialAccumulate's (D149)";
+        *why = "a seed is TreeAccumulate's and SerialAccumulate's (D163)";
         return nullptr;
     }
     for (size_t i = 0; i < p.in_types.size(); i++)

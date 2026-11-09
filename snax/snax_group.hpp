@@ -36,7 +36,7 @@
 // outer inputs all have a beat and whether its outer output has room (true for
 // a unit without one).
 //
-// A seeded fold (TreeAccumulate, SerialAccumulate; D149) has one more outer
+// A seeded fold (TreeAccumulate, SerialAccumulate; D163) has one more outer
 // input, its seed, one beat per job: its input has a beat when its other
 // inputs have one and, on its job's first beat (d = 0), its seed has one
 // (fire = a.valid and (not first or seed.valid)); the seed is taken with the

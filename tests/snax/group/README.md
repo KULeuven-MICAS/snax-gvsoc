@@ -37,7 +37,7 @@ A cycle line: `V... R | F G | F G ... | O... | B`: the outer inputs' valid, unit
 | `dot6_input_gap` | dot 6, T = 4, JOBS 2, reader a without a beat for a cycle: stall_in |
 | `dot5_w1_j2`, `dot6_w1_j2` | dot 5 and dot 6 at W = 1, T = 4, JOBS 2: SerialAccumulate at span 1, which reads (and fires) once per beat; random int64 data (numpy, seeded) and each job's sum from numpy |
 | `dot4_jobs0` | dot 4 with JOBS 0: the empty run, ignored, busy never rises |
-| `seed_none`, `seed_first`, `seed_both` | the fold's seed (snax-forge B2 R5, D149): acc (TreeAccumulate, T 2) -> wire -> sum (TreeAccumulate, T 2), JOBS 2, neither, the first or both seeded, every seed there from the start: the same cycles all three (gen.py checks it) |
+| `seed_none`, `seed_first`, `seed_both` | the fold's seed (snax-forge B2 R5, D163): acc (TreeAccumulate, T 2) -> wire -> sum (TreeAccumulate, T 2), JOBS 2, neither, the first or both seeded, every seed there from the start: the same cycles all three (gen.py checks it) |
 | `seed_late` | matvec_seed's sum alone (TreeAccumulate, T 4, JOBS 2), its seed missing in cycles 1 to 3 and 8 to 9: each job's first beat waits for it (stall_in), the job's other beats do not |
 | `seed_serial_late` | Mac (T 2) -> wire -> SerialAccumulate (span 4, seeded, T 1), JOBS 2, the seed missing in cycles 1 to 4 and 7: the sum reads its job's first beat lane by lane only while its seed is there, the Mac holds its result |
 

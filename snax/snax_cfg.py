@@ -72,7 +72,7 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
                               out; dtype, NumPy's name; lanes; a fold's seed,
                               the BRM port seed of a TreeAccumulate or
                               SerialAccumulate, an in port of 1 lane at its
-                              output's dtype, read once per job, D149),
+                              output's dtype, read once per job, D163),
                               opType (SimdLanes and Mac),
                               params (op: SimdLanes' and
                               TreeAccumulate's, add, or SimdLanes' axpby, two
@@ -221,7 +221,7 @@ CATALOGUE = {
     'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1),
 }
-# A fold's seed port (snax-forge's brm.SEED): one element, read once per job (D149)
+# A fold's seed port (snax-forge's brm.SEED): one element, read once per job (D163)
 SEED = 'seed'
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
 # read-only, last (C§17)
@@ -851,7 +851,7 @@ def _unit(node: _Node) -> Unit:
     if SEED in unit_ports:
         seed = unit_ports[SEED]
         outs = [x for x in unit_ports.values() if x.dir == 'out']
-        why = (f'{datapath} takes no seed (TreeAccumulate and SerialAccumulate do, D149)'
+        why = (f'{datapath} takes no seed (TreeAccumulate and SerialAccumulate do, D163)'
                if not facts.seedable else 'an in port' if seed.dir != 'in'
                else f'{seed.lanes} lanes, a seed is 1' if seed.lanes != 1
                else f'{seed.dtype}, a seed is its output\'s {outs[0].dtype}'

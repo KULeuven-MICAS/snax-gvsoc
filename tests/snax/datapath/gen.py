@@ -180,7 +180,7 @@ def serial(name, t_in, t_out, lanes, beats, words=4):
 
 
 def tree_seed(name, t_in, t_out, lanes, beats, firings=10):
-    """A seeded TreeAccumulate (D149): its second input the seed, one element; a job's first
+    """A seeded TreeAccumulate (D163): its second input the seed, one element; a job's first
     firing starts from it, acc <- seed + tree(a)."""
     t = Test(name, "TreeAccumulate", [t_in, t_out], t_out, t_out, lanes, op="add", seed=True)
     acc, d = NP[t_out](0), 0
@@ -361,7 +361,7 @@ def main():
             for lanes in sizes:
                 name = f"lane_acc_{t_in}" + ("" if t_in == t_out else f"_to_{t_out}")
                 tests.append(lane_acc(f"{name}_w{lanes}", t_in, t_out, lanes, 3))
-        # the fold's seed (B2 R5, D149): TreeAccumulate and SerialAccumulate at W 1, 2 and 4,
+        # the fold's seed (B2 R5, D163): TreeAccumulate and SerialAccumulate at W 1, 2 and 4,
         # int64, and int32 into int64 (drawn after the tests above, so theirs stay as they were)
         for t_in, t_out, sizes in (("int64", "int64", (1, 2, 4)), ("int32", "int64", (2, 4))):
             for lanes in sizes:
