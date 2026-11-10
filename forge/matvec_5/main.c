@@ -46,7 +46,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
     }
     while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[0] = csrr_ss(MATVEC_RO_COUNTER);
+    forge_counter[0] = csrr_ss(MATVEC_RO_BUSY_COUNTER);
     snrt_cluster_hw_barrier();
     snrt_cluster_hw_barrier();
     return 0;

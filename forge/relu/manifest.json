@@ -12,7 +12,7 @@
    "ACC_RW_START": 973,
    "ACC_RW_JOBS": 974,
    "ACC_RO_STATUS": 975,
-   "ACC_RO_COUNTER": 976
+   "ACC_RO_BUSY_COUNTER": 976
   }
  },
  "tasks": [{"name": "numpy_maximum_acc", "beats": 16, "csrs": {"JOBS": 16}}]

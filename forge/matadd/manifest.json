@@ -12,7 +12,7 @@
    "ACC_RW_START": 984,
    "ACC_RW_JOBS": 985,
    "ACC_RO_STATUS": 986,
-   "ACC_RO_COUNTER": 987
+   "ACC_RO_BUSY_COUNTER": 987
   }
  },
  "tasks": [{"name": "add_acc", "beats": 32, "csrs": {"JOBS": 32}}]

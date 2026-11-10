@@ -55,7 +55,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
     }
     while (csrr_ss(VMUL_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[0] = csrr_ss(VMUL_RO_COUNTER);
+    forge_counter[0] = csrr_ss(VMUL_RO_BUSY_COUNTER);
     snrt_cluster_hw_barrier();
     csrw_ss(VSUM_STREAMER_START_CSR, 1);
     csrw_ss(VSUM_RW_START, 1);
@@ -63,7 +63,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
     }
     while (csrr_ss(VSUM_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[1] = csrr_ss(VSUM_RO_COUNTER);
+    forge_counter[1] = csrr_ss(VSUM_RO_BUSY_COUNTER);
     snrt_cluster_hw_barrier();
     snrt_cluster_hw_barrier();
     return 0;

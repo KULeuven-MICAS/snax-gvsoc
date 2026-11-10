@@ -13,7 +13,7 @@
    "MATVEC_RW_JOBS": 983,
    "MATVEC_RW_SUM_JOB_BEATS": 984,
    "MATVEC_RO_STATUS": 985,
-   "MATVEC_RO_COUNTER": 986
+   "MATVEC_RO_BUSY_COUNTER": 986
   }
  },
  "tasks": [{"name": "mult_matvec", "beats": 2048, "csrs": {"JOBS": 16, "SUM_JOB_BEATS": 128}}]

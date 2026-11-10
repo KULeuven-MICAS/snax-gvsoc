@@ -2,10 +2,11 @@
 // out/design/matvec_4/design_point.json. Do not edit: run `pixi run gen-gvsoc
 // out/design/matvec_4/design_point.json` again.
 // Accelerator matvec's own CSRs (accelerator.json, D146, D157): per group
-// START, JOBS, its units' R/W, STATUS, COUNTER, numbered after its streamer's.
+// START, JOBS, its units' R/W, STATUS, BUSY_COUNTER, numbered after its
+// streamer's.
 
 #define MATVEC_RW_START 982
 #define MATVEC_RW_JOBS 983
 #define MATVEC_RW_MAC_JOB_BEATS 984
 #define MATVEC_RO_STATUS 985
-#define MATVEC_RO_COUNTER 986
+#define MATVEC_RO_BUSY_COUNTER 986

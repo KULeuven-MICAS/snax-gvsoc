@@ -2,10 +2,10 @@
 // out/design/dot_2/design_point.json. Do not edit: run `pixi run gen-gvsoc
 // out/design/dot_2/design_point.json` again.
 // Accelerator dot's own CSRs (accelerator.json, D146, D157): per group START,
-// JOBS, its units' R/W, STATUS, COUNTER, numbered after its streamer's.
+// JOBS, its units' R/W, STATUS, BUSY_COUNTER, numbered after its streamer's.
 
 #define DOT_RW_START 978
 #define DOT_RW_JOBS 979
 #define DOT_RW_SUM_JOB_BEATS 980
 #define DOT_RO_STATUS 981
-#define DOT_RO_COUNTER 982
+#define DOT_RO_BUSY_COUNTER 982
