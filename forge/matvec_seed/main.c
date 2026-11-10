@@ -104,7 +104,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
     }
     while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[0] = csrr_ss(MATVEC_RO_MUL_COUNTER);
+    forge_counter[0] = csrr_ss(MATVEC_RO_MUL_BUSY_COUNTER);
     snrt_cluster_hw_barrier();
     csrw_ss(MATVEC_STREAMER_START_CSR, 1);
     csrw_ss(MATVEC_RW_SUM_START, 1);
@@ -112,7 +112,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
     }
     while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[1] = csrr_ss(MATVEC_RO_SUM_COUNTER);
+    forge_counter[1] = csrr_ss(MATVEC_RO_SUM_BUSY_COUNTER);
     snrt_cluster_hw_barrier();
     snrt_cluster_hw_barrier();
     return 0;

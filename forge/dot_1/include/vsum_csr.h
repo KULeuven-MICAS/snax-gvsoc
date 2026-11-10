@@ -2,10 +2,10 @@
 // out/design/dot_1/design_point.json. Do not edit: run `pixi run gen-gvsoc
 // out/design/dot_1/design_point.json` again.
 // Accelerator vsum's own CSRs (accelerator.json, D146, D157): per group START,
-// JOBS, its units' R/W, STATUS, COUNTER, numbered after its streamer's.
+// JOBS, its units' R/W, STATUS, BUSY_COUNTER, numbered after its streamer's.
 
 #define VSUM_RW_START 995
 #define VSUM_RW_JOBS 996
 #define VSUM_RW_JOB_BEATS 997
 #define VSUM_RO_STATUS 998
-#define VSUM_RO_COUNTER 999
+#define VSUM_RO_BUSY_COUNTER 999

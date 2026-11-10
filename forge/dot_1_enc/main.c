@@ -78,14 +78,14 @@ static __attribute__((noinline)) int forge_core_0(void) {
     }
     while (csrr_ss(DOT_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[0] = csrr_ss(DOT_RO_VMUL_COUNTER);
+    forge_counter[0] = csrr_ss(DOT_RO_VMUL_BUSY_COUNTER);
     csrw_ss(DOT_STREAMER_START_CSR, 1);
     csrw_ss(DOT_RW_VSUM_START, 1);
     while (csrr_ss(DOT_RO_VSUM_STATUS) & 1) {
     }
     while (csrr_ss(DOT_STREAMER_BUSY_CSR)) {
     }
-    forge_counter[1] = csrr_ss(DOT_RO_VSUM_COUNTER);
+    forge_counter[1] = csrr_ss(DOT_RO_VSUM_BUSY_COUNTER);
     snrt_cluster_hw_barrier();
     snrt_cluster_hw_barrier();
     return 0;

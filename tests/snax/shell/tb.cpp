@@ -47,7 +47,7 @@ struct Case
     int ii = 1;
     int inputs = 2;
     int job_width = 32;         // JOBS and JOB_BEATS (START is 1)
-    int counter_width = 32;     // COUNTER
+    int busy_counter_width = 32;     // BUSY_COUNTER
     std::vector<CycleLine> cycles;
 };
 
@@ -198,9 +198,9 @@ static bool parse(const std::string &path, Case &c)
         {
             ok = (bool)(ss >> c.job_width) && c.job_width >= 1 && c.job_width <= 32;
         }
-        else if (key == "counter_width")
+        else if (key == "busy_counter_width")
         {
-            ok = (bool)(ss >> c.counter_width) && c.counter_width >= 1 && c.counter_width <= 32;
+            ok = (bool)(ss >> c.busy_counter_width) && c.busy_counter_width >= 1 && c.busy_counter_width <= 32;
         }
         else if (key == "cycles") { in_cycles = true; }
         else { ok = false; }
@@ -232,7 +232,7 @@ static int run(const Case &c)
     {
         widths.push_back(c.csr_widths[i] ? c.csr_widths[i] : c.job_width);
     }
-    shell.configure(c.csrs.size(), job_beats, widths, c.counter_width, scalars);
+    shell.configure(c.csrs.size(), job_beats, widths, c.busy_counter_width, scalars);
     size_t started = 0;
     int nb_rw = c.csrs.size();
 
@@ -276,10 +276,11 @@ static int run(const Case &c)
         int64_t cycle = t;
         const CycleLine &l = c.cycles[t];
 
-        // A held start taken in E + 1: it goes to the unit, its write is answered
+        // A held write taken in E + 1 and answered; a held start goes to the unit
         if (shell.held && shell.release_cycle() == cycle)
         {
-            if (!shell.release(cycle))
+            SnaxShellRule::Write w = shell.release(cycle);
+            if (w.start && !w.empty)
             {
                 start_unit(cycle, l);
             }

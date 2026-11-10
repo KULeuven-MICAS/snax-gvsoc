@@ -2,9 +2,9 @@
 // out/design/dot_1/design_point.json. Do not edit: run `pixi run gen-gvsoc
 // out/design/dot_1/design_point.json` again.
 // Accelerator vmul's own CSRs (accelerator.json, D146, D157): per group START,
-// JOBS, its units' R/W, STATUS, COUNTER, numbered after its streamer's.
+// JOBS, its units' R/W, STATUS, BUSY_COUNTER, numbered after its streamer's.
 
 #define VMUL_RW_START 978
 #define VMUL_RW_JOBS 979
 #define VMUL_RO_STATUS 980
-#define VMUL_RO_COUNTER 981
+#define VMUL_RO_BUSY_COUNTER 981

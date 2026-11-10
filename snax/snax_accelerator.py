@@ -24,7 +24,7 @@ SNAX_CSR_FIRST (960) and b_{k+1} = b_k + s_k + c_k. accelerator.json's
 offsets run over all the accelerators from 0 (the shell's view): an
 accelerator's CSR at offset o is at b_k + s_k + o - o_k, o_k its first
 offset. Each group's window (START, JOBS, its units' R/W CSRs, STATUS,
-COUNTER) goes to its shell. The last CSR must be at most SNAX_ACC_CSR_LAST.
+BUSY_COUNTER) goes to its shell. The last CSR must be at most SNAX_ACC_CSR_LAST.
 
 The TCDM ports are the streamers' channels, set after set, each streamer's
 readers first: the cluster names port p by its owner,
@@ -228,7 +228,7 @@ class SnaxAccelerator(gvsoc.systree.Component):
             for j, group in enumerate(acc.groups):
                 base = row.csr(group.window[0].offset)
                 shell = SnaxShell(self, shell_names[group.name], csr_base=base, csrs=group.rw,
-                    widths=group.rw_widths, counter_width=group.counter_width)
+                    widths=group.rw_widths, busy_counter_width=group.busy_counter_width)
                 # The group's window; the set's last group's to the next set's streamer, and
                 # past the last set's, everything to the last SNAX CSR, which its shell refuses
                 end = (row.csr(acc.groups[j + 1].window[0].offset) if j + 1 < len(acc.groups)

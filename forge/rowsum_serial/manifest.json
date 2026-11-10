@@ -13,7 +13,7 @@
    "ACC_RW_JOBS": 976,
    "ACC_RW_JOB_BEATS": 977,
    "ACC_RO_STATUS": 978,
-   "ACC_RO_COUNTER": 979
+   "ACC_RO_BUSY_COUNTER": 979
   }
  },
  "tasks": [{"name": "sum_acc", "beats": 64, "csrs": {"JOBS": 4, "JOB_BEATS": 16}}]

@@ -9,25 +9,30 @@
 // ReqRspManager (hw/chisel/.../reqRspManager/ReqRspManager.scala) holding the
 // read-write CSRs, BlockGemm's ctrl handshake, busy and performance counter
 // (hw/chisel_acc/.../gemm/BlockGemm.scala), with the group's START, JOBS,
-// STATUS and COUNTER. Plain C++, so the component (snax_shell.cpp) and the
-// standalone test (tests/snax/shell/) run the same code, as snax_group.hpp.
+// STATUS and BUSY_COUNTER. Plain C++, so the component (snax_shell.cpp) and
+// the standalone test (tests/snax/shell/) run the same code, as
+// snax_group.hpp.
 //
 // CSRs, offsets from the group's first CSR (the CSR mux removes it): START,
 // JOBS, then the units' read-write CSRs (JOB_BEATS for each fold without a
 // fixed T, then its scalars', K1, or K1_LO and K1_HI at 64 bits, in unit
 // order), each kept at its width (accelerator.json's, D152:
 // a write keeps the low bits, a read gives them with the upper bits 0);
-// then STATUS and COUNTER, read-only. START is a strobe: no register, it
-// reads 0.
+// then STATUS and BUSY_COUNTER, read-only. START is a strobe: no register,
+// it reads 0.
 //
 // Rules, c being the cycle of an access:
-//   - a write to a read-write CSR other than START is taken at once; one to
-//     START with bit 0 clear too, and does nothing;
-//   - a start (START written with bit 0 set) is accepted in c when the unit
-//     is idle in c (BlockGemm: ctrl.ready is idle), and the write answered at
-//     once. While the unit is busy in c the write is held (IO_REQ_PENDING:
-//     the ReqRspManager's req.ready is ctrl.ready), and accepted, then
-//     answered, in the cycle busy falls: E + 1, E the run's last cycle;
+//   - while the unit is idle in c, a write to a read-write CSR other than
+//     START is taken at once; one to START with bit 0 clear too, and does
+//     nothing; a start (START written with bit 0 set) is accepted in c
+//     (BlockGemm: ctrl.ready is idle), and the write answered at once;
+//   - while the unit is busy in c, a write to any read-write CSR (START with
+//     bit 0 set or clear, JOBS, a JOB_BEATS, a scalar) is held (IO_REQ_PENDING:
+//     the csr's req.ready is low while busy), then taken as above and
+//     answered in the cycle busy falls: E + 1, E the run's last cycle. So a
+//     group's settings stay constant through its run, and the RTL's control
+//     unit reads them live with no copy (snax-forge D168). Reads are never
+//     held;
 //   - an accepted start a goes to the group's ctrl as JOBS and every
 //     JOB_BEATS in unit order, as they stand (JOBS and 1 for a group without
 //     one: a start is two words at least), then every scalar CSR in CSR order
@@ -39,10 +44,11 @@
 //     cleared by an accepted start, so it reads 0 from a + 1; a set wins over
 //     a clear in the same cycle (an empty run: STATUS reads 2 from a + 1);
 //     bit 2 and up 0;
-//   - COUNTER is reset by an accepted start and counts each busy cycle, then
-//     holds after the run (BlockGemm's performance_counter): at c it is the
-//     busy cycles after the accepted start and before c; 0 after an empty run.
-//     At its width w it saturates at 2^w - 1.
+//   - BUSY_COUNTER is reset by an accepted start and counts each busy cycle,
+//     then holds after the run (BlockGemm's performance_counter): at c it is
+//     the busy cycles after the accepted start and before c; 0 after an
+//     empty run. At its width w it saturates at 2^w - 1. In the RTL it lives
+//     in the csr's submodule <tag>_peripherals (D168).
 // Busy and the counter are computed when read, from the cycles the unit's
 // busy wire rose (busy from the next cycle) and fell (idle from the next).
 // The unit sets the wire synchronously in the ctrl write that starts it, so a
@@ -67,7 +73,7 @@ public:
     // What a write to a read-write CSR does in its cycle
     struct Write
     {
-        bool held;      // a start while the unit is busy: answered when release() takes it
+        bool held;      // a write while the unit is busy: answered when release() takes it
         bool start;     // a start accepted now
         bool empty;     // ... the empty run: nothing goes to the unit
     };
@@ -82,15 +88,17 @@ public:
     int64_t done_cycle;
     int64_t accept_before;
     int64_t done_before;
-    // A start held while busy
+    // A write held while busy: its CSR and value
     bool held;
+    int held_index;
+    uint32_t held_value;
 
     // nb_rw read-write CSRs (START, JOBS and the units'), the JOB_BEATS ones
     // at job_beats (indices into them, in unit order; none for a group
     // without), the scalars' at scalars (in CSR order); widths, each one's
-    // bits (none: all 32), and COUNTER's
+    // bits (none: all 32), and BUSY_COUNTER's
     void configure(int nb_rw, const std::vector<int> &job_beats,
-        const std::vector<int> &widths = {}, int counter_width = 32,
+        const std::vector<int> &widths = {}, int busy_counter_width = 32,
         const std::vector<int> &scalars = {})
     {
         this->job_beats_index = job_beats;
@@ -101,7 +109,7 @@ public:
         {
             this->masks[i] = mask(widths[i]);
         }
-        this->counter_max = mask(counter_width);
+        this->busy_counter_max = mask(busy_counter_width);
         this->reset();
     }
 
@@ -118,6 +126,8 @@ public:
         this->accept_cycle = this->done_cycle = -1;
         this->accept_before = this->done_before = -1;
         this->held = false;
+        this->held_index = START;
+        this->held_value = 0;
     }
 
     int nb_rw() const
@@ -170,35 +180,29 @@ public:
         return false;
     }
 
-    // A write of value to read-write CSR index in cycle: kept at its width,
-    // but START, which only starts
+    // A write of value to read-write CSR index in cycle: held while the unit
+    // is busy, else taken
     Write write(int64_t cycle, int index, uint32_t value)
     {
-        if (index != START)
+        if (!this->unit_idle(cycle))
         {
-            this->regs[index] = value & this->masks[index];
-            return {false, false, false};
+            this->held = true;
+            this->held_index = index;
+            this->held_value = value;
+            return {true, false, false};
         }
-        if (!(value & 1))
-        {
-            return {false, false, false};
-        }
-        if (this->unit_idle(cycle))
-        {
-            return {false, true, this->accept(cycle)};
-        }
-        this->held = true;
-        return {true, false, false};
+        return this->take(cycle, index, value);
     }
 
-    // A read in cycle of CSR index: a read-write one as kept (START 0), then STATUS and COUNTER
+    // A read in cycle of CSR index: a read-write one as kept (START 0), then
+    // STATUS and BUSY_COUNTER
     uint32_t read(int64_t cycle, int index) const
     {
         if (index < this->nb_rw())
         {
             return this->regs[index];
         }
-        return index == this->nb_rw() ? this->status_at(cycle) : this->counter_at(cycle);
+        return index == this->nb_rw() ? this->status_at(cycle) : this->busy_counter_at(cycle);
     }
 
     // The unit's busy wire set to busy in cycle; its fall is the done pulse
@@ -215,19 +219,19 @@ public:
         }
     }
 
-    // The cycle a held start is taken, E + 1, once the run has ended; -1
+    // The cycle a held write is taken, E + 1, once the run has ended; -1
     // while none is held or the unit is still busy
     int64_t release_cycle() const
     {
         return this->held && this->unit_run.ended() ? this->unit_run.end_cycle + 1 : -1;
     }
 
-    // The held start taken in cycle: accepted, its write answered. Whether
-    // it is the empty run (nothing goes to the unit)
-    bool release(int64_t cycle)
+    // The held write taken in cycle and answered: a held start is accepted
+    // (and may be the empty run, when nothing goes to the unit)
+    Write release(int64_t cycle)
     {
         this->held = false;
-        return this->accept(cycle);
+        return this->take(cycle, this->held_index, this->held_value);
     }
 
     // Idle in cycle: never started, or the last run ended before it
@@ -250,10 +254,10 @@ public:
         return (uint32_t)this->busy_at(cycle) | (uint32_t)this->done_at(cycle) << 1;
     }
 
-    // The busy cycles in [accept + 1, cycle - 1], saturating at COUNTER's width
-    uint32_t counter_at(int64_t cycle) const
+    // The busy cycles in [accept + 1, cycle - 1], saturating at BUSY_COUNTER's width
+    uint32_t busy_counter_at(int64_t cycle) const
     {
-        return (uint32_t)std::min<int64_t>(this->busy_cycles(cycle), this->counter_max);
+        return (uint32_t)std::min<int64_t>(this->busy_cycles(cycle), this->busy_counter_max);
     }
 
     int64_t busy_cycles(int64_t cycle) const
@@ -272,6 +276,22 @@ public:
     }
 
 private:
+    // A write taken in cycle, the unit idle: kept at its width, but START,
+    // which only starts (bit 0 set) or does nothing (bit 0 clear)
+    Write take(int64_t cycle, int index, uint32_t value)
+    {
+        if (index != START)
+        {
+            this->regs[index] = value & this->masks[index];
+            return {false, false, false};
+        }
+        if (!(value & 1))
+        {
+            return {false, false, false};
+        }
+        return {false, true, this->accept(cycle)};
+    }
+
     // An accepted start in cycle; the empty run ends here (E = a): true
     bool accept(int64_t cycle)
     {
@@ -301,5 +321,5 @@ private:
     std::vector<int> job_beats_index;
     std::vector<int> scalar_index;
     std::vector<uint32_t> masks;    // per read-write CSR, its width's values
-    uint32_t counter_max = 0xffffffffu;
+    uint32_t busy_counter_max = 0xffffffffu;
 };

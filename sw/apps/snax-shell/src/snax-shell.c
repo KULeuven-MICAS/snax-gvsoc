@@ -6,7 +6,7 @@
 // and a SnaxGroup of one unit (SimdLanes add, L = 0, II 1, 4 lanes of 64
 // bit) behind the streamer (snax/snax_accelerator.py). snax_cluster's snax-alu DMA and
 // streamer setup; the streamer's and the group's CSRs (START, JOBS, STATUS,
-// COUNTER, snax-forge C§17) from forge/vecadd/include/. One streamer run of
+// BUSY_COUNTER, snax-forge C§17) from forge/vecadd/include/. One streamer run of
 // LOOP_ITER beats feeds three unit runs of RUN_BEATS jobs each:
 //   - start 1, alone: once STATUS bit 0 (busy) is 0, the counter is run 1's
 //     busy cycles, printed (`snax-shell counter: <n>`); regress.py checks it
@@ -73,7 +73,7 @@ int main() {
         csrw_ss(ACC_RW_START, 1);
         while (csrr_ss(ACC_RO_STATUS) & 1) {
         };
-        uint32_t counter = csrr_ss(ACC_RO_COUNTER);
+        uint32_t counter = csrr_ss(ACC_RO_BUSY_COUNTER);
         int counter_short = counter < RUN_BEATS;
         err += counter_short;
         uint32_t status_done = csrr_ss(ACC_RO_STATUS);
@@ -106,7 +106,7 @@ int main() {
         csrw_ss(ACC_RW_JOBS, 0);
         csrw_ss(ACC_RW_START, 1);
         uint32_t status_zero = csrr_ss(ACC_RO_STATUS);
-        uint32_t counter_zero = csrr_ss(ACC_RO_COUNTER);
+        uint32_t counter_zero = csrr_ss(ACC_RO_BUSY_COUNTER);
         int zero_off = status_zero != 2 || counter_zero != 0;
         err += zero_off;
 

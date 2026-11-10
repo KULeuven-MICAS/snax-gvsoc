@@ -6,20 +6,21 @@
 
 // SnaxShell (D130, D146 in snax-forge): the CSRs of one group of an
 // accelerator, in front of its SnaxGroup. Its rule (START, JOBS, the units'
-// read-write CSRs, a start held while busy, the empty run, STATUS, COUNTER)
-// is SnaxShellRule in snax_shell.hpp, which tests/snax/shell/ checks against
-// hand-worked cases; this file wires it to the CSR port, the group's ctrl and
-// busy ports, and the event that takes a held start in E + 1.
+// read-write CSRs, a write held while busy, the empty run, STATUS,
+// BUSY_COUNTER) is SnaxShellRule in snax_shell.hpp, which tests/snax/shell/
+// checks against hand-worked cases; this file wires it to the CSR port, the
+// group's ctrl and busy ports, and the event that takes a held write in E + 1.
 //
 // Properties (a missing or bad one is a fatal error naming it):
 //   csr_base   the group's first CSR (its START), for the trace
 //   csrs       its read-write CSRs' names in CSR order: START, JOBS, then the
 //              units' (JOB_BEATS, each fold's without a fixed T, then its
-//              scalars', in unit order); STATUS and COUNTER follow
+//              scalars', in unit order); STATUS and BUSY_COUNTER follow
 //   widths     each read-write CSR's width, in the order of csrs, 1 to 32
 //              (accelerator.json's, D152: START 1, JOBS and JOB_BEATS
 //              job_width); a write keeps its low bits
-//   counter_width  COUNTER's width, 1 to 32: it saturates at 2^w - 1
+//   busy_counter_width  BUSY_COUNTER's width, 1 to 32: it saturates at
+//              2^w - 1
 // An accepted start, but the empty run (JOBS or a JOB_BEATS 0), goes to the
 // group's ctrl as a write of 32-bit words: JOBS, then every JOB_BEATS in unit
 // order (JOBS and 1 without one), then every unit's scalar CSR (any other
@@ -59,9 +60,9 @@ private:
     SnaxShellRule rule;
     // The CSRs' decoding, refusals and messages; its registers mirror the
     // rule's, written in the same calls
-    SnaxCsrBlock csrs;          // START, JOBS, the units'; STATUS, COUNTER
+    SnaxCsrBlock csrs;          // START, JOBS, the units'; STATUS, BUSY_COUNTER
     std::vector<uint32_t> config_words;     // JOBS, then each JOB_BEATS (or 1)
-    vp::IoReq *held_req;        // the held start's request (rule.held)
+    vp::IoReq *held_req;        // the held write's request (rule.held)
 };
 
 
@@ -113,14 +114,14 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
         this->trace.fatal("Property widths: %ld, one per read-write CSR (%ld)\n", widths.size(),
             names.size());
     }
-    int counter_width = props.int_prop(this->get_js_config(), "counter_width", "");
-    if (counter_width < 1 || counter_width > 32)
+    int busy_counter_width = props.int_prop(this->get_js_config(), "busy_counter_width", "");
+    if (busy_counter_width < 1 || busy_counter_width > 32)
     {
-        this->trace.fatal("Property counter_width: %d, must be 1 to 32\n", counter_width);
+        this->trace.fatal("Property busy_counter_width: %d, must be 1 to 32\n", busy_counter_width);
     }
 
     this->nb_rw = names.size();
-    this->rule.configure(this->nb_rw, job_beats, widths, counter_width, scalars);
+    this->rule.configure(this->nb_rw, job_beats, widths, busy_counter_width, scalars);
     this->csrs.configure(&this->trace, csr_base, this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxShell::csr_req);
@@ -134,7 +135,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
         this->trace.msg(vp::Trace::LEVEL_DEBUG, "CSR %d: %s\n", this->csrs.csr(i),
             names[i].c_str());
     }
-    this->trace.msg(vp::Trace::LEVEL_DEBUG, "CSR %d: STATUS, CSR %d: COUNTER\n",
+    this->trace.msg(vp::Trace::LEVEL_DEBUG, "CSR %d: STATUS, CSR %d: BUSY_COUNTER\n",
         this->csrs.csr(this->nb_rw), this->csrs.csr(this->nb_rw + 1));
 }
 
@@ -211,7 +212,8 @@ vp::IoReqStatus SnaxShell::csr_req(vp::Block *__this, vp::IoReq *req)
     // Held until the cycle after busy falls; if the run already ended in this
     // cycle, that is the next one
     _this->held_req = req;
-    _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start held at cycle %ld: the unit is busy\n", cycle);
+    _this->trace.msg(vp::Trace::LEVEL_DEBUG,
+        "Write to CSR %d held at cycle %ld: the unit is busy\n", index, cycle);
     int64_t release = _this->rule.release_cycle();
     if (release != -1 && !_this->send_event.is_enqueued())
     {
@@ -234,8 +236,8 @@ void SnaxShell::busy_sync(vp::Block *__this, bool busy)
 }
 
 
-// The cycle after busy falls: the held start goes to the unit, then its
-// write is answered
+// The cycle after busy falls: the held write is taken (a held start goes to
+// the unit), then answered
 void SnaxShell::send_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     SnaxShell *_this = (SnaxShell *)__this;
@@ -246,9 +248,14 @@ void SnaxShell::send_handler(vp::Block *__this, vp::ClockEvent *event)
         return;
     }
     _this->held_req = nullptr;
-    bool empty = _this->rule.release(cycle);
-    _this->csrs.write(SnaxShellRule::START, 0, " (START, a strobe, held)");
-    _this->send(cycle, empty);
+    int index = _this->rule.held_index;
+    SnaxShellRule::Write write = _this->rule.release(cycle);
+    _this->csrs.write(index, _this->rule.regs[index],
+        index == SnaxShellRule::START ? " (START, a strobe, held)" : " (held)");
+    if (write.start)
+    {
+        _this->send(cycle, write.empty);
+    }
     req->status = vp::IO_REQ_OK;
     req->get_resp_port()->resp(req);
 }

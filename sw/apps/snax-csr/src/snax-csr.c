@@ -34,10 +34,10 @@
     X(ACC_T_STRIDE_WRITER_0_0) X(ACC_RW_JOBS)
 #define RO_CSRS(X)                                                  \
     X(ACC_STREAMER_BUSY_CSR) X(ACC_STREAMER_PERFORMANCE_COUNTER_CSR) \
-    X(ACC_RO_STATUS) X(ACC_RO_COUNTER)
-// Part 3's CSRs: a read-write one, and the group's read-only COUNTER
+    X(ACC_RO_STATUS) X(ACC_RO_BUSY_COUNTER)
+// Part 3's CSRs: a read-write one, and the group's read-only BUSY_COUNTER
 #define ONE_RW ACC_BASE_PTR_READER_0_LOW
-#define ONE_RO ACC_RO_COUNTER
+#define ONE_RO ACC_RO_BUSY_COUNTER
 
 #define STR(x) #x
 #define WRITE(csr, v) write_csr(csr, v)
