@@ -49,7 +49,7 @@ def slot_of(description, *streamers):
 
 def with_unit_csrs(desc, k):
     """desc with k more R/W CSRs in its last accelerator's last unit (the offsets of STATUS and
-    COUNTER moved past them)."""
+    BUSY_COUNTER moved past them)."""
     *before, acc = desc.accelerators
     *groups, group = acc.groups
     base = group.csrs[0].offset
@@ -129,7 +129,7 @@ class Built(unittest.TestCase):
         self.assertEqual(acc.components["streamer_acc"].properties["csr_base"], 960)
         self.assertEqual(acc.components["shell"].properties,
                          {"csr_base": first, "csrs": ["START", "JOBS"], "widths": [1, 32],
-                          "counter_width": 32})
+                          "busy_counter_width": 32})
         group = acc.components["unit"].properties
         (unit,) = group["units"]
         self.assertEqual((group["links"], group["csr_base"]), ([], first))
@@ -205,10 +205,10 @@ class Built(unittest.TestCase):
         self.assertEqual(first, 988)
         self.assertEqual(acc.components["shell_vmul"].properties,
                          {"csr_base": first, "csrs": ["START", "JOBS"], "widths": [1, 32],
-                          "counter_width": 32})
+                          "busy_counter_width": 32})
         self.assertEqual(acc.components["shell_vsum"].properties,
                          {"csr_base": first + 4, "csrs": ["START", "JOBS", "JOB_BEATS"],
-                          "widths": [1, 32, 32], "counter_width": 32})
+                          "widths": [1, 32, 32], "busy_counter_width": 32})
         (mul,), (total,) = (acc.components[n].properties["units"]
                             for n in ("unit_vmul", "unit_vsum"))
         self.assertEqual((mul["datapath"], mul["inputs"], mul["op"], mul["t"]),
@@ -224,7 +224,7 @@ class Built(unittest.TestCase):
 
     def test_dot4_one_linked_group(self):
         """dot 4: one shell and one group_dot over its window (START, JOBS, the MAC's
-        JOB_BEATS, STATUS, COUNTER), the MAC's outer inputs and the sum's outer output, the
+        JOB_BEATS, STATUS, BUSY_COUNTER), the MAC's outer inputs and the sum's outer output, the
         wire between them; the sum's T fixed at 1 (params.T), the MAC's from the start."""
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(DOT4, DOT4_STREAMER), 131072)
         acc = cls(None, "snax_acc0")
@@ -233,7 +233,7 @@ class Built(unittest.TestCase):
         first = SNAX_CSR_FIRST + nb_csrs(DOT4_STREAMER)
         self.assertEqual(acc.components["shell_dot"].properties,
                          {"csr_base": first, "csrs": ["START", "JOBS", "JOB_BEATS"],
-                          "widths": [1, 32, 32], "counter_width": 32})
+                          "widths": [1, 32, 32], "busy_counter_width": 32})
         group = acc.components["group_dot"].properties
         mac, total = group["units"]
         self.assertEqual((group["links"], group["csr_base"]),

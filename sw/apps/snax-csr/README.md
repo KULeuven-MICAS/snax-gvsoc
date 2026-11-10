@@ -13,7 +13,7 @@ The two start CSRs, the streamer's (975) and the group's START (978), are left o
 | | `csrrc` with `x0`, `csrrsi` and `csrrci` with 0 on CSR 981: each returns 0 | the callback, read only (`priv.hpp`) |
 | 4 | `csrr` of the 4 read-only CSRs | the callback |
 
-Part 3's no-write forms run on 981, the group's read-only COUNTER (0, as nothing ran): a write to a read-only SNAX CSR is refused and stops the run here (the RTL's manager asserts on it), so they pass only if nothing is written.
+Part 3's no-write forms run on 981, the group's read-only BUSY_COUNTER (0, as nothing ran): a write to a read-only SNAX CSR is refused and stops the run here (the RTL's manager asserts on it), so they pass only if nothing is written.
 
 The streamer and the shell see 105 accesses: 66 reads and 39 writes.
 

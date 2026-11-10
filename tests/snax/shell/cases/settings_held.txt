@@ -1,0 +1,64 @@
+# A write to any read-write CSR while the unit is busy is held until E + 1
+# (snax-forge D168), so a group's settings stay constant through its run: the
+# RTL's control unit reads JOBS and JOB_BEATS live from the csr, with no copy.
+# A fold group with a scalar (TreeAccumulate, L = 1): START 0, JOBS 1,
+# JOB_BEATS 2, K1 3, STATUS 4, BUSY_COUNTER 5. A run of J jobs of T beats
+# started in a fires J * T times from a + 1 and pushes its last result one
+# cycle later: E = a + J * T + 1, busy a + 1 .. E.
+#   - run 1 (c3, JOBS 1, T 2, K1 7): fires c4, c5, E = 6. A read of JOBS in
+#     c4 is answered at once (reads are never held); c5's JOBS 2 is held
+#     through E and taken in c7 = E + 1.
+#   - run 2 (c9, JOBS 2, T 2): E = 9 + 4 + 1 = 14, so c5's write was taken
+#     (with JOBS 1 it would end in 12); c10's JOB_BEATS 3 is held until c15.
+#   - run 3 (c16, JOBS 2, T 3): E = 16 + 6 + 1 = 23; c17's K1 9 is held until
+#     c24, so run 3 still gets K1 7 and run 4 gets 9.
+#   - run 4 (c25, JOBS 2, T 3, K1 9): E = 32; c26's START with bit 0 clear is
+#     held until c33 too, then taken and does nothing: no run, done stays
+#     (STATUS 2), BUSY_COUNTER keeps run 4's busy cycles, c26 .. c32: 7.
+csrs START JOBS JOB_BEATS K1:32
+latency 1
+ii 1
+inputs 1
+words 1 2 7
+words 2 2 7
+words 2 3 7
+words 2 3 9
+cycles
+# in out  access   result  status
+1 1       w 1 1    0       0     # 0: JOBS 1
+1 1       w 2 2    1       0     # 1: JOB_BEATS 2
+1 1       w 3 7    2       0     # 2: K1 7
+1 1       w 0 1    3       0     # 3: run 1 starts (1 2 7); busy from 4
+1 1       r 1      1       1     # 4: JOBS read while busy: at once; fires
+1 1       w 1 2    7       1     # 5: JOBS 2 while busy: held until E + 1 = 7; fires
+1 1       .        -       1     # 6: push, E
+1 1       .        -       2     # 7: E + 1: taken and answered; done
+1 1       r 1      2       2     # 8: JOBS now 2
+1 1       w 0 1    9       2     # 9: run 2 starts (2 2 7); busy from 10
+1 1       w 2 3    15      1     # 10: JOB_BEATS 3 while busy: held until 15
+1 1       .        -       1     # 11
+1 1       .        -       1     # 12: run 2 still busy (JOBS 2 was taken)
+1 1       .        -       1     # 13
+1 1       .        -       1     # 14: E
+1 1       .        -       2     # 15: taken, answered
+1 1       w 0 1    16      2     # 16: run 3 starts (2 3 7); busy from 17
+1 1       w 3 9    24      1     # 17: K1 9 while busy: held until 24
+1 1       .        -       1     # 18
+1 1       .        -       1     # 19
+1 1       .        -       1     # 20
+1 1       .        -       1     # 21
+1 1       .        -       1     # 22
+1 1       .        -       1     # 23: E
+1 1       .        -       2     # 24: taken, answered
+1 1       w 0 1    25      2     # 25: run 4 starts (2 3 9); busy from 26
+1 1       w 0 0    33      1     # 26: START with bit 0 clear while busy: held until 33
+1 1       .        -       1     # 27
+1 1       .        -       1     # 28
+1 1       .        -       1     # 29
+1 1       .        -       1     # 30
+1 1       .        -       1     # 31
+1 1       .        -       1     # 32: E
+1 1       .        -       2     # 33: taken, does nothing
+1 1       r 4      2       2     # 34: STATUS: no run started, done
+1 1       r 5      7       2     # 35: BUSY_COUNTER of run 4: c26 .. c32
+1 1       r 3      9       2     # 36: K1 9

@@ -55,7 +55,7 @@ def group_csrs(base: int, between: int = 0) -> list:
     """A group's own CSRs from offset base, with between unit CSRs after JOBS."""
     return [Csr("START", "rw", base, 1), Csr("JOBS", "rw", base + 1, 32),
             Csr("STATUS", "ro", base + 2 + between, 2),
-            Csr("COUNTER", "ro", base + 3 + between, 32)]
+            Csr("BUSY_COUNTER", "ro", base + 3 + between, 32)]
 
 
 def simd(name: str, op: str, dtype: str = "int64", brm: str = None) -> Unit:
@@ -178,7 +178,7 @@ class Fixtures(unittest.TestCase):
 
     def test_axpy(self):
         """axpby with k1 read from its CSR: scalars {k1: int32}, the R/W CSR K1 (pin k1, 32
-        bits) after JOBS, so STATUS and COUNTER one later; 3 R/W CSRs."""
+        bits) after JOBS, so STATUS and BUSY_COUNTER one later; 3 R/W CSRs."""
         slot = self.slot("axpy")
         unit = Unit("acc", "simd", "SimdLanes",
                     {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
@@ -204,11 +204,11 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(slot.description,
                          accelerator("vsum_tree_i32", fold("acc", 0, "int32", 4), between=1))
         self.assertEqual([c.name for c in slot.description.csrs],
-                         ["START", "JOBS", "JOB_BEATS", "STATUS", "COUNTER"])
+                         ["START", "JOBS", "JOB_BEATS", "STATUS", "BUSY_COUNTER"])
         self.assertEqual(slot.description.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
-        # The widths (D152): START a strobe, JOBS and JOB_BEATS job_width, COUNTER counter_width
+        # The widths (D152): START a strobe, JOBS and JOB_BEATS job_width, BUSY_COUNTER busy_counter_width
         self.assertEqual(slot.description.groups[0].rw_widths, [1, 32, 32])
-        self.assertEqual(slot.description.groups[0].counter_width, 32)
+        self.assertEqual(slot.description.groups[0].busy_counter_width, 32)
 
     def test_every_fixture_reads(self):
         for folder in sorted(p for p in FORGE.iterdir() if p.is_dir()):
@@ -217,7 +217,7 @@ class Fixtures(unittest.TestCase):
                 self.assertEqual(slot.description.design_point,
                                  f"out/design/{folder.name}/design_point.json")
                 self.assertEqual(slot.description.tag, slot.name)
-                # A set per accelerator, named after it; STATUS and COUNTER per group
+                # A set per accelerator, named after it; STATUS and BUSY_COUNTER per group
                 self.assertEqual([x.name for x in slot.sets],
                                  [a.name for a in slot.description.accelerators])
                 for x, a in zip(slot.sets, slot.description.accelerators):
@@ -396,8 +396,8 @@ def streamer(readers: list, writers: list) -> dict:
 
 # dot 1 (snax-forge C§17's table, D157): the units vmul (an SimdLanes mul) and vsum (a
 # TreeAccumulate over 4 lanes, with JOB_BEATS), each an accelerator of one group, in two
-# streamer sets: vmul's CSRs START 0, JOBS 1, STATUS 2, COUNTER 3, vsum's START 4, JOBS 5,
-# JOB_BEATS 6, STATUS 7, COUNTER 8 (the offsets run over both accelerators)
+# streamer sets: vmul's CSRs START 0, JOBS 1, STATUS 2, BUSY_COUNTER 3, vsum's START 4, JOBS 5,
+# JOB_BEATS 6, STATUS 7, BUSY_COUNTER 8 (the offsets run over both accelerators)
 VMUL = Accelerator("vmul", ["vmul.a", "vmul.b"], ["vmul.out"],
                    [Group("vmul", group_csrs(0), [simd("vmul", "mul")], [])])
 VSUM = Accelerator("vsum", ["vsum.a"], ["vsum.out"],
@@ -513,10 +513,10 @@ class AccJson(unittest.TestCase):
     def test_group_csrs_in_order(self):
         csrs = self.acc["accelerators"][0]["groups"][0]["csrs"]
         csrs[0], csrs[1] = csrs[1], csrs[0]
-        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, COUNTER")
+        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, BUSY_COUNTER")
         self.acc = acc_json(VECADD)
         del self.acc["accelerators"][0]["groups"][0]["csrs"][3]
-        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, COUNTER")
+        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, BUSY_COUNTER")
 
     def test_csr_fields(self):
         del self.acc["accelerators"][0]["groups"][0]["csrs"][2]["width"]
@@ -888,9 +888,9 @@ class Dot1(unittest.TestCase):
         self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports), (5, 4, 17))
         # The offsets over both accelerators, as the shell sees them
         self.assertEqual([[(c.name, c.offset) for c in a.csrs] for a in DOT1.accelerators],
-                         [[("START", 0), ("JOBS", 1), ("STATUS", 2), ("COUNTER", 3)],
+                         [[("START", 0), ("JOBS", 1), ("STATUS", 2), ("BUSY_COUNTER", 3)],
                           [("START", 4), ("JOBS", 5), ("JOB_BEATS", 6), ("STATUS", 7),
-                           ("COUNTER", 8)]])
+                           ("BUSY_COUNTER", 8)]])
         self.assertEqual(VSUM.ports_of("vsum", VSUM.inputs), [(0, "a")])
 
     def test_dot_1_enc_one_set(self):

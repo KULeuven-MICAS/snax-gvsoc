@@ -11,15 +11,18 @@ import gvsoc.systree
 
 
 class SnaxShell(gvsoc.systree.Component):
-    """START, JOBS and the units' CSRs, read-write; STATUS and COUNTER, read-only.
+    """START, JOBS and the units' CSRs, read-write; STATUS and BUSY_COUNTER, read-only.
 
     START is a strobe that reads 0; every other CSR keeps its width (a write its low
-    bits) and COUNTER saturates at its own (accelerator.json's widths, D152).
+    bits) and BUSY_COUNTER saturates at its own (accelerator.json's widths, D152).
 
     A start goes to the group's ctrl as JOBS and every JOB_BEATS (JOBS and 1
     without one), then every scalar CSR (K1, or K1_LO and K1_HI), when the
-    group is idle, and is held (the core stalls) while it is busy; JOBS or a
-    JOB_BEATS 0 is the empty run, ended by the shell, as snax_shell.hpp says.
+    group is idle; JOBS or a JOB_BEATS 0 is the empty run, ended by the shell,
+    as snax_shell.hpp says. While the group is busy a write to any of its
+    read-write CSRs, START or a setting, is held (the core stalls) until the
+    cycle after its run ends, so the settings stay constant through a run
+    (snax-forge D168); reads are never held.
 
     Parameters
     ----------
@@ -29,11 +32,11 @@ class SnaxShell(gvsoc.systree.Component):
         The group's read-write CSRs in CSR order: START, JOBS, then the
         units' (JOB_BEATS for each fold without a fixed T, then its scalars',
         in unit order).
-        STATUS and COUNTER follow them.
+        STATUS and BUSY_COUNTER follow them.
     widths : list[int]
         Each read-write CSR's width, in the order of csrs (START 1).
-    counter_width : int
-        COUNTER's width.
+    busy_counter_width : int
+        BUSY_COUNTER's width.
 
     Ports
     -----
@@ -48,7 +51,7 @@ class SnaxShell(gvsoc.systree.Component):
     SOURCES = ['snax_shell.cpp']
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, csr_base: int,
-            csrs: list, widths: list, counter_width: int):
+            csrs: list, widths: list, busy_counter_width: int):
         super().__init__(parent, name)
 
         self.add_sources(self.SOURCES)
@@ -57,7 +60,7 @@ class SnaxShell(gvsoc.systree.Component):
             'csr_base': csr_base,
             'csrs': list(csrs),
             'widths': list(widths),
-            'counter_width': counter_width,
+            'busy_counter_width': busy_counter_width,
         })
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:

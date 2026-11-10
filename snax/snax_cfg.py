@@ -63,7 +63,7 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
       inputs, outputs         the outer ports, "<unit>.<port>", in its set's
                               streamer's reader and writer order
       groups[]                Group: name, csrs (START, JOBS, STATUS,
-                              COUNTER), units, links
+                              BUSY_COUNTER), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
                               snax_datapath.hpp's registry: SimdLanes,
                               TreeAccumulate, Mac, SerialAccumulate,
@@ -91,10 +91,10 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
     a CSR                     Csr: name, access (rw, ro), offset (from the
                               accelerator's first CSR), width (its bits, every
                               CSR: START 1, JOBS and JOB_BEATS job_width, STATUS
-                              2, COUNTER counter_width; D152), pin
+                              2, BUSY_COUNTER busy_counter_width; D152), pin
 
 Per group the CSRs in CSR order are START, JOBS, its units' R/W CSRs, STATUS,
-COUNTER, and the offsets over all groups of all accelerators in that order
+BUSY_COUNTER, and the offsets over all groups of all accelerators in that order
 are contiguous from 0 (the shell's view, D157): they are read, never computed
 (a group's window starts at its START). Unit, group and accelerator names
 are each the file's once.
@@ -223,10 +223,10 @@ CATALOGUE = {
 }
 # A fold's seed port (snax-forge's brm.SEED): one element, read once per job (D163)
 SEED = 'seed'
-# A group's own CSRs: START and JOBS, read-write, first; STATUS and COUNTER,
+# A group's own CSRs: START and JOBS, read-write, first; STATUS and BUSY_COUNTER,
 # read-only, last (C§17)
 GROUP_RW = ('START', 'JOBS')
-GROUP_RO = ('STATUS', 'COUNTER')
+GROUP_RO = ('STATUS', 'BUSY_COUNTER')
 # The unit CSRs modelled: a fold's JOB_BEATS, then its scalars' (scalar_csrs)
 UNIT_RW = ('JOB_BEATS',)
 # The op names (snax_types.hpp's snax_op_names), and SimdLanes' axpby
@@ -466,7 +466,7 @@ class Link:
 
 @dataclass(frozen=True)
 class Group:
-    """A group: its own CSRs (START, JOBS, STATUS, COUNTER), its units and links."""
+    """A group: its own CSRs (START, JOBS, STATUS, BUSY_COUNTER), its units and links."""
 
     name: str
     csrs: list
@@ -475,7 +475,7 @@ class Group:
 
     @property
     def window(self) -> list:
-        """Its CSRs in CSR order: START, JOBS, its units' R/W CSRs, STATUS, COUNTER."""
+        """Its CSRs in CSR order: START, JOBS, its units' R/W CSRs, STATUS, BUSY_COUNTER."""
         own = {c.name: c for c in self.csrs}
         return ([own[n] for n in GROUP_RW] + [c for u in self.units for c in u.csrs]
                 + [own[n] for n in GROUP_RO])
@@ -491,9 +491,9 @@ class Group:
         return [c.width for c in self.window if c.access == 'rw']
 
     @property
-    def counter_width(self) -> int:
-        """Its COUNTER's width: the counter saturates at 2^width - 1."""
-        return next(c.width for c in self.csrs if c.name == 'COUNTER')
+    def busy_counter_width(self) -> int:
+        """Its BUSY_COUNTER's width: the counter saturates at 2^width - 1."""
+        return next(c.width for c in self.csrs if c.name == 'BUSY_COUNTER')
 
 
 @dataclass(frozen=True)
@@ -889,8 +889,8 @@ def _group(node: _Node) -> Group:
     want = [(n, 'rw') for n in GROUP_RW] + [(n, 'ro') for n in GROUP_RO]
     if own != want:
         raise CfgSlotError(node.file, node.where('csrs'),
-            f'{[c.name for c in csrs]}: a group\'s own CSRs are START, JOBS (rw), STATUS, COUNTER '
-            '(ro), in that order')
+            f'{[c.name for c in csrs]}: a group\'s own CSRs are START, JOBS (rw), STATUS, '
+            'BUSY_COUNTER (ro), in that order')
     return Group(name=node.get('name', str), csrs=csrs, units=units, links=links)
 
 
@@ -938,7 +938,7 @@ def _description(node: _Node) -> Description:
             raise CfgSlotError(node.file, node.where('accelerators'),
                 f'group {group}\'s {csr.name} has offset {csr.offset}, but is CSR {i} in CSR '
                 'order (accelerator by accelerator, per group START, JOBS, the units\' R/W CSRs, '
-                'STATUS, COUNTER): the offsets must be contiguous from 0')
+                'STATUS, BUSY_COUNTER): the offsets must be contiguous from 0')
 
     # Names: an accelerator's, a group's (its components') and a unit's are the file's once
     for what, names in (('accelerator', [a.name for a in desc.accelerators]),
@@ -1252,7 +1252,7 @@ def _check_description(acc: _Node, slot: AccSlot):
         if s.num_ro_csr != accelerator.num_ro:
             fail(s.key('snax_num_ro_csr'), f'{s.num_ro_csr}, but accelerator '
                  f'{accelerator.name} has {accelerator.num_ro} read-only CSRs (STATUS and '
-                 'COUNTER per group)')
+                 'BUSY_COUNTER per group)')
 
 
 def _core(core: _Node) -> Core:

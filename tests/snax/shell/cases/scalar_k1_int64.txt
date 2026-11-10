@@ -1,6 +1,6 @@
 # A 64-bit scalar (axpy's K1 at int64) is two CSRs, K1_LO at 2 and K1_HI at 3, 32 bits each,
 # low word first; an int8 one after it (K2, 8 bits, at 4) keeps a write's low 8 bits: 0x1fe
-# reads 0xfe. So STATUS is 5 and COUNTER 6. A start sends JOBS, 1, then the scalars in CSR
+# reads 0xfe. So STATUS is 5 and BUSY_COUNTER 6. A start sends JOBS, 1, then the scalars in CSR
 # order: words 1 1 0x89abcdef 0x01234567 0xfe. c6's start: busy c7, one firing (E = 7).
 csrs START JOBS K1_LO:32 K1_HI:32 K2:8
 words 1 1 0x89abcdef 0x01234567 0xfe
@@ -14,4 +14,4 @@ cycles
 1 1 1      w 1 1           5           0     # 5: JOBS 1
 1 1 1      w 0 1           6           0     # 6: start: JOBS 1, 1, K1_LO, K1_HI, K2
 1 1 1      r 5             1           1     # 7: STATUS at 5: busy; fires, E
-1 1 1      r 6             1           2     # 8: COUNTER at 6: one busy cycle; done
+1 1 1      r 6             1           2     # 8: BUSY_COUNTER at 6: one busy cycle; done

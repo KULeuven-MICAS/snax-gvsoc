@@ -57,7 +57,7 @@ It exits 0. The lines:
 
 - `forge cycles`: the program's window, between its two `mcycle` reads (snax-forge D135), which snax-forge's flow takes as the run's cycles;
 - `forge data`: every output word against its golden in `data.h`;
-- `forge counter add_acc`: the group's COUNTER after the task, which is the unit's run line's busy + stall_in + stall_out + flush (16 + 3 + 0 + 0), the firings the task's beats in `manifest.json`;
+- `forge counter add_acc`: the group's BUSY_COUNTER after the task, which is the unit's run line's busy + stall_in + stall_out + flush (16 + 3 + 0 + 0), the firings the task's beats in `manifest.json`;
 - `forge errors`: the data errors plus one per counter below its beats; `main` returns it.
 
 GVSoC buffers its stdout, so a trace line can cut a program's line in two; trace to a file to keep them apart. `vecadd/` runs on the build's platform tree (it is `snax_hjson`'s default file); another fixture's cluster file runs on the JSON config, with gvrun's warning that the platform tree does not match. Nothing is compiled for a design point.
