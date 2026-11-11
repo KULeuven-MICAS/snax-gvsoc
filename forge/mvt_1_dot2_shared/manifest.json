@@ -1,0 +1,42 @@
+{
+ "design": "mvt_1_dot2_shared",
+ "design_point": "out/design/mvt_1_dot2_shared/design_point.json",
+ "symbols": {"M": 40, "N": 40},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_mvt_1_dot2_shared_streamer_mvt_vadd.hjson", "accelerator.json", "include/streamer_mvt_vadd_csr_addr_map.h", "include/mvt_vadd_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0",
+ "csrs": {
+  "streamers": [
+   {"name": "mvt_vadd", "first": 960, "last": 982, "trace": "snax_acc0/streamer_mvt_vadd"}
+  ],
+  "accelerator": {
+   "MVT_VADD_RW_MVT_START": 983,
+   "MVT_VADD_RW_MVT_JOBS": 984,
+   "MVT_VADD_RW_MVT_VSUM_X1_JOB_BEATS": 985,
+   "MVT_VADD_RO_MVT_STATUS": 986,
+   "MVT_VADD_RO_MVT_BUSY_COUNTER": 987,
+   "MVT_VADD_RW_VADD_START": 988,
+   "MVT_VADD_RW_VADD_JOBS": 989,
+   "MVT_VADD_RO_VADD_STATUS": 990,
+   "MVT_VADD_RO_VADD_BUSY_COUNTER": 991,
+   "MVT_VADD_RW_PORT_MUX_SEL": 992
+  }
+ },
+ "tasks": [
+  {
+   "name": "tmp0_mult_mvt",
+   "beats": 200,
+   "csrs": {"JOBS": 40, "VSUM_X1_JOB_BEATS": 5},
+   "trace": "snax_acc0/group_mvt"
+  },
+  {"name": "augassign_18_4_vadd", "beats": 5, "csrs": {"JOBS": 5}, "trace": "snax_acc0/unit_vadd"},
+  {
+   "name": "tmp2_mult_mvt",
+   "beats": 200,
+   "csrs": {"JOBS": 40, "VSUM_X1_JOB_BEATS": 5},
+   "trace": "snax_acc0/group_mvt"
+  },
+  {"name": "augassign_19_4_vadd", "beats": 5, "csrs": {"JOBS": 5}, "trace": "snax_acc0/unit_vadd"}
+ ]
+}

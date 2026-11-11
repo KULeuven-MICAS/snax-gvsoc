@@ -1,0 +1,113 @@
+{
+ "design_point": "out/design/mvt_1_dot2_shared/design_point.json",
+ "tag": "snax_forge_mvt_1_dot2_shared",
+ "accelerators": [
+  {
+   "name": "mvt_vadd",
+   "inputs": ["vmul_x1.a", "vmul_x1.b", "vadd.a", "vadd.b"],
+   "outputs": ["vsum_x1.out", "vadd.out"],
+   "groups": [
+    {
+     "name": "mvt",
+     "csrs": [
+      {"name": "START", "access": "rw", "offset": 0, "width": 1},
+      {"name": "JOBS", "access": "rw", "offset": 1, "width": 32},
+      {"name": "STATUS", "access": "ro", "offset": 3, "width": 2},
+      {"name": "BUSY_COUNTER", "access": "ro", "offset": 4, "width": 32}
+     ],
+     "units": [
+      {
+       "name": "vmul_x1",
+       "brm": "simd",
+       "datapath": "SimdLanes",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int64", "lanes": 8},
+        "b": {"port": "b", "dir": "in", "dtype": "int64", "lanes": 8},
+        "out": {"port": "out", "dir": "out", "dtype": "int64", "lanes": 8}
+       },
+       "opType": "int64",
+       "params": {"op": "mul"},
+       "timing": {"latency": 0, "ii": 1, "span": 1},
+       "csrs": []
+      },
+      {
+       "name": "vsum_x1",
+       "brm": "accumulate",
+       "datapath": "TreeAccumulate",
+       "ports": {
+        "a": {"port": "in", "dir": "in", "dtype": "int64", "lanes": 8},
+        "out": {"port": "out", "dir": "out", "dtype": "int64", "lanes": 1}
+       },
+       "params": {"op": "add"},
+       "timing": {"latency": 1, "ii": 1, "span": 1},
+       "csrs": [{"name": "JOB_BEATS", "access": "rw", "offset": 2, "width": 32}]
+      }
+     ],
+     "links": [{"name": "tmp0_prod", "from": "vmul_x1.out", "to": "vsum_x1.a", "depth": 1}]
+    },
+    {
+     "name": "vadd",
+     "csrs": [
+      {"name": "START", "access": "rw", "offset": 5, "width": 1},
+      {"name": "JOBS", "access": "rw", "offset": 6, "width": 32},
+      {"name": "STATUS", "access": "ro", "offset": 7, "width": 2},
+      {"name": "BUSY_COUNTER", "access": "ro", "offset": 8, "width": 32}
+     ],
+     "units": [
+      {
+       "name": "vadd",
+       "brm": "simd",
+       "datapath": "SimdLanes",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int64", "lanes": 8},
+        "b": {"port": "b", "dir": "in", "dtype": "int64", "lanes": 8},
+        "out": {"port": "out", "dir": "out", "dtype": "int64", "lanes": 8}
+       },
+       "opType": "int64",
+       "params": {"op": "add"},
+       "timing": {"latency": 0, "ii": 1, "span": 1},
+       "csrs": []
+      }
+     ],
+     "links": []
+    }
+   ],
+   "movers": [
+    {
+     "name": "reader0",
+     "role": "read",
+     "num_channel": 8,
+     "masked": false,
+     "users": [
+      {"group": "mvt", "port": "vmul_x1.a", "num_channel": 8},
+      {"group": "vadd", "port": "vadd.a", "num_channel": 8}
+     ]
+    },
+    {
+     "name": "reader1",
+     "role": "read",
+     "num_channel": 8,
+     "masked": false,
+     "users": [
+      {"group": "mvt", "port": "vmul_x1.b", "num_channel": 8},
+      {"group": "vadd", "port": "vadd.b", "num_channel": 8}
+     ]
+    },
+    {
+     "name": "writer0",
+     "role": "write",
+     "num_channel": 8,
+     "masked": true,
+     "users": [
+      {"group": "mvt", "port": "vsum_x1.out", "num_channel": 1},
+      {"group": "vadd", "port": "vadd.out", "num_channel": 8}
+     ]
+    }
+   ],
+   "port_mux": {
+    "groups": ["mvt", "vadd"],
+    "csr": {"name": "PORT_MUX_SEL", "access": "rw", "offset": 9, "width": 1}
+   }
+  }
+ ]
+}
