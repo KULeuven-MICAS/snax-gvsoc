@@ -20,4 +20,18 @@ In snax_cluster's image `d3d8f5572ff4` (`ghcr.io/kuleuven-micas/snax:main`; it h
     tests/snax/sparse_arb/run.sh build/sg7/mixed/SparseInterconnect.sv "$M"
     tests/snax/sparse_arb/run.sh build/sg7/alu/SparseInterconnect.sv "$A" "[[12, 1]]"
 
-It prints what the stimulus covered (selections, contested ones, ones the priority decided, ones after a refusal and after an idle cycle) and the differences; exit 1 on any.
+The modules above 64 inputs (PORT1 R3b, snax_cluster `7c14681c`), elaborated in the same image (`d3d8f5572ff4`) from snax_cluster's `hw/chisel` with the Scala caches of the home folder mounted under `/root`, snax-forge's platform (32 banks of 64 bits, 512 rows, 2 cores, so `--userWidth 3` as snaxgen computes it), each `CFG` and `N` below:
+
+    sbt -batch -mem 8192 "runMain snax.sparse_interconnect.SparseInterconnectGen --NumInp N --NumOut 32 --memAddrWidth 9 --tcdmAddrWidth 17 --dataWidth 64 --strbWidth 8 --priorityWidth 1 --userWidth 3 --sparseConfig \"CFG\" --hw-target-dir <snax-gvsoc>/build/port1/<name>"
+
+    M100="[[48, 1], [32, 8], [16, 1], [1, 1], [1, 1], [1, 1], [1, 1]]"   # N 100, 72 inputs per bank
+    M128="[[76, 1], [32, 8], [16, 1], [1, 1], [1, 1], [1, 1], [1, 1]]"   # N 128, 100 per bank
+    N128="[[108, 1], [16, 1], [1, 1], [1, 1], [1, 1], [1, 1]]"           # N 128, 128 per bank
+    tests/snax/sparse_arb/run.sh build/port1/m100/SparseInterconnect.sv "$M100"
+    tests/snax/sparse_arb/run.sh build/port1/m128/SparseInterconnect.sv "$M128"
+    tests/snax/sparse_arb/run.sh build/port1/n128/SparseInterconnect.sv "$N128"
+    tests/snax/sparse_arb/run.sh build/port1/m100/SparseInterconnect.sv "$M100" "[[48, 1], [32, 8]]"
+    tests/snax/sparse_arb/run.sh build/port1/m128/SparseInterconnect.sv "$M128" "[[76, 1], [32, 8]]"
+    tests/snax/sparse_arb/run.sh build/port1/n128/SparseInterconnect.sv "$N128" "[[108, 1]]"
+
+It prints what the stimulus covered (selections, contested ones, ones the priority decided, ones after a refusal and after an idle cycle, ones at a bank's arbiter input 64 or above and how many of those were contested) and the differences; exit 1 on any.
