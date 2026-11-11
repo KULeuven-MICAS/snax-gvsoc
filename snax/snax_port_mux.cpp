@@ -8,7 +8,7 @@
 // beat ports and the groups' ports, selected by PORT_MUX_SEL. The rule is
 // SnaxPortMuxRule (snax_port_mux.hpp); here its ports, its CSR and its fatals.
 //
-// Ports: port_<i>, an io slave per group port (properties.ports[i]), the one
+// Ports: port_<i>, an io slave per group port (properties.users[i]), the one
 // its group's outer port binds; mover_<k>, an io master to the streamer's
 // reader or writer k (properties.movers[k]); input, the CSR PORT_MUX_SEL at
 // offset 0, R/W, 0 after reset, its width the property sel_width; busy, a
@@ -92,10 +92,10 @@ SnaxPortMux::SnaxPortMux(vp::ComponentConf &config) : vp::Component(config)
     }
 
     std::vector<SnaxMuxPort> ports;
-    std::vector<js::Config *> port_list = props.list_prop(cfg, "ports", "");
+    std::vector<js::Config *> port_list = props.list_prop(cfg, "users", "");
     for (size_t i = 0; i < port_list.size(); i++)
     {
-        std::string w = "ports[" + std::to_string(i) + "]";
+        std::string w = "users[" + std::to_string(i) + "]";
         js::Config *p = port_list[i];
         this->port_names.push_back(props.str_prop(p, "name", w));
         ports.push_back({props.int_prop(p, "group", w), props.int_prop(p, "mover", w),

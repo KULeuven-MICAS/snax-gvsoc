@@ -271,7 +271,7 @@ class SnaxAccelerator(gvsoc.systree.Component):
                     sel_width=acc.port_mux.csr.width, groups=acc.port_mux.groups,
                     movers=[{'name': m.name, 'is_reader': m.role == 'read',
                              'num_channel': m.num_channel} for m in acc.movers],
-                    ports=mux_ports(acc))
+                    users=mux_ports(acc))
                 csr_mux.o_MAP(mux.i_INPUT(), base=4 * mux_csr, size=4 * (set_end - mux_csr))
                 streamer.o_BUSY(mux.i_BUSY())
                 for i, user in enumerate(mux_ports(acc)):

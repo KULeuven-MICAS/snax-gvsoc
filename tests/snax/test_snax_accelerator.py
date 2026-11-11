@@ -241,7 +241,7 @@ class Built(unittest.TestCase):
             "movers": [{"name": "reader0", "is_reader": True, "num_channel": 4},
                        {"name": "reader1", "is_reader": True, "num_channel": 4},
                        {"name": "writer0", "is_reader": False, "num_channel": 4}],
-            "ports": [{"name": "vmul.a", "group": 0, "mover": 0, "num_channel": 4},
+            "users": [{"name": "vmul.a", "group": 0, "mover": 0, "num_channel": 4},
                       {"name": "vsum.a", "group": 1, "mover": 0, "num_channel": 4},
                       {"name": "vmul.b", "group": 0, "mover": 1, "num_channel": 4},
                       {"name": "vmul.out", "group": 0, "mover": 2, "num_channel": 4},

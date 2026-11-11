@@ -22,9 +22,9 @@ class SnaxPortMux(gvsoc.systree.Component):
         The groups' names, in PORT_MUX_SEL's order (accelerator.json's port_mux.groups).
     movers : list
         The streamer's movers in its order, each {name, is_reader, num_channel}.
-    ports : list
+    users : list
         The groups' ports, each {name, group (index in groups), mover (index in movers),
-        num_channel}.
+        num_channel}; not ``ports``, which the systree writes into every component's config.
 
     Ports
     -----
@@ -33,7 +33,7 @@ class SnaxPortMux(gvsoc.systree.Component):
     busy : wire<bool> slave
         The streamer's busy.
     port_<i> : io slave
-        ports[i]'s beats, from its group.
+        users[i]'s beats, from its group.
     mover_<k> : io master
         To the streamer's reader or writer of movers[k].
     """
@@ -41,7 +41,7 @@ class SnaxPortMux(gvsoc.systree.Component):
     SOURCES = ['snax_port_mux.cpp']
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, csr_base: int,
-            sel_width: int, groups: list, movers: list, ports: list):
+            sel_width: int, groups: list, movers: list, users: list):
         super().__init__(parent, name)
 
         self.add_sources(self.SOURCES)
@@ -51,7 +51,7 @@ class SnaxPortMux(gvsoc.systree.Component):
             'sel_width': sel_width,
             'groups': list(groups),
             'movers': list(movers),
-            'ports': list(ports),
+            'users': list(users),
         })
 
     def i_INPUT(self) -> gvsoc.systree.SlaveItf:
