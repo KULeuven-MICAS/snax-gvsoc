@@ -20,4 +20,4 @@ In snax_cluster's image `d3d8f5572ff4` (`ghcr.io/kuleuven-micas/snax:main`; it h
     tests/snax/sparse_arb/run.sh build/sg7/mixed/SparseInterconnect.sv "$M"
     tests/snax/sparse_arb/run.sh build/sg7/alu/SparseInterconnect.sv "$A" "[[12, 1]]"
 
-It prints what the stimulus covered (selections, contested ones, ones the priority decided, ones after a refusal and after an idle cycle) and the differences; exit 1 on any.
+It prints what the stimulus covered (selections, contested ones, ones the priority decided, ones after a refusal and after an idle cycle, ones at a bank's arbiter input 64 or above and how many of those were contested) and the differences; exit 1 on any.

@@ -141,6 +141,9 @@ int main(int argc, char **argv)
     // What the stimulus covered, counted apart from the arbiter
     long picks = 0, contested = 0, by_priority = 0, after_refusal = 0, after_idle = 0,
         refusals = 0;
+    // Selections of a bank's arbiter input 64 or above (the mask bits a 64-bit
+    // mask would not have), and how many of them were contested
+    long upper = 0, upper_contested = 0;
     long sel_diffs = 0, ready_diffs = 0;
     std::vector<long> last_request(NUM_OUT, -10), last_refusal(NUM_OUT, -10);
 
@@ -245,7 +248,13 @@ int main(int argc, char **argv)
             after_idle += last_request[b] < cycle - 1 && last_request[b] >= 0 && count > 1;
             last_request[b] = cycle;
 
-            winner[b] = bank_inputs[b][arbs[b].pick(cycle, req, high)];
+            int local = arbs[b].pick(cycle, req, high);
+            winner[b] = bank_inputs[b][local];
+            if (local >= 64)
+            {
+                upper++;
+                upper_contested += count > 1;
+            }
             if (!bank_valid(t, b) || (int)bank_addr(t, b) != winner[b])
             {
                 if (sel_diffs++ < 10)
@@ -280,10 +289,11 @@ int main(int argc, char **argv)
     }
 
     printf("%ld cycles, %d of %d inputs active: %ld selections (%ld contested, %ld decided by "
-        "priority, %ld after a refusal, %ld after an idle cycle), %ld refusals; "
-        "selection differences %ld, ready differences %ld\n",
-        cycles, active, NUM_INP, picks, contested, by_priority, after_refusal, after_idle,
-        refusals, sel_diffs, ready_diffs);
+        "priority, %ld after a refusal, %ld after an idle cycle; %ld at arbiter input 64 or "
+        "above, %ld of them contested), %ld refusals; selection differences %ld, ready "
+        "differences %ld\n",
+        cycles, active, NUM_INP, picks, contested, by_priority, after_refusal, after_idle, upper,
+        upper_contested, refusals, sel_diffs, ready_diffs);
     t->final();
     delete t;
     return sel_diffs || ready_diffs ? 1 : 0;
