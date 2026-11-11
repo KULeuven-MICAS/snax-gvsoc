@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "snax"))
 import hjson  # noqa: E402
 import snax_cfg  # noqa: E402
-from snax_cfg import Accelerator, Csr, Description, Group, Link, Port, Unit  # noqa: E402
+from snax_cfg import (Accelerator, Csr, Description, Group, Link, MoverUser, Port,  # noqa: E402
+                      PortMux, SharedMover, Unit)
 
 CFG = ROOT / "sw" / "cfg"
 FORGE = ROOT / "forge"
@@ -374,14 +375,23 @@ def acc_json(desc: Description) -> dict:
     def link(k):
         return {"name": k.name, "from": k.from_, "to": k.to, "depth": k.depth}
 
+    def acc(a):
+        d = {"name": a.name, "inputs": list(a.inputs), "outputs": list(a.outputs),
+             "groups": [{"name": g.name, "csrs": [csr(c) for c in g.csrs],
+                         "units": [unit(u) for u in g.units],
+                         "links": [link(k) for k in g.links]}
+                        for g in a.groups]}
+        if a.port_mux is not None:
+            d["movers"] = [{"name": m.name, "role": m.role, "num_channel": m.num_channel,
+                            "masked": m.masked,
+                            "users": [{"group": u.group, "port": u.port,
+                                       "num_channel": u.num_channel} for u in m.users]}
+                           for m in a.movers]
+            d["port_mux"] = {"groups": list(a.port_mux.groups), "csr": csr(a.port_mux.csr)}
+        return d
+
     return {"design_point": desc.design_point, "tag": desc.tag,
-            "accelerators": [{"name": a.name, "inputs": list(a.inputs),
-                              "outputs": list(a.outputs),
-                              "groups": [{"name": g.name, "csrs": [csr(c) for c in g.csrs],
-                                          "units": [unit(u) for u in g.units],
-                                          "links": [link(k) for k in g.links]}
-                                         for g in a.groups]}
-                             for a in desc.accelerators]}
+            "accelerators": [acc(a) for a in desc.accelerators]}
 
 
 def streamer(readers: list, writers: list) -> dict:
@@ -410,6 +420,20 @@ VSUM_STREAMER = streamer([4], [1])
 DOT = description("dot_1_enc", Accelerator("dot", ["vmul.a", "vmul.b", "vsum.a"],
                                            ["vmul.out", "vsum.out"], VMUL.groups + VSUM.groups))
 DOT_STREAMER = streamer([4, 4, 4], [4, 1])
+# dot 1 with share_ports on tmp0 (snax-forge D169): vmul and vsum on one set whose movers they
+# share, per role the k-th widest port of each group on mover k: reader0 vmul.a / vsum.a,
+# reader1 vmul.b, writer0 vmul.out / vsum.out (1 of its 4 channels, so masked); PORT_MUX_SEL
+# at offset 9, after vsum's window
+DOT_SHARED = description("dot_1_shared", Accelerator(
+    "dot", ["vmul.a", "vmul.b", "vsum.a"], ["vmul.out", "vsum.out"], VMUL.groups + VSUM.groups,
+    [SharedMover("reader0", "read", 4, False, [MoverUser("vmul", "vmul.a", 4),
+                                                MoverUser("vsum", "vsum.a", 4)]),
+     SharedMover("reader1", "read", 4, False, [MoverUser("vmul", "vmul.b", 4)]),
+     SharedMover("writer0", "write", 4, True, [MoverUser("vmul", "vmul.out", 4),
+                                                MoverUser("vsum", "vsum.out", 1)])],
+    PortMux(["vmul", "vsum"], Csr("PORT_MUX_SEL", "rw", 9, 1))))
+DOT_SHARED_STREAMER = streamer([4, 4], [4])
+DOT_SHARED_STREAMER["data_writer_params"]["configurable_channel"] = [True]
 
 
 # dot 4 (snax-forge C§17's block): one group dot, a Mac unit (JOB_BEATS at 2) wired into a
@@ -455,6 +479,11 @@ def write_design(folder: Path, acc: dict, streamer: dict, rw: int, ro: int) -> P
 def dot_cluster(folder: Path) -> Path:
     """dot_1_enc in folder (DOT, DOT_STREAMER): one set; its cluster file."""
     return write_design(folder, acc_json(DOT), DOT_STREAMER, 5, 4)
+
+
+def dot_shared_cluster(folder: Path) -> Path:
+    """dot 1 shared in folder (DOT_SHARED, DOT_SHARED_STREAMER): one set; its cluster file."""
+    return write_design(folder, acc_json(DOT_SHARED), DOT_SHARED_STREAMER, 6, 4)
 
 
 def dot1_cluster(folder: Path) -> Path:
@@ -916,6 +945,95 @@ class Dot1(unittest.TestCase):
                 self.assertEqual([x.name for x in slot.sets], sets)
                 self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports),
                                  (5, 4, 17))
+
+
+class Shared(unittest.TestCase):
+    """A set whose groups share its movers (snax-forge D169): movers and port_mux read, and
+    each thing wrong in them a named error at its key."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.acc = acc_json(DOT_SHARED)
+        self.streamer = copy.deepcopy(DOT_SHARED_STREAMER)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self):
+        path = write_design(self.dir, self.acc, self.streamer, 6, 4)
+        (slot,) = snax_cfg.load(path).cores[0].accelerators
+        return slot
+
+    def fails(self, path_part, why_part):
+        with self.assertRaises(snax_cfg.SnaxCfgError) as ctx:
+            self.load()
+        self.assertIn(path_part, ctx.exception.path)
+        self.assertIn(why_part, ctx.exception.why)
+
+    def mover(self, k):
+        return self.acc["accelerators"][0]["movers"][k]
+
+    def test_dot_1_shared(self):
+        slot = self.load()
+        self.assertEqual(slot.description, DOT_SHARED)
+        (dot,) = slot.description.accelerators
+        # PORT_MUX_SEL last: 6 R/W (vmul's 2, vsum's 3, the select), 4 R/O
+        self.assertEqual([c.name for c in dot.csrs][-2:], ["BUSY_COUNTER", "PORT_MUX_SEL"])
+        self.assertEqual((dot.num_rw, dot.num_ro), (6, 4))
+        # 12 channels where dot_1_enc has 17: the movers 4 + 4 + 4
+        self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports), (6, 4, 12))
+        self.assertEqual(snax_cfg.template_movers(DOT_SHARED_STREAMER)[-1],
+                         {"name": "writer0", "is_reader": False, "num_channel": 4,
+                          "configurable_channel": True})
+
+    def test_movers_without_port_mux(self):
+        del self.acc["accelerators"][0]["port_mux"]
+        self.fails("accelerators[0].port_mux", "both movers and port_mux")
+
+    def test_port_mux_misses_a_group(self):
+        self.acc["accelerators"][0]["port_mux"]["groups"] = ["vmul"]
+        self.fails("port_mux.groups", "each once")
+
+    def test_port_mux_sel_is_rw(self):
+        self.acc["accelerators"][0]["port_mux"]["csr"]["access"] = "ro"
+        self.fails("port_mux.csr", "must be PORT_MUX_SEL (rw)")
+
+    def test_port_mux_sel_offset_contiguous(self):
+        self.acc["accelerators"][0]["port_mux"]["csr"]["offset"] = 10
+        self.fails("accelerators", "the port mux's PORT_MUX_SEL has offset 10")
+
+    def test_user_not_an_outer_port_of_its_role(self):
+        self.mover(0)["users"][1]["port"] = "vsum.out"
+        self.fails("movers[0].users[1]", "the ports reader0 can serve")
+
+    def test_user_of_another_group(self):
+        self.mover(1)["users"][0]["group"] = "vsum"
+        self.fails("movers[1].users[0]", "is not a port of group vsum")
+
+    def test_two_ports_of_one_group(self):
+        self.mover(0)["users"][1] = {"group": "vmul", "port": "vmul.b", "num_channel": 4}
+        self.fails("movers[0].users[1]", "a second port of group vmul")
+
+    def test_narrow_user_on_an_unmasked_mover(self):
+        self.mover(2)["masked"] = False
+        self.fails("movers[2].users[1]", "not masked")
+
+    def test_masked_against_the_template(self):
+        del self.streamer["data_writer_params"]["configurable_channel"]
+        self.fails("movers[2]", "masked True, but its configurable_channel is False")
+
+    def test_movers_against_the_template(self):
+        self.streamer = streamer([4, 4, 4], [4])
+        self.fails("movers", "has the movers ['reader0', 'reader1', 'reader2', 'writer0']")
+
+    def test_a_port_on_no_mover(self):
+        self.mover(1)["users"] = []
+        self.fails("accelerators[0].movers", "vmul.b is on no mover")
+
+    def test_user_words_per_beat(self):
+        self.mover(2)["users"][1]["num_channel"] = 2
+        self.fails("movers[2].users[1]", "a fold's output is one 64-bit word")
 
 
 class Sets(unittest.TestCase):

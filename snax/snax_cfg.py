@@ -497,19 +497,58 @@ class Group:
 
 
 @dataclass(frozen=True)
+class MoverUser:
+    """A group's port on a shared mover (snax-forge D169): the group, the port
+    ("<unit>.<port>", one of the accelerator's inputs or outputs) and its words per beat, at
+    most the mover's."""
+
+    group: str
+    port: str
+    num_channel: int
+
+
+@dataclass(frozen=True)
+class SharedMover:
+    """A mover of a streamer set whose groups share its movers (snax-forge D169), in the
+    streamer's order: its name (reader<i>, writer<j>), role (read or write), channels, whether
+    it has configurable_channel (masked: a user narrower than it) and its users, at most one
+    per group."""
+
+    name: str
+    role: str
+    num_channel: int
+    masked: bool
+    users: list
+
+
+@dataclass(frozen=True)
+class PortMux:
+    """The data-side mux of a shared streamer set (snax-forge D169): its groups in
+    PORT_MUX_SEL's order, and PORT_MUX_SEL, the accelerator's last CSR."""
+
+    groups: list
+    csr: Csr
+
+
+@dataclass(frozen=True)
 class Accelerator:
     """An accelerator of accelerator.json, one streamer set's: its outer ports, in its set's
-    reader and writer order, and its groups."""
+    reader and writer order, and its groups. With share_ports (snax-forge D169) its groups
+    share the set's movers: movers says which port of each group each mover serves, and
+    port_mux which group is connected; its outer ports are then in no mover order."""
 
     name: str
     inputs: list
     outputs: list
     groups: list
+    movers: list = field(default_factory=list)
+    port_mux: PortMux = None
 
     @property
     def csrs(self) -> list:
-        """Its CSRs in CSR order."""
-        return [c for g in self.groups for c in g.window]
+        """Its CSRs in CSR order: its groups' windows, then PORT_MUX_SEL when shared."""
+        own = [] if self.port_mux is None else [self.port_mux.csr]
+        return [c for g in self.groups for c in g.window] + own
 
     @property
     def num_rw(self) -> int:
@@ -662,7 +701,7 @@ def spatial_mismatch(spatial_bounds: list, num_channel: int):
 # higherStaticPriority (default false) are read as stream_param_gen.scala.tpl
 # reads them.
 MOVER_KEYS = ['spatial_bounds', 'temporal_dim', 'num_channel', 'fifo_depth', 'dynamicPriority',
-    'higherStaticPriority']
+    'higherStaticPriority', 'configurable_channel']
 # The keys of the streamer template the model reads (MOVERS), or that do not change it
 TEMPLATE_KEYS = [*MOVERS, 'snax_library_name']
 
@@ -692,6 +731,20 @@ def check_template(template: dict):
             why = spatial_mismatch(list(bounds), channels)
             if why is not None:
                 raise RuntimeError(f'{group}[{i}]: {why}')
+
+
+def template_movers(template: dict) -> list:
+    """The template's movers in the streamer's order, readers first: each {name (reader<i>,
+    writer<j>), is_reader, num_channel, configurable_channel}."""
+    out = []
+    for group, kind in (('data_reader_params', 'reader'), ('data_writer_params', 'writer')):
+        params = template.get(group, {})
+        flags = params.get('configurable_channel', [])
+        for i, channels in enumerate(params.get('num_channel', [])):
+            out.append({'name': f'{kind}{i}', 'is_reader': kind == 'reader',
+                        'num_channel': channels,
+                        'configurable_channel': i < len(flags) and bool(flags[i])})
+    return out
 
 
 def streamer_channels(template: dict) -> int:
@@ -894,17 +947,84 @@ def _group(node: _Node) -> Group:
     return Group(name=node.get('name', str), csrs=csrs, units=units, links=links)
 
 
+def _mover(node: _Node) -> SharedMover:
+    role = node.get('role', str)
+    if role not in ('read', 'write'):
+        raise CfgTypeError(node.file, node.where('role'), f'{role!r}, must be read or write')
+    users = [MoverUser(group=u.get('group', str), port=u.get('port', str),
+                       num_channel=u.get('num_channel', int)) for u in node.nodes('users')]
+    return SharedMover(name=node.get('name', str), role=role,
+                       num_channel=node.get('num_channel', int), masked=node.get('masked', bool),
+                       users=users)
+
+
+def _port_mux(node: _Node) -> PortMux:
+    return PortMux(groups=_names(node, 'groups'), csr=_csr(node.node('csr')))
+
+
 def _accelerator(node: _Node) -> Accelerator:
     """An entry of accelerator.json's accelerators."""
+    movers = node.nodes('movers', None)
+    mux = node.node('port_mux', None)
     acc = Accelerator(
         name=node.get('name', str),
         inputs=_names(node, 'inputs'),
         outputs=_names(node, 'outputs'),
         groups=[_group(g) for g in node.nodes('groups')],
+        movers=[] if movers is None else [_mover(m) for m in movers],
+        port_mux=None if mux is None else _port_mux(mux),
     )
     if not acc.groups:
         raise CfgTypeError(node.file, node.where('groups'), 'no group')
+    if (movers is None) != (mux is None):
+        raise CfgSlotError(node.file, node.where('movers' if movers is None else 'port_mux'),
+            'missing: a shared streamer set (snax-forge D169) has both movers and port_mux')
     return acc
+
+
+def _check_shared(at: _Node, acc: Accelerator):
+    """A shared set's movers and port mux against its groups and outer ports (snax-forge D169):
+    port_mux names every group once and PORT_MUX_SEL is R/W; each user is a group's outer port
+    of the mover's direction, at most as wide as the mover, one per group and mover, a narrower
+    one only on a masked mover; every outer port is on one mover."""
+    def fail(key, why):
+        raise CfgSlotError(at.file, at.where(key), why)
+
+    groups = [g.name for g in acc.groups]
+    mux = acc.port_mux
+    if sorted(mux.groups) != sorted(groups):
+        fail('port_mux.groups', f'{mux.groups}, but accelerator {acc.name}\'s groups are '
+             f'{groups}: each once')
+    if (mux.csr.name, mux.csr.access) != ('PORT_MUX_SEL', 'rw'):
+        fail('port_mux.csr', f'{mux.csr.name} ({mux.csr.access}), must be PORT_MUX_SEL (rw)')
+    unit_group = {u.name: g.name for g in acc.groups for u in g.units}
+    placed = {}
+    for k, m in enumerate(acc.movers):
+        outer = acc.inputs if m.role == 'read' else acc.outputs
+        seen = set()
+        for i, user in enumerate(m.users):
+            where = f'movers[{k}].users[{i}]'
+            if user.port not in outer:
+                fail(where, f'{user.port!r} is not one of accelerator {acc.name}\'s '
+                     f'{"inputs" if m.role == "read" else "outputs"}, the ports {m.name} '
+                     'can serve')
+            if unit_group[user.port.split('.', 1)[0]] != user.group:
+                fail(where, f'{user.port!r} is not a port of group {user.group}')
+            if user.group in seen:
+                fail(where, f'a second port of group {user.group} on {m.name}')
+            seen.add(user.group)
+            if not 1 <= user.num_channel <= m.num_channel:
+                fail(where, f'{user.port} has {user.num_channel} channels, {m.name} '
+                     f'{m.num_channel}')
+            if user.num_channel < m.num_channel and not m.masked:
+                fail(where, f'{user.port} is narrower than {m.name}, which is not masked '
+                     '(configurable_channel)')
+            if user.port in placed:
+                fail(where, f'{user.port} is on {placed[user.port]} already')
+            placed[user.port] = m.name
+    for entry in [*acc.inputs, *acc.outputs]:
+        if entry not in placed:
+            fail('movers', f'{entry} is on no mover')
 
 
 # The top-level keys of accelerator.json before D157 (one accelerator, no accelerators list)
@@ -934,11 +1054,13 @@ def _description(node: _Node) -> Description:
     # The offsets in CSR order over every accelerator, contiguous from 0: read, never computed
     for i, csr in enumerate(desc.csrs):
         if csr.offset != i:
-            group = next(g.name for g in desc.groups if any(c is csr for c in g.window))
+            group = next((f'group {g.name}' for g in desc.groups
+                          if any(c is csr for c in g.window)), 'the port mux')
             raise CfgSlotError(node.file, node.where('accelerators'),
-                f'group {group}\'s {csr.name} has offset {csr.offset}, but is CSR {i} in CSR '
+                f'{group}\'s {csr.name} has offset {csr.offset}, but is CSR {i} in CSR '
                 'order (accelerator by accelerator, per group START, JOBS, the units\' R/W CSRs, '
-                'STATUS, BUSY_COUNTER): the offsets must be contiguous from 0')
+                'STATUS, BUSY_COUNTER, then a shared set\'s PORT_MUX_SEL): the offsets must be '
+                'contiguous from 0')
 
     # Names: an accelerator's, a group's (its components') and a unit's are the file's once
     for what, names in (('accelerator', [a.name for a in desc.accelerators]),
@@ -971,6 +1093,8 @@ def _description(node: _Node) -> Description:
         _check_links(at, acc)
         for u in own.values():
             _check_shape(at, acc, u)
+        if acc.port_mux is not None:
+            _check_shared(at, acc)
     return desc
 
 
@@ -1221,31 +1345,20 @@ def _check_description(acc: _Node, slot: AccSlot):
              'after it, in its order')
     for k, (s, accelerator) in enumerate(zip(slot.sets, desc.accelerators)):
         at = f'snax_datapath_cfg.accelerators[{k}]'
-        for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
-            ports = getattr(accelerator, key)
-            channels = s.streamer.get(mover, {}).get('num_channel', [])
-            if len(ports) != len(channels):
-                fail(f'{at}.{key}', f'{ports}, but set {s.name}\'s streamer has '
-                     f'{len(channels)} {mover}: one port each, in order')
-            for i, entry in enumerate(ports):
-                unit, _, name = entry.partition('.')
-                u = accelerator.unit(unit)
-                port = u.ports[name]
-                if CATALOGUE[u.datapath].reduces and key == 'outputs':
-                    if channels[i] != 1:
-                        fail(f'{at}.{key}[{i}]', f"{entry}: a fold's output is one 64-bit word "
-                             f"per beat, but set {s.name}'s {mover}[{i}] has num_channel "
-                             f'{channels[i]}')
-                    continue
-                bits = port.lanes * port.width
-                if bits % 64 != 0:
-                    fail(f'{at}.{key}[{i}]', f'{entry}: lanes {port.lanes} x {port.width} bits '
-                         'is not a whole number of 64-bit channel words')
-                if bits // 64 != channels[i]:
-                    fail(f'{at}.{key}[{i}]', f'{entry}: lanes {port.lanes} x {port.width} bits '
-                         f"is {bits // 64} 64-bit words per beat, but set {s.name}'s {mover}[{i}] "
-                         f'has num_channel {channels[i]}: SnaxGroup has no FIFO slicer, so they '
-                         'must match')
+        if accelerator.port_mux is not None:
+            _check_shared_set(acc, at, s, accelerator)
+        else:
+            for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
+                ports = getattr(accelerator, key)
+                channels = s.streamer.get(mover, {}).get('num_channel', [])
+                if len(ports) != len(channels):
+                    fail(f'{at}.{key}', f'{ports}, but set {s.name}\'s streamer has '
+                         f'{len(channels)} {mover}: one port each, in order')
+                for i, entry in enumerate(ports):
+                    why = _port_words(accelerator, entry, key == 'outputs', channels[i],
+                                      f"set {s.name}'s {mover}[{i}]")
+                    if why is not None:
+                        fail(f'{at}.{key}[{i}]', why)
         if s.num_rw_csr != accelerator.num_rw:
             fail(s.key('snax_num_rw_csr'), f'{s.num_rw_csr}, but accelerator '
                  f'{accelerator.name} has {accelerator.num_rw} read-write CSRs')
@@ -1253,6 +1366,58 @@ def _check_description(acc: _Node, slot: AccSlot):
             fail(s.key('snax_num_ro_csr'), f'{s.num_ro_csr}, but accelerator '
                  f'{accelerator.name} has {accelerator.num_ro} read-only CSRs (STATUS and '
                  'BUSY_COUNTER per group)')
+
+
+def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: int,
+                mover: str):
+    """Why an outer port's words per beat are not its mover's num_channel (or its user's on a
+    shared mover), or None: SnaxGroup has no FIFO slicer, so they must match."""
+    unit, _, name = entry.partition('.')
+    u = accelerator.unit(unit)
+    port = u.ports[name]
+    if CATALOGUE[u.datapath].reduces and output:
+        if channels != 1:
+            return (f"{entry}: a fold's output is one 64-bit word per beat, but {mover} has "
+                    f'num_channel {channels}')
+        return None
+    bits = port.lanes * port.width
+    if bits % 64 != 0:
+        return (f'{entry}: lanes {port.lanes} x {port.width} bits is not a whole number of '
+                '64-bit channel words')
+    if bits // 64 != channels:
+        return (f'{entry}: lanes {port.lanes} x {port.width} bits is {bits // 64} 64-bit words '
+                f'per beat, but {mover} has num_channel {channels}: SnaxGroup has no FIFO '
+                'slicer, so they must match')
+    return None
+
+
+def _check_shared_set(acc: _Node, at: str, s: StreamerSet, accelerator: Accelerator):
+    """A shared accelerator's movers against its set's streamer (snax-forge D169): the same
+    movers in the streamer's order (readers, then writers), each of its num_channel, masked
+    exactly when its template has configurable_channel; each user's words per beat its
+    num_channel."""
+    def fail(key, why):
+        raise CfgSlotError(acc.file, acc.where(key), why)
+
+    streamer = template_movers(s.streamer)
+    names = [m['name'] for m in streamer]
+    if [m.name for m in accelerator.movers] != names:
+        fail(f'{at}.movers', f'{[m.name for m in accelerator.movers]}, but set {s.name}\'s '
+             f'streamer has the movers {names}, in that order')
+    for k, (m, t) in enumerate(zip(accelerator.movers, streamer)):
+        where = f'{at}.movers[{k}]'
+        if (m.role == 'read') != t['is_reader'] or m.num_channel != t['num_channel']:
+            fail(where, f'{m.name}: {m.role}, {m.num_channel} channels, but set {s.name}\'s '
+                 f"{t['name']} is a {'reader' if t['is_reader'] else 'writer'} of "
+                 f"{t['num_channel']}")
+        if m.masked != t['configurable_channel']:
+            fail(where, f'{m.name}: masked {m.masked}, but its configurable_channel is '
+                 f"{t['configurable_channel']}")
+        for i, user in enumerate(m.users):
+            why = _port_words(accelerator, user.port, m.role == 'write', user.num_channel,
+                              f'its user entry on {m.name}')
+            if why is not None:
+                fail(f'{where}.users[{i}]', why)
 
 
 def _core(core: _Node) -> Core:

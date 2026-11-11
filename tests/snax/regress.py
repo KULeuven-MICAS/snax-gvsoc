@@ -8,8 +8,10 @@ First runs the rule of one unit (SnaxGroupRule's one-unit case) against its hand
 (tests/snax/unit/run.sh, g++ only; `unit`, passes when it exits 0), then
 SnaxShell's rule with the unit's against its own (tests/snax/shell/run.sh;
 `shell`, likewise), then the datapath classes against NumPy's vectors
-(tests/snax/datapath/run.sh; `datapath`) and SnaxGroupRule against the shared
-group cases (tests/snax/group/run.sh; `group`). Then
+(tests/snax/datapath/run.sh; `datapath`), SnaxGroupRule against the shared
+group cases (tests/snax/group/run.sh; `group`), the crossbar's pick at up to
+128 inputs (tests/snax/sparse_pick/run.sh; `sparse_pick`) and the port mux's
+rule (tests/snax/port_mux/run.sh; `port_mux`). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
 sw/apps/, then runs the cluster tests on `snax_hjson` with
@@ -363,6 +365,10 @@ def main():
     check.run_script("datapath", HERE / "datapath" / "run.sh")
     check.section("SnaxGroupRule's cases (tests/snax/group)")
     check.run_script("group", HERE / "group" / "run.sh")
+    check.section("The crossbar's pick at up to 128 inputs (tests/snax/sparse_pick)")
+    check.run_script("sparse_pick", HERE / "sparse_pick" / "run.sh")
+    check.section("The port mux's rule (tests/snax/port_mux)")
+    check.run_script("port_mux", HERE / "port_mux" / "run.sh")
 
     make(SW)
 

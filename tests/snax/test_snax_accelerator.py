@@ -4,7 +4,8 @@
 """Unit tests of snax/snax_accelerator.py: the sets' CSR layout and the slot's CSR limit,
 and the composite built from accelerator.json: one group (forge/vecadd/), dot 1's two
 accelerators in two streamer sets (test_snax_cfg's DOT1), dot_1_enc's two groups in one
-(test_snax_cfg.dot_cluster) and a linked group (dot 4, DOT4).
+(test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED, snax-forge D169) and a
+linked group (dot 4, DOT4).
 Run from snax-gvsoc after `make build` (the composite imports GVSoC's Python from
 install/):
 
@@ -35,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
 from test_snax_cfg import (CLUSTER, DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER,  # noqa: E402
                            STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, accelerator,
-                           dot1_cluster, dot_cluster, seeded)
+                           dot1_cluster, dot_cluster, dot_shared_cluster, seeded)
 
 
 def slot_of(description, *streamers):
@@ -221,6 +222,50 @@ class Built(unittest.TestCase):
         self.assertEqual(snax_accelerator.component_names(slot.description),
                          ({"vmul": "shell_vmul", "vsum": "shell_vsum"},
                           {"vmul": "unit_vmul", "vsum": "unit_vsum"}))
+
+    def test_dot_1_shared(self):
+        """dot 1 shared: one streamer of three movers, the mux port_mux_dot between them and the
+        groups' ports, PORT_MUX_SEL after vsum's window to the last SNAX CSR."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = dot_shared_cluster(Path(tmp))
+            (slot,) = snax_cfg.load(path).cores[0].accelerators
+            acc = self.build(path)
+        self.assertEqual(sorted(acc.components),
+                         ["csr_mux", "port_mux_dot", "shell_vmul", "shell_vsum", "streamer_dot",
+                          "unit_vmul", "unit_vsum"])
+        # The streamer: 5 + 5 + 6 CSRs (writer0's ENABLED_CHANNEL), start, busy, counter
+        self.assertEqual(nb_csrs(slot.sets[0].streamer), 19)
+        first = SNAX_CSR_FIRST + 19
+        self.assertEqual(acc.components["port_mux_dot"].properties, {
+            "csr_base": first + 9, "sel_width": 1, "groups": ["vmul", "vsum"],
+            "movers": [{"name": "reader0", "is_reader": True, "num_channel": 4},
+                       {"name": "reader1", "is_reader": True, "num_channel": 4},
+                       {"name": "writer0", "is_reader": False, "num_channel": 4}],
+            "users": [{"name": "vmul.a", "group": 0, "mover": 0, "num_channel": 4},
+                      {"name": "vsum.a", "group": 1, "mover": 0, "num_channel": 4},
+                      {"name": "vmul.b", "group": 0, "mover": 1, "num_channel": 4},
+                      {"name": "vmul.out", "group": 0, "mover": 2, "num_channel": 4},
+                      {"name": "vsum.out", "group": 1, "mover": 2, "num_channel": 1}]})
+        # vsum's window ends at PORT_MUX_SEL, which goes to the mux, up to the last SNAX CSR
+        self.assertEqual(mappings(acc), [(960, 19), (first, 4), (first + 4, 5),
+                                         (first + 9, 0x600 - first - 9)])
+        self.assertEqual((acc.nb_tcdm_ports, acc.tcdm_port_names[8], acc.tcdm_port_names[11]),
+                         (12, "streamer_dot.writer0.lane0", "streamer_dot.writer0.lane3"))
+        binds = {(m.name, mi, s.name, si) for m, mi, s, si, *_ in acc.bindings}
+        self.assertLessEqual({
+            ("unit_vmul", "vmul_a", "port_mux_dot", "port_0"),
+            ("unit_vsum", "vsum_a", "port_mux_dot", "port_1"),
+            ("unit_vmul", "vmul_b", "port_mux_dot", "port_2"),
+            ("unit_vmul", "vmul_out", "port_mux_dot", "port_3"),
+            ("unit_vsum", "vsum_out", "port_mux_dot", "port_4"),
+            ("port_mux_dot", "mover_0", "streamer_dot", "reader_0"),
+            ("port_mux_dot", "mover_1", "streamer_dot", "reader_1"),
+            ("port_mux_dot", "mover_2", "streamer_dot", "writer_0"),
+            ("streamer_dot", "busy", "port_mux_dot", "busy"),
+        }, binds)
+        # No group port reaches the streamer past the mux
+        self.assertFalse([b for b in binds if b[2] == "streamer_dot" and b[0] != "port_mux_dot"
+                          and b[3].startswith(("reader", "writer"))])
 
     def test_dot4_one_linked_group(self):
         """dot 4: one shell and one group_dot over its window (START, JOBS, the MAC's

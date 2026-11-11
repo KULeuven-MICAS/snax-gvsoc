@@ -212,20 +212,20 @@ int main(int argc, char **argv)
         // The model's pick per bank against the module's request
         for (int b = 0; b < NUM_OUT; b++)
         {
-            uint64_t req = 0, high = 0;
+            SnaxInputMask req, high;
             int count = 0;
             for (size_t local = 0; local < bank_inputs[b].size(); local++)
             {
                 int i = bank_inputs[b][local];
                 if (valid[i] && bank[i] == b)
                 {
-                    req |= 1ULL << local;
-                    high |= (uint64_t)priority[i] << local;
+                    req.set(local);
+                    high.set(local, priority[i]);
                     count++;
                 }
             }
             winner[b] = -1;
-            if (req == 0)
+            if (req.none())
             {
                 if (bank_valid(t, b))
                 {
@@ -240,7 +240,7 @@ int main(int argc, char **argv)
 
             picks++;
             contested += count > 1;
-            by_priority += high != 0 && (req & ~high) != 0;
+            by_priority += high.any() && (req & ~high).any();
             after_refusal += last_refusal[b] == cycle - 1 && count > 1;
             after_idle += last_request[b] < cycle - 1 && last_request[b] >= 0 && count > 1;
             last_request[b] = cycle;

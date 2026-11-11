@@ -14,10 +14,32 @@
 
 #pragma once
 
+#include <bitset>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+
+// The most inputs the crossbar takes (snax-forge D85: l1.max_xbar_inputs), and
+// a set of them, one bit each: per bank its requesters, per arbiter its valid
+// and high local inputs
+constexpr int kMaxInputs = 128;
+using SnaxInputMask = std::bitset<kMaxInputs>;
+
+
+// The first input of mask at or after from, -1 if none
+inline int snax_first_input(const SnaxInputMask &mask, int from = 0)
+{
+    for (int i = from; i < kMaxInputs; i++)
+    {
+        if (mask[i])
+        {
+            return i;
+        }
+    }
+    return -1;
+}
 
 
 // One port of the sparse configuration: width inputs, each reaching every
@@ -48,9 +70,10 @@ public:
                     + std::to_string(nb_banks) + " banks");
             }
         }
-        if (this->inputs_per_bank() > 64)
+        if (this->inputs_per_bank() > kMaxInputs)
         {
-            throw std::invalid_argument("more than 64 inputs per bank");
+            throw std::invalid_argument("more than " + std::to_string(kMaxInputs)
+                + " inputs per bank");
         }
     }
 
@@ -126,7 +149,7 @@ public:
 
     // The winner among the local inputs in valid (one bit each, nonzero),
     // high the ones with priority 1
-    int pick(int64_t cycle, uint64_t valid, uint64_t high)
+    int pick(int64_t cycle, const SnaxInputMask &valid, const SnaxInputMask &high)
     {
         // With no request, the RTL's selection is the last input and nothing
         // was refused: the pointer restarts.
@@ -137,17 +160,21 @@ public:
         }
 
         // Only the highest priority among the valid requests competes
-        uint64_t mask = (valid & high) != 0 ? valid & high : valid;
+        SnaxInputMask mask = (valid & high).any() ? valid & high : valid;
 
         int winner;
-        if (this->lock && ((mask >> this->previous) & 1))
+        if (this->lock && mask[this->previous])
         {
             winner = this->previous;
         }
         else
         {
-            uint64_t above = mask & ~((2ULL << this->previous) - 1);
-            winner = __builtin_ctzll(above != 0 ? above : mask);
+            // Round robin: the first after the last pick, else the first
+            winner = snax_first_input(mask, this->previous + 1);
+            if (winner < 0)
+            {
+                winner = snax_first_input(mask);
+            }
         }
 
         this->previous = winner;

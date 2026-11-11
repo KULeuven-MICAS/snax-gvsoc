@@ -24,7 +24,7 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
     ----------
     nb_inputs : int
         TCDM ports, numbered as on the RTL: the SNAX ports, the cores, AXI (at
-        most 64).
+        most 128, kMaxInputs in snax_sparse_arb.hpp).
     nb_banks : int
         TCDM banks, a power of two.
     bank_width : int

@@ -12,8 +12,18 @@
 //
 // CSRs, offsets from the streamer's first CSR (the CSR mux removes it):
 //   per mover: pointer low and high, one spatial stride per spatial bound,
-//   the temporal bounds, the temporal strides; then the start CSR, all
-//   read-write; then busy and the performance counter, read-only.
+//   the temporal bounds, the temporal strides, and with configurable_channel
+//   ENABLED_CHANNEL (ceil(num_channel / 32) CSRs, bit l lane l); then the
+//   start CSR, all read-write; then busy and the performance counter,
+//   read-only.
+//
+// Configurable channels (DataRequestor.scala, DataResponser.scala): a mover
+// with configurable_channel takes its lanes' enables at start; one without
+// has every lane on. A lane off sends no TCDM request. A reader's lane off
+// takes its address when it has credit, as a request would, and puts a 0 word
+// into its queue in that cycle, which can leave from the next; a writer's
+// lane off drops its address and its data word each as soon as it has one.
+// Its words still move with the beat, so a beat's other lanes are unchanged.
 //
 // Timing, per cycle t while busy (s is the cycle the start write is taken):
 //   0. the accelerator takes reader beats and gives writer beats (its own
@@ -84,11 +94,14 @@
 // the summary's `mover` line with the run's classes and queue maxima when the
 // streamer is done.
 //
+// The busy wire (a port mux's check, snax_port_mux.cpp): true from the start
+// write (s) until the run ends, at the commit before e.
+//
 // VCD signals (snax_events.hpp, gtkwave only): streamer_busy (from s + 1 to
 // e, as the RTL's), <mover>_busy (from s + 1 to its last busy cycle) and
 // <mover>_lane<l>_count (the lane's queue count, from the cycle it holds).
 //
-// Not modelled: reader-writers, configurable channels and byte masks, address
+// Not modelled: reader-writers, byte masks, address
 // remapping (logic word sizes), datapath extensions, a second clock domain;
 // snax_streamer.py refuses their keys.
 
@@ -133,11 +146,13 @@ struct Mover
     int fifo_depth;
     bool dynamic_priority;      // the priority bit from the queue count
     bool higher_static_priority;  // else this bit
+    bool configurable_channel;  // it has ENABLED_CHANNEL
     int csr_first;              // offset of its first CSR
     int first_channel;          // index of its first channel in the streamer
 
     // Configuration, taken at start
     uint32_t ptr;
+    std::vector<bool> enabled;  // per lane: on (every lane without configurable_channel)
     std::vector<uint32_t> spatial_strides;
     std::vector<uint32_t> temporal_bounds;
     std::vector<uint32_t> temporal_strides;
@@ -209,6 +224,8 @@ private:
     bool has_addresses(Mover &mover);
     bool mover_busy(Mover &mover);
     bool can_request(Channel &ch, int64_t cycle);
+    bool can_drop(Channel &ch, int64_t cycle);
+    bool lane_on(Channel &ch);
     void wake(int64_t delay);
     void queue_changed(Channel &ch);
     void count_flush(Channel &ch);
@@ -226,6 +243,7 @@ private:
     std::vector<vp::WireMaster<bool>> tcdm_prio_itf;
     std::vector<vp::IoSlave> reader_itf;
     std::vector<vp::IoSlave> writer_itf;
+    vp::WireMaster<bool> busy_itf;
     vp::ClockEvent step_event;
     vp::ClockEvent commit_event;
     vp::ClockEvent summary_event;
@@ -288,10 +306,13 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
         mover.fifo_depth = props.int_prop(m, "fifo_depth", w);
         mover.dynamic_priority = props.bool_prop(m, "dynamic_priority", w);
         mover.higher_static_priority = props.bool_prop(m, "higher_static_priority", w);
+        mover.configurable_channel = props.bool_prop(m, "configurable_channel", w);
         mover.csr_first = csr;
         mover.first_channel = nb_channels;
-        // Pointer low and high, spatial strides, temporal bounds and strides
-        csr += 2 + mover.spatial_bounds.size() + 2 * mover.temporal_dim;
+        mover.enabled.assign(mover.num_channel, true);
+        // Pointer low and high, spatial strides, temporal bounds and strides, ENABLED_CHANNEL
+        csr += 2 + mover.spatial_bounds.size() + 2 * mover.temporal_dim
+            + (mover.configurable_channel ? (mover.num_channel + 31) / 32 : 0);
         nb_channels += mover.num_channel;
         this->movers.push_back(mover);
     }
@@ -301,6 +322,7 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
 
     this->csr_itf.set_req_meth(&SnaxStreamer::csr_req);
     this->new_slave_port("input", &this->csr_itf);
+    this->new_master_port("busy", &this->busy_itf);
 
     // From here the movers do not move in memory: channels point to them
     for (Mover &mover : this->movers)
@@ -451,10 +473,17 @@ bool SnaxStreamer::mover_busy(Mover &mover)
 }
 
 
+// The lane is on (ENABLED_CHANNEL, taken at start)
+bool SnaxStreamer::lane_on(Channel &ch)
+{
+    return ch.mover->enabled[ch.lane];
+}
+
+
 // A reader needs credit, a writer its lane's data, visible in this cycle
 bool SnaxStreamer::can_request(Channel &ch, int64_t cycle)
 {
-    if (ch.addrs.empty())
+    if (ch.addrs.empty() || !this->lane_on(ch))
     {
         return false;
     }
@@ -463,6 +492,22 @@ bool SnaxStreamer::can_request(Channel &ch, int64_t cycle)
         return ch.used < ch.mover->fifo_depth;
     }
     return !ch.data.empty() && ch.data.front().visible <= cycle;
+}
+
+
+// A lane off drops in this cycle: a reader's address when it has credit; a writer's address,
+// or its data word once visible
+bool SnaxStreamer::can_drop(Channel &ch, int64_t cycle)
+{
+    if (this->lane_on(ch))
+    {
+        return false;
+    }
+    if (ch.mover->is_reader)
+    {
+        return !ch.addrs.empty() && ch.used < ch.mover->fifo_depth;
+    }
+    return !ch.addrs.empty() || (!ch.data.empty() && ch.data.front().visible <= cycle);
 }
 
 
@@ -581,6 +626,14 @@ void SnaxStreamer::start(int64_t cycle)
         csr += mover.temporal_dim;
         mover.temporal_strides.assign(regs.begin() + csr,
             regs.begin() + csr + mover.temporal_dim);
+        csr += mover.temporal_dim;
+        if (mover.configurable_channel)
+        {
+            for (int lane = 0; lane < mover.num_channel; lane++)
+            {
+                mover.enabled[lane] = (regs[csr + lane / 32] >> (lane % 32)) & 1;
+            }
+        }
 
         // Reader.scala: with temporal stride 0 on loop 0 the AGU runs that loop
         // once and each beat is handed out bound times.
@@ -639,6 +692,10 @@ void SnaxStreamer::start(int64_t cycle)
     this->counter_before = this->counter_at(cycle);
     this->runs++;
     this->span.start(cycle);
+    if (this->busy_itf.is_bound())
+    {
+        this->busy_itf.sync(true);
+    }
     // Cycles are classed from s + 1
     this->classed_cycle = cycle;
 
@@ -665,6 +722,10 @@ void SnaxStreamer::end_run(int64_t cycle)
     }
     this->span.end(cycle + 1);
     this->sigs.set_from(this->sig_busy, 0, this->span.end_cycle + 1);
+    if (this->busy_itf.is_bound())
+    {
+        this->busy_itf.sync(false);
+    }
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "Done: busy up to cycle %ld, counter %d\n",
         this->span.end_cycle, this->counter_at(this->span.end_cycle + 1));
     for (Mover &mover : this->movers)
@@ -1067,6 +1128,35 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
         ch.requested = false;
     }
 
+    // The lanes off: what they drop in this cycle, no request
+    for (Channel &ch : _this->channels)
+    {
+        if (!_this->can_drop(ch, cycle))
+        {
+            continue;
+        }
+        if (ch.mover->is_reader)
+        {
+            // DataResponser: the 0 word enters the queue with the address it stands for
+            ch.data.push_back({cycle + 1, 0, ch.addr_beats.front()});
+            ch.addrs.pop_front();
+            ch.addr_beats.pop_front();
+            ch.used++;
+            _this->queue_changed(ch);
+            continue;
+        }
+        if (!ch.addrs.empty())
+        {
+            ch.addrs.pop_front();
+            ch.addr_beats.pop_front();
+        }
+        if (!ch.data.empty() && ch.data.front().visible <= cycle)
+        {
+            _this->pop_word(ch, cycle);
+            _this->queue_changed(ch);
+        }
+    }
+
     for (Mover &mover : _this->movers)
     {
         // Room in every FIFO, counting this cycle's grants (the pipe queue)
@@ -1097,7 +1187,7 @@ void SnaxStreamer::commit_handler(vp::Block *__this, vp::ClockEvent *event)
     bool progress = false;
     for (Channel &ch : _this->channels)
     {
-        progress |= _this->can_request(ch, cycle + 1);
+        progress |= _this->can_request(ch, cycle + 1) || _this->can_drop(ch, cycle + 1);
     }
     for (Mover &mover : _this->movers)
     {
