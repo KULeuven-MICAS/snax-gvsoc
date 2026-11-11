@@ -107,7 +107,7 @@ private:
     void stop() override;
 
     // The sparse interconnect's winner on bank among the inputs in req_mask
-    int sparse_pick(int bank, uint64_t req_mask, int64_t cycle);
+    int sparse_pick(int bank, const SnaxInputMask &req_mask, int64_t cycle);
     // Whether bank refuses this cycle's winner: the DMA took its superbank
     bool bank_refuses(int bank)
     {
@@ -115,7 +115,7 @@ private:
             && this->superbank_cycle[bank / this->superbank_banks] == this->clock.get_cycles();
     }
     // The inputs requesting in req_mask but winner, for the trace
-    std::string others(uint64_t req_mask, int winner);
+    std::string others(const SnaxInputMask &req_mask, int winner);
     // An input's name for the trace; one asking with priority 1 is marked
     // with !
     std::string name(int input);
@@ -150,7 +150,7 @@ private:
     // Per input: its bank, decoded when the request arrives
     std::vector<int> pending_bank;
     // Per bank: the inputs requesting it in this cycle, one bit each
-    std::vector<uint64_t> bank_req;
+    std::vector<SnaxInputMask> bank_req;
     // Per input: its owner's name for the trace, in_<i> when none is given
     std::vector<std::string> names;
     // Per input: the priority bit of its request in this cycle
@@ -209,8 +209,8 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     this->nb_banks = this->get_js_config()->get_child_int("nb_banks");
     int bank_width = this->get_js_config()->get_child_int("bank_width");
 
-    vp_assert_always(this->nb_inputs > 0 && this->nb_inputs <= 64, &this->trace,
-        "nb_inputs must be in (0, 64], got %d\n", this->nb_inputs);
+    vp_assert_always(this->nb_inputs > 0 && this->nb_inputs <= kMaxInputs, &this->trace,
+        "nb_inputs must be in (0, %d], got %d\n", kMaxInputs, this->nb_inputs);
 
     this->bank_bits = __builtin_ctz(this->nb_banks);
     this->width_bits = __builtin_ctz(bank_width);
@@ -249,7 +249,7 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
     this->banks.resize(this->nb_banks);
     this->pending.assign(this->nb_inputs, NULL);
     this->pending_bank.assign(this->nb_inputs, 0);
-    this->bank_req.assign(this->nb_banks, 0);
+    this->bank_req.assign(this->nb_banks, SnaxInputMask());
     this->priority.assign(this->nb_inputs, false);
     this->grant_cycle.assign(this->nb_banks, -1);
     this->grant_input.assign(this->nb_banks, 0);
@@ -574,12 +574,12 @@ std::string SnaxTcdmXbar::beat_field(vp::IoReq *req)
 }
 
 
-std::string SnaxTcdmXbar::others(uint64_t req_mask, int winner)
+std::string SnaxTcdmXbar::others(const SnaxInputMask &req_mask, int winner)
 {
     std::string held;
     for (int i = 0; i < this->nb_inputs; i++)
     {
-        if (i != winner && ((req_mask >> i) & 1))
+        if (i != winner && req_mask[i])
         {
             held += " " + this->name(i);
         }
@@ -588,18 +588,18 @@ std::string SnaxTcdmXbar::others(uint64_t req_mask, int winner)
 }
 
 
-int SnaxTcdmXbar::sparse_pick(int bank, uint64_t req_mask, int64_t cycle)
+int SnaxTcdmXbar::sparse_pick(int bank, const SnaxInputMask &req_mask, int64_t cycle)
 {
     std::vector<int> &inputs = this->bank_inputs[bank];
-    uint64_t valid = 0, high = 0;
+    SnaxInputMask valid, high;
     for (size_t local = 0; local < inputs.size(); local++)
     {
-        if ((req_mask >> inputs[local]) & 1)
+        if (req_mask[inputs[local]])
         {
-            valid |= 1ULL << local;
+            valid.set(local);
             if (this->priority[inputs[local]])
             {
-                high |= 1ULL << local;
+                high.set(local);
             }
         }
     }
@@ -614,19 +614,22 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
     _this->arb_cycle = cycle;
 
     // The requests of this cycle, per bank
-    std::fill(_this->bank_req.begin(), _this->bank_req.end(), 0);
+    for (SnaxInputMask &mask : _this->bank_req)
+    {
+        mask.reset();
+    }
     for (int i = 0; i < _this->nb_inputs; i++)
     {
         if (_this->pending[i] != NULL)
         {
-            _this->bank_req[_this->pending_bank[i]] |= 1ULL << i;
+            _this->bank_req[_this->pending_bank[i]].set(i);
         }
     }
 
     for (int bank = 0; bank < _this->nb_banks; bank++)
     {
-        uint64_t req_mask = _this->bank_req[bank];
-        if (req_mask == 0)
+        const SnaxInputMask &req_mask = _this->bank_req[bank];
+        if (req_mask.none())
         {
             continue;
         }
@@ -635,7 +638,7 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         bool refuses = _this->bank_refuses(bank);
         for (int i = 0; i < _this->nb_inputs; i++)
         {
-            if ((req_mask >> i) & 1)
+            if (req_mask[i])
             {
                 _this->sigs.pulse(*_this->sig_valid[i]);
                 _this->sigs.pulse(*(i != winner || refuses ? _this->sig_stall : _this->sig_ready)[i]);
@@ -655,7 +658,7 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
                 : _this->pending[winner]->get_addr();
             for (int i = 0; i < _this->nb_inputs; i++)
             {
-                if (((req_mask >> i) & 1) && (i != winner || refuses) && _this->trace_input[i])
+                if (req_mask[i] && (i != winner || refuses) && _this->trace_input[i])
                 {
                     uint64_t addr = _this->pending[i]->get_addr();
                     _this->ev.stalls.msg(vp::Trace::LEVEL_INFO,
@@ -669,7 +672,7 @@ void SnaxTcdmXbar::arbitrate(vp::Block *__this, vp::ClockEvent *event)
         int requests = refuses;
         for (int i = 0; i < _this->nb_inputs; i++)
         {
-            if ((req_mask >> i) & 1)
+            if (req_mask[i])
             {
                 requests += !_this->holds[i];
                 if (i != winner || refuses)

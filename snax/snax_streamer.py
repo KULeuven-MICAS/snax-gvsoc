@@ -36,16 +36,24 @@ def movers_of(template: dict) -> list[dict]:
                     or bool(params['dynamicPriority'][i]),
                 'higher_static_priority': 'higherStaticPriority' in params
                     and bool(params['higherStaticPriority'][i]),
+                'configurable_channel': 'configurable_channel' in params
+                    and bool(params['configurable_channel'][i]),
             })
     return movers
 
 
+def mover_csrs(mover: dict) -> int:
+    """A mover's CSRs: the pointer (2), the spatial strides, the temporal bounds and strides,
+    and with configurable_channel ENABLED_CHANNEL, ceil(num_channel / 32) of them
+    (ReaderWriterParam.csrNum)."""
+    enabled = (mover['num_channel'] + 31) // 32 if mover['configurable_channel'] else 0
+    return 2 + len(mover['spatial_bounds']) + 2 * mover['temporal_dim'] + enabled
+
+
 def nb_csrs(template: dict) -> int:
-    """The streamer's CSRs: per mover the pointer (2), the spatial strides, the temporal
-    bounds and strides; then start; then busy and the counter (Streamer.scala)."""
-    rw = sum(2 + len(mover['spatial_bounds']) + 2 * mover['temporal_dim']
-        for mover in movers_of(template))
-    return rw + 1 + 2
+    """The streamer's CSRs: per mover its own (mover_csrs); then start; then busy and the
+    counter (Streamer.scala)."""
+    return sum(mover_csrs(mover) for mover in movers_of(template)) + 1 + 2
 
 
 def tcdm_port_names(template: dict) -> list[str]:
@@ -62,7 +70,8 @@ class SnaxStreamer(gvsoc.systree.Component):
     template : dict
         The streamer template of the cluster hjson, with its keys
         (data_reader_params, data_writer_params; spatial_bounds, temporal_dim,
-        num_channel, fifo_depth, dynamicPriority, higherStaticPriority).
+        num_channel, fifo_depth, dynamicPriority, higherStaticPriority,
+        configurable_channel).
     csr_base : int
         Number of the streamer's first CSR, for the trace.
     tcdm_size : int
@@ -74,6 +83,8 @@ class SnaxStreamer(gvsoc.systree.Component):
         CSR accesses, offsets from the first CSR (4 bytes per CSR).
     tcdm_<i> : io master
         Channel i's TCDM port, numbered readers first, as on the RTL.
+    busy : wire<bool> master
+        True from the start write until the streamer is done (a port mux's check).
     tcdm_prio_<i> : wire<bool> master
         The priority bit of channel i's request, set before each request.
     reader_<i> : io slave
@@ -121,3 +132,6 @@ class SnaxStreamer(gvsoc.systree.Component):
 
     def i_WRITER(self, writer: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'writer_{writer}', signature='io')
+
+    def o_BUSY(self, itf: gvsoc.systree.SlaveItf):
+        self.itf_bind('busy', itf, signature='wire<bool>')
