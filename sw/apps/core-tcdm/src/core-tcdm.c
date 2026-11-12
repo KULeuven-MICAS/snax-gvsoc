@@ -7,7 +7,7 @@
 // CASE_<name>; each prints the value it compares, chosen not to depend on the
 // core's timing (D123).
 //
-//   subword          the compute core's stores and loads of bytes, halves,
+//   subword          core 0's stores and loads of bytes, halves,
 //                    words and doublewords (two words on rv32ima), an
 //                    amoadd.w and an LR/SC pair, all on L1, checked; returns
 //                    the error count
@@ -60,7 +60,7 @@ static uint32_t area_init(void) {
     } while (0)
 
 int main() {
-    if (!snrt_is_compute_core()) return 0;
+    if (snrt_cluster_core_idx() != 0) return 0;  // core 0 drives the accelerator
 
     uint32_t a = area_init();
     uint32_t bytes = 0, halves = 0, words = 0, dwords = 0, amo = 0, lrsc = 0;
@@ -199,7 +199,7 @@ static inline void configure(uint32_t a) {
 }
 
 int main() {
-    if (!snrt_is_compute_core()) return 0;
+    if (snrt_cluster_core_idx() != 0) return 0;  // core 0 drives the accelerator
 
     uint32_t a = area_init();
 

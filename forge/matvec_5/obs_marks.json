@@ -1,0 +1,37 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "dma_in",
+  "label": "dma load_p"
+ },
+ {
+  "mark": 3,
+  "kind": "streamer_config",
+  "label": "streamer config matvec"
+ },
+ {
+  "mark": 4,
+  "kind": "acc_config",
+  "label": "acc config matvec"
+ },
+ {
+  "mark": 5,
+  "kind": "run",
+  "label": "run matvec"
+ },
+ {
+  "mark": 6,
+  "kind": "dma_out",
+  "label": "dma store_q"
+ },
+ {
+  "mark": 7,
+  "kind": "check",
+  "label": "check"
+ }
+]

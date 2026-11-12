@@ -3,7 +3,7 @@
  "design_point": "out/design/rowsum_serial/design_point.json",
  "symbols": {"M": 4, "N": 16},
  "cluster": "snax_forge.hjson",
- "files": ["snax_forge.hjson", "snax_forge_rowsum_serial_streamer_acc.hjson", "accelerator.json", "include/streamer_acc_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "manifest.json"],
+ "files": ["snax_forge.hjson", "snax_forge_rowsum_serial_streamer_acc.hjson", "accelerator.json", "include/streamer_acc_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
  "program": "main.c",
  "trace": "snax_acc0/unit",
  "csrs": {

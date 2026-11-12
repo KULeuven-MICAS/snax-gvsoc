@@ -1,0 +1,52 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "dma_in",
+  "label": "dma load_B"
+ },
+ {
+  "mark": 3,
+  "kind": "streamer_config",
+  "label": "streamer config vmul"
+ },
+ {
+  "mark": 4,
+  "kind": "acc_config",
+  "label": "acc config vmul"
+ },
+ {
+  "mark": 5,
+  "kind": "run",
+  "label": "run vmul"
+ },
+ {
+  "mark": 6,
+  "kind": "streamer_config",
+  "label": "streamer config vsum"
+ },
+ {
+  "mark": 7,
+  "kind": "acc_config",
+  "label": "acc config vsum"
+ },
+ {
+  "mark": 8,
+  "kind": "run",
+  "label": "run vsum"
+ },
+ {
+  "mark": 9,
+  "kind": "dma_out",
+  "label": "dma store_out"
+ },
+ {
+  "mark": 10,
+  "kind": "check",
+  "label": "check"
+ }
+]

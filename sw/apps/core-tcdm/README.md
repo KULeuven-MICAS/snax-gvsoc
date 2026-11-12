@@ -1,6 +1,6 @@
 # core-tcdm
 
-The cores' TCDM accesses through the interconnect: the compute core's sub-word accesses, AMO and LR/SC on L1, and its loads against the streamer's readers on the same banks. One ELF per case, as `stream-timing`. The same ELFs run on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson` and on snax_cluster's RTL with the sparse interconnect (measured on `cfg/snax_alu_cluster.hjson`, the cluster snax-forge's base cluster is a copy of). Each case prints the value it compares, chosen not to depend on the core's timing (D123); `core_vs_reader` runs twice so that its measured run does not depend on the core's instruction fetch (below).
+The cores' TCDM accesses through the interconnect: core 0's sub-word accesses, AMO and LR/SC on L1, and its loads against the streamer's readers on the same banks. One ELF per case, as `stream-timing`. The same ELFs run on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson` and on snax_cluster's RTL with the sparse interconnect (measured on `cfg/snax_alu_cluster.hjson`, the cluster snax-forge's base cluster is a copy of). Each case prints the value it compares, chosen not to depend on the core's timing (D123); `core_vs_reader` runs twice so that its measured run does not depend on the core's instruction fetch (below).
 
 | Case | What | Compare |
 |---|---|---|

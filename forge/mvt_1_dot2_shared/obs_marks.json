@@ -1,0 +1,102 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "dma_in",
+  "label": "dma load_y1"
+ },
+ {
+  "mark": 3,
+  "kind": "streamer_config",
+  "label": "streamer config mvt_vadd"
+ },
+ {
+  "mark": 4,
+  "kind": "acc_config",
+  "label": "acc config mvt"
+ },
+ {
+  "mark": 5,
+  "kind": "run",
+  "label": "run mvt"
+ },
+ {
+  "mark": 6,
+  "kind": "dma_in",
+  "label": "dma load_x1"
+ },
+ {
+  "mark": 7,
+  "kind": "streamer_config",
+  "label": "streamer config mvt_vadd"
+ },
+ {
+  "mark": 8,
+  "kind": "acc_config",
+  "label": "acc config vadd"
+ },
+ {
+  "mark": 9,
+  "kind": "run",
+  "label": "run vadd"
+ },
+ {
+  "mark": 10,
+  "kind": "dma_out",
+  "label": "dma store_x1"
+ },
+ {
+  "mark": 11,
+  "kind": "dma_in",
+  "label": "dma load_y2"
+ },
+ {
+  "mark": 12,
+  "kind": "streamer_config",
+  "label": "streamer config mvt_vadd"
+ },
+ {
+  "mark": 13,
+  "kind": "acc_config",
+  "label": "acc config mvt"
+ },
+ {
+  "mark": 14,
+  "kind": "run",
+  "label": "run mvt"
+ },
+ {
+  "mark": 15,
+  "kind": "dma_in",
+  "label": "dma load_x2"
+ },
+ {
+  "mark": 16,
+  "kind": "streamer_config",
+  "label": "streamer config mvt_vadd"
+ },
+ {
+  "mark": 17,
+  "kind": "acc_config",
+  "label": "acc config vadd"
+ },
+ {
+  "mark": 18,
+  "kind": "run",
+  "label": "run vadd"
+ },
+ {
+  "mark": 19,
+  "kind": "dma_out",
+  "label": "dma store_x2"
+ },
+ {
+  "mark": 20,
+  "kind": "check",
+  "label": "check"
+ }
+]

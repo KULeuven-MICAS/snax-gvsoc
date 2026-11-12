@@ -24,7 +24,7 @@ GVSoC for the Makefile's `SNAX_TARGETS` (`snitch;snax_hjson`); the single quotes
 
 ## 3. A cluster test: snax-csr
 
-The cluster tests in `sw/apps/` (`snax-csr`, `dma-timing`, `stream-timing`, `core-tcdm`, `dma-tcdm`) run on `snax_hjson` with `forge/vecadd/`'s cluster file. `snax-csr` checks the compute core's SNAX CSRs:
+The cluster tests in `sw/apps/` (`snax-csr`, `obs-csr`, `dma-timing`, `stream-timing`, `core-tcdm`, `dma-tcdm`) run on `snax_hjson` with `forge/vecadd/`'s cluster file, which has one core since snax-forge D170: core 0 drives the accelerator and the DMA, so each test takes its roles by core index (core 0 the accelerator's, the last core the DMA's) and runs as written on a cluster of more cores. `snax-csr` checks core 0's SNAX CSRs:
 
     make -C sw/apps/snax-csr
     gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \

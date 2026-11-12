@@ -2,7 +2,7 @@
 
 The DMA timing program, on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL (at `b2672f8` and at `9fbf35d`); the DMA's values do not depend on the cluster's accelerator.
 
-The DMA core copies between DRAM (L2) and L1. For each case it clears the destination, resets and enables the cluster's perf counters 0 to 5, reads one enable back (so the posted stores have landed before the DMA turns busy), then takes `mcycle` before the first `snrt_dma_start_1d`, after the last one and after `snrt_dma_wait_all`. It then stops the counters, reads them and checks the copy. Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier the compute core prints one line per case.
+The DMA core copies between DRAM (L2) and L1. For each case it clears the destination, resets and enables the cluster's perf counters 0 to 5, reads one enable back (so the posted stores have landed before the DMA turns busy), then takes `mcycle` before the first `snrt_dma_start_1d`, after the last one and after `snrt_dma_wait_all`. It then stops the counters, reads them and checks the copy. Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier core 0 prints one line per case.
 
 | Case | Copies |
 |---|---|

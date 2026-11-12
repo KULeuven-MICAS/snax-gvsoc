@@ -174,6 +174,9 @@ public:
     iss_addr_t mem_map;
     iss_reg_t mem_pc;
     CsrReg csr_fmode;
+    // snax_cluster's CsrObsRegister (0x7C5, snitch.sv): 32 bits R/W, reset 0; the RTL
+    // drives its low ObsWidth bits on the core's obs_o, which the cluster takes from core 0
+    CsrReg csr_obs;
 
 private:
     bool barrier_update(bool is_write, iss_reg_t &value);
