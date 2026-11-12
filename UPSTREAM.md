@@ -93,3 +93,4 @@ Every upstream file we edit gets one comment line near its top, `Modified for SN
 | `pulp/pulp/idma/snitch_dma.py` | `SnitchDma.gen_gtkw` lists `fe/dma_busy` under the tag `snax` | FLOW3 2a step 4 |
 | `pulp/pulp/idma/idma.hpp` | A comment line: the `IDMA_SNAX_*` constants are kept equal to `snax/snax_events.hpp`'s by hand | CLN2 G1b |
 | `Makefile` | `FAST=1` passes `-DBUILD_ASSERT=OFF` to the build (no asserts flavour; `ON` otherwise); `regress` passes `J` as `-j` | CLN2 G1b |
+| `core/models/cpu/iss/src/snitch/snitch.cpp`, `include/cores/snitch/class.hpp` | `csr_obs`, snax_cluster's observability CSR 0x7C5 (`CsrObsRegister`): a plain 32-bit R/W register, reset 0 | CORE1 R1 |

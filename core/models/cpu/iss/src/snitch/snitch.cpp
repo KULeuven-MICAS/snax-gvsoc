@@ -40,6 +40,8 @@ Iss::Iss(IssWrapper &top)
     this->csr_ssr.register_callback(std::bind(&Iss::ssr_access, this, std::placeholders::_1,
         std::placeholders::_2));
     this->csr.declare_csr(&this->csr_fmode, "fmode", 0x800);
+    // snax_cluster's observability register, a plain R/W CSR as snitch.sv's CsrObsRegister
+    this->csr.declare_csr(&this->csr_obs, "obs", 0x7C5);
 
     // snax_cluster's start-up code reads its cluster base address (0xBC1 low,
     // 0xBC2 high) and {core count, core index} (0xBC3) from these CSRs, which

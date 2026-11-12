@@ -16,7 +16,7 @@ builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
 sw/apps/, then runs the cluster tests on `snax_hjson` with
 forge/vecadd/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
-`dma-timing`, `snax-csr`, the seven `stream-timing` cases, the three
+`dma-timing`, `snax-csr`, `obs-csr`, the seven `stream-timing` cases, the three
 `core-tcdm` cases and the `dma-tcdm` case, each a plain run (exit code
 only); then `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file
 (SHELL_DESIGN: SnaxShell and SnaxGroup, an SimdLanes add), with the unit's
@@ -104,7 +104,7 @@ FORGE_APP = "forge"
 # The cluster tests run on this fixture's cluster file (its manifest's), whose
 # streamer and shell they are written for
 CLUSTER_DESIGN = "vecadd"
-CLUSTER_TESTS = ["dma-timing", "snax-csr"]
+CLUSTER_TESTS = ["dma-timing", "snax-csr", "obs-csr"]
 # snax-shell runs on this fixture's cluster file, whose CSRs and datapath it is
 # written for, with the counter check; the beats of its first run are its
 # RUN_BEATS, DATA_LEN 192 / 4 lanes / 3 runs
