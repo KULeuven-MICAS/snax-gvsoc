@@ -27,6 +27,10 @@ refresh the fixture from snax-forge (forge/README.md))
 endif
 FORGE_BUILD ?= $(SW_BUILD)/apps/$(APP)/$(DESIGN)
 BUILDDIR = $(FORGE_BUILD)
+# The same main.c built twice (snax-forge D135): forge.elf, and forge_quiet.elf with
+# -DFORGE_QUIET, every start waited on at once, each section marked in CSR 0x7C5, no prints
+QUIET_ELF = $(BUILDDIR)/$(APP)_quiet.elf
+ELFS = $(BUILDDIR)/$(APP).elf $(QUIET_ELF)
 INCDIRS  = $(FORGE)
 INCDIRS += $(FORGE)/include
 include ../../common.mk
@@ -51,3 +55,6 @@ FIXTURE = $(wildcard $(FORGE)/* $(FORGE)/include/*)
 
 $(ELF): $(FORGE)/main.c $(FIXTURE) $(LIBS) | $(BUILDDIR)
 	$(RISCV_CC) $(RISCV_CFLAGS) $(RISCV_LDFLAGS) $< -o $@
+
+$(QUIET_ELF): $(FORGE)/main.c $(FIXTURE) $(LIBS) | $(BUILDDIR)
+	$(RISCV_CC) $(RISCV_CFLAGS) -DFORGE_QUIET $(RISCV_LDFLAGS) $< -o $@

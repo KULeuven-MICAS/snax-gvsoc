@@ -4,7 +4,7 @@ The generic app for a generated accelerator. It builds the program snax-forge wr
 
     make -C sw/apps/forge DESIGN=vecadd
 
-- `DESIGN` (default `vecadd`): the fixture, `forge/$(DESIGN)/` (`forge/README.md`). The ELF goes to `build/sw/apps/forge/$(DESIGN)/forge.elf`.
+- `DESIGN` (default `vecadd`): the fixture, `forge/$(DESIGN)/` (`forge/README.md`). The ELF goes to `build/sw/apps/forge/$(DESIGN)/forge.elf`, and the same `main.c` built with `-DFORGE_QUIET` (snax-forge D135: every start waited on at once, each section marked in CSR 0x7C5, no prints) to `forge_quiet.elf` beside it.
 - `FORGE` (default `forge/$(DESIGN)`): the folder to build from, for a bundle of the same form elsewhere (snax-forge's `out/gvsoc/<design>/`).
 
 The fixture's folder (for `data.h`) and its `include/` (for each streamer set's `streamer_<set>_csr_addr_map.h` and `<set>_csr.h`) come before `sw/generated/`, as in the other forge apps. There is no datagen: `data.h` holds the inputs, the zeroed outputs and their goldens. The ELF depends on every file of the fixture, so a refreshed fixture rebuilds it.
