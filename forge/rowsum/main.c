@@ -5,6 +5,8 @@
 // acc; the SNAX waits as the lowering places them (D64), the DMA's on
 // dependences only (D135), a barrier where another core goes on. One function
 // per core, a straight line; the window from main's entry to forge_check()'s.
+// Built with -DFORGE_QUIET (D135): every start waited at once, each section
+// marked in CSR 0x7c5 (obs_marks.json), no prints.
 
 #include "snrt.h"
 
@@ -17,7 +19,16 @@ static uint32_t forge_counter[1];
 
 // Core 0: the DMA and the accelerator acc
 static __attribute__((noinline)) int forge_core_0(void) {
+#ifdef FORGE_QUIET
+    write_csr(0x7c5, 1);  // dma load_A
+#endif  // FORGE_QUIET
     snrt_dma_start_1d((void *)0x10000000, A, 4096);
+#ifdef FORGE_QUIET
+    snrt_dma_wait_all();
+#endif  // FORGE_QUIET
+#ifdef FORGE_QUIET
+    write_csr(0x7c5, 2);  // streamer config acc
+#endif  // FORGE_QUIET
     csrw_ss(ACC_BASE_PTR_READER_0_LOW, 0x10000000);
     csrw_ss(ACC_BASE_PTR_READER_0_HIGH, 0);
     csrw_ss(ACC_S_STRIDE_READER_0_0, 8);
@@ -30,17 +41,35 @@ static __attribute__((noinline)) int forge_core_0(void) {
     csrw_ss(ACC_S_STRIDE_WRITER_0_0, 8);
     csrw_ss(ACC_T_BOUND_WRITER_0_0, 8);
     csrw_ss(ACC_T_STRIDE_WRITER_0_0, 8);
+#ifdef FORGE_QUIET
+    write_csr(0x7c5, 3);  // acc config acc
+#endif  // FORGE_QUIET
     csrw_ss(ACC_RW_JOBS, 8);
     csrw_ss(ACC_RW_JOB_BEATS, 16);
     snrt_dma_wait_all();
+#ifdef FORGE_QUIET
+    write_csr(0x7c5, 4);  // run acc
+#endif  // FORGE_QUIET
     csrw_ss(ACC_STREAMER_START_CSR, 1);
     csrw_ss(ACC_RW_START, 1);
+#ifdef FORGE_QUIET
+    while (csrr_ss(ACC_RO_STATUS) & 1) {
+    }
+    while (csrr_ss(ACC_STREAMER_BUSY_CSR)) {
+    }
+#endif  // FORGE_QUIET
     while (csrr_ss(ACC_RO_STATUS) & 1) {
     }
     while (csrr_ss(ACC_STREAMER_BUSY_CSR)) {
     }
     forge_counter[0] = csrr_ss(ACC_RO_BUSY_COUNTER);
+#ifdef FORGE_QUIET
+    write_csr(0x7c5, 5);  // dma store_y
+#endif  // FORGE_QUIET
     snrt_dma_start_1d(y, (void *)0x10001000, 64);
+#ifdef FORGE_QUIET
+    snrt_dma_wait_all();
+#endif  // FORGE_QUIET
     snrt_dma_wait_all();
     return 0;
 }
@@ -48,7 +77,13 @@ static __attribute__((noinline)) int forge_core_0(void) {
 // The window's end, then the self-check
 static __attribute__((noinline)) int forge_check(uint32_t t0) {
     uint32_t cycles = snrt_mcycle() - t0;
+#ifdef FORGE_QUIET
+    write_csr(0x7c5, 6);  // check
+    (void)cycles;
+#endif  // FORGE_QUIET
+#ifndef FORGE_QUIET
     printf("forge cycles: %u\n", cycles);
+#endif  // FORGE_QUIET
     int err = 0;
     int data_errors = 0;
     for (uint32_t i = 0; i < 8; i++) {
@@ -57,10 +92,16 @@ static __attribute__((noinline)) int forge_check(uint32_t t0) {
         }
     }
     err += data_errors;
+#ifndef FORGE_QUIET
     printf("forge data: %d errors (%u words)\n", data_errors, 8u);
+#endif  // FORGE_QUIET
+#ifndef FORGE_QUIET
     printf("forge counter sum_acc: %u\n", forge_counter[0]);
+#endif  // FORGE_QUIET
     err += forge_counter[0] < 128;
+#ifndef FORGE_QUIET
     printf("forge errors: %d\n", err);
+#endif  // FORGE_QUIET
     return err;
 }
 

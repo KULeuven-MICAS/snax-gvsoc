@@ -1,0 +1,57 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "dma_in",
+  "label": "dma load_p"
+ },
+ {
+  "mark": 3,
+  "kind": "streamer_config",
+  "label": "streamer config matvec"
+ },
+ {
+  "mark": 4,
+  "kind": "acc_config",
+  "label": "acc config mul"
+ },
+ {
+  "mark": 5,
+  "kind": "run",
+  "label": "run mul"
+ },
+ {
+  "mark": 6,
+  "kind": "dma_in",
+  "label": "dma load_q"
+ },
+ {
+  "mark": 7,
+  "kind": "streamer_config",
+  "label": "streamer config matvec"
+ },
+ {
+  "mark": 8,
+  "kind": "acc_config",
+  "label": "acc config sum"
+ },
+ {
+  "mark": 9,
+  "kind": "run",
+  "label": "run sum"
+ },
+ {
+  "mark": 10,
+  "kind": "dma_out",
+  "label": "dma store_q"
+ },
+ {
+  "mark": 11,
+  "kind": "check",
+  "label": "check"
+ }
+]

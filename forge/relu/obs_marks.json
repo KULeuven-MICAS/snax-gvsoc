@@ -1,0 +1,32 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "streamer_config",
+  "label": "streamer config acc"
+ },
+ {
+  "mark": 3,
+  "kind": "acc_config",
+  "label": "acc config acc"
+ },
+ {
+  "mark": 4,
+  "kind": "run",
+  "label": "run acc"
+ },
+ {
+  "mark": 5,
+  "kind": "dma_out",
+  "label": "dma store_B"
+ },
+ {
+  "mark": 6,
+  "kind": "check",
+  "label": "check"
+ }
+]
