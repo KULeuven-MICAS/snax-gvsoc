@@ -147,11 +147,10 @@ class Fixtures(unittest.TestCase):
         self.assertEqual((cfg.periph_size, cfg.zero_mem_size), (64 * 1024, 64 * 1024))
         self.assertEqual(cfg.dma, snax_cfg.Dma(512, 3, 3))
         self.assertEqual(cfg.dram, snax_cfg.Dram(0x8000_0000, 0x8000_0000))
-        compute, dma = cfg.cores
-        self.assertEqual((compute.isa, compute.xdma, compute.num_int_outstanding_loads),
-                         ("rv32ima", False, 1))
-        self.assertEqual((dma.isa, dma.xdma, dma.accelerators), ("rv32ima", True, []))
-        self.assertEqual(compute.misa, MISA_RV32IMA)
+        (core,) = cfg.cores  # one core, the slot and the DMA (snax-forge D170)
+        self.assertEqual((core.isa, core.xdma, core.num_int_outstanding_loads),
+                         ("rv32ima", True, 1))
+        self.assertEqual(core.misa, MISA_RV32IMA)
         slot = self.slot("vecadd")
         self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 2, 2))
         self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
@@ -323,8 +322,8 @@ class Broken(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, d, "sparse_interconnect_config[0]",
                    "[width, granularity]")
         d = cluster()
-        d["cluster"]["hives"][0]["cores"][1] = "dma"
-        self.fails(snax_cfg.CfgTypeError, d, "cluster.hives[0].cores[1]", "an object")
+        d["cluster"]["hives"][0]["cores"][0] = "core"
+        self.fails(snax_cfg.CfgTypeError, d, "cluster.hives[0].cores[0]", "an object")
 
     def test_slot_ports(self):
         d = cluster()
