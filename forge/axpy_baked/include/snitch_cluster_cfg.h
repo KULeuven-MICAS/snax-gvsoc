@@ -4,5 +4,5 @@
 // The runtime's core count and first hart, as snax_cluster's
 // snitch_cluster_cfg.h.tpl renders it from the cluster file.
 
-#define CFG_CLUSTER_NR_CORES 2
+#define CFG_CLUSTER_NR_CORES 1
 #define CFG_CLUSTER_BASE_HARTID 0
