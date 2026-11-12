@@ -44,12 +44,15 @@ LIBS   := $(SW_BUILD)/libmath.a $(RUNTIME)
 
 # The key's copy of the headers is never overwritten, so its objects stay up
 # to date across fixtures; sw/Makefile decides whether they are (they depend
-# on the two headers)
+# on the two headers). One build of a key at a time (flock on its .lock): forges
+# run in parallel that meet a new key (snax-forge's forge-set -j) would otherwise
+# copy its headers and build its runtime into the same folder at once
 $(RUNTIME): FORCE
 	@mkdir -p $(RUNTIME_KEYED)/include
-	@cp -n $(CLUSTER_HEADERS) $(RUNTIME_KEYED)/include/
-	$(MAKE) -s --no-print-directory -C $(SW) runtime RUNTIME_INC=$(RUNTIME_KEYED)/include \
-		RUNTIME_BUILD=$(RUNTIME_KEYED)
+	@flock $(RUNTIME_KEYED)/.lock sh -c 'for h in $(CLUSTER_HEADERS); do \
+		[ -e $(RUNTIME_KEYED)/include/$$(basename $$h) ] || cp $$h $(RUNTIME_KEYED)/include/; \
+		done && $(MAKE) -s --no-print-directory -C $(SW) runtime \
+		RUNTIME_INC=$(RUNTIME_KEYED)/include RUNTIME_BUILD=$(RUNTIME_KEYED)'
 
 FIXTURE = $(wildcard $(FORGE)/* $(FORGE)/include/*)
 
