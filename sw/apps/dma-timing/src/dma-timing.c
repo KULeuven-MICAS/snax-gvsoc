@@ -5,7 +5,7 @@
 // DMA timing program: the same ELF runs on snax_cluster's RTL and on
 // SNAX-GVSoC. The DMA core copies between DRAM (L2) and L1 at a few sizes and
 // measures each case with mcycle and the cluster's DMA perf counters; the
-// compute core prints one line per case after the barrier, checks busy, r
+// core 0 prints one line per case after the barrier, checks busy, r
 // and w against the RTL's and returns the errors and the cases off them.
 
 #include "snrt.h"
@@ -127,7 +127,7 @@ int main() {
 
     snrt_cluster_hw_barrier();
 
-    if (snrt_is_compute_core()) {
+    if (snrt_cluster_core_idx() == 0) {
         uint32_t errors = 0;
         uint32_t mismatches = 0;
         for (uint32_t i = 0; i < NB_CASES; i++) {

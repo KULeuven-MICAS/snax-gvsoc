@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Streamer timing program: the same ELFs run on snax_cluster's RTL and
-// on SNAX-GVSoC. The compute core sets up the streamer's two readers, leaves the
+// on SNAX-GVSoC. Core 0 sets up the streamer's two readers, leaves the
 // writer's bound at 0, starts the streamer and polls its busy CSR; it prints
 // the streamer's counter (977) and the mcycle span.
 //
@@ -121,7 +121,7 @@ static inline uint32_t stream(uint32_t area, const stream_run_t *r, uint32_t *po
 }
 
 int main() {
-    if (!snrt_is_compute_core()) return 0;
+    if (snrt_cluster_core_idx() != 0) return 0;  // core 0 drives the accelerator
 
     // The area holds A, B and the writer's unused pointer, from bank 0
     uint32_t a = align_up((uintptr_t)snrt_l1_next(), NB_BANKS * BANK_WIDTH);

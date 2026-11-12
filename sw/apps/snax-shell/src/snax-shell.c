@@ -49,7 +49,7 @@ int main() {
 
     snrt_cluster_hw_barrier();
 
-    if (snrt_is_compute_core()) {
+    if (snrt_cluster_core_idx() == 0) {
         csrw_ss(ACC_BASE_PTR_READER_0_LOW, (uint32_t)local_a);
         csrw_ss(ACC_BASE_PTR_READER_0_HIGH, 0);
         csrw_ss(ACC_S_STRIDE_READER_0_0, 8);

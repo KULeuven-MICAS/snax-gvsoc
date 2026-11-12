@@ -91,9 +91,12 @@ COPIED = [
 MATH = "sw/math"
 MATH_SKIP = ("Makefile", ".gitignore", "include/bits/")
 
-# Each cluster's configuration, relative to target/snitch_cluster
+# Each cluster's configuration, relative to target/snitch_cluster: snitch_cluster's from
+# the checkout, snax_forge's from this repo's forge/vecadd/ (snax-forge's fixture, D126;
+# one core since snax-forge D170), absolute, so the hand-written apps' runtime matches
+# the cluster file they run on
 CLUSTERS = {"snitch_cluster": "cfg/snitch_cluster.hjson",
-            "snax_forge": f"cfg/{FORGE}/snax_forge.hjson"}
+            "snax_forge": str(REPO / "forge" / "vecadd" / "snax_forge.hjson")}
 # Clusters whose streamer header snaxgen writes, where it writes it
 STREAMERS = {"snax_forge": f"{TSW}/snax/snax_forge/include/streamer_csr_addr_map.h"}
 COMMON = f"{TSW}/runtime/common"

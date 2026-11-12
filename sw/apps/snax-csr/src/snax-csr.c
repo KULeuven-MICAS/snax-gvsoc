@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Checks the compute core's SNAX CSRs on snax_hjson with forge/vecadd/'s
+// Checks core 0's SNAX CSRs on snax_hjson with forge/vecadd/'s
 // cluster file (the streamer and the shell): every read-write CSR reads
 // back what was written, through each kind of CSR instruction, the forms that
 // must not write (csrrc with x0, csrrsi / csrrci with 0) leave a read-only CSR
@@ -79,7 +79,7 @@ static void check(const char *what, int csr, uint32_t got, uint32_t expected) {
 #define READ_ZERO(csr) check("read-only", csr, read_csr(csr), 0);
 
 int main() {
-    if (!snrt_is_compute_core()) return 0;
+    if (snrt_cluster_core_idx() != 0) return 0;  // core 0 drives the accelerator
 
     RW_CSRS(WRITE_PATTERN)
     RW_CSRS(READ_PATTERN)
