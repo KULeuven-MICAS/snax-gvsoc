@@ -29,6 +29,7 @@
 
 #include "snax_group.hpp"
 #include "snax_types.hpp"
+#include "../tb_common.hpp"
 
 
 struct StartLine
@@ -67,31 +68,6 @@ struct Case
     std::map<int, std::vector<int64_t>> results;    // push -> its lanes (a fold's one)
 };
 
-static std::string base_of(const std::string &path)
-{
-    size_t slash = path.rfind('/');
-    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
-    size_t dot = base.rfind('.');
-    return dot == std::string::npos ? base : base.substr(0, dot);
-}
-
-// A NumPy integer type's name, int8 to uint64
-static bool type_of(const std::string &name, SnaxType &t)
-{
-    for (int width : {8, 16, 32, 64})
-    {
-        for (bool is_signed : {true, false})
-        {
-            if (name == snax_type_name({width, is_signed}))
-            {
-                t = {width, is_signed};
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 // `beat N V...` or `result N V...`: an index and its values
 static bool values_line(std::istringstream &ss, std::map<int, std::vector<int64_t>> &into)
 {
@@ -123,7 +99,7 @@ static bool parse(const std::string &path, Case &c)
         fprintf(stderr, "%s: cannot open\n", path.c_str());
         return false;
     }
-    c.name = base_of(path);
+    c.name = tb_base_of(path);
     bool in_cycles = false;
     std::string raw;
     int lineno = 0;
@@ -161,7 +137,7 @@ static bool parse(const std::string &path, Case &c)
             c.types.clear();
             while (ok && ss >> name)
             {
-                ok = type_of(name, t);
+                ok = tb_type_of(name, t);
                 c.types.push_back(t);
             }
         }
@@ -259,8 +235,6 @@ static bool parse(const std::string &path, Case &c)
     }
     return true;
 }
-
-static const char *start_names[] = {"taken", "ignored", "refused"};
 
 // The data of a case with types: each firing's beat into a result, as the
 // component computes it, and each push checked against the case's results
@@ -407,7 +381,7 @@ static int run(const Case &c)
                 continue;
             }
             SnaxGroupRule::Start answer = rule.start(cycle, s.jobs, {s.job_beats});
-            const char *got = start_names[answer];
+            const char *got = tb_start_names[answer];
             if (answer == SnaxGroupRule::TAKEN)
             {
                 run_busy = 0;
@@ -506,26 +480,8 @@ static int run(const Case &c)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
-    {
-        fprintf(stderr, "usage: %s CASE...\n", argv[0]);
-        return 2;
-    }
-    int failed = 0, passed = 0;
-
-    for (int i = 1; i < argc; i++)
-    {
-        Case c;
-        if (!parse(argv[i], c))
-        {
-            return 2;
-        }
-        int errors = run(c);
-        printf("%s %s: %zu cycles, %zu run(s)%s\n", errors ? "FAIL" : "PASS", c.name.c_str(),
-            c.cycles.size(), c.expects.size(), c.types.empty() ? "" : ", data");
-        failed += errors != 0;
-        passed += errors == 0;
-    }
-    printf("%d passed, %d failed\n", passed, failed);
-    return failed ? 1 : 0;
+    return tb_main<Case>(argc, argv, parse, run, [](const Case &c) {
+        printf("%s: %zu cycles, %zu run(s)%s\n", c.name.c_str(), c.cycles.size(),
+            c.expects.size(), c.types.empty() ? "" : ", data");
+    });
 }
