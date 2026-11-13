@@ -1,8 +1,15 @@
 # stream-timing
 
-The streamer's timing on its own: core 0 sets up the streamer's two readers, leaves the writer's temporal bound at 0, starts the streamer, polls its busy CSR (976) and prints the streamer's counter (977). It runs on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`; the same ELFs ran on snax_cluster's RTL with the sparse interconnect (`cfg/snax_alu_cluster.hjson`, the cluster snax-forge's base cluster is a copy of). The counter is the value to compare.
+The streamer's timing on its own: core 0 sets up the streamer's two readers, leaves the writer's temporal bound at 0, starts the streamer, polls its busy CSR (976) and prints the streamer's counter (977). The counter is the value to compare.
 
-The accelerator is never started, so nothing takes the readers' beats. Each lane reads at most `fifo_depth` (8) beats and the reader is done; the beats stay in its queues and hold its credit, and the RTL does not clear them at start. So each case is an ELF of its own. Two cases use that: a first run leaves beats in one reader's queues, then the measured run starts, with no access to the TCDM in between; they also print the first run's counter.
+- It runs on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`.
+- The same ELFs ran on snax_cluster's RTL with the sparse interconnect (`cfg/snax_alu_cluster.hjson`, which snax-forge's base cluster copies).
+
+The accelerator is never started, so nothing takes the readers' beats:
+
+- each lane reads at most `fifo_depth` (8) beats and the reader is done;
+- the beats stay in its queues and hold its credit, and the RTL does not clear them at start, so each case is an ELF of its own;
+- two cases use that on purpose: a first run leaves beats in one reader's queues, then the measured run starts with no TCDM access in between. They also print the first run's counter.
 
 | Case | Readers | Counter |
 |---|---|---|

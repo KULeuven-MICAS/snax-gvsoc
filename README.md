@@ -1,29 +1,51 @@
 # snax-gvsoc
 
-SNAX-GVSoC is a GVSoC model of the SNAX cluster ([snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)) in which a Snitch core runs the real program. It is [SNAX-FORGE](https://github.com/KULeuven-MICAS/snax-forge)'s model (D116 there), checked against snax_cluster's RTL by one ELF on both (D123).
+SNAX-GVSoC is a GVSoC model of the SNAX cluster ([snax_cluster](https://github.com/KULeuven-MICAS/snax_cluster)) in which a Snitch core runs the real program. It is [SNAX-FORGE](https://github.com/KULeuven-MICAS/snax-forge)'s model, checked against snax_cluster's RTL by running one ELF on both.
 
-It is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at `93cedc4`; `UPSTREAM.md` lists the upstream commits, the license and every upstream file we changed. GVSoC's own documentation: [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and [gvsoc-developer.readthedocs.io](https://gvsoc-developer.readthedocs.io/en/latest/).
+It is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at `93cedc4`. `UPSTREAM.md` lists the upstream commits, the license and every upstream file we changed. GVSoC's own docs: [gvsoc.readthedocs.io](https://gvsoc.readthedocs.io/en/latest/) and [gvsoc-developer.readthedocs.io](https://gvsoc-developer.readthedocs.io/en/latest/).
+
+## The SNAX parts
+
+The core configures an accelerator through CSRs; the streamer moves its data between the L1 banks and the accelerator's ports.
+
+```mermaid
+flowchart LR
+    core["Snitch core"] -- "CSRs from 960" --> mux["CSR mux"]
+    mux --> streamer["streamer per set"]
+    mux --> shell["SnaxShell per group"]
+    shell -- "start, JOBS, T" --> group["SnaxGroup: control rule and datapaths"]
+    streamer -- "reader beats" --> group
+    group -- "writer beats" --> streamer
+    streamer -- "one 64-bit port per lane" --> xbar["TCDM crossbar"]
+    core -- "loads and stores" --> xbar
+    dma["iDMA"] -- "superbank beats" --> xbar
+    xbar --> banks["L1 banks"]
+    dma <--> l2["L2 and DRAM"]
+```
+
+- A set whose groups share movers puts a `SnaxPortMux` between the streamer and the groups.
+- Every number (lanes, widths, timing, CSRs) is read from the design point's files at run time, so a new design point compiles nothing.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, folded in from its submodules |
-| `snax/` | The `snax_hjson` target (any SNAX cluster read from its hjson, `snax_hjson.py`) and the SNAX components: the streamer, the TCDM crossbar, `SnaxGroup` (a group's datapaths under one control rule, `snax_group.hpp`) and `SnaxShell` (its CSRs) |
-| `forge/` | snax-forge's generated accelerators, one design point per folder, checked in as fixtures (`forge/README.md`) |
-| `sw/` | snax_cluster's software, a pinned copy (`sw/README.md`), and our programs in `sw/apps/`, each with a README |
-| `tests/snax/` | The regression (`regress.py`), the testbenches (`unit/`, `shell/`, `datapath/`, `group/`, `sparse_arb/`) and the Python unit tests |
-| `docs/` | `RUN.md` (how to run it), `EVENTS.md` (what the SNAX components write about a run), `notes/NOTES.md` (what was measured, and what holds) |
+| `core/`, `engine/`, `pulp/`, `gvrun/`, ... | GVSoC, as upstream has it |
+| `snax/` | the SNAX components and the `snax_hjson` target, which builds any SNAX cluster from its hjson |
+| `forge/` | snax-forge's generated design points, one folder each, checked in as fixtures (`forge/README.md`) |
+| `sw/` | a pinned copy of snax_cluster's software (`sw/README.md`) and our programs in `sw/apps/` |
+| `tests/snax/` | the regression, the testbenches and the Python unit tests |
+| `docs/` | `TOOL.md` (the commands), `EVENTS.md` (what a run writes), `notes/NOTES.md` (what was measured and still holds) |
 
 ## Getting started
 
-Everything runs in snax-forge's image `ghcr.io/kuleuven-micas/snax-forge:main` (GVSoC's build tools, snax_cluster's RISC-V toolchain), with this repository mounted at its own path; `CLAUDE.md` lists the commands, and `docs/RUN.md` walks through them with the lines to check: the build, a program on `snax_hjson`, a `forge/` fixture, the regression and the unit tests.
-
-CI (`.github/workflows/ci.yml`, in the same image) builds GVSoC for the SNAX targets, runs the unit tests and `make regress` on every pull request and push to main.
+- Everything runs in snax-forge's image, `ghcr.io/kuleuven-micas/snax-forge:main`; `docs/TOOL.md` has the commands with the lines to check.
+- Usually you don't run this repository by hand: snax-forge's `pixi run flow` builds it and runs a design point on it.
+- CI (`.github/workflows/ci.yml`, same image) builds GVSoC, runs the unit tests and `make regress` on every pull request and push to main.
 
 ## Comparing with the RTL
 
-The regression checks that each program finishes; cycles are compared with snax_cluster's RTL by hand (D123). snax-forge's local check runs its bundles on the RTL and compares each with its SNAX-GVSoC run (snax-forge's `docs/RUN.md`, section 8); `docs/notes/NOTES.md` has what was measured.
+The regression checks that each program finishes. Cycles are compared with snax_cluster's RTL by snax-forge's local check (its `docs/TOOL.md`), which runs each bundle on the RTL and on SNAX-GVSoC; `docs/notes/NOTES.md` has what was measured.
 
 ## License
 
