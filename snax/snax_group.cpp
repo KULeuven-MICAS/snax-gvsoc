@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxGroup (snax-forge C§17, D146, D147): one group of accelerator.json, its
+// SnaxGroup: one group of accelerator.json, its
 // units' datapaths under one control model, generic, every number a property
 // read at run time (get_js_config), so a design point compiles nothing. The
 // control model is snax_group.hpp's SnaxGroupRule (the `<tag>_<group>_ctrl` of
@@ -22,10 +22,9 @@
 //                                   has no outer one but its seed)
 //                seed               the index in inputs of a fold's seed (the
 //                                   last, an outer port: one element in one
-//                                   word, taken once per job, D163), or -1
+//                                   word, taken once per job), or -1
 //                output             the outer output's port name, or ""
-//                                   (linked); exactly one unit has one until
-//                                   tier A
+//                                   (linked); exactly one unit has one
 //                in_widths, in_signed, out_width, out_signed, op_width,
 //                op_signed          each input's, the output's and the op's
 //                                   element type (snax_types.hpp: 8 to 64
@@ -43,16 +42,15 @@
 //                                   [slot, words]: 1 word, or 2 at 64 bits
 //                                   (low first), sent at each start
 //                accumulate, reg_out  Mac's variant
-//                latency, ii, span  C§17's timing
+//                latency, ii, span  the unit's timing
 //                t                  a result every t-th firing, fixed (1 for a
 //                                   unit without a fold, params.T), or 0: a
 //                                   fold's JOB_BEATS, from the start
 //   links      the edges between the units, each an object: from and to, the
 //              producer's and the consumer's names; to_input, the consumer's
 //              input it feeds (an index in its inputs, one left ""); depth, 0 a
-//              wire, >= 1 a buffer (a LinkBuffer of that many beats). Until
-//              tier A the edges are one chain: SnaxGroupRule refuses a fork or
-//              a join
+//              wire, >= 1 a buffer (a LinkBuffer of that many beats). The
+//              edges are one chain: SnaxGroupRule refuses a fork or a join
 //   csr_base   the group's first CSR, for the trace
 //
 // Ports:
@@ -74,22 +72,8 @@
 //
 // Its event runs every busy cycle, so it runs before the streamer's step.
 //
-// Events (docs/EVENTS.md, snax_events.hpp), at the group's boundary: `start`
-// (count, the head's firings, and rate, the head's firings per result of the
-// outer output's unit; for one unit JOBS * JOB_BEATS and JOB_BEATS) in the cycle a start
-// is taken; `done` (the head's firings, its first and last firing's cycles)
-// in the run's last busy cycle; there too, the summary's `run` line
-// (SnaxGroupRule::run_line), the classes adding up to the run's busy cycles.
-// Beats: `fire` per head firing (its index n, each outer input's beat b as the
-// streamer hands it back, -1 if it does not, and the words; a seed not taken
-// in that firing, b -1 and its last words), `push` per
-// result the outer output's unit pushes (its index n, the head's firings it folds, the
-// words), and `class` (mode) in the first cycle of each run of one class.
-// Per-unit events of a linked group are parked (snax-forge open item 96).
-//
-// VCD signals (snax_events.hpp, gtkwave only): busy (from s + 1 to E), fire
-// and push (the head fires, the outer output's unit pushes), cycle_class (0 idle, 1
-// busy, 2 stall_in, 3 stall_out, 4 flush).
+// Events, fire, push and class lines and VCD signals: docs/EVENTS.md. Per-unit
+// events of a linked group are not written yet.
 
 #include <algorithm>
 #include <stdexcept>
@@ -355,7 +339,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             if (output != -1)
             {
                 this->trace.fatal("Property %s.output: \"%s\", but units[%d] has the outer "
-                    "output already: until tier A a group has one\n", w.c_str(), out.c_str(),
+                    "output already: a group has one\n", w.c_str(), out.c_str(),
                     output);
             }
             output = k;

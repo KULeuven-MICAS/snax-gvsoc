@@ -32,7 +32,7 @@ typedef struct {
     enum dir dir;
     uint32_t copies;  // back-to-back copies, each `bytes` long, placed
     uint32_t bytes;   // one after the other
-    // The RTL's busy, r and w: they do not depend on the core (D123), so any
+    // NB (D123): the RTL's busy, r and w do not depend on the core, so any
     // other value is the DMA's own timing moving
     uint32_t rtl_busy, rtl_r, rtl_w;
 } dma_case_t;

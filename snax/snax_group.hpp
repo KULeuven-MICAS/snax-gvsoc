@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxGroupRule: the control model of one group of an accelerator, snax-forge
-// C§17's Control paragraph (D146, D147): the `<tag>_<group>_ctrl` of its
+// SnaxGroupRule: the control model of one group of an accelerator, snax-forge's
+// control rule: the `<tag>_<group>_ctrl` of its
 // Chisel, which drives the group's datapaths (snax_datapath.hpp) with their
 // enables, every cycle. Plain C++, so the component (snax_group.cpp) and the
 // standalone tests (tests/snax/unit/, tests/snax/shell/, tests/snax/group/,
@@ -20,14 +20,14 @@
 // SerialAccumulate's lanes) and, per run, its T: a result every T-th firing
 // (a fold's JOB_BEATS or params.T; 1 for a unit without a fold). Each unit's
 // outer inputs, if any, come from the streamer; one unit owns the group's
-// outer output (by default the sink, the unit without an out-edge). Until
-// tier A a group is one chain: configure() refuses a unit with two out-edges
+// outer output (by default the sink, the unit without an out-edge). A
+// group is one chain: configure() refuses a unit with two out-edges
 // (a fork) or two in-edges (a join), a cycle, and units no link joins.
 //
 // A run: a start offered in cycle s carries JOBS and each unit's T; unit k
 // fires n_k times, JOBS * T for the sink, n_succ * T_k for a unit before it
 // (each firing of its consumer takes one of its results): over a chain, JOBS *
-// prod T_v over k and every unit after it (C§17's firings). It is taken only
+// prod T_v over k and every unit after it. It is taken only
 // when the group is idle in s and no number is 0 (JOBS 0 or any T 0 is the
 // empty run, which the shell ends without the group: here it is ignored, busy
 // stays 0); a start while busy is refused. The group is busy from s + 1 to the
@@ -36,17 +36,18 @@
 // outer inputs all have a beat and whether its outer output has room (true for
 // a unit without one).
 //
-// A seeded fold (TreeAccumulate, SerialAccumulate; D163) has one more outer
+// NB (D163): a seeded fold (TreeAccumulate, SerialAccumulate) has one more outer
 // input, its seed, one beat per job: its input has a beat when its other
 // inputs have one and, on its job's first beat (d = 0), its seed has one
 // (fire = a.valid and (not first or seed.valid)); the seed is taken with the
 // job's first firing (seed.ready = fire and first, UnitStep::seed). A seed
 // missing when wanted is stall_in, as a missing outer beat.
 //
-// Per unit (C§17): its job_beats_counter d (its firings mod T, here derived
+// Per unit: its job_beats_counter d (its firings mod T, here derived
 // from its firings; first = [d = 0], it gives a result on firings with d =
 // T - 1; the Chisel keeps it as a counter, and counts each unit's results in
-// nested counters, never against n_k: D153), an L-deep pipeline that stalls
+// nested counters, never against n_k; NB (D153): the RTL counts the same
+// way, so a change here must match the Chisel), an L-deep pipeline that stalls
 // as a whole when its head cannot be pushed, at most one firing per II (the
 // II counts cycles from the unit's last firing; a stall does not restart it,
 // and it carries over to the next run), and a lane counter when span > 1. A
@@ -79,7 +80,7 @@
 // (its consumer's firing), its write and read slots a ring.
 //
 // Each busy cycle is one class, judged at the unit owning the outer output,
-// in D59's order: stall_out (it has a result and no room: it is frozen) >
+// in this order: stall_out (it has a result and no room: it is frozen) >
 // busy (any unit fires or reads, or is in its II gap) > stall_in (a unit with
 // outer inputs wants to fire and one of them has no beat) > flush (results in
 // flight, beats in a buffer: accel.py's idle). busy + stall_in + stall_out +
@@ -185,7 +186,7 @@ public:
                 return "unit " + std::to_string(k) + " has " +
                     std::to_string(fork ? outs[k].size() : ins[k].size()) +
                     (fork ? " out-edges (a fork)" : " in-edges (a join)") +
-                    ": until tier A a group is a chain";
+                    ": a group is one chain";
             }
         }
         // Kahn's order, the lowest index first among the units ready
@@ -226,7 +227,7 @@ public:
         }
         if (sinks != 1)
         {
-            return std::to_string(sinks) + " units have no out-edge: until tier A a group is "
+            return std::to_string(sinks) + " units have no out-edge: a group is "
                 "one chain";
         }
         if (output >= (int)n)

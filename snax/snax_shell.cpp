@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxShell (D130, D146 in snax-forge): the CSRs of one group of an
+// SnaxShell: the CSRs of one group of an
 // accelerator, in front of its SnaxGroup. Its rule (START, JOBS, the units'
 // read-write CSRs, a write held while busy, the empty run, STATUS,
 // BUSY_COUNTER) is SnaxShellRule in snax_shell.hpp, which tests/snax/shell/
@@ -17,7 +17,7 @@
 //              units' (JOB_BEATS, each fold's without a fixed T, then its
 //              scalars', in unit order); STATUS and BUSY_COUNTER follow
 //   widths     each read-write CSR's width, in the order of csrs, 1 to 32
-//              (accelerator.json's, D152: START 1, JOBS and JOB_BEATS
+//              (accelerator.json's: START 1, JOBS and JOB_BEATS
 //              job_width); a write keeps its low bits
 //   busy_counter_width  BUSY_COUNTER's width, 1 to 32: it saturates at
 //              2^w - 1

@@ -45,30 +45,12 @@
 // (docs/notes/NOTES.md); one that comes after it on a superbank already
 // granted to a narrow request is fatal.
 //
-// Counters (docs/EVENTS.md, snax_events.hpp), over the whole simulation and
-// written by stop() as summary lines: per input its grants, its stalls (cycles
-// it requested and was not granted) and the part of them on a bank the DMA's
-// superbank took; per bank its reads and writes (a SNAX input's grant, or a
-// word of a DMA beat) and its conflicts (cycles with two or more of those
-// requests on it). The banks count the SNAX inputs and the DMA only: the
-// inputs that hold (the cores, AXI) have their own lines, marked whole_run,
-// since their traffic starts at boot.
-//
-// Beat and stall lines (docs/EVENTS.md), for the inputs the property
-// trace_inputs names: a grant line per grant, with the word the bank access
-// read or wrote and the cycle its response comes; a stall line per input and
-// cycle refused, with the input the bank granted (-1: the DMA's superbank);
-// a dma line per DMA beat, with one word per bank it covers. A streamer's
-// request carries its beat's b, a DMA beat its copy's id, its index and its
-// other side's address, in the argument slots snax_events.hpp names.
-// trace_inputs is a list joined by ',' of input names (input_names) or
-// indices and dma; default (its default) is every input that resends (the
-// SNAX ports) and dma.
-//
-// VCD signals (snax_events.hpp, gtkwave only): per input in<i>_q_valid (it
-// requests), in<i>_q_ready (it is granted) and in<i>_stall (it is refused),
-// the RTL's TCDM handshake names; per bank bank<b>_grant, the input it granted
-// plus one (0 none, nb_inputs + 1 the DMA's beat).
+// Counters, grant, stall and dma lines and VCD signals: docs/EVENTS.md. The
+// property trace_inputs picks the inputs that get beat and stall lines: a
+// list joined by ',' of input names or indices and dma; by default every input
+// that resends (the SNAX ports) and dma. A streamer's request carries its
+// beat's b, a DMA beat its copy's id, its index and its other side's address,
+// in the argument slots snax_events.hpp names.
 
 #include <algorithm>
 #include <memory>

@@ -5,7 +5,7 @@
 // The DMA against the streamer in the TCDM: the same ELFs run
 // on snax_cluster's RTL and on SNAX-GVSoC. One ELF per case, chosen with
 // CASE_<name>; each prints the counter it compares, chosen not to depend on
-// the cores' timing (D123).
+// the cores' timing.
 //
 //   dma_vs_reader   A, B and O of the accelerator of forge/vecadd/ (add, 256
 //                   beats) each on its own
@@ -19,7 +19,7 @@
 //
 // Both runs execute the same code, so the measured one runs from a warm
 // instruction cache. Core 0 drives the accelerator, the DMA core (the last)
-// the copies; on one core (snax-forge D170) they are the same core, which
+// the copies; on one core they are the same core, which
 // starts the accelerator, waits on mcycle, queues the copies, polls the
 // accelerator and then the DMA. In the window no core makes a TCDM access:
 // they read CSRs, wait on mcycle, issue the copies from registers and poll.

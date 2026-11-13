@@ -4,7 +4,7 @@
 """Unit tests of snax/snax_accelerator.py: the sets' CSR layout and the slot's CSR limit,
 and the composite built from accelerator.json: one group (forge/vecadd/), dot 1's two
 accelerators in two streamer sets (test_snax_cfg's DOT1), dot_1_enc's two groups in one
-(test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED, snax-forge D169) and a
+(test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED) and a
 linked group (dot 4, DOT4).
 Run from snax-gvsoc after `make build` (the composite imports GVSoC's Python from
 install/):
@@ -72,7 +72,7 @@ def mappings(acc):
 
 @unittest.skipIf(snax_accelerator is None, "no GVSoC in install/ (run make build first)")
 class Csrs(unittest.TestCase):
-    """Per set its streamer's CSRs then its accelerator's, packed from 960 (snax-forge D157);
+    """Per set its streamer's CSRs then its accelerator's, packed from 960;
     the last CSR over all sets may be at most SNAX_ACC_CSR_LAST, 0x5FD: 0x5FE and 0x5FF are
     snax_cluster's task-queue CSRs, not the accelerator's."""
 
@@ -295,7 +295,7 @@ class Built(unittest.TestCase):
         self.assertEqual(len(DOT4.csrs), 5)
 
     def test_a_seeded_fold(self):
-        """matvec_seed's sum (B2 R5, D163): its inputs a and its seed, both outer, the seed's
+        """matvec_seed's sum: its inputs a and its seed, both outer, the seed's
         index 1 (SnaxGroup's seed: the last input, one element in one word)."""
         desc = accelerator("matvec_seed", seeded(), between=1)
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, SEEDED_STREAMER), 131072)

@@ -2,7 +2,7 @@
 # Copyright 2026 KU Leuven.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""snax/snax_group_rule.py: the dot variants against C§17's formulas, the groups it refuses,
+"""snax/snax_group_rule.py: the dot variants against the control rule's formulas, the groups it refuses,
 and one unit against the unit cases (tests/snax/unit/cases).
 
     python3 -m unittest discover -s tests/snax -p 'test_*.py'

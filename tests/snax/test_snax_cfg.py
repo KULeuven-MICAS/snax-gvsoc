@@ -8,11 +8,11 @@
 Reads sw/cfg/snitch_cluster.hjson and forge/'s fixtures, then broken copies
 of forge/vecadd/'s cluster (its streamer file and accelerator.json inlined,
 written as JSON into a temporary folder), broken accelerator.json files
-beside it, hand-written dot 1 designs (snax-forge C§17's table, D157): two
+beside it, hand-written dot 1 designs: two
 accelerators vmul and vsum in two streamer sets, and dot_1_enc, the two as
 one accelerator dot of two groups; then the sets' refusals and the slot form
 before sets (snax_streamer_cfg), read as one set. snax_cluster's copy in
-sw/cfg/snax_forge/ is never read (snax-forge D126).
+sw/cfg/snax_forge/ is never read.
 """
 
 import copy
@@ -147,7 +147,7 @@ class Fixtures(unittest.TestCase):
         self.assertEqual((cfg.periph_size, cfg.zero_mem_size), (64 * 1024, 64 * 1024))
         self.assertEqual(cfg.dma, snax_cfg.Dma(512, 3, 3))
         self.assertEqual(cfg.dram, snax_cfg.Dram(0x8000_0000, 0x8000_0000))
-        (core,) = cfg.cores  # one core, the slot and the DMA (snax-forge D170)
+        (core,) = cfg.cores  # one core, the slot and the DMA
         self.assertEqual((core.isa, core.xdma, core.num_int_outstanding_loads),
                          ("rv32ima", True, 1))
         self.assertEqual(core.misa, MISA_RV32IMA)
@@ -206,7 +206,7 @@ class Fixtures(unittest.TestCase):
         self.assertEqual([c.name for c in slot.description.csrs],
                          ["START", "JOBS", "JOB_BEATS", "STATUS", "BUSY_COUNTER"])
         self.assertEqual(slot.description.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
-        # The widths (D152): START a strobe, JOBS and JOB_BEATS job_width, BUSY_COUNTER busy_counter_width
+        # The widths: START a strobe, JOBS and JOB_BEATS job_width, BUSY_COUNTER busy_counter_width
         self.assertEqual(slot.description.groups[0].rw_widths, [1, 32, 32])
         self.assertEqual(slot.description.groups[0].busy_counter_width, 32)
 
@@ -403,7 +403,7 @@ def streamer(readers: list, writers: list) -> dict:
     return {"data_reader_params": movers(readers), "data_writer_params": movers(writers)}
 
 
-# dot 1 (snax-forge C§17's table, D157): the units vmul (an SimdLanes mul) and vsum (a
+# dot 1: the units vmul (an SimdLanes mul) and vsum (a
 # TreeAccumulate over 4 lanes, with JOB_BEATS), each an accelerator of one group, in two
 # streamer sets: vmul's CSRs START 0, JOBS 1, STATUS 2, BUSY_COUNTER 3, vsum's START 4, JOBS 5,
 # JOB_BEATS 6, STATUS 7, BUSY_COUNTER 8 (the offsets run over both accelerators)
@@ -414,12 +414,12 @@ VSUM = Accelerator("vsum", ["vsum.a"], ["vsum.out"],
 DOT1 = description("dot_1", VMUL, VSUM)
 VMUL_STREAMER = streamer([4, 4], [4])
 VSUM_STREAMER = streamer([4], [1])
-# dot_1_enc (D148): the same two groups in one accelerator dot, one set; readers vmul.a,
+# dot_1_enc: the same two groups in one accelerator dot, one set; readers vmul.a,
 # vmul.b, vsum.a, writers vmul.out, vsum.out
 DOT = description("dot_1_enc", Accelerator("dot", ["vmul.a", "vmul.b", "vsum.a"],
                                            ["vmul.out", "vsum.out"], VMUL.groups + VSUM.groups))
 DOT_STREAMER = streamer([4, 4, 4], [4, 1])
-# dot 1 with share_ports on tmp0 (snax-forge D169): vmul and vsum on one set whose movers they
+# dot 1 with share_ports on tmp0: vmul and vsum on one set whose movers they
 # share, per role the k-th widest port of each group on mover k: reader0 vmul.a / vsum.a,
 # reader1 vmul.b, writer0 vmul.out / vsum.out (1 of its 4 channels, so masked); PORT_MUX_SEL
 # at offset 9, after vsum's window
@@ -435,7 +435,7 @@ DOT_SHARED_STREAMER = streamer([4, 4], [4])
 DOT_SHARED_STREAMER["data_writer_params"]["configurable_channel"] = [True]
 
 
-# dot 4 (snax-forge C§17's block): one group dot, a Mac unit (JOB_BEATS at 2) wired into a
+# dot 4: one group dot, a Mac unit (JOB_BEATS at 2) wired into a
 # TreeAccumulate unit of fixed T 1 by the link out_partial; readers mac.a, mac.b, writer sum.out
 DOT4 = description("dot_4", Accelerator(
     "dot", ["mac.a", "mac.b"], ["sum.out"],
@@ -717,7 +717,7 @@ class AccJson(unittest.TestCase):
 
 
 class LinkedGroup(unittest.TestCase):
-    """dot 4 (snax-forge C§17's block): one group of a Mac wired into a TreeAccumulate, read
+    """dot 4: one group of a Mac wired into a TreeAccumulate, read
     as written; each of snax-forge's link checks refuses its case with its code."""
 
     def setUp(self):
@@ -788,7 +788,7 @@ class LinkedGroup(unittest.TestCase):
         self.acc["accelerators"][0]["groups"][0]["units"].reverse()
         self.fails(snax_cfg.CfgTargetError,
                    "gen.chain: accelerator dot: group dot's links [('mac', 'sum')] over its units "
-                   "['sum', 'mac']: a group is a chain until tier A (fork and join)")
+                   "['sum', 'mac']: a group is one chain (no fork or join)")
 
     def test_gen_span(self):
         """A SerialAccumulate of 4 lanes (span 4) fed by the streamer: snax-forge's gen.span in
@@ -806,7 +806,7 @@ class LinkedGroup(unittest.TestCase):
         with self.assertRaises(snax_cfg.CfgTargetError) as ctx:
             snax_cfg.load(write_design(self.dir, acc, streamer, 3, 2))
         self.assertIn("gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the streamer: "
-                      "a unit with span > 1 reads from a link until B2", ctx.exception.why)
+                      "a unit with span > 1 reads from a link", ctx.exception.why)
 
     def test_a_datapath_is_the_registrys(self):
         self.acc["accelerators"][0]["groups"][0]["units"][0]["datapath"] = "LinkBuffer"
@@ -817,7 +817,7 @@ class LinkedGroup(unittest.TestCase):
         self.fails(snax_cfg.CfgTargetError, "gen.timing:")
 
 
-# matvec_seed's sum (snax-forge B2 R5, D163): a TreeAccumulate over 4 lanes with a seed port,
+# matvec_seed's sum: a TreeAccumulate over 4 lanes with a seed port,
 # one int64 lane read once per job, its one accelerator's readers sum.a and sum.seed
 def seeded(datapath: str = "TreeAccumulate", seed: Port = Port("seed", "int64", 1, "in"),
            lanes: int = 4, span: int = 1, name: str = "acc") -> Unit:
@@ -832,7 +832,7 @@ SEEDED_STREAMER = streamer([4, 1], [1])
 
 
 class Seed(unittest.TestCase):
-    """A fold's seed port (snax-forge B2 R5, D163): read on TreeAccumulate and
+    """A fold's seed port: read on TreeAccumulate and
     SerialAccumulate, one lane at the output's dtype, the last in port, from the streamer
     (also at span > 1); anything else is gen.seed at the port."""
 
@@ -877,7 +877,7 @@ class Seed(unittest.TestCase):
                                           "out": Port("out", "int64", 4, "out")}, "int64",
                    {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)])
         self.refused(acc_json(accelerator("mac_seed", mac, between=1)),
-                     "gen.seed: Mac takes no seed (TreeAccumulate and SerialAccumulate do, D163)",
+                     "gen.seed: Mac takes no seed (TreeAccumulate and SerialAccumulate do)",
                      streamer([4, 4, 1], [4]))
         first = acc_json(accelerator("matvec_seed", seeded(), between=1))
         ports = first["accelerators"][0]["groups"][0]["units"][0]["ports"]
@@ -904,8 +904,8 @@ class Seed(unittest.TestCase):
 
 
 class Dot1(unittest.TestCase):
-    """dot 1 (snax-forge C§17's table, D157): two accelerators vmul and vsum in two streamer
-    sets; dot_1_enc, the two as one accelerator dot of two groups (D148), one set."""
+    """dot 1: two accelerators vmul and vsum in two streamer
+    sets; dot_1_enc, the two as one accelerator dot of two groups, one set."""
 
     def test_dot_1_two_sets(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -947,7 +947,7 @@ class Dot1(unittest.TestCase):
 
 
 class Shared(unittest.TestCase):
-    """A set whose groups share its movers (snax-forge D169): movers and port_mux read, and
+    """A set whose groups share its movers: movers and port_mux read, and
     each thing wrong in them a named error at its key."""
 
     def setUp(self):
@@ -1145,7 +1145,7 @@ class Sets(unittest.TestCase):
         flat = self.acc["accelerators"][0]
         self.acc = {"design_point": "x", "tag": "y", **flat}
         self.fails(snax_cfg.CfgTypeError, "snax_datapath_cfg.name",
-                   "before streamer sets (snax-forge D157)")
+                   "before streamer sets")
 
     def test_names_once(self):
         self.acc["accelerators"][1]["groups"][0]["name"] = "vmul"

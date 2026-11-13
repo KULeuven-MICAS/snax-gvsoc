@@ -15,7 +15,7 @@ from gvrun's working directory. Without it, the build's default:
 forge/vecadd/snax_forge.hjson, snax-forge's vecadd fixture's cluster (with
 its streamer set's file and accelerator.json), installed beside this module as
 cfg/forge/vecadd/ (snax/CMakeLists.txt); snax_cluster's synced copy in
-sw/cfg/snax_forge/ is never read (snax-forge D126). The build's platform tree holds the default file's
+sw/cfg/snax_forge/ is never read. The build's platform tree holds the default file's
 components and bindings: a file with the same ones (forge/vecadd/'s) uses it, its properties coming through the JSON
 config as always; one with others (another accelerator) does not match, so
 gvrun warns and runs it on the JSON config (runner_gvrun2.py).

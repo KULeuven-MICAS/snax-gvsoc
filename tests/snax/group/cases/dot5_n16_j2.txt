@@ -1,5 +1,5 @@
 # dot 5 at N = 16, W = 4 (T = 4), JOBS 2: mac -> a wire -> SerialAccumulate sum
-# C§17: busy cycles E - s = 16
+# busy cycles E - s = 16
 
 unit mac Mac latency 1 ii 1 span 1 t 4 inputs 2
 unit sum SerialAccumulate latency 1 ii 1 span 4 t 1 inputs 0
@@ -7,7 +7,7 @@ link mac sum depth 0
 jobs 2
 start 0 taken
 expect run index=0 firings=8 busy=15 stall_in=0 stall_out=0 flush=1
-# E - s = 16, C§17's formula
+# E - s = 16, the rule's formula
 
 # a b ready | mac fire give | sum fire give | busy
 cycles

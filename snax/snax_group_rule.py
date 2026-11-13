@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""A group's control rule, snax-forge's C§17 (Control), in plain Python: the twin of
+"""A group's control rule, snax-forge's, in plain Python: the twin of
 snax_group.hpp's SnaxGroupRule, with no GVSoC import, so tests/snax/group/gen.py writes the
 group cases from it and snax-forge can import it from the submodule.
 
@@ -12,7 +12,7 @@ group cases from it and snax-forge can import it from the submodule.
 
 A unit is a dict: ``name``, ``L`` (latency), ``ii``, ``span`` (the cycles it reads one beat in
 place), ``inputs`` (its count of outer inputs, from the streamer) and ``seed`` (optional, false
-by default: its last outer input is a fold's seed, one beat per job, D163). A link is an edge
+by default: its last outer input is a fold's seed, one beat per job). A link is an edge
 ``{"from", "to", "to_input", "depth"}``: the producer's and the consumer's names, the
 consumer's input it drives (the datapaths use it, the rule does not), and its depth D (0 a
 wire, >= 1 a buffer of D beats). ``output`` names the unit that owns the group's outer output;
@@ -39,7 +39,7 @@ judged at the unit owning the outer output: stall_out (it is frozen) > busy (any
 reads or is in its II gap) > stall_in (a unit with outer inputs wants to fire and one has no
 beat) > flush.
 
-Until tier A a group is one chain: a unit with two out-edges (a fork) or two in-edges (a join),
+A group is one chain: a unit with two out-edges (a fork) or two in-edges (a join),
 a cycle, or units no link joins are refused (GroupError), as snax_cfg.py's ``gen.chain``.
 """
 
@@ -49,7 +49,7 @@ class GroupError(ValueError):
 
 
 class GroupRule:
-    """C§17's Control over edges: per unit its firings (its job_beats_counter their remainder
+    """The control rule over edges: per unit its firings (its job_beats_counter their remainder
     mod T), its L-deep pipeline, its II gap and lane counter; per buffer its occupancy."""
 
     def __init__(self, units, links, output=None):
@@ -70,13 +70,12 @@ class GroupRule:
             for edges, what in ((self.outs[k], "out-edges (a fork)"),
                                 (self.ins[k], "in-edges (a join)")):
                 if len(edges) > 1:
-                    raise GroupError(f"unit {u['name']} has {len(edges)} {what}: until tier A "
-                                     "a group is a chain")
+                    raise GroupError(f"unit {u['name']} has {len(edges)} {what}: a group is one chain")
         self.order = self._topological()
         sinks = [k for k in range(n) if not self.outs[k]]
         if len(sinks) != 1:
             raise GroupError("units " + ", ".join(units[k]["name"] for k in sinks)
-                             + " have no out-edge: until tier A a group is one chain")
+                             + " have no out-edge: a group is one chain")
         self.output = sinks[0] if output is None else index[output]
 
     def _topological(self):

@@ -66,7 +66,7 @@
 // during a cycle is the RTL queue's: the words visible by then and not popped
 // before it.
 //
-// Per mover, the cycles of each run are classed in D59's order:
+// Per mover, the cycles of each run are classed in this order:
 // busy (a channel granted) > stall_xbar (requested, none granted) >
 // stall_fifo (an address, but no credit or no data) > idle; the trace gives
 // them with the highest queue count per lane when the streamer is done. The
@@ -82,24 +82,14 @@
 // count from the first cycle it holds, written once that cycle's changes are
 // known (the next change, or the streamer's end).
 //
-// Beats (docs/EVENTS.md): a reader's beats are numbered b in its AGU's order
-// from 0 in each run, a writer's in the order the unit hands them over. Each
-// TCDM request carries its beat's b (SNAX_ARG_ID, snax_events.hpp) for the
-// crossbar's lines; a reader's words keep it, and the beat handed to the
-// unit carries it back (a beat with a repeat, every time it is handed out).
-//
-// Events (docs/EVENTS.md, snax_events.hpp), per mover: `start` in the cycle
-// the start is taken; `done` in its last busy cycle (the commit in which its
-// last address leaves, or the streamer's end for a mover that never started);
-// the summary's `mover` line with the run's classes and queue maxima when the
-// streamer is done.
+// Beat ids: each TCDM request carries its beat's b (SNAX_ARG_ID,
+// snax_events.hpp), numbered per run in the AGU's order for a reader and in
+// hand-over order for a writer; a reader's words keep it and the beat handed
+// to the unit carries it back. Events, class and fifo lines and VCD signals:
+// docs/EVENTS.md.
 //
 // The busy wire (a port mux's check, snax_port_mux.cpp): true from the start
 // write (s) until the run ends, at the commit before e.
-//
-// VCD signals (snax_events.hpp, gtkwave only): streamer_busy (from s + 1 to
-// e, as the RTL's), <mover>_busy (from s + 1 to its last busy cycle) and
-// <mover>_lane<l>_count (the lane's queue count, from the cycle it holds).
 //
 // Not modelled: reader-writers, byte masks, address
 // remapping (logic word sizes), datapath extensions, a second clock domain;

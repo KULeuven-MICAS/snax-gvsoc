@@ -21,7 +21,8 @@
 #include <vector>
 
 
-// The most inputs the crossbar takes (snax-forge D85: l1.max_xbar_inputs), and
+// NB (D85): the most inputs the crossbar takes; snax-forge's platform field
+// l1.max_xbar_inputs must not exceed it. Also
 // a set of them, one bit each: per bank its requesters, per arbiter its valid
 // and high local inputs
 constexpr int kMaxInputs = 128;
