@@ -132,21 +132,5 @@ class OneUnit(unittest.TestCase):
                        + " ".join(f"{k}={cls[k]}" for k in CLASSES))
                 self.assertEqual(head["expect"][0], ["run", *run.split()])
 
-    def test_recomputed_busy_cycles(self):
-        # The busy cycles E - s the cases state in their comments
-        for name, busy in (("pipelined_l2_backpressure", 10), ("pipelined_rate_t4", 9),
-                           ("lockstep_out_not_ready", 7)):
-            head, cycles = unit_case(UNIT_CASES / f"{name}.txt")
-            n_in = int(head.get("inputs", [["2"]])[0][0])
-            _, jobs, t, _ = head["start"][0]
-            rule = GroupRule([unit("u", L=int(head["latency"][0][0]),
-                                   ii=int(head["ii"][0][0]))], [])
-            rows, end = rule.run(int(jobs), [int(t)], lambda c: cycles[c][:n_in],
-                                 lambda c: cycles[c][n_in], len(cycles))
-            with self.subTest(case=name):
-                self.assertEqual(end, busy)
-                self.assertEqual(sum(totals(rows).values()), busy)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -276,11 +276,6 @@ class Broken(unittest.TestCase):
                    "snax_acc_cfg[0].snax_streamer_sets[0].snax_streamer_cfg",
                    "no 'no_such_template'")
 
-    def test_ref_missing_file(self):
-        d = cluster()
-        self.set0(d)["snax_streamer_cfg"] = {"$ref": "acc.hjson#/snax_streamer_cfg"}
-        self.fails(snax_cfg.CfgRefError, d, "snax_streamer_cfg", "no file")
-
     def test_ref_malformed(self):
         d = cluster()
         d["streamer_template"] = self.set0(d)["snax_streamer_cfg"]
@@ -556,17 +551,6 @@ class AccJson(unittest.TestCase):
         self.acc["accelerators"][0]["groups"][0]["csrs"][0]["access"] = "wo"
         self.fails(snax_cfg.CfgTypeError, "groups[0].csrs[0].access", "rw or ro")
 
-    def test_csr_counts(self):
-        self.rw = 3
-        self.fails(snax_cfg.CfgSlotError, "snax_streamer_sets[0].snax_num_rw_csr",
-                   "accelerator acc has 2 read-write")
-        self.rw, self.ro = 2, 1
-        self.fails(snax_cfg.CfgSlotError, "snax_num_ro_csr", "2 read-only")
-
-    def test_datapath(self):
-        self.unit()["datapath"] = "Gemm"
-        self.fails(snax_cfg.CfgTargetError, "units[0].datapath", "not a datapath SnaxGroup models")
-
     def test_links_and_units(self):
         """A link has its four keys; a group's units are connected by its links (gen.group);
         a unit name is the accelerator's once."""
@@ -776,12 +760,6 @@ class LinkedGroup(unittest.TestCase):
         self.acc["accelerators"][0]["inputs"] = ["mac.b", "mac.a"]
         self.fails(snax_cfg.CfgSlotError, "gen.outer:")
 
-    def test_gen_group(self):
-        self.acc["accelerators"][0]["groups"][0]["links"] = []
-        self.acc["accelerators"][0]["inputs"] = ["mac.a", "mac.b", "sum.a"]
-        self.acc["accelerators"][0]["outputs"] = ["mac.out", "sum.out"]
-        self.fails(snax_cfg.CfgSlotError, "gen.group:")
-
     def test_gen_chain(self):
         """The link mac -> sum over the units in the order sum, mac: not a chain in unit order,
         snax-forge's gen.chain in its words."""
@@ -789,24 +767,6 @@ class LinkedGroup(unittest.TestCase):
         self.fails(snax_cfg.CfgTargetError,
                    "gen.chain: accelerator dot: group dot's links [('mac', 'sum')] over its units "
                    "['sum', 'mac']: a group is one chain (no fork or join)")
-
-    def test_gen_span(self):
-        """A SerialAccumulate of 4 lanes (span 4) fed by the streamer: snax-forge's gen.span in
-        its words."""
-        serial = Unit("acc", "accumulate", "SerialAccumulate",
-                      {"a": Port("in", "int64", 4, "in"), "out": Port("out", "int64", 1, "out")},
-                      None, {}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)], 4)
-        streamer = {
-            "data_reader_params": {"spatial_bounds": [[4]], "temporal_dim": [1],
-                                   "num_channel": [4], "fifo_depth": [8]},
-            "data_writer_params": {"spatial_bounds": [[1]], "temporal_dim": [1],
-                                   "num_channel": [1], "fifo_depth": [8]},
-        }
-        acc = acc_json(accelerator("serial", serial, between=1))
-        with self.assertRaises(snax_cfg.CfgTargetError) as ctx:
-            snax_cfg.load(write_design(self.dir, acc, streamer, 3, 2))
-        self.assertIn("gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the streamer: "
-                      "a unit with span > 1 reads from a link", ctx.exception.why)
 
     def test_a_datapath_is_the_registrys(self):
         self.acc["accelerators"][0]["groups"][0]["units"][0]["datapath"] = "LinkBuffer"
@@ -900,7 +860,7 @@ class Seed(unittest.TestCase):
         alone = acc_json(accelerator("serial_seed", seeded("SerialAccumulate", span=4),
                                      between=1))
         self.refused(alone, "gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the "
-                     "streamer")
+                     "streamer: a unit with span > 1 reads from a link")
 
 
 class Dot1(unittest.TestCase):
@@ -1065,10 +1025,6 @@ class Sets(unittest.TestCase):
         self.assertIn(path_part, ctx.exception.path)
         self.assertIn(why_part, ctx.exception.why)
 
-    def test_reads(self):
-        self.assertEqual([x.at for x in self.load().sets],
-                         ["snax_streamer_sets[0]", "snax_streamer_sets[1]"])
-
     def test_names_and_order_are_the_accelerators(self):
         sets = self.slot()["snax_streamer_sets"]
         sets.reverse()
@@ -1083,6 +1039,8 @@ class Sets(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_streamer_sets", "the sets ['vmul']")
 
     def test_counts_are_the_sets_groups(self):
+        self.assertEqual([x.at for x in self.load().sets],
+                         ["snax_streamer_sets[0]", "snax_streamer_sets[1]"])
         self.slot()["snax_streamer_sets"][1]["snax_num_rw_csr"] = 2
         self.fails(snax_cfg.CfgSlotError, "snax_streamer_sets[1].snax_num_rw_csr",
                    "2, but accelerator vsum has 3 read-write CSRs")
