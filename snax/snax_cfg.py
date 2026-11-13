@@ -437,11 +437,6 @@ class Unit:
     scalars: dict = field(default_factory=dict)
 
     @property
-    def op(self) -> str:
-        """The op its lanes compute: params.op (a fold's add)."""
-        return self.params['op']
-
-    @property
     def seeded(self) -> bool:
         """It has a seed port (SEED), a fold's start read once per job."""
         return SEED in self.ports
@@ -585,9 +580,6 @@ class Description:
     def csrs(self) -> list:
         """Every CSR in CSR order: the offsets 0, 1, ..."""
         return [c for a in self.accelerators for c in a.csrs]
-
-    def unit(self, name: str) -> Unit:
-        return next(u for g in self.groups for u in g.units if u.name == name)
 
 
 @dataclass(frozen=True)
