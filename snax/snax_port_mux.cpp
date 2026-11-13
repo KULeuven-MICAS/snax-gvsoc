@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// A shared streamer's data-side mux (snax-forge D169): between the movers'
+// A shared streamer's data-side mux: between the movers'
 // beat ports and the groups' ports, selected by PORT_MUX_SEL. The rule is
 // SnaxPortMuxRule (snax_port_mux.hpp); here its ports, its CSR and its fatals.
+// NB (D169): one group owns the movers per streamer run; the core writes
+// PORT_MUX_SEL before each STREAMER_START, and the sets run in series.
 //
 // Ports: port_<i>, an io slave per group port (properties.users[i]), the one
 // its group's outer port binds; mover_<k>, an io master to the streamer's

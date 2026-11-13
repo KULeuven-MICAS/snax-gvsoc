@@ -23,6 +23,7 @@
 
 #include "snax_shell.hpp"
 #include "snax_group.hpp"
+#include "../tb_common.hpp"
 
 
 struct CycleLine
@@ -50,14 +51,6 @@ struct Case
     int busy_counter_width = 32;     // BUSY_COUNTER
     std::vector<CycleLine> cycles;
 };
-
-static std::string base_of(const std::string &path)
-{
-    size_t slash = path.rfind('/');
-    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
-    size_t dot = base.rfind('.');
-    return dot == std::string::npos ? base : base.substr(0, dot);
-}
 
 static bool number(const std::string &token, int64_t &value)
 {
@@ -139,7 +132,7 @@ static bool parse(const std::string &path, Case &c)
         fprintf(stderr, "%s: cannot open\n", path.c_str());
         return false;
     }
-    c.name = base_of(path);
+    c.name = tb_base_of(path);
     bool in_cycles = false;
     std::string raw;
     int lineno = 0;
@@ -393,24 +386,7 @@ static int run(const Case &c)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
-    {
-        fprintf(stderr, "usage: %s CASE...\n", argv[0]);
-        return 2;
-    }
-    int failed = 0, passed = 0;
-    for (int i = 1; i < argc; i++)
-    {
-        Case c;
-        if (!parse(argv[i], c))
-        {
-            return 2;
-        }
-        int errors = run(c);
-        printf("%s %s: %zu cycles\n", errors ? "FAIL" : "PASS", c.name.c_str(), c.cycles.size());
-        failed += errors != 0;
-        passed += errors == 0;
-    }
-    printf("%d passed, %d failed\n", passed, failed);
-    return failed ? 1 : 0;
+    return tb_main<Case>(argc, argv, parse, run, [](const Case &c) {
+        printf("%s: %zu cycles\n", c.name.c_str(), c.cycles.size());
+    });
 }

@@ -29,7 +29,13 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, in any 
 | `result N V...` | the case's N-th pushed result: W values for an elementwise op, one for a fold |
 | `cycles` | the cycle lines follow |
 
-A cycle line: each input's valid, the output's ready (room), then the expected fire, push and busy, all 0 or 1. The rule is stepped only in busy cycles, with every input valid ANDed. Values are decimal or `0x` hex, taken modulo their type's width. An elementwise result is the op at the inputs' NumPy result type, cast to the output's; a fold casts each lane to the output's type, sums them through its tree (`fold lanes`: each lane on its own), and starts a result on each job's first firing. The expected values are worked by hand from the rules in `snax_group.hpp` and `snax_types.hpp`; each case says how in its comments.
+A cycle line holds each input's valid, the output's ready (room), then the expected fire, push and busy, all 0 or 1.
+
+- The rule is stepped only in busy cycles, with every input valid ANDed.
+- Values are decimal or `0x` hex, taken modulo their type's width.
+- An elementwise result is the op at the inputs' NumPy result type, cast to the output's.
+- A fold casts each lane to the output's type, sums them through its tree (`fold lanes`: each lane on its own), and starts a result on each job's first firing.
+- The expected values are worked by hand from the rules in `snax_group.hpp` and `snax_types.hpp`; each case says how in its comments.
 
 | Case | What |
 |---|---|

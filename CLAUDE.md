@@ -1,31 +1,33 @@
 # SNAX-GVSoC
 
-A detached copy of upstream [GVSoC](https://github.com/gvsoc/gvsoc) (at `93cedc4`) with the SNAX models added: SNAX-FORGE's model of the SNAX cluster, in which a Snitch core runs the real program. `UPSTREAM.md` lists the upstream commits, the license and every upstream file we changed. snax-forge holds the decisions (D-numbers here are snax-forge's `docs/DECISIONS.md`).
+A detached copy of upstream [GVSoC](https://github.com/gvsoc/gvsoc) (at `93cedc4`) with the SNAX models added: SNAX-FORGE's model of the SNAX cluster, in which a Snitch core runs the real program. `UPSTREAM.md` lists the upstream commits, the license and every upstream file we changed. snax-forge holds the decisions: a D-number here is an entry of snax-forge's `docs/DECISIONS.md`.
 
 ## The SNAX parts
 
 - `snax/`: the C++ components (streamer, TCDM crossbar, `SnaxGroup`, `SnaxShell`, `SnaxPortMux`, the datapath classes) and their Python configs, among them `snax_cfg.py`, the reader of a cluster's hjson; the `snax_hjson` target.
 - `tests/snax/`: the testbenches (`unit/`, `group/`, `shell/`, `datapath/`, `sparse_pick/`, `port_mux/`, `sparse_arb/`), the Python unit tests (`test_*.py`) and the regression, `regress.py`.
 - `sw/apps/`: our programs for the SNAX targets.
-- `forge/`: one folder per snax-forge design point, the generator's output checked in as fixtures (D134). Never edited by hand: snax-forge writes them again (`forge/README.md`, the only hand-written file there).
-- `docs/`: `RUN.md` (how to run it), `EVENTS.md` (what the SNAX components write about a run), `notes/NOTES.md` (what was measured and still holds).
+- `forge/`: one folder per snax-forge design point, the generator's output checked in as fixtures. Never edited by hand: snax-forge writes them again (`forge/README.md`, the only hand-written file there).
+- `docs/`: `TOOL.md` (the commands), `EVENTS.md` (what the SNAX components write about a run), `notes/NOTES.md` (what was measured and still holds).
 
 ## What is not ours
 
-- `sw/` is a pinned copy of snax_cluster's software (D126 in snax-forge) but for our own files: `apps/`, `README.md`, `sync.py`, `Makefile` and `common.mk`. The copy (`COPIED` and `MATH` in `sync.py`) and `generated/` are refreshed only by `make sync-snax-cluster SNAX_CLUSTER=<checkout>`, whose diff is the check, and never edited by hand.
+- `sw/` is a pinned copy of snax_cluster's software but for our own files: `apps/`, `README.md`, `sync.py`, `Makefile` and `common.mk`. The copy (`COPIED` and `MATH` in `sync.py`) and `generated/` are refreshed only by `make sync-snax-cluster SNAX_CLUSTER=<checkout>`, whose diff is the check, and never edited by hand.
 - Upstream GVSoC's code and docs (`core/`, `engine/`, `pulp/`, `gvrun/`, `DRAMSys.md`, ...) stay as they are. A change to an upstream file is the exception: it gets a `Modified for SNAX-GVSoC` line and a row in `UPSTREAM.md`, in the same commit.
 
 ## Commands
 
-Everything runs in the image `ghcr.io/kuleuven-micas/snax-forge:main` (GVSoC's build tools, snax_cluster's toolchain), as CI does.
+Everything runs in the image `ghcr.io/kuleuven-micas/snax-forge:main` (GVSoC's build tools, snax_cluster's toolchain), as CI does. The one exception is `sparse_arb`, which needs snax_cluster's image `ghcr.io/kuleuven-micas/snax:main` for Verilator (its README).
 
 - `make build TARGETS='$(SNAX_TARGETS)'`: GVSoC for the SNAX targets (single quotes, so make expands the variable).
 - `python3 -m unittest discover -s tests/snax -p 'test_*.py'`: the Python unit tests.
-- `tests/snax/<name>/run.sh` for `unit`, `group`, `shell`, `datapath`, `sparse_pick` and `port_mux`: each testbench against its cases, g++ only; `sparse_arb` against the RTL, with Verilator.
-- `make regress` (`K=SUBSTRING` for some programs): builds `sw/` and the programs, then each must exit 0 on the built GVSoC.
+- `tests/snax/<name>/run.sh` for `unit`, `group`, `shell`, `datapath`, `sparse_pick` and `port_mux`: each testbench against its cases, g++ only (shared helpers in `tests/snax/tb_common.hpp`); `sparse_arb` against the RTL, with Verilator, by hand (not in `make regress` or CI).
+- `make regress` (`K=SUBSTRING` for some programs): runs the six g++ testbenches, builds `sw/` and the programs, then runs the cluster tests, `snax-shell`, every `forge/` folder (counters and traces checked) and the plain tests on the built GVSoC; each must exit 0.
+- `docs/TOOL.md` has every command with the lines to check.
 
 ## Conventions
 
-- Markdown prose is one line per paragraph, list item and table row, never hard-wrapped; headings, code blocks, tables, display maths and HTML stay as they are (snax-forge D117, its `util/md_reflow.py --check`). Code comments and docstrings keep the formatter's line length.
+- Markdown prose is one line per paragraph, list item and table row, never hard-wrapped; headings, code blocks, tables, display maths and HTML stay as they are (snax-forge's `util/md_reflow.py --check`). Code comments and docstrings keep the formatter's line length.
+- No task, round or contract tags in code or docs. A comment `NB (Dn): ...` marks the few spots where the model must match the RTL or a choice looks wrong but is not; keep those.
 - A commit message is one short line, with no co-author trailer. A pushed commit is never amended or force-pushed; a fix goes into the next commit.
 - Pull requests are opened, never merged here; the maintainer merges.

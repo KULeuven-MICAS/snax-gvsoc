@@ -5,8 +5,8 @@
  */
 
 // SnaxPortMuxRule (snax/snax_port_mux.hpp) against hand-worked cases, g++
-// only (README.md). The setting is mvt_1_dot2's shared streamer at W = 8
-// (snax-forge D169): groups dot (0) and vadd (1); movers reader0 (8),
+// only (README.md). The setting is mvt_1_dot2's shared streamer at W = 8:
+// groups dot (0) and vadd (1); movers reader0 (8),
 // reader1 (8), writer0 (8); dot's ports vmul.a, vmul.b on the readers and
 // vsum.out (1 channel) on the writer, vadd's vadd.a, vadd.b, vadd.out (8).
 // Exit 1 on a difference.

@@ -2,7 +2,7 @@
 // out/design/mvt_1_dot2_shared/design_point.json. Do not edit: run `pixi run
 // gen-gvsoc out/design/mvt_1_dot2_shared/design_point.json` again.
 // Streamer set mvt_vadd's streamer template: its movers, which its groups share
-// (D169), readers then writers, as accelerator.json's movers.
+// , readers then writers, as accelerator.json's movers.
 {
  "data_reader_params": {
   "spatial_bounds": [[8], [8]],

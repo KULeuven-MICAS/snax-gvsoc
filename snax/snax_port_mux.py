@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""A shared streamer's data-side mux (snax_port_mux.cpp, snax-forge D169)."""
+"""A shared streamer's data-side mux (snax_port_mux.cpp)."""
 
 import gvsoc.systree
 

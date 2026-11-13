@@ -27,7 +27,7 @@ refresh the fixture from snax-forge (forge/README.md))
 endif
 FORGE_BUILD ?= $(SW_BUILD)/apps/$(APP)/$(DESIGN)
 BUILDDIR = $(FORGE_BUILD)
-# The same main.c built twice (snax-forge D135): forge.elf, and forge_quiet.elf with
+# The same main.c built twice: forge.elf, and forge_quiet.elf with
 # -DFORGE_QUIET, every start waited on at once, each section marked in CSR 0x7C5, no prints
 QUIET_ELF = $(BUILDDIR)/$(APP)_quiet.elf
 ELFS = $(BUILDDIR)/$(APP).elf $(QUIET_ELF)

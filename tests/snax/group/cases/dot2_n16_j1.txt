@@ -1,5 +1,5 @@
 # dot 2 at N = 16, W = 4 (T = 4), JOBS 1: mul -> a buffer of depth 1 -> TreeAccumulate sum
-# C§17: busy cycles E - s = 6
+# busy cycles E - s = 6
 
 unit mul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2
 unit sum TreeAccumulate latency 1 ii 1 span 1 t 4 inputs 0
@@ -7,7 +7,7 @@ link mul sum depth 1
 jobs 1
 start 0 taken
 expect run index=0 firings=4 busy=5 stall_in=0 stall_out=0 flush=1
-# E - s = 6, C§17's formula
+# E - s = 6, the rule's formula
 
 # a b ready | mul fire give | sum fire give | occ0 | busy
 cycles

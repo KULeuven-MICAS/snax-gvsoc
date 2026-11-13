@@ -6,7 +6,7 @@
 
 """The standard composite of an accelerator slot with an accelerator.json: the
 CSR mux, one streamer per streamer set, per group one SnaxShell and one
-SnaxGroup, and per shared set (snax-forge D169) one SnaxPortMux.
+SnaxGroup, and per shared set one SnaxPortMux.
 
     SnaxAccelerator.for_slot(slot, tcdm_size, file) -> class
 
@@ -15,16 +15,16 @@ The slot (snax_cfg.AccSlot) gives its streamer sets and the description
 cluster its TCDM size. Set k's streamer is `streamer_<set>`; each entry of
 its accelerator's inputs ("<unit>.<port>") takes that streamer's reader of
 its index, each entry of its outputs the writer of its index; a port on a
-link (snax-forge C§17) is the group's own and meets no streamer.
+link is the group's own and meets no streamer.
 
-A shared set (accelerator.json's movers and port_mux, snax-forge D169) has its
+A shared set (accelerator.json's movers and port_mux) has its
 groups share its streamer's movers: its outer ports bind to `port_mux_<set>`
 (SnaxPortMux), one port per mover user in the movers' order, and the mux's
 mover k to the streamer's k-th mover (readers, then writers); the streamer's
 busy wire goes to the mux. PORT_MUX_SEL, the accelerator's last CSR, goes to
 the mux, and its last group's window ends before it.
 
-CSRs (snax-forge D157, snax_cluster's csr_range_table; csr_layout): set k
+CSRs (snax_cluster's csr_range_table; csr_layout): set k
 holds [b_k, b_k + s_k + c_k), its streamer's s_k CSRs (nb_csrs of its
 template) from b_k, then its accelerator's c_k from b_k + s_k; b_0 is
 SNAX_CSR_FIRST (960) and b_{k+1} = b_k + s_k + c_k. accelerator.json's

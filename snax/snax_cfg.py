@@ -12,8 +12,8 @@ The hjson is the contract: snax_cluster's clustergen and snaxgen read the
 same file. A design is the cluster file, named after its base platform
 (snax_forge.hjson), one streamer file per streamer set, named after the
 slot's tag and the set (snax_forge_<design>_streamer_<set>.hjson, the set's
-streamer template), and accelerator.json, the accelerators' one description
-(snax-forge C§17, D145, D157). The cluster's snax_acc_cfg entry (the slot)
+streamer template), and accelerator.json, the accelerators' one description.
+The cluster's snax_acc_cfg entry (the slot)
 keeps the slot keys; each of its snax_streamer_sets has its name, its
 snax_streamer_cfg (a $ref to its streamer file) and its own CSR counts, and
 its snax_datapath_cfg is a $ref to accelerator.json, each the whole file.
@@ -53,7 +53,7 @@ schema; the slot needs snax_disable_csr_manager); a slot with
 snax_streamer_cfg in their place is one set, named after the slot, with the
 slot's snax_num_rw_csr and snax_num_ro_csr, as snax_cluster's snaxgen reads it.
 
-accelerator.json (snax-forge C§17, D157), what the standard composite
+accelerator.json, what the standard composite
 (snax_accelerator.py) builds the slot's streamers, shells and units from:
 
     design_point, tag         Description.design_point, .tag
@@ -72,7 +72,7 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
                               out; dtype, NumPy's name; lanes; a fold's seed,
                               the BRM port seed of a TreeAccumulate or
                               SerialAccumulate, an in port of 1 lane at its
-                              output's dtype, read once per job, D163),
+                              output's dtype, read once per job),
                               opType (SimdLanes and Mac),
                               params (op: SimdLanes' and
                               TreeAccumulate's, add, or SimdLanes' axpby, two
@@ -91,11 +91,11 @@ accelerator.json (snax-forge C§17, D157), what the standard composite
     a CSR                     Csr: name, access (rw, ro), offset (from the
                               accelerator's first CSR), width (its bits, every
                               CSR: START 1, JOBS and JOB_BEATS job_width, STATUS
-                              2, BUSY_COUNTER busy_counter_width; D152), pin
+                              2, BUSY_COUNTER busy_counter_width), pin
 
 Per group the CSRs in CSR order are START, JOBS, its units' R/W CSRs, STATUS,
 BUSY_COUNTER, and the offsets over all groups of all accelerators in that order
-are contiguous from 0 (the shell's view, D157): they are read, never computed
+are contiguous from 0 (the shell's view): they are read, never computed
 (a group's window starts at its START). Unit, group and accelerator names
 are each the file's once.
 
@@ -132,7 +132,7 @@ gen.span, a unit of span > 1 fed by the streamer, but for its seed; gen.seed, a
 seed on another datapath, of more than 1 lane, another dtype than its
 output's, or on a link). The datapath block before accelerator.json
 (<slot>_acc.hjson: unit, control, config, wait, fields) is refused at its key,
-and so is accelerator.json's form before D157 (name, inputs, outputs, groups
+and so is accelerator.json's older flat form (name, inputs, outputs, groups
 at the top, no accelerators).
 """
 
@@ -187,7 +187,7 @@ UNMODELLED_MOVERS = ('data_reader_writer_params',)
 
 @dataclass(frozen=True)
 class Datapath:
-    """A unit datapath's facts (snax-forge's catalogue, D147, D149), each from its params
+    """A unit datapath's facts (snax-forge's catalogue), each from its params
     (accelerator.json's unit params: accumulate, regOut) where it depends on them."""
 
     nb_inputs: object           # params -> its input ports
@@ -221,10 +221,10 @@ CATALOGUE = {
     'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1),
 }
-# A fold's seed port (snax-forge's brm.SEED): one element, read once per job (D163)
+# A fold's seed port (snax-forge's brm.SEED): one element, read once per job
 SEED = 'seed'
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and BUSY_COUNTER,
-# read-only, last (C§17)
+# read-only, last
 GROUP_RW = ('START', 'JOBS')
 GROUP_RO = ('STATUS', 'BUSY_COUNTER')
 # The unit CSRs modelled: a fold's JOB_BEATS, then its scalars' (scalar_csrs)
@@ -437,11 +437,6 @@ class Unit:
     scalars: dict = field(default_factory=dict)
 
     @property
-    def op(self) -> str:
-        """The op its lanes compute: params.op (a fold's add)."""
-        return self.params['op']
-
-    @property
     def seeded(self) -> bool:
         """It has a seed port (SEED), a fold's start read once per job."""
         return SEED in self.ports
@@ -455,7 +450,7 @@ class Unit:
 
 @dataclass(frozen=True)
 class Link:
-    """A link of a group (C§17): from an out port to an in port, each "<unit>.<port>"; depth
+    """A link of a group: from an out port to an in port, each "<unit>.<port>"; depth
     0 a wire, >= 1 a buffer of that many beats."""
 
     name: str
@@ -498,7 +493,7 @@ class Group:
 
 @dataclass(frozen=True)
 class MoverUser:
-    """A group's port on a shared mover (snax-forge D169): the group, the port
+    """A group's port on a shared mover: the group, the port
     ("<unit>.<port>", one of the accelerator's inputs or outputs) and its words per beat, at
     most the mover's."""
 
@@ -509,7 +504,7 @@ class MoverUser:
 
 @dataclass(frozen=True)
 class SharedMover:
-    """A mover of a streamer set whose groups share its movers (snax-forge D169), in the
+    """A mover of a streamer set whose groups share its movers, in the
     streamer's order: its name (reader<i>, writer<j>), role (read or write), channels, whether
     it has configurable_channel (masked: a user narrower than it) and its users, at most one
     per group."""
@@ -523,7 +518,7 @@ class SharedMover:
 
 @dataclass(frozen=True)
 class PortMux:
-    """The data-side mux of a shared streamer set (snax-forge D169): its groups in
+    """The data-side mux of a shared streamer set: its groups in
     PORT_MUX_SEL's order, and PORT_MUX_SEL, the accelerator's last CSR."""
 
     groups: list
@@ -533,7 +528,7 @@ class PortMux:
 @dataclass(frozen=True)
 class Accelerator:
     """An accelerator of accelerator.json, one streamer set's: its outer ports, in its set's
-    reader and writer order, and its groups. With share_ports (snax-forge D169) its groups
+    reader and writer order, and its groups. With share_ports its groups
     share the set's movers: movers says which port of each group each mover serves, and
     port_mux which group is connected; its outer ports are then in no mover order."""
 
@@ -569,7 +564,7 @@ class Accelerator:
 
 @dataclass(frozen=True)
 class Description:
-    """accelerator.json (snax-forge C§17, D157): the design point, the tag and the
+    """accelerator.json: the design point, the tag and the
     accelerators, one per streamer set, in the sets' order."""
 
     design_point: str
@@ -585,9 +580,6 @@ class Description:
     def csrs(self) -> list:
         """Every CSR in CSR order: the offsets 0, 1, ..."""
         return [c for a in self.accelerators for c in a.csrs]
-
-    def unit(self, name: str) -> Unit:
-        return next(u for g in self.groups for u in g.units if u.name == name)
 
 
 @dataclass(frozen=True)
@@ -904,7 +896,7 @@ def _unit(node: _Node) -> Unit:
     if SEED in unit_ports:
         seed = unit_ports[SEED]
         outs = [x for x in unit_ports.values() if x.dir == 'out']
-        why = (f'{datapath} takes no seed (TreeAccumulate and SerialAccumulate do, D163)'
+        why = (f'{datapath} takes no seed (TreeAccumulate and SerialAccumulate do)'
                if not facts.seedable else 'an in port' if seed.dir != 'in'
                else f'{seed.lanes} lanes, a seed is 1' if seed.lanes != 1
                else f'{seed.dtype}, a seed is its output\'s {outs[0].dtype}'
@@ -978,12 +970,12 @@ def _accelerator(node: _Node) -> Accelerator:
         raise CfgTypeError(node.file, node.where('groups'), 'no group')
     if (movers is None) != (mux is None):
         raise CfgSlotError(node.file, node.where('movers' if movers is None else 'port_mux'),
-            'missing: a shared streamer set (snax-forge D169) has both movers and port_mux')
+            'missing: a shared streamer set has both movers and port_mux')
     return acc
 
 
 def _check_shared(at: _Node, acc: Accelerator):
-    """A shared set's movers and port mux against its groups and outer ports (snax-forge D169):
+    """A shared set's movers and port mux against its groups and outer ports:
     port_mux names every group once and PORT_MUX_SEL is R/W; each user is a group's outer port
     of the mover's direction, at most as wide as the mover, one per group and mover, a narrower
     one only on a masked mover; every outer port is on one mover."""
@@ -1027,7 +1019,7 @@ def _check_shared(at: _Node, acc: Accelerator):
             fail('movers', f'{entry} is on no mover')
 
 
-# The top-level keys of accelerator.json before D157 (one accelerator, no accelerators list)
+# The top-level keys of accelerator.json's older flat form (one accelerator, no accelerators list)
 FLAT_KEYS = ('name', 'inputs', 'outputs', 'groups')
 
 
@@ -1036,11 +1028,11 @@ def _description(node: _Node) -> Description:
     for key in OLD_DATAPATH_KEYS:
         if key in node.value:
             raise CfgTypeError(node.file, node.where(key), 'a key of the datapath block, which '
-                'accelerator.json replaced (snax-forge C§17, D145): regenerate the design point')
+                'accelerator.json replaced: regenerate the design point')
     for key in FLAT_KEYS:
         if key in node.value:
             raise CfgTypeError(node.file, node.where(key), 'a top-level key of accelerator.json '
-                'before streamer sets (snax-forge D157), whose accelerators now hold it: '
+                'before streamer sets, whose accelerators now hold it: '
                 'regenerate the design point')
     nodes = node.nodes('accelerators')
     desc = Description(
@@ -1161,7 +1153,7 @@ def _check_links(node: _Node, acc: Accelerator):
         if not chain:
             raise CfgTargetError(node.file, node.where('groups'),
                 f"gen.chain: accelerator {acc.name}: group {g.name}'s links {hops} over its "
-                f'units {names}: a group is a chain until tier A (fork and join)')
+                f'units {names}: a group is one chain (no fork or join)')
         for u in g.units:
             if u.seeded and f'{u.name}.{SEED}' in linked:
                 raise CfgTargetError(node.file, node.where('groups'),
@@ -1172,7 +1164,7 @@ def _check_links(node: _Node, acc: Accelerator):
             if u.span > 1 and outer_in:
                 raise CfgTargetError(node.file, node.where('inputs'),
                     f'gen.span: accelerator {acc.name}: unit {u.name} (span {u.span}) reads '
-                    f'{outer_in} from the streamer: a unit with span > 1 reads from a link until B2')
+                    f'{outer_in} from the streamer: a unit with span > 1 reads from a link')
 
 
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):
@@ -1392,7 +1384,7 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
 
 
 def _check_shared_set(acc: _Node, at: str, s: StreamerSet, accelerator: Accelerator):
-    """A shared accelerator's movers against its set's streamer (snax-forge D169): the same
+    """A shared accelerator's movers against its set's streamer: the same
     movers in the streamer's order (readers, then writers), each of its num_channel, masked
     exactly when its template has configurable_channel; each user's words per beat its
     num_channel."""

@@ -30,7 +30,7 @@ under its trace path are on); it runs on `snax_hjson` with
 `--param hjson=<cluster file>` (but for vecadd's, its components are not
 the default file's, so gvrun warns and runs it on the JSON config), with the
 counter checks;
-then each folder's quiet build (snax-forge D135, forge_quiet.elf, -DFORGE_QUIET: every start
+then each folder's quiet build (forge_quiet.elf, -DFORGE_QUIET: every start
 waited on at once, each section marked in CSR 0x7C5, no prints), named forge_quiet.<design>,
 a plain run (exit code only);
 then

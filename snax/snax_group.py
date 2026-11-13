@@ -7,10 +7,10 @@
 """SnaxGroup (snax_group.cpp): one group of accelerator.json, its units' datapaths
 under one control model, every number a property.
 
-The control model (SnaxGroupRule, snax-forge C§17's Control) is in snax_group.hpp,
+The control model (SnaxGroupRule) is in snax_group.hpp,
 the datapaths (snax-forge's catalogue) in snax_datapath.hpp. The C++ checks every
 property and stops on a bad one, naming it; this class only passes them on, so a
-design point compiles nothing (D134 in snax-forge).
+design point compiles nothing.
 """
 
 import gvsoc.systree
@@ -36,7 +36,7 @@ class SnaxGroup(gvsoc.systree.Component):
     links : list[dict]
         Each link an edge: from and to (the producer's and the consumer's
         names), to_input (the consumer's input it feeds, an index in its
-        inputs) and depth (0 a wire, >= 1 a buffer). A chain until tier A.
+        inputs) and depth (0 a wire, >= 1 a buffer). One chain, no fork or join.
     csr_base : int
         Number of its group's first CSR, for the trace.
 

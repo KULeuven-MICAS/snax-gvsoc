@@ -1,6 +1,9 @@
 # SnaxShell's rule
 
-The rule of `snax/snax_shell.hpp`, the code `SnaxShell` (`snax/snax_shell.cpp`) runs for one group of an accelerator (snax-forge C§17, D146, D152: START, a strobe that reads 0, JOBS, the units' read-write CSRs at their widths, STATUS, BUSY_COUNTER; a start, a write held while busy (D168), the empty run, the sticky done bit, the counter, saturating at its width), against hand-worked cases, with g++ only. `make regress` runs it after `unit`, as `shell`. snax-forge's Chisel specs drive their shell through the same files, from the folder `SNAX_GVSOC_SHELL_CASES` names, so both sides read one set of cases and the format below is the contract between the two.
+The rule of `snax/snax_shell.hpp`, the code `SnaxShell` (`snax/snax_shell.cpp`) runs for one group of an accelerator, against hand-worked cases, with g++ only. `make regress` runs it after `unit`, as `shell`.
+
+- **What it covers:** START (a strobe that reads 0), JOBS, the units' R/W CSRs at their widths, STATUS and BUSY_COUNTER; a start, a write held while busy, the empty run, the sticky done bit, and the counter saturating at its width.
+- **Shared with Chisel.** snax-forge's Chisel specs drive their shell through the same files, from the folder `SNAX_GVSOC_SHELL_CASES` names, so both sides read one set of cases and the format below is the contract between them.
 
 - `tb.cpp` steps `SnaxShellRule` with `snax_group.hpp`'s `SnaxGroupRule` (one unit, no links), wired as GVSoC wires them: the shell's accepted start, but the empty run, starts the unit with JOBS and JOB_BEATS as they stand, and the unit's busy feeds the shell (rising in the start's cycle, falling in the run's last cycle E). Every cycle it takes a held write in E + 1, then the cycle's CSR access, then the unit's step, and compares each access's result and STATUS.
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/shell`) and runs it on every `cases/*.txt`; exit 1 on any difference.
@@ -28,7 +31,10 @@ A cycle line: each input's valid and the output's ready (0 or 1), then the cycle
 | `-` | none: `-` |
 | `.` | the write of an earlier line, still held (or answered in this cycle): `-` |
 
-Values may be decimal or `0x` hex. One access per cycle: the core issues CSR accesses one at a time, and a held write takes every cycle from the one it is offered in to the one it is answered in, each written `.` after the first. The STATUS column is what STATUS would read in that cycle, whether or not the line reads it: bit 0 busy (from the cycle after the accepted start to E), bit 1 done (from E + 1, an empty run's from a + 1, until the cycle after the next accepted start), so 0, 1 or 2. The expected values are worked by hand from the rules in `snax_shell.hpp`; each case says how in its comments.
+- Values may be decimal or `0x` hex.
+- One access per cycle: the core issues CSR accesses one at a time. A held write takes every cycle from the one it is offered in to the one it is answered in, each after the first written `.`.
+- The STATUS column is what STATUS would read in that cycle, whether or not the line reads it: bit 0 busy (from the cycle after the accepted start to E), bit 1 done (from E + 1, an empty run's from a + 1, until the cycle after the next accepted start), so 0, 1 or 2.
+- The expected values are worked by hand from the rules in `snax_shell.hpp`; each case says how in its comments.
 
 | Case | What |
 |---|---|
@@ -45,7 +51,7 @@ Values may be decimal or `0x` hex. One access per cycle: the core issues CSR acc
 | `jobs_zero` | a fold group (with JOB_BEATS): a start with JOBS 0, then one with JOB_BEATS 0 after a run: STATUS 2 from a + 1, BUSY_COUNTER 0 |
 | `scalar_k1` | axpy's K1 (32 bits) after JOBS at 2, so STATUS 3 and BUSY_COUNTER 4: read back as written, sent with the start (2 1 3); K1 0 is a value, the next start runs (2 1 0) |
 | `scalar_k1_int64` | a 64-bit scalar as K1_LO at 2 and K1_HI at 3, and an 8-bit K2 at 4 keeping a write's low 8 bits (0x1fe reads 0xfe): STATUS 5, BUSY_COUNTER 6; the start sends JOBS, 1, K1_LO, K1_HI, K2 |
-| `settings_held` | a fold group with K1: while busy, writes to JOBS, JOB_BEATS, K1 and START with bit 0 clear each held until E + 1 and then taken (the next run's words and length show it), a read of JOBS answered at once (D168) |
+| `settings_held` | a fold group with K1: while busy, writes to JOBS, JOB_BEATS, K1 and START with bit 0 clear each held until E + 1 and then taken (the next run's words and length show it), a read of JOBS answered at once |
 | `counter_saturates` | at `job_width` 8 a JOBS write of 0x105 keeps 5 and runs 5 jobs; at `busy_counter_width` 2 BUSY_COUNTER reads 0, 1, 2, 3, then 3 held |
 
 ## Running

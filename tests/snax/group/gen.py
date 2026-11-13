@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""Writes cases/*.txt, the shared group cases (README.md), from C§17's rule.
+"""Writes cases/*.txt, the shared group cases (README.md), from the control rule.
 
     python3 gen.py
 
-The group rule of snax/snax_group_rule.py (written from snax-forge's C§17,
+The group rule of snax/snax_group_rule.py (written from snax-forge's control rule,
 Control, not from snax/snax_group.hpp) steps each case, whose cycle table is
 written with a comment per cycle; every dot variant's busy cycles E - s are
-checked against C§17's formulas before a file is written, so a case never
+checked against the rule's formulas before a file is written, so a case never
 states a total the formula does not give. The files are checked in; tb.cpp reads them.
 The W = 1 cases carry their data: seeded random int64 beats and each job's sum from numpy
 (so this script needs numpy).
@@ -28,7 +28,7 @@ from snax_group_rule import GroupRule  # noqa: E402
 
 W = 4
 
-# dot 2-6 (C§17): (datapath, L, span, inputs) per unit, the link's depth, whose T is N / W
+# dot 2-6: (datapath, L, span, inputs) per unit, the link's depth, whose T is N / W
 VARIANTS = {
     2: ([("mul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 0)], 1, "sum"),
     3: ([("mul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 0)], 0, "sum"),
@@ -39,7 +39,7 @@ VARIANTS = {
 
 
 def formula(v, t, j, w=W):
-    """C§17's busy cycles E - s of dot variant v at w lanes."""
+    """The busy cycles E - s of dot variant v at w lanes."""
     return {2: j * t + 2, 3: j * t + 1, 4: j * t + 2, 5: j * (t + w - 1) + 2,
             6: (j - 1) * max(t, w) + t + w + 2}[v]
 
@@ -89,7 +89,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
         lines.append(f"expect run index=0 firings={heads} busy={classes['busy']} "
                      f"stall_in={classes['stall_in']} stall_out={classes['stall_out']} "
                      f"flush={classes['flush']}")
-        lines.append(f"# E - s = {total}" + (f", C§17's formula" if formula_total else ""))
+        lines.append(f"# E - s = {total}" + (f", the rule's formula" if formula_total else ""))
     if data is not None:
         lines.append(f"lanes {data['lanes']}")
         lines += [f"data {x} " + " ".join(map(str, data[x])) for x in ("a", "b")]
@@ -109,7 +109,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
 
 
 def seed_cases():
-    """The fold's seed (snax-forge B2 R5, D163): a seeded unit's last outer input is its seed,
+    """The fold's seed: a seeded unit's last outer input is its seed,
     one beat per job; its job's first beat waits for it (fire = a.valid and (not first or
     seed.valid)), the firing takes it. Two folds in a chain, acc (TreeAccumulate, T 2) into sum
     (TreeAccumulate, T 2) by a wire, JOBS 2, unseeded, the first seeded, both seeded: with
@@ -154,7 +154,7 @@ def main():
                 total = write(f"dot{v}_n{n}_j{j}", f"dot {v} at N = {n}, W = {W} (T = {t}), "
                               f"JOBS {j}: {units[0][0]} -> {link} -> {units[1][1]} {units[1][0]}",
                               units, [depth], j, ts, formula_total=formula(v, t, j),
-                              comment=[f"C§17: busy cycles E - s = {formula(v, t, j)}"])
+                              comment=[f"busy cycles E - s = {formula(v, t, j)}"])
                 table[(v, t, j)] = total
     u4, u6 = VARIANTS[4][0], VARIANTS[6][0]
     write("dot4_backpressure", "dot 4 at N = 8 (T = 2), JOBS 2, the writer not ready in "
@@ -171,7 +171,7 @@ def main():
         write(f"dot{v}_w1_j{j}", f"dot {v} at N = 4, W = 1 (T = {t}), JOBS {j}: mac -> {link} "
               f"-> SerialAccumulate sum at span 1", units, [depth], j, [t, 1],
               formula_total=formula(v, t, j, 1),
-              comment=[f"C§17: busy cycles E - s = {formula(v, t, j, 1)}",
+              comment=[f"busy cycles E - s = {formula(v, t, j, 1)}",
                        f"random int64 data (numpy seed {seed}); each job's sum of a * b"],
               data=dot_data(seed, j, t, 1))
     write("dot4_jobs0", "dot 4, JOBS 0: the empty run, ignored; busy never rises", u4, [0], 0,

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The rule of a shared streamer's data-side mux (snax-forge D169), plain C++
+// The rule of a shared streamer's data-side mux, plain C++
 // so the component (snax_port_mux.cpp) and its testbench (tests/snax/port_mux/)
 // run the same code.
 //

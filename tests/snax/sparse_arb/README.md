@@ -20,7 +20,7 @@ In snax_cluster's image `d3d8f5572ff4` (`ghcr.io/kuleuven-micas/snax:main`; it h
     tests/snax/sparse_arb/run.sh build/sg7/mixed/SparseInterconnect.sv "$M"
     tests/snax/sparse_arb/run.sh build/sg7/alu/SparseInterconnect.sv "$A" "[[12, 1]]"
 
-The modules above 64 inputs (PORT1 R3b, snax_cluster `7c14681c`), elaborated in the same image (`d3d8f5572ff4`) from snax_cluster's `hw/chisel` with the Scala caches of the home folder mounted under `/root`, snax-forge's platform (32 banks of 64 bits, 512 rows, 2 cores, so `--userWidth 3` as snaxgen computes it), each `CFG` and `N` below:
+The modules above 64 inputs need a snax_cluster with the 128-input sparse interconnect; they were elaborated in the same image (`d3d8f5572ff4`) from snax_cluster's `hw/chisel` with the Scala caches of the home folder mounted under `/root`, snax-forge's platform (32 banks of 64 bits, 512 rows, 2 cores, so `--userWidth 3` as snaxgen computes it), each `CFG` and `N` below:
 
     sbt -batch -mem 8192 "runMain snax.sparse_interconnect.SparseInterconnectGen --NumInp N --NumOut 32 --memAddrWidth 9 --tcdmAddrWidth 17 --dataWidth 64 --strbWidth 8 --priorityWidth 1 --userWidth 3 --sparseConfig \"CFG\" --hw-target-dir <snax-gvsoc>/build/port1/<name>"
 

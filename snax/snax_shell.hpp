@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SnaxShell's rule: the CSRs of one group of an accelerator (snax-forge
-// C§17, D146), GeMMX's shell contract as snax_cluster gives it (05615e4): the
+// SnaxShell's rule: the CSRs of one group of an accelerator,
+// GeMMX's shell contract as snax_cluster gives it: the
 // ReqRspManager (hw/chisel/.../reqRspManager/ReqRspManager.scala) holding the
 // read-write CSRs, BlockGemm's ctrl handshake, busy and performance counter
 // (hw/chisel_acc/.../gemm/BlockGemm.scala), with the group's START, JOBS,
@@ -16,7 +16,7 @@
 // CSRs, offsets from the group's first CSR (the CSR mux removes it): START,
 // JOBS, then the units' read-write CSRs (JOB_BEATS for each fold without a
 // fixed T, then its scalars', K1, or K1_LO and K1_HI at 64 bits, in unit
-// order), each kept at its width (accelerator.json's, D152:
+// order), each kept at its width (accelerator.json's:
 // a write keeps the low bits, a read gives them with the upper bits 0);
 // then STATUS and BUSY_COUNTER, read-only. START is a strobe: no register,
 // it reads 0.
@@ -31,8 +31,9 @@
 //     the csr's req.ready is low while busy), then taken as above and
 //     answered in the cycle busy falls: E + 1, E the run's last cycle. So a
 //     group's settings stay constant through its run, and the RTL's control
-//     unit reads them live with no copy (snax-forge D168). Reads are never
-//     held;
+//     unit reads them live with no copy. Reads are never
+//     held. NB (D168): this hold is the RTL's; without it a run's settings
+//     could change under it;
 //   - an accepted start a goes to the group's ctrl as JOBS and every
 //     JOB_BEATS in unit order, as they stand (JOBS and 1 for a group without
 //     one: a start is two words at least), then every scalar CSR in CSR order
@@ -48,7 +49,7 @@
 //     then holds after the run (BlockGemm's performance_counter): at c it is
 //     the busy cycles after the accepted start and before c; 0 after an
 //     empty run. At its width w it saturates at 2^w - 1. In the RTL it lives
-//     in the csr's submodule <tag>_peripherals (D168).
+//     in the csr's submodule <tag>_peripherals.
 // Busy and the counter are computed when read, from the cycles the unit's
 // busy wire rose (busy from the next cycle) and fell (idle from the next).
 // The unit sets the wire synchronously in the ctrl write that starts it, so a

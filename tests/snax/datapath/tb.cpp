@@ -22,23 +22,8 @@
 #include <vector>
 
 #include "snax_datapath.hpp"
+#include "../tb_common.hpp"
 
-
-static bool type_of(const std::string &name, SnaxType &t)
-{
-    for (int width : {8, 16, 32, 64})
-    {
-        for (bool is_signed : {true, false})
-        {
-            if (name == snax_type_name({width, is_signed}))
-            {
-                t = {width, is_signed};
-                return true;
-            }
-        }
-    }
-    return false;
-}
 
 struct Step
 {
@@ -108,14 +93,14 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
             SnaxType t;
             while (ok && ss >> name)
             {
-                ok = type_of(name, t);
+                ok = tb_type_of(name, t);
                 tests.back().p.in_types.push_back(t);
             }
         }
         else if (key == "optype" || key == "out")
         {
             std::string name;
-            ok = (bool)(ss >> name) && type_of(name, key == "out" ? tests.back().p.out_type
+            ok = (bool)(ss >> name) && tb_type_of(name, key == "out" ? tests.back().p.out_type
                 : tests.back().p.op_type);
         }
         else if (key == "lanes") { ok = (bool)(ss >> tests.back().p.lanes); }
@@ -553,27 +538,24 @@ int main(int argc, char **argv)
     {
         return 2;
     }
-    int failed = 0, passed = 0, count;
+    TbTally tally;
+    int count;
     int reg_errors = check_registry(&count);
     printf("%s registry: %d cases\n", reg_errors ? "FAIL" : "PASS", count);
-    failed += reg_errors != 0;
-    passed += reg_errors == 0;
+    tally.add(reg_errors);
     for (auto check : {std::make_pair("ops", check_ops), std::make_pair("tree", check_tree),
         std::make_pair("types", check_types), std::make_pair("beats", check_beats)})
     {
         int errors = check.second(&count);
         printf("%s %s: %d vectors\n", errors ? "FAIL" : "PASS", check.first, count);
-        failed += errors != 0;
-        passed += errors == 0;
+        tally.add(errors);
     }
     for (const Test &t : tests)
     {
         int errors = run(t);
         printf("%s %s: %s, %zu steps\n", errors ? "FAIL" : "PASS", t.name.c_str(),
             t.datapath.c_str(), t.steps.size());
-        failed += errors != 0;
-        passed += errors == 0;
+        tally.add(errors);
     }
-    printf("%d passed, %d failed\n", passed, failed);
-    return failed ? 1 : 0;
+    return tally.finish();
 }

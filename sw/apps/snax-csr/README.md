@@ -17,7 +17,7 @@ Part 3's no-write forms run on 981, the group's read-only BUSY_COUNTER (0, as no
 
 The streamer and the shell see 105 accesses: 66 reads and 39 writes.
 
-Every form follows Zicsr (D120 in snax-forge) on both sides: `csrrw` and `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`, `csrrsi` and `csrrci` write unless `rs1` is `x0` or `uimm` is 0. The RTL does so since snax_cluster `9fbf35d` (#657); the checks of part 3 run on SNAX-GVSoC only.
+Every form follows Zicsr on both sides: `csrrw` and `csrrwi` with `rd` not `x0` read before they write, `csrrs`, `csrrc`, `csrrsi` and `csrrci` write unless `rs1` is `x0` or `uimm` is 0. The pinned RTL does the same; part 3's checks run on SNAX-GVSoC only.
 
 ## Build and run
 

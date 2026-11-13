@@ -2,11 +2,11 @@
 // out/design/matvec_seed/design_point.json. Do not edit: run `pixi run
 // gen-gvsoc out/design/matvec_seed/design_point.json` again.
 // The task list matvec_seed on snRuntime: core 0 runs the DMA and the
-// accelerator matvec; the SNAX waits as the lowering places them (D64), the
-// DMA's on dependences only (D135), a barrier where another core goes on. One
-// function per core, a straight line; the window from main's entry to
-// forge_check()'s. Built with -DFORGE_QUIET (D135): every start waited at once,
-// each section marked in CSR 0x7c5 (obs_marks.json), no prints.
+// accelerator matvec; the SNAX waits as the lowering places them, the DMA's on
+// dependences only, a barrier where another core goes on. One function per
+// core, a straight line; the window from main's entry to forge_check()'s. Built
+// with -DFORGE_QUIET: every start waited at once, each section marked in CSR
+// 0x7c5 (obs_marks.json), no prints.
 
 #include "snrt.h"
 

@@ -1,6 +1,6 @@
 # Upstream
 
-This repository is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at `93cedc4`, made on 2026-10-12. It is developed on its own and is never merged or rebased from upstream (D116 in [snax-forge](https://github.com/KULeuven-MICAS/snax-forge)).
+This repository is a detached copy of [GVSoC](https://github.com/gvsoc/gvsoc) at `93cedc4`, made on 2026-10-12. It is developed on its own and never merged or rebased from upstream.
 
 `sw/` is a pinned copy of snax_cluster's software, not of GVSoC: its pin, licences and sync are in `sw/README.md`.
 
@@ -29,68 +29,68 @@ GVSoC is Apache 2.0: the root `LICENSE`, and `core/`, `engine/`, `gvrun/` and `p
 
 Every upstream file we edit gets one comment line near its top, `Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md`, and a row here (Apache 2.0, section 4(b)). A replaced or removed file only gets a row.
 
-| File | Change | Step |
-|---|---|---|
-| `README.md` | Replaced with a short SNAX-GVSoC README | SG0 P1 |
-| `.github/workflows/build.yml` | Removed: upstream CI that builds every target on each push | SG0 P1 |
-| `.github/CODEOWNERS` | Removed: named the upstream maintainer as owner of every file | SG0 P1 |
-| `core/models/cpu/iss/include/cores/snitch/class.hpp` | Three CSR registers for snax_cluster's 0xBC1 to 0xBC3 | SG0 P3 |
-| `core/models/cpu/iss/src/snitch/snitch.cpp` | 0xBC1 to 0xBC3 declared read-only, values from the core's properties | SG0 P3 |
-| `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes the cluster base, core count and core index as properties | SG0 P3 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | Passes them to each Snitch core | SG0 P3 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `misa` and passes it to each Snitch core; `None` keeps the value the ISA string gives | SG1 P3 |
-| `Makefile` | `snax/` added to `GVSOC_MODULES` | SG1 P3 |
-| `core/models/cpu/iss/include/cores/snitch/class.hpp` | `SnaxCsr` and the `snax_csr` port: snax_cluster's accelerator CSRs 0x3C0 to 0x5FF | SG1 P4 |
-| `core/models/cpu/iss/src/snitch/snitch.cpp` | The 0x3C0 to 0x5FF CSRs declared in a loop and sent out as IO requests; a refused access (`IO_REQ_INVALID`) ends the run with its own message, a pending or denied answer with another | SG1 P4, housekeeping after SG6 |
-| `pulp/pulp/snitch/snitch_core.py` | `Snitch.o_SNAX_CSR` binds that port | SG1 P4 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `snax_acc`; `SnitchCluster` builds each accelerator and binds it to its core's `snax_csr` port | SG1 P5 |
-| `core/models/cpu/iss/src/snitch/snitch.cpp` | `SnaxCsr::handle()` tests `rd = x0` against `ISS_NB_REGS`, the index the decoder gives it | SG1 P5 |
-| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | Wires `busy` (the state `dmstat 2` returns) and `r_beats` / `w_beats` (the AXI beats of each queued copy); unbound wires are not driven | SG2 P3 |
-| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `beat_size` (64) and gains `o_BUSY`, `o_R_BEATS`, `o_W_BEATS` | SG2 P3 |
-| `pulp/pulp/snitch/snitch_cluster/cluster_registers.cpp` | The perf counters of `snitch_cluster_peripheral.sv` count `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and `DMA_BUSY`; the other events count nothing | SG2 P3 |
-| `pulp/pulp/snitch/snitch_cluster/cluster_registers.py` | `ClusterRegisters` gains `i_DMA_BUSY`, `i_DMA_R_BEATS`, `i_DMA_W_BEATS` | SG2 P3 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` binds the iDMA's wires to the cluster registers (not with Spatz) | SG2 P3 |
-| `pulp/pulp/chips/snitch/snitch.py` | `Soc` takes `hbm_latency` from the arch when a target sets it; the default stays 100 (0 with Spatz) | SG2 P4 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `dma`, `SnitchDma` arguments that replace the cluster's defaults | SG2 P4 |
-| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | `read_latency` (0 when absent) added to each read burst's latency | SG2 P5 |
-| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `read_latency` (0 when absent) paid once per read stream: a line read on the cycle after the previous one does not pay it again | SG2 P5 |
-| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) | SG2 P5 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `nb_snax_ports` and builds `SnaxTcdmXbar` (`snax/`) in front of the same banks; `SnitchCluster` counts the accelerators' `nb_tcdm_ports` and binds each one's ports to it | SG3 P3 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `snax_port_names`; `SnitchCluster` names each SNAX port `snax_acc<core>.<name>` from the accelerator's `tcdm_port_names` | SG3 P5 |
-| `core/models/cpu/iss/include/lsu.hpp`, `include/lsu_implem.hpp`, `src/lsu.cpp` | `Lsu` takes `int_loads_in_flight` from the core's properties (0, no limit, when absent; only 0 and 1 modelled): with 1, a load stalls the core until the previous load's data is back (`load_wait`, `load_issued` in `load` and `load_signed`) | SG5 P5 |
-| `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes `int_loads_in_flight` (0) as a property | SG5 P5 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `core`, `Snitch` arguments that replace the cores' defaults, and `core_latency`, cycles added on each core's data path to the TCDM (`tcdm`) and out of the cluster (`narrow`, the map to `narrow_axi`) | SG5 P5 |
-| `Makefile` | `regress` (runs `tests/snax/regress.py`: every program exits 0, SG6); `sw` (`make -C sw`) and `sync-snax-cluster` (`sw/sync.py`), which replace `regress-plain` and the snax_cluster checkout | SG5 P6, CI1 |
-| `core/models/cpu/iss/include/isa/priv.hpp` | `csrrc` with `rs1` = `x0`, and `csrrsi` / `csrrci` with `uimm` = 0, write nothing (Zicsr), as `csrrs` already did; for every core | SG6 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` binds a priority wire per SNAX port to `SnaxTcdmXbar`; `SnitchCluster` binds an accelerator's `o_TCDM_PRIORITY` to it when the accelerator has one | SG7 step 6 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` (both arch paths) takes `snax_sparse_config`; `SnitchCluster` lists the accelerators' sparse ports in core order (`[nb_tcdm_ports, 1]` by default, as snaxgen) and `SnitchClusterTcdm` passes them to `SnaxTcdmXbar` | SG7 step 7 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | With SNAX ports, `SnitchCluster` sends each core's TCDM and `tcdm_alias` maps (with their latency) to the SNAX crossbar's input after the SNAX ports, in core order, and `narrow_axi`'s TCDM map straight to its last input (AXI), not through `pe0_ico`; these inputs hold a losing request and are `[1, 1]` each in the sparse config. `SnitchClusterTcdm` takes `snax_holds` | SG7 round 3 step 3 |
-| `core/models/cpu/iss/include/lsu.hpp`, `include/lsu_implem.hpp`, `src/lsu.cpp`, `src/snitch/decode.cpp` | With `int_loads_in_flight` set on the Snitch core, a load answered `IO_REQ_PENDING` no longer stalls the core: its register is marked not ready in the core's `scoreboard_reg_valid`, and an instruction on that register (`int_offload_exec`), the next load, store or AMO stall until the response (`wait_for_load`); the response sets the register's and the next load's ready cycle (`pending_load_response`) | SG7 round 3b step 2 |
-| `core/models/cpu/iss/include/htif.hpp`, `src/htif.cpp` | With the core property `htif_poll_backdoor`, the host's `tohost` poll (the read every 1000 cycles and its clear) goes through the zero-time debug backdoor behind the core's data port (`vp/debug_mem.hpp`), not as requests on the port | SG7 round 3b step 3 |
-| `pulp/pulp/snitch/snitch_core.py` | `Snitch` and `Snitch_fp_ss` take `htif_poll_backdoor` (False) as a property | SG7 round 3b step 3 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` gives each FP subsystem the `htif_poll_backdoor` of `ClusterArch.core` | SG7 round 3b step 3 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` (both arch paths) takes `snax_dma_data_width`; with SNAX ports and it, `SnitchClusterTcdm` sends the DMA input (the iDMA's TCDM port, `wide_axi`'s TCDM and `tcdm_alias` maps) to the SNAX crossbar's `dma` port with `superbank_banks` = `dma_data_width / (8 * bank_width)` instead of `DmaInterleaver`, and `SnitchCluster` checks the DMA's `tcdm_width` is one superbank | SG7 round 4 step 3 |
-| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `tcdm_write_latency` (0 when absent): a line written to the local memory reaches it that many cycles after it leaves the DMA, and is acknowledged when it leaves | SG7 round 4 follow-up |
-| `pulp/pulp/idma/me/idma_me_2d.hpp`, `.cpp`, `be/idma_be.hpp`, `.cpp`, `be/idma_be_axi.hpp`, `.cpp` | `one_cycle_per_stage` (false when absent): the midend takes a transfer, the backend splits it and the AXI back-end sends a read burst from the cycle after it arrived, also when the stage's event is already queued for that cycle | SG7 round 4 follow-up |
-| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `tcdm_write_latency` (0) and `one_cycle_per_stage` (False) | SG7 round 4 follow-up |
-| `core/models/cpu/iss/src/snitch/snitch.cpp`, `include/cores/snitch/class.hpp` | A SNAX CSR write answered `IO_REQ_PENDING` stalls the core until the block's response (`snax_csr_response`: `stalled_dec`, `insn_terminate`, as the LSU's pending store); the request's data is a member (`snax_csr_data`), not a local; a pending read still ends the run | GEN3 step 2 |
-| `engine/python/gvsoc/runner_gvrun2.py` | A target without `libplatform_tree_<target>.so` (one no build made, e.g. read from `--target-dir`) runs on the JSON config path with one warning line on stderr, as on a signature mismatch, instead of stopping (`Missing platform_tree library`) | GEN3 round 1b F1 |
-| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` (both arch paths) takes the TCDM's size, bank count and bank width and the peripherals' and zero memory's sizes (`tcdm_size`, `tcdm_banks`, `tcdm_bank_width`, `periph_size`, `zero_mem_size`; the build path reads them from its properties), today's values as defaults; `ClusterArch.Tcdm` takes the first three and holds `nb_banks` instead of the superbank split; the peripherals and the zero memory (and their aliases) follow the TCDM by size | LNK2a step 1 |
-| `pulp/pulp/snitch/snitch_cluster/cluster_registers.py` | `gen` writes the `cluster_periph` headers beside the old ones and replaces them only when they differ, so a build with nothing changed recompiles nothing | housekeeping 2 |
-| `Makefile` | Every `cmake` is `$(CMAKE)`, so a caller names the CMake the build uses (snax-forge's `gvsoc/Makefile` from pixi) | FLOW3 step 1 |
-| `gvrun/bin/gvrun` | Without the venv, runs `gvrun` on `$GVRUN_PYTHON` (default `python3`), so a caller whose `python3` lacks GVSoC's packages (pixi's) names the Python | FLOW3 step 1 |
-| `core/models/cpu/iss/src/snitch/snitch.cpp`, `src/snitch/iss.cpp`, `include/cores/snitch/class.hpp` | FLOW3's events (`docs/EVENTS.md`): the core's `summary`, `events` and `beats` traces; its SNAX CSR accesses, reads of one CSR with one value folded into a `poll`, its barrier waits, its state and the function the PC is in; its CSR counts at stop | FLOW3 1b step 3 |
-| `core/models/cpu/iss/include/exec/exec_inorder_implem.hpp` | With `CONFIG_GVSOC_ISS_SNAX_EVENTS`, `Exec::busy_enter` and `busy_exit` give the core's state and `insn_exec_profiling` the function to the Snitch core's events | FLOW3 1b step 3 |
-| `pulp/pulp/snitch/snitch_core.py` | `Snitch` builds with `CONFIG_GVSOC_ISS_SNAX_EVENTS` | FLOW3 1b step 3 |
-| `core/models/cpu/iss/src/csr.cpp`, `include/csr.hpp` | With `CONFIG_GVSOC_ISS_SNAX_EVENTS`, a read of `mcycle` (its own callback, `mcycle_csr_access`; `cycle` keeps `mcycle_access`) or of `mcycleh` writes the Snitch core's `mcycle` / `mcycleh` event line | FLOW3 1b fix step 1 |
-| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | FLOW3's events: the front end's `summary`, `events` and `beats` traces; `issue` per copy in `enqueue_copy`, `done` in `ack_transfer`; at stop the copies, busy cycles, beats and bytes to and from the local area (`loc_base`, `loc_size`) | FLOW3 1b step 3 |
-| `pulp/pulp/idma/idma.hpp` | `IdmaTransfer` holds a copy's `id` and its beats on the local memory so far (`local_reads`, `local_writes`), and a row's `row_src` and `row_dst`; `IDMA_SNAX_ARG_*`, the argument slots of the SNAX crossbar's `dma` line | FLOW3 2a step 2 |
-| `pulp/pulp/idma/fe/idma_fe_xdma.cpp` | A copy's transfer carries its ID | FLOW3 2a step 2 |
-| `pulp/pulp/idma/be/idma_be.cpp` | `enqueue_transfer` keeps the row's start (`row_src`, `row_dst`) | FLOW3 2a step 2 |
-| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | Each line to the TCDM (and each delayed one) carries its copy's ID, its index on that side and the other side's address in the `IDMA_SNAX_ARG_*` slots | FLOW3 2a step 2 |
-| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | FLOW3's `beats` trace: a `burst` line per request to AXI (its copy, address and size as it leaves, written when its data is back or it is acknowledged) | FLOW3 2a step 2 |
-| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | The busy wire as the VCD signal `dma_busy` | FLOW3 2a step 4 |
-| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma.gen_gtkw` lists `fe/dma_busy` under the tag `snax` | FLOW3 2a step 4 |
-| `pulp/pulp/idma/idma.hpp` | A comment line: the `IDMA_SNAX_*` constants are kept equal to `snax/snax_events.hpp`'s by hand | CLN2 G1b |
-| `Makefile` | `FAST=1` passes `-DBUILD_ASSERT=OFF` to the build (no asserts flavour; `ON` otherwise); `regress` passes `J` as `-j` | CLN2 G1b |
-| `core/models/cpu/iss/src/snitch/snitch.cpp`, `include/cores/snitch/class.hpp` | `csr_obs`, snax_cluster's observability CSR 0x7C5 (`CsrObsRegister`): a plain 32-bit R/W register, reset 0 | CORE1 R1 |
+| File | Change |
+|---|---|
+| `README.md` | Replaced with a short SNAX-GVSoC README |
+| `.github/workflows/build.yml` | Removed: upstream CI that builds every target on each push |
+| `.github/CODEOWNERS` | Removed: named the upstream maintainer as owner of every file |
+| `core/models/cpu/iss/include/cores/snitch/class.hpp` | Three CSR registers for snax_cluster's 0xBC1 to 0xBC3 |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | 0xBC1 to 0xBC3 declared read-only, values from the core's properties |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes the cluster base, core count and core index as properties |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | Passes them to each Snitch core |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `misa` and passes it to each Snitch core; `None` keeps the value the ISA string gives |
+| `Makefile` | `snax/` added to `GVSOC_MODULES` |
+| `core/models/cpu/iss/include/cores/snitch/class.hpp` | `SnaxCsr` and the `snax_csr` port: snax_cluster's accelerator CSRs 0x3C0 to 0x5FF |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | The 0x3C0 to 0x5FF CSRs declared in a loop and sent out as IO requests; a refused access (`IO_REQ_INVALID`) ends the run with its own message, a pending or denied answer with another |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch.o_SNAX_CSR` binds that port |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `snax_acc`; `SnitchCluster` builds each accelerator and binds it to its core's `snax_csr` port |
+| `core/models/cpu/iss/src/snitch/snitch.cpp` | `SnaxCsr::handle()` tests `rd = x0` against `ISS_NB_REGS`, the index the decoder gives it |
+| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | Wires `busy` (the state `dmstat 2` returns) and `r_beats` / `w_beats` (the AXI beats of each queued copy); unbound wires are not driven |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `beat_size` (64) and gains `o_BUSY`, `o_R_BEATS`, `o_W_BEATS` |
+| `pulp/pulp/snitch/snitch_cluster/cluster_registers.cpp` | The perf counters of `snitch_cluster_peripheral.sv` count `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and `DMA_BUSY`; the other events count nothing |
+| `pulp/pulp/snitch/snitch_cluster/cluster_registers.py` | `ClusterRegisters` gains `i_DMA_BUSY`, `i_DMA_R_BEATS`, `i_DMA_W_BEATS` |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` binds the iDMA's wires to the cluster registers (not with Spatz) |
+| `pulp/pulp/chips/snitch/snitch.py` | `Soc` takes `hbm_latency` from the arch when a target sets it; the default stays 100 (0 with Spatz) |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `dma`, `SnitchDma` arguments that replace the cluster's defaults |
+| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | `read_latency` (0 when absent) added to each read burst's latency |
+| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `read_latency` (0 when absent) paid once per read stream: a line read on the cycle after the previous one does not pay it again |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `read_latency` (0) |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `nb_snax_ports` and builds `SnaxTcdmXbar` (`snax/`) in front of the same banks; `SnitchCluster` counts the accelerators' `nb_tcdm_ports` and binds each one's ports to it |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` takes `snax_port_names`; `SnitchCluster` names each SNAX port `snax_acc<core>.<name>` from the accelerator's `tcdm_port_names` |
+| `core/models/cpu/iss/include/lsu.hpp`, `include/lsu_implem.hpp`, `src/lsu.cpp` | `Lsu` takes `int_loads_in_flight` from the core's properties (0, no limit, when absent; only 0 and 1 modelled): with 1, a load stalls the core until the previous load's data is back (`load_wait`, `load_issued` in `load` and `load_signed`) |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch` takes `int_loads_in_flight` (0) as a property |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` takes `core`, `Snitch` arguments that replace the cores' defaults, and `core_latency`, cycles added on each core's data path to the TCDM (`tcdm`) and out of the cluster (`narrow`, the map to `narrow_axi`) |
+| `Makefile` | `regress` (runs `tests/snax/regress.py`: every program exits 0); `sw` (`make -C sw`) and `sync-snax-cluster` (`sw/sync.py`), which replace `regress-plain` and the snax_cluster checkout |
+| `core/models/cpu/iss/include/isa/priv.hpp` | `csrrc` with `rs1` = `x0`, and `csrrsi` / `csrrci` with `uimm` = 0, write nothing (Zicsr), as `csrrs` already did; for every core |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchClusterTcdm` binds a priority wire per SNAX port to `SnaxTcdmXbar`; `SnitchCluster` binds an accelerator's `o_TCDM_PRIORITY` to it when the accelerator has one |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` (both arch paths) takes `snax_sparse_config`; `SnitchCluster` lists the accelerators' sparse ports in core order (`[nb_tcdm_ports, 1]` by default, as snaxgen) and `SnitchClusterTcdm` passes them to `SnaxTcdmXbar` |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | With SNAX ports, `SnitchCluster` sends each core's TCDM and `tcdm_alias` maps (with their latency) to the SNAX crossbar's input after the SNAX ports, in core order, and `narrow_axi`'s TCDM map straight to its last input (AXI), not through `pe0_ico`; these inputs hold a losing request and are `[1, 1]` each in the sparse config. `SnitchClusterTcdm` takes `snax_holds` |
+| `core/models/cpu/iss/include/lsu.hpp`, `include/lsu_implem.hpp`, `src/lsu.cpp`, `src/snitch/decode.cpp` | With `int_loads_in_flight` set on the Snitch core, a load answered `IO_REQ_PENDING` no longer stalls the core: its register is marked not ready in the core's `scoreboard_reg_valid`, and an instruction on that register (`int_offload_exec`), the next load, store or AMO stall until the response (`wait_for_load`); the response sets the register's and the next load's ready cycle (`pending_load_response`) |
+| `core/models/cpu/iss/include/htif.hpp`, `src/htif.cpp` | With the core property `htif_poll_backdoor`, the host's `tohost` poll (the read every 1000 cycles and its clear) goes through the zero-time debug backdoor behind the core's data port (`vp/debug_mem.hpp`), not as requests on the port |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch` and `Snitch_fp_ss` take `htif_poll_backdoor` (False) as a property |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` gives each FP subsystem the `htif_poll_backdoor` of `ClusterArch.core` |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` (both arch paths) takes `snax_dma_data_width`; with SNAX ports and it, `SnitchClusterTcdm` sends the DMA input (the iDMA's TCDM port, `wide_axi`'s TCDM and `tcdm_alias` maps) to the SNAX crossbar's `dma` port with `superbank_banks` = `dma_data_width / (8 * bank_width)` instead of `DmaInterleaver`, and `SnitchCluster` checks the DMA's `tcdm_width` is one superbank |
+| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | `tcdm_write_latency` (0 when absent): a line written to the local memory reaches it that many cycles after it leaves the DMA, and is acknowledged when it leaves |
+| `pulp/pulp/idma/me/idma_me_2d.hpp`, `.cpp`, `be/idma_be.hpp`, `.cpp`, `be/idma_be_axi.hpp`, `.cpp` | `one_cycle_per_stage` (false when absent): the midend takes a transfer, the backend splits it and the AXI back-end sends a read burst from the cycle after it arrived, also when the stage's event is already queued for that cycle |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma` takes `tcdm_write_latency` (0) and `one_cycle_per_stage` (False) |
+| `core/models/cpu/iss/src/snitch/snitch.cpp`, `include/cores/snitch/class.hpp` | A SNAX CSR write answered `IO_REQ_PENDING` stalls the core until the block's response (`snax_csr_response`: `stalled_dec`, `insn_terminate`, as the LSU's pending store); the request's data is a member (`snax_csr_data`), not a local; a pending read still ends the run |
+| `engine/python/gvsoc/runner_gvrun2.py` | A target without `libplatform_tree_<target>.so` (one no build made, e.g. read from `--target-dir`) runs on the JSON config path with one warning line on stderr, as on a signature mismatch, instead of stopping (`Missing platform_tree library`) |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `ClusterArch` (both arch paths) takes the TCDM's size, bank count and bank width and the peripherals' and zero memory's sizes (`tcdm_size`, `tcdm_banks`, `tcdm_bank_width`, `periph_size`, `zero_mem_size`; the build path reads them from its properties), today's values as defaults; `ClusterArch.Tcdm` takes the first three and holds `nb_banks` instead of the superbank split; the peripherals and the zero memory (and their aliases) follow the TCDM by size |
+| `pulp/pulp/snitch/snitch_cluster/cluster_registers.py` | `gen` writes the `cluster_periph` headers beside the old ones and replaces them only when they differ, so a build with nothing changed recompiles nothing |
+| `Makefile` | Every `cmake` is `$(CMAKE)`, so a caller names the CMake the build uses (snax-forge's `gvsoc/Makefile` from pixi) |
+| `gvrun/bin/gvrun` | Without the venv, runs `gvrun` on `$GVRUN_PYTHON` (default `python3`), so a caller whose `python3` lacks GVSoC's packages (pixi's) names the Python |
+| `core/models/cpu/iss/src/snitch/snitch.cpp`, `src/snitch/iss.cpp`, `include/cores/snitch/class.hpp` | The events (`docs/EVENTS.md`): the core's `summary`, `events` and `beats` traces; its SNAX CSR accesses, reads of one CSR with one value folded into a `poll`, its barrier waits, its state and the function the PC is in; its CSR counts at stop |
+| `core/models/cpu/iss/include/exec/exec_inorder_implem.hpp` | With `CONFIG_GVSOC_ISS_SNAX_EVENTS`, `Exec::busy_enter` and `busy_exit` give the core's state and `insn_exec_profiling` the function to the Snitch core's events |
+| `pulp/pulp/snitch/snitch_core.py` | `Snitch` builds with `CONFIG_GVSOC_ISS_SNAX_EVENTS` |
+| `core/models/cpu/iss/src/csr.cpp`, `include/csr.hpp` | With `CONFIG_GVSOC_ISS_SNAX_EVENTS`, a read of `mcycle` (its own callback, `mcycle_csr_access`; `cycle` keeps `mcycle_access`) or of `mcycleh` writes the Snitch core's `mcycle` / `mcycleh` event line |
+| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | The events: the front end's `summary`, `events` and `beats` traces; `issue` per copy in `enqueue_copy`, `done` in `ack_transfer`; at stop the copies, busy cycles, beats and bytes to and from the local area (`loc_base`, `loc_size`) |
+| `pulp/pulp/idma/idma.hpp` | `IdmaTransfer` holds a copy's `id` and its beats on the local memory so far (`local_reads`, `local_writes`), and a row's `row_src` and `row_dst`; `IDMA_SNAX_ARG_*`, the argument slots of the SNAX crossbar's `dma` line |
+| `pulp/pulp/idma/fe/idma_fe_xdma.cpp` | A copy's transfer carries its ID |
+| `pulp/pulp/idma/be/idma_be.cpp` | `enqueue_transfer` keeps the row's start (`row_src`, `row_dst`) |
+| `pulp/pulp/idma/be/idma_be_tcdm.hpp`, `.cpp` | Each line to the TCDM (and each delayed one) carries its copy's ID, its index on that side and the other side's address in the `IDMA_SNAX_ARG_*` slots |
+| `pulp/pulp/idma/be/idma_be_axi.hpp`, `.cpp` | The `beats` trace: a `burst` line per request to AXI (its copy, address and size as it leaves, written when its data is back or it is acknowledged) |
+| `pulp/pulp/idma/fe/idma_fe_xdma.hpp`, `.cpp` | The busy wire as the VCD signal `dma_busy` |
+| `pulp/pulp/idma/snitch_dma.py` | `SnitchDma.gen_gtkw` lists `fe/dma_busy` under the tag `snax` |
+| `pulp/pulp/idma/idma.hpp` | A comment line: the `IDMA_SNAX_*` constants are kept equal to `snax/snax_events.hpp`'s by hand |
+| `Makefile` | `FAST=1` passes `-DBUILD_ASSERT=OFF` to the build (no asserts flavour; `ON` otherwise); `regress` passes `J` as `-j` |
+| `core/models/cpu/iss/src/snitch/snitch.cpp`, `include/cores/snitch/class.hpp` | `csr_obs`, snax_cluster's observability CSR 0x7C5 (`CsrObsRegister`): a plain 32-bit R/W register, reset 0 |

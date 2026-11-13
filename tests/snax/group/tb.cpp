@@ -32,6 +32,7 @@
 
 #include "snax_datapath.hpp"
 #include "snax_group.hpp"
+#include "../tb_common.hpp"
 
 
 struct UnitLine
@@ -66,14 +67,6 @@ struct Case
     int lanes = 0;                      // 0: no data of its own
     std::vector<int64_t> a, b, sums;    // a and b element i * lanes + l, a job's sum each
 };
-
-static std::string base_of(const std::string &path)
-{
-    size_t slash = path.rfind('/');
-    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
-    size_t dot = base.rfind('.');
-    return dot == std::string::npos ? base : base.substr(0, dot);
-}
 
 static std::vector<std::string> fields(const std::string &line, char sep)
 {
@@ -117,7 +110,7 @@ static bool parse(const std::string &path, Case &c)
         fprintf(stderr, "%s: cannot open\n", path.c_str());
         return false;
     }
-    c.name = base_of(path);
+    c.name = tb_base_of(path);
     bool in_cycles = false;
     std::string raw;
     int lineno = 0;
@@ -265,8 +258,6 @@ static bool parse(const std::string &path, Case &c)
     return true;
 }
 
-static const char *start_names[] = {"taken", "ignored", "refused"};
-
 // The dot product the data check runs without data of the case's own: 4 lanes of int64, a
 // head of two outer inputs
 static const int LANES = 4;
@@ -359,9 +350,9 @@ static int run(const Case &c)
             {
                 run_busy = 0;
             }
-            if (c.start_result != start_names[answer])
+            if (c.start_result != tb_start_names[answer])
             {
-                fail(std::string("start ") + start_names[answer] + ", expected " + c.start_result);
+                fail(std::string("start ") + tb_start_names[answer] + ", expected " + c.start_result);
             }
         }
         int busy = rule.busy(cycle);
@@ -493,28 +484,10 @@ static int run(const Case &c)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
-    {
-        fprintf(stderr, "usage: %s CASE...\n", argv[0]);
-        return 2;
-    }
-    int failed = 0, passed = 0;
-    for (int i = 1; i < argc; i++)
-    {
-        Case c;
-        if (!parse(argv[i], c))
-        {
-            return 2;
-        }
-        int errors = run(c);
+    return tb_main<Case>(argc, argv, parse, run, [](const Case &c) {
         SnaxGroupRule rule;
         bool data = configure(c, rule).empty() && dot_datapaths(c, rule);
-        printf("%s %s: %zu units, %zu cycles, %zu run(s)%s\n", errors ? "FAIL" : "PASS",
-            c.name.c_str(), c.units.size(), c.cycles.size(), c.expects.size(),
-            data ? ", data" : "");
-        failed += errors != 0;
-        passed += errors == 0;
-    }
-    printf("%d passed, %d failed\n", passed, failed);
-    return failed ? 1 : 0;
+        printf("%s: %zu units, %zu cycles, %zu run(s)%s\n", c.name.c_str(), c.units.size(),
+            c.cycles.size(), c.expects.size(), data ? ", data" : "");
+    });
 }

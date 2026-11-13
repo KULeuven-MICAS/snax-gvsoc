@@ -5,7 +5,7 @@
 #
 
 """SnaxShell (snax_shell.cpp): the CSRs of one group of an accelerator in front
-of its SnaxGroup, GeMMX's shell contract (D130, D146 in snax-forge)."""
+of its SnaxGroup, GeMMX's shell contract."""
 
 import gvsoc.systree
 
@@ -14,15 +14,15 @@ class SnaxShell(gvsoc.systree.Component):
     """START, JOBS and the units' CSRs, read-write; STATUS and BUSY_COUNTER, read-only.
 
     START is a strobe that reads 0; every other CSR keeps its width (a write its low
-    bits) and BUSY_COUNTER saturates at its own (accelerator.json's widths, D152).
+    bits) and BUSY_COUNTER saturates at its own (accelerator.json's widths).
 
     A start goes to the group's ctrl as JOBS and every JOB_BEATS (JOBS and 1
     without one), then every scalar CSR (K1, or K1_LO and K1_HI), when the
     group is idle; JOBS or a JOB_BEATS 0 is the empty run, ended by the shell,
     as snax_shell.hpp says. While the group is busy a write to any of its
     read-write CSRs, START or a setting, is held (the core stalls) until the
-    cycle after its run ends, so the settings stay constant through a run
-    (snax-forge D168); reads are never held.
+    cycle after its run ends, so the settings stay constant through a run;
+    reads are never held.
 
     Parameters
     ----------

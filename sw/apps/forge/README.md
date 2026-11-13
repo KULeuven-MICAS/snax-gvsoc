@@ -1,17 +1,24 @@
 # forge
 
-The generic app for a generated accelerator. It builds the program snax-forge writes for a design point (`forge/<design>/main.c`, snax-forge's C backend, its D135) with the fixture's own headers and data; nothing here is written by hand per design.
+The generic app for a generated accelerator. It builds the program snax-forge writes for a design point (`forge/<design>/main.c`, from snax-forge's C backend) with the fixture's own headers and data; nothing here is written by hand per design.
 
     make -C sw/apps/forge DESIGN=vecadd
 
-- `DESIGN` (default `vecadd`): the fixture, `forge/$(DESIGN)/` (`forge/README.md`). The ELF goes to `build/sw/apps/forge/$(DESIGN)/forge.elf`, and the same `main.c` built with `-DFORGE_QUIET` (snax-forge D135: every start waited on at once, each section marked in CSR 0x7C5, no prints) to `forge_quiet.elf` beside it.
+- `DESIGN` (default `vecadd`): the fixture, `forge/$(DESIGN)/` (`forge/README.md`). The ELF goes to `build/sw/apps/forge/$(DESIGN)/forge.elf`, and the same `main.c` built with `-DFORGE_QUIET` (every start waited on at once, each section marked in CSR 0x7C5, no prints) to `forge_quiet.elf` beside it.
 - `FORGE` (default `forge/$(DESIGN)`): the folder to build from, for a bundle of the same form elsewhere (snax-forge's `out/gvsoc/<design>/`).
 
 The fixture's folder (for `data.h`) and its `include/` (for each streamer set's `streamer_<set>_csr_addr_map.h` and `<set>_csr.h`) come before `sw/generated/`, as in the other forge apps. There is no datagen: `data.h` holds the inputs, the zeroed outputs and their goldens. The ELF depends on every file of the fixture, so a refreshed fixture rebuilds it.
 
 ## What the program does
 
-The design point's task list on snRuntime (snax-forge `lower/c.py`): one function per core, `main` calling its core's through a table, each step on the core that owns its component in the cluster file (the DMA on the core with `xdma`, the accelerator on the one holding the slot), a barrier where another core goes on, and each accelerator task's counter stored after its wait; no task marks. `main` reads `mcycle` first, and on the accelerator's core calls `forge_check()` after its function, which reads `mcycle` first and prints the window between the two, then checks:
+The design point's task list on snRuntime (snax-forge's `lower/c.py`):
+
+- one function per core, `main` calling its core's through a table;
+- each step on the core that owns its component in the cluster file: the DMA on the core with `xdma`, the accelerator on the core holding the slot;
+- a barrier where another core goes on;
+- each accelerator task's counter stored after its wait.
+
+`main` reads `mcycle` first. On the accelerator's core it calls `forge_check()` after its function, which reads `mcycle` first, prints the window between the two reads, then checks:
 
     forge cycles: <n>
     forge data: <e> errors (<words> words)

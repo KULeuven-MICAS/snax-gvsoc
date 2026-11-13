@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The datapaths of snax-forge's catalogue (C§17's datapath catalogue,
-// hw/chisel/blocks.json; D129, D147, D149), one plain C++ class each, data and
+// The datapaths of snax-forge's catalogue (hw/chisel/blocks.json), one plain C++ class each, data and
 // enables only: no valid, ready or counter inside, which are the control
 // model's (snax_group.hpp's SnaxGroupRule, the `<tag>_<group>_ctrl` of
 // snax-forge's Chisel). No GVSoC types, so the component (snax_group.cpp) and
@@ -87,7 +86,7 @@ struct SnaxEnables
 };
 
 
-// A unit's datapath params, as accelerator.json's unit gives them (C§17): the
+// A unit's datapath params, as accelerator.json's unit gives them: the
 // inputs' types in port order, the op's and the output's, the lanes, and what
 // a datapath takes of the rest
 struct SnaxDatapathParams
@@ -109,7 +108,7 @@ struct SnaxDatapathParams
     bool has_k2 = false;    // axpby's k2, as k1; neither: + b
     uint64_t k2 = 0;
     bool k2_csr = false;
-    bool seed = false;      // a fold's seed: its last input, one element in one word (D163)
+    bool seed = false;      // a fold's seed: its last input, one element in one word
 };
 
 
@@ -131,7 +130,7 @@ public:
     // Words per beat of each input, in port order, and of the output
     std::vector<int> in_words;
     int out_words = 1;
-    // Its latency and span (C§17's timing), for the control model's check
+    // Its latency and span, for the control model's check
     int latency = 0;
     int span = 1;
 
@@ -570,7 +569,7 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
     }
     if (p.seed && name != "TreeAccumulate" && name != "SerialAccumulate")
     {
-        *why = "a seed is TreeAccumulate's and SerialAccumulate's (D163)";
+        *why = "a seed is TreeAccumulate's and SerialAccumulate's";
         return nullptr;
     }
     for (size_t i = 0; i < p.in_types.size(); i++)

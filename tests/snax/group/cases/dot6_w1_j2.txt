@@ -1,5 +1,5 @@
 # dot 6 at N = 4, W = 1 (T = 4), JOBS 2: mac -> a buffer of depth 1 -> SerialAccumulate sum at span 1
-# C§17: busy cycles E - s = 11
+# busy cycles E - s = 11
 # random int64 data (numpy seed 6); each job's sum of a * b
 
 unit mac Mac latency 1 ii 1 span 1 t 4 inputs 2
@@ -8,7 +8,7 @@ link mac sum depth 1
 jobs 2
 start 0 taken
 expect run index=0 firings=8 busy=9 stall_in=0 stall_out=0 flush=2
-# E - s = 11, C§17's formula
+# E - s = 11, the rule's formula
 lanes 1
 data a 704008024342037246 -2891142153448451873 -2415283118359038993 -2315126045623110811 8991772983981613421 2448920984963642835 3215708931939523818 -3136620621682344247
 data b 3318895049833111673 -6954932109174513026 -8269136133320522219 6459890151409359892 -9059273388813122841 8831702690425992540 6032141128612719464 5261213573710757988
