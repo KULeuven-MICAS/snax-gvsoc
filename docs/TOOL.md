@@ -113,7 +113,7 @@ The trace levels are trace names (`docs/EVENTS.md`), each a `--trace` pattern, h
 
 ## The regression
 
-`make regress` runs the four g++ testbenches, builds `sw/` and every program, then runs the cluster tests, `snax-shell` and every `forge/` folder on `snax_hjson` (their counters checked against their units' run lines) and the plain tests on `snitch`. `tests/snax/regress.py` says what each checks. It ends:
+`make regress` runs the six g++ testbenches, builds `sw/` and every program, then runs the cluster tests, `snax-shell` and every `forge/` folder on `snax_hjson` (their counters checked against their units' run lines) and the plain tests on `snitch`. `tests/snax/regress.py` says what each checks. It ends:
 
     forge/'s accelerators: forge.dot_1, forge.dot_2, ...
       29 run

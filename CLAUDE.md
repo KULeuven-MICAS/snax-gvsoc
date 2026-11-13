@@ -17,12 +17,12 @@ A detached copy of upstream [GVSoC](https://github.com/gvsoc/gvsoc) (at `93cedc4
 
 ## Commands
 
-Everything runs in the image `ghcr.io/kuleuven-micas/snax-forge:main` (GVSoC's build tools, snax_cluster's toolchain), as CI does.
+Everything runs in the image `ghcr.io/kuleuven-micas/snax-forge:main` (GVSoC's build tools, snax_cluster's toolchain), as CI does. The one exception is `sparse_arb`, which needs snax_cluster's image `ghcr.io/kuleuven-micas/snax:main` for Verilator (its README).
 
 - `make build TARGETS='$(SNAX_TARGETS)'`: GVSoC for the SNAX targets (single quotes, so make expands the variable).
 - `python3 -m unittest discover -s tests/snax -p 'test_*.py'`: the Python unit tests.
-- `tests/snax/<name>/run.sh` for `unit`, `group`, `shell`, `datapath`, `sparse_pick` and `port_mux`: each testbench against its cases, g++ only (shared helpers in `tests/snax/tb_common.hpp`); `sparse_arb` against the RTL, with Verilator.
-- `make regress` (`K=SUBSTRING` for some programs): builds `sw/` and the programs, then each must exit 0 on the built GVSoC.
+- `tests/snax/<name>/run.sh` for `unit`, `group`, `shell`, `datapath`, `sparse_pick` and `port_mux`: each testbench against its cases, g++ only (shared helpers in `tests/snax/tb_common.hpp`); `sparse_arb` against the RTL, with Verilator, by hand (not in `make regress` or CI).
+- `make regress` (`K=SUBSTRING` for some programs): runs the six g++ testbenches, builds `sw/` and the programs, then runs the cluster tests, `snax-shell`, every `forge/` folder (counters and traces checked) and the plain tests on the built GVSoC; each must exit 0.
 - `docs/TOOL.md` has every command with the lines to check.
 
 ## Conventions
