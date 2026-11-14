@@ -1,5 +1,5 @@
 # pipelined, L = 1, II 2: at most one firing every two cycles; the cycle after
-# a firing is busy (the II gap, D59) whether the inputs are there or not
+# a firing is busy (the II gap) whether the inputs are there or not
 # (busy 5 + stall_in 1 + stall_out 1 + flush 1 = 8 busy cycles)
 latency 1
 ii 2
