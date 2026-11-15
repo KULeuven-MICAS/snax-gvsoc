@@ -26,7 +26,7 @@
 // write enable and its ring's write and read slots).
 //
 //   SimdLanes(inTypes, opType, outType, lanes, op[, k])   L 0: per lane
-//       a op b at opType, cast to outType (snax_op_elementwise); with one
+//       a op b at opType, cast to outType (snax_op_elementwise_at); with one
 //       input (one stream), op(a, k) with the constant k at opType, a's type
 //       (snax_op_elementwise_k); at op axpby, k1 * a + k2 * b (+ b without k2)
 //       at opType (snax_op_axpby). A slot read from its CSR (k at one stream,
@@ -174,8 +174,10 @@ public:
                 this->p.op_type, this->p.out_type, in[0], this->p.k, this->out_.data());
             return;
         }
-        snax_op_elementwise(this->p.op, this->p.lanes, this->p.in_types[0],
-            this->p.in_types[1], this->p.out_type, in[0], in[1], this->out_.data());
+        // NB (D175): at opType, which the kernel's casts may set wider than the inputs'
+        snax_op_elementwise_at(this->p.op, this->p.lanes, this->p.in_types[0],
+            this->p.in_types[1], this->p.op_type, this->p.out_type, in[0], in[1],
+            this->out_.data());
     }
 
     void commit(const SnaxEnables &) override {}
@@ -501,9 +503,10 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
                     return std::unique_ptr<SnaxDatapath>();
                 }
             }
-            else if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t))
+            else if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t) ||
+                !snax_holds(p.op_type, t))
             {
-                *why = "two inputs with an integer result type, or one with k";
+                *why = "two inputs with an integer result type that opType holds, or one with k";
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxSimdLanes(p));

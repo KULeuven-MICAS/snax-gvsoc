@@ -55,14 +55,32 @@ def dot_data(seed, jobs, beats, lanes):
     return {"lanes": lanes, "a": a.tolist(), "b": b.tolist(), "sums": sums.tolist()}
 
 
+def packed_words(sent_at, pushes_at, d_out):
+    """The words the packer sends: push n's result is -(n + 1), its low 64 / d_out bits at its
+    slice, the slices above a short last word zero (snax_group.hpp's SnaxPacker)."""
+    bits, words, word, slice_, n = 64 // d_out, [], 0, 0, 0
+    for push, sent in zip(pushes_at, sent_at):
+        if not push:
+            continue
+        word = 0 if slice_ == 0 else word
+        word |= ((-(n + 1)) & ((1 << bits) - 1)) << (slice_ * bits)
+        n += 1
+        if sent:
+            words.append(word)
+            slice_ = 0
+        else:
+            slice_ += 1
+    return words
+
+
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
-          formula_total=None, comment=(), data=None):
+          formula_total=None, comment=(), data=None, d_out=1):
     # A chain: link k joins unit k to unit k + 1's only input
     links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
              for k, d in enumerate(depths)]
     m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4],
                         seed=len(u) > 5 and u[5]) for u in units], links)
-    rows, end = m.run(jobs, ts, valid, ready, 64)
+    rows, end = m.run(jobs, ts, valid, ready, 64, d_out)
     if end is None:
         empty = jobs == 0 or 0 in ts
         assert empty, name
@@ -82,6 +100,8 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
     for e in links:
         lines.append(f"link {e['from']} {e['to']} depth {e['depth']}")
     lines.append(f"jobs {jobs}")
+    if d_out > 1:
+        lines.append(f"dout {d_out}")
     result = "ignored" if (jobs == 0 or 0 in ts) else "taken"
     lines.append(f"start 0 {result}")
     if end is not None:
@@ -90,6 +110,10 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
                      f"stall_in={classes['stall_in']} stall_out={classes['stall_out']} "
                      f"flush={classes['flush']}")
         lines.append(f"# E - s = {total}" + (f", the rule's formula" if formula_total else ""))
+    if d_out > 1:
+        pushes_at = [r[2][m.output][1] for r in rows]
+        words = packed_words(m.sent[: len(rows)], pushes_at, d_out)
+        lines.append("words " + " ".join(f"0x{w:016x}" for w in words))
     if data is not None:
         lines.append(f"lanes {data['lanes']}")
         lines += [f"data {x} " + " ".join(map(str, data[x])) for x in ("a", "b")]
@@ -98,11 +122,14 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
              else [*(["a"] * (u[4] - 1)), f"{u[0]}.seed"]) if u[4] else [])]
     lines += ["", f"# {' '.join(names)} ready | " + " | ".join(f"{u[0]} fire give" for u in units)
               + (" | " + " ".join(f"occ{k}" for k, d in enumerate(depths) if d) if any(depths) else "")
-              + " | busy", "cycles"]
+              + (" | sent" if d_out > 1 else "") + " | busy", "cycles"]
     for c, (v, r, out, occ, busy, cls, note) in enumerate(rows):
         cols = " ".join(map(str, v)) + f" {r} | " + " | ".join(f"{f} {g}" for f, g in out)
         if any(depths):
             cols += " | " + " ".join(str(occ[k]) for k, d in enumerate(depths) if d)
+        if d_out > 1:
+            cols += f" | {m.sent[c]}"
+            note += " (word sent)" if m.sent[c] else ""
         lines.append(f"{cols} | {busy}    # {c}: {note}")
     (HERE / "cases" / f"{name}.txt").write_text("\n".join(lines) + "\n")
     return total
@@ -143,6 +170,32 @@ def seed_cases():
                    "mac holds its result"])
 
 
+def pack_cases():
+    """The outer output's packer (D174): a fold's one-lane result packed d_out to a word, its
+    room the writer's ready only on a sending push. sum (TreeAccumulate, T 2) alone at d_out
+    2, 4 and 8 (int32, int16, int8 results), JOBS 1 (a short word at once), 9 (a short last
+    word) and 10 (whole words at d_out 2); the writer not ready while the packer fills; and dot
+    3 (SimdLanes -> wire -> TreeAccumulate, T 2) at d_out 2 over 3 jobs."""
+    sum_ = [("sum", "TreeAccumulate", 1, 1, 1)]
+    for d in (2, 4, 8):
+        for j in (1, 9, 10):
+            write(f"pack_d{d}_j{j}", f"sum (TreeAccumulate, T 2), JOBS {j}, its result packed "
+                  f"{d} to a word ({64 // d}-bit results)", sum_, [], j, [2],
+                  valid=lambda c: (1,), d_out=d,
+                  comment=["a word every d_out pushes, the run's last push sending a short one; "
+                           "push n's result is -(n + 1), so a word shows its slices"])
+    # writer not ready in cycles 4 and 5, during the first word's filling push and its sending
+    # push: the filling push goes ahead, the sending one waits (stall_out)
+    write("pack_d2_backpressure", "sum (TreeAccumulate, T 2), JOBS 4, packed 2 to a word, the "
+          "writer not ready in cycles 3 to 5", sum_, [], 4, [2], valid=lambda c: (1,),
+          ready=lambda c: 0 if c in (3, 4, 5) else 1, d_out=2,
+          comment=["a filling push needs no room at the writer; a sending one waits for it"])
+    dot3 = VARIANTS[3][0]
+    write("pack_dot3_d2_j3", "dot 3 at N = 8, W = 4 (T = 2), JOBS 3, the sum packed 2 to a word",
+          dot3, [0], 3, [1, 2], d_out=2,
+          comment=["three results: one whole word, then a short one on the last push"])
+
+
 def main():
     table = {}
     for v, (units, depth, fold) in VARIANTS.items():
@@ -177,6 +230,7 @@ def main():
     write("dot4_jobs0", "dot 4, JOBS 0: the empty run, ignored; busy never rises", u4, [0], 0,
           [2, 1], comment=["the shell ends it in its own cycle (tests/snax/shell)"])
     seed_cases()
+    pack_cases()
     print("T, J | " + " | ".join(f"dot {v}" for v in VARIANTS))
     for t in (2, 4):
         for j in (1, 2):

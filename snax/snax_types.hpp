@@ -153,15 +153,13 @@ inline void snax_lane_set(uint64_t *words, int width, int lane, uint64_t v)
 }
 
 
-// A SimdLanes beat, as NumPy's out = (a op b).astype(out_t): per lane, a
-// and b each at its own port's type, both extended to T, their result type
-// (snax_op_result_type, which must give one), the op at T, and the result
-// cast to out_t. The words: lanes * width / 64 per port, out's cleared here.
-inline void snax_op_elementwise(int op, int lanes, SnaxType a_t, SnaxType b_t,
-    SnaxType out_t, const uint64_t *a, const uint64_t *b, uint64_t *out)
+// A SimdLanes beat, as NumPy's out = (T(a) op T(b)).astype(out_t): per lane,
+// a and b each at its own port's type, both extended to T (the unit's opType,
+// which holds both), the op at T, and the result cast to out_t. The words:
+// lanes * width / 64 per port, out's cleared here.
+inline void snax_op_elementwise_at(int op, int lanes, SnaxType a_t, SnaxType b_t,
+    SnaxType t, SnaxType out_t, const uint64_t *a, const uint64_t *b, uint64_t *out)
 {
-    SnaxType t;
-    snax_op_result_type(a_t, b_t, &t);
     for (int w = 0; w < lanes * out_t.width / 64; w++)
     {
         out[w] = 0;
@@ -173,6 +171,23 @@ inline void snax_op_elementwise(int op, int lanes, SnaxType a_t, SnaxType b_t,
         snax_lane_set(out, out_t.width, lane,
             snax_lane_cast(snax_op_compute(op, t, x, y), t, out_t));
     }
+}
+
+// The same at T, a and b's result type (snax_op_result_type, which must give
+// one): NumPy's out = (a op b).astype(out_t).
+inline void snax_op_elementwise(int op, int lanes, SnaxType a_t, SnaxType b_t,
+    SnaxType out_t, const uint64_t *a, const uint64_t *b, uint64_t *out)
+{
+    SnaxType t;
+    snax_op_result_type(a_t, b_t, &t);
+    snax_op_elementwise_at(op, lanes, a_t, b_t, t, out_t, a, b, out);
+}
+
+// t holds a: their result type is t, so a extends into t without loss
+inline bool snax_holds(SnaxType t, SnaxType a)
+{
+    SnaxType r;
+    return snax_op_result_type(t, a, &r) && r.width == t.width && r.is_signed == t.is_signed;
 }
 
 

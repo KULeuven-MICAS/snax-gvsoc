@@ -148,6 +148,8 @@ private:
     int64_t last_fire;
     int line_class;                     // the class of the last class line in this run, -1 none
     uint32_t pushes;                    // results pushed in this run
+    uint32_t results = 0;               // the outer output's results in this run
+    SnaxPacker packer;                  // its packer, at d_out 1 none (snax_group.hpp)
 };
 
 
@@ -345,6 +347,13 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             output = k;
             out_name = out;
             this->out_words = dp->out_words;
+            this->packer.d_out = this->props.int_prop(u, "d_out", w);
+            int d = this->packer.d_out;
+            if ((d != 1 && d != 2 && d != 4 && d != 8) || (d > 1 && dp->out_words != 1))
+            {
+                this->trace.fatal("Property %s.d_out: %d, must be 1, 2, 4 or 8, and above 1 "
+                    "only on a one-word result (%d words)\n", w.c_str(), d, dp->out_words);
+            }
         }
         this->data.units.push_back(std::move(dp));
         names.push_back(name);
@@ -474,6 +483,8 @@ void SnaxGroup::reset(bool active)
         this->rule.reset();
         this->first_fire = this->last_fire = -1;
         this->pushes = 0;
+        this->results = 0;
+        this->packer.clear();
         this->line_class = -1;
         this->rate = 1;
     }
@@ -566,6 +577,8 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
                 (long)cycle, _this->rule.count(), _this->rate);
             _this->first_fire = _this->last_fire = -1;
             _this->pushes = 0;
+            _this->results = results;
+            _this->packer.clear();
             _this->line_class = -1;
             if (_this->busy_itf.is_bound())
             {
@@ -619,7 +632,10 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
             std::vector<bool> &has = o.seed ? seeds : inputs;
             has[o.unit] = _this->probe(o.itf, false) && has[o.unit];
         }
-        _this->room[_this->rule.output_unit()] = _this->probe(_this->out_itf, true);
+        // A push the packer keeps needs no room at the writer: only a sending one asks it
+        bool last = _this->pushes + 1 == _this->results;
+        _this->room[_this->rule.output_unit()] = !_this->packer.sending(last) ||
+            _this->probe(_this->out_itf, true);
 
         const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, seeds, _this->room);
         const SnaxGroupRule::UnitStep &head = step.units[_this->rule.topological().front()];
@@ -675,7 +691,15 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
         {
             std::vector<uint64_t> &out = _this->out_beat;
             std::copy(result.begin(), result.end(), out.begin());
-            _this->move(_this->out_itf, true, out.data(), _this->out_words);
+            uint64_t word;
+            if (_this->packer.d_out == 1)
+            {
+                _this->move(_this->out_itf, true, out.data(), _this->out_words);
+            }
+            else if (_this->packer.push(out[0], last, &word))
+            {
+                _this->move(_this->out_itf, true, &word, 1);
+            }
             if (_this->ev.beats.get_active())
             {
                 std::string text = snax_words_text(out.data(), out.size());

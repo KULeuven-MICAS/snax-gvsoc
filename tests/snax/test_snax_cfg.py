@@ -578,6 +578,19 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].inputs",
                    "set acc's streamer has 1 data_reader_params")
 
+    def test_a_wider_op_type(self):
+        """vecmul at i8: int8 a and b at 8 lanes (one word each), int32 out (four words), the
+        product at int32 as the kernel's casts set it (D175)."""
+        u = self.unit()
+        for port, dtype in (("a", "int8"), ("b", "int8"), ("out", "int32")):
+            u["ports"][port].update(dtype=dtype, lanes=8)
+        u["opType"] = "int32"
+        self.streamer["data_reader_params"]["num_channel"] = [1, 1]
+        self.streamer["data_reader_params"]["spatial_bounds"] = [[1], [1]]
+        self.streamer["data_writer_params"]["num_channel"] = [4]
+        self.streamer["data_writer_params"]["spatial_bounds"] = [[4]]
+        self.load()
+
     def test_words_per_beat(self):
         """int32 a at 4 lanes is 2 words: its reader must have num_channel 2."""
         self.unit()["ports"]["a"]["dtype"] = "int32"
@@ -592,9 +605,14 @@ class AccJson(unittest.TestCase):
                    "one lane count")
 
     def test_op_type(self):
+        """opType holds the inputs' result type: int64 itself here (int64 inputs), never
+        narrower; a wider one comes from the kernel's casts (D175)."""
         self.unit()["opType"] = "int32"
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
-                   "opType int32, but its inputs' result type is int64")
+                   "opType int32 does not hold its inputs' result type int64")
+        self.unit()["opType"] = "uint64"
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
+                   "opType uint64 does not hold its inputs' result type int64")
         del self.unit()["opType"]
         self.fails(snax_cfg.CfgKeyError, "units[0].opType", "missing")
         self.acc = acc_json(VECADD)
@@ -733,6 +751,21 @@ class LinkedGroup(unittest.TestCase):
 
     def link(self, **kw):
         self.acc["accelerators"][0]["groups"][0]["links"][0].update(kw)
+
+    def test_a_packed_output(self):
+        """sum.out at int32 packed two to a word (d_out 2, D174) on the writer's one channel;
+        d_out on an input, a d_out that does not fill a word, or one not 2, 4 or 8, refused."""
+        out = self.acc["accelerators"][0]["groups"][0]["units"][1]["ports"]["out"]
+        out.update(dtype="int32", d_out=2)
+        (group,) = self.load().description.groups
+        self.assertEqual(group.units[1].ports["out"].d_out, 2)
+        out.update(dtype="int64")
+        self.fails(snax_cfg.CfgSlotError, "d_out 2 results of 64 bits are 128 bits")
+        out.update(dtype="int32", d_out=3)
+        self.fails(snax_cfg.CfgTypeError, "an output's results per word, 2, 4 or 8")
+        del out["d_out"]
+        self.acc["accelerators"][0]["groups"][0]["units"][0]["ports"]["a"]["d_out"] = 2
+        self.fails(snax_cfg.CfgTypeError, "an output's results per word")
 
     def test_gen_link(self):
         self.link(to="mac.a")  # out to an in port, but mac.a is outer: also on inputs

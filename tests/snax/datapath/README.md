@@ -27,6 +27,8 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 - Each class at three sizes, int64 (1, 2, 4 lanes) and int32 (2, 4, 8), random beats and enables; a tree, a MAC and a serial sum from int32 into int64; LinkBuffer at depth 1, 2 and 4.
 - SimdLanes at one stream (relu's, the header's `k`: op(a, k) at a's type): add, sub, mul, min and max at int32 (4 lanes) and int64 (2), each with k = 0, -1, the type's min and max, and a random k; and max(a, 0) from int32 into int64.
 - SimdLanes at axpby (axpy's, `k1 * a + k2 * b` at the inputs' result type, + b without k2): k1 baked or from its CSR, k2 unset, baked or from its CSR, at int32 (2 and 4 lanes), int64 (2) and int64 with an int16 b (4), a CSR slot's value set anew every other step; int32 into int64; and one stream with k from its CSR (add, mul, max at int32 and int64), k set anew every step.
+- The folds at narrow types: TreeAccumulate, SerialAccumulate and LaneAccumulate from int8 (8 lanes) and int16 (4) into int32.
+- An opType wider than the inputs' result type, as a kernel's casts set it (D175): SimdLanes mul and add from int8 at int32 (8 lanes), mul from int8 at int32 into int16, from int16 at int32 (4) and from int32 at int64 (2); Mac accumulating int8 at int32 (8).
 - Mac in its three forms: accumulate, plain, plain with regOut. Plain at W = 4: a = (3, 5, -9, 5), b = (-1, 0, 2, -4), c = (8, -9, -4, -3) give y = (5, -9, -22, -23).
 - Accumulate at W = 2, J = 2, T = 3: A's rows (1, -2, 3, 4, -5, 6) and (2, 2, 2, 2, 2, 2) against p = (2, 1, 0, -1, 3, 2), a beat a cycle, give the partials (-13, 6) and (10, 4); dot's sums of them are q = (-7, 14).
 - The int32 product that wraps, W = 2, T = 8: 46341 x 46341 wraps at int32, and the partials are (-2147478991, 4).
@@ -39,4 +41,4 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 
     tests/snax/datapath/run.sh
 
-It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `157 passed, 0 failed`.
+It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `169 passed, 0 failed`.

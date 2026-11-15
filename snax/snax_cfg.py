@@ -112,11 +112,12 @@ group's units with the same dtype and lanes (gen.link), no port is on two
 links (gen.link_port) and a group's links connect its units (gen.group), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
-1), since SnaxGroup has no FIFO slicer; each set's snax_num_rw_csr and
+1), since SnaxGroup has no FIFO slicer; an outer output with d_out (D174) fills
+one word with d_out results, on one channel, through SnaxGroup's packer; each set's snax_num_rw_csr and
 snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
-opType is its inputs' NumPy result type (snax_types.hpp's
+opType holds its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
-and b.
+and b: that type itself, or a wider one the kernel's casts chose (D175).
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
@@ -402,13 +403,14 @@ class Csr:
 
 @dataclass(frozen=True)
 class Port:
-    """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes and its
-    direction (in or out)."""
+    """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes, its
+    direction (in or out) and, on an outer output a packer feeds, d_out (D174)."""
 
     port: str
     dtype: str
     lanes: int
     dir: str
+    d_out: int = 1
 
     @property
     def width(self) -> int:
@@ -806,7 +808,11 @@ def _port(node: _Node) -> Port:
     direction = node.get('dir', str)
     if direction not in ('in', 'out'):
         raise CfgTypeError(node.file, node.where('dir'), f'{direction!r}, must be in or out')
-    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction)
+    d_out = node.get('d_out', int, 1)
+    if d_out not in (1, 2, 4, 8) or (d_out > 1 and direction != 'out'):
+        raise CfgTypeError(node.file, node.where('d_out'),
+            f'{d_out}: an output\'s results per word, 2, 4 or 8 (absent at 1)')
+    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction, d_out=d_out)
 
 
 def _unit(node: _Node) -> Unit:
@@ -1210,9 +1216,10 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
         raise CfgTypeError(node.file, node.where('groups'),
             f'unit {u.name}: {type_name(*a)} with {type_name(*b)} has no integer result type '
             '(NumPy gives float64)')
-    if u.op_type != type_name(*t):
+    # NB (D175): the kernel's casts may set the op wider than the inputs' result type
+    if result_type(DTYPES[u.op_type], t) != DTYPES[u.op_type]:
         raise CfgSlotError(node.file, node.where('groups'),
-            f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
+            f'unit {u.name}: opType {u.op_type} does not hold its inputs\' result type '
             f'{type_name(*t)} (snax_op_result_type)')
 
 
@@ -1367,6 +1374,13 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
     unit, _, name = entry.partition('.')
     u = accelerator.unit(unit)
     port = u.ports[name]
+    if port.d_out > 1:  # packed (D174): d_out results of lanes x width bits fill one word
+        bits = (1 if CATALOGUE[u.datapath].reduces else port.lanes) * port.width * port.d_out
+        if bits != 64 or channels != 1:
+            return (f'{entry}: d_out {port.d_out} results of {bits // port.d_out} bits are '
+                    f'{bits} bits, not one 64-bit word, or {mover} has num_channel {channels}, '
+                    'not 1')
+        return None
     if CATALOGUE[u.datapath].reduces and output:
         if channels != 1:
             return (f"{entry}: a fold's output is one 64-bit word per beat, but {mover} has "
