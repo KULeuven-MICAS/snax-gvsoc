@@ -578,6 +578,19 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].inputs",
                    "set acc's streamer has 1 data_reader_params")
 
+    def test_a_wider_op_type(self):
+        """vecmul at i8: int8 a and b at 8 lanes (one word each), int32 out (four words), the
+        product at int32 as the kernel's casts set it (D175)."""
+        u = self.unit()
+        for port, dtype in (("a", "int8"), ("b", "int8"), ("out", "int32")):
+            u["ports"][port].update(dtype=dtype, lanes=8)
+        u["opType"] = "int32"
+        self.streamer["data_reader_params"]["num_channel"] = [1, 1]
+        self.streamer["data_reader_params"]["spatial_bounds"] = [[1], [1]]
+        self.streamer["data_writer_params"]["num_channel"] = [4]
+        self.streamer["data_writer_params"]["spatial_bounds"] = [[4]]
+        self.load()
+
     def test_words_per_beat(self):
         """int32 a at 4 lanes is 2 words: its reader must have num_channel 2."""
         self.unit()["ports"]["a"]["dtype"] = "int32"
@@ -592,9 +605,14 @@ class AccJson(unittest.TestCase):
                    "one lane count")
 
     def test_op_type(self):
+        """opType holds the inputs' result type: int64 itself here (int64 inputs), never
+        narrower; a wider one comes from the kernel's casts (D175)."""
         self.unit()["opType"] = "int32"
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
-                   "opType int32, but its inputs' result type is int64")
+                   "opType int32 does not hold its inputs' result type int64")
+        self.unit()["opType"] = "uint64"
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
+                   "opType uint64 does not hold its inputs' result type int64")
         del self.unit()["opType"]
         self.fails(snax_cfg.CfgKeyError, "units[0].opType", "missing")
         self.acc = acc_json(VECADD)

@@ -114,9 +114,9 @@ codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
 1), since SnaxGroup has no FIFO slicer; each set's snax_num_rw_csr and
 snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
-opType is its inputs' NumPy result type (snax_types.hpp's
+opType holds its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
-and b.
+and b: that type itself, or a wider one the kernel's casts chose (D175).
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
@@ -1210,9 +1210,10 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
         raise CfgTypeError(node.file, node.where('groups'),
             f'unit {u.name}: {type_name(*a)} with {type_name(*b)} has no integer result type '
             '(NumPy gives float64)')
-    if u.op_type != type_name(*t):
+    # NB (D175): the kernel's casts may set the op wider than the inputs' result type
+    if result_type(DTYPES[u.op_type], t) != DTYPES[u.op_type]:
         raise CfgSlotError(node.file, node.where('groups'),
-            f'unit {u.name}: opType {u.op_type}, but its inputs\' result type is '
+            f'unit {u.name}: opType {u.op_type} does not hold its inputs\' result type '
             f'{type_name(*t)} (snax_op_result_type)')
 
 

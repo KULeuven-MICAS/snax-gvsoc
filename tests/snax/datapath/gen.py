@@ -59,12 +59,13 @@ def en(fire=0, first=0, read=0, lane=0, e=0, load=0, ws=0, rs=0):
     return (fire, first, read, lane, e, load, ws, rs)
 
 
-def simd(name, op, t_a, t_b, t_out, lanes, steps=6):
-    t = Test(name, "SimdLanes", [t_a, t_b], np.result_type(NP[t_a], NP[t_b]).name,
-             t_out, lanes, op=op)
+def simd(name, op, t_a, t_b, t_out, lanes, steps=6, op_t=None):
+    """A two-stream SimdLanes at op_t, by default the inputs' result type; a wider op_t is a
+    kernel's cast (int32(a) * int32(b): the exact product of int8 inputs)."""
+    T = np.result_type(NP[t_a], NP[t_b]) if op_t is None else np.dtype(NP[op_t])
+    t = Test(name, "SimdLanes", [t_a, t_b], T.name, t_out, lanes, op=op)
     for _ in range(steps):
         a, b = rand(t_a, lanes), rand(t_b, lanes)
-        T = np.result_type(NP[t_a], NP[t_b])
         x, y = a.astype(T), b.astype(T)
         r = {"add": x + y, "sub": x - y, "mul": x * y, "min": np.minimum(x, y),
              "max": np.maximum(x, y), "xor": x ^ y}[op]
@@ -368,6 +369,16 @@ def main():
                 name = t_in if t_in == t_out else f"{t_in}_to_{t_out}"
                 tests.append(tree_seed(f"tree_seed_{name}_w{lanes}", t_in, t_out, lanes, 3))
                 tests.append(serial_seed(f"serial_seed_{name}_w{lanes}", t_in, t_out, lanes, 2))
+        # an opType wider than the inputs' result type, from the kernel's casts (int32(a) *
+        # int32(b): int8 inputs' exact product); drawn last, so the tests above stay as they were
+        for op, t_in, op_t, t_out, lanes in (("mul", "int8", "int32", "int32", 8),
+                                              ("add", "int8", "int32", "int32", 8),
+                                              ("mul", "int8", "int32", "int16", 8),
+                                              ("mul", "int16", "int32", "int32", 4),
+                                              ("mul", "int32", "int64", "int64", 2)):
+            tests.append(simd(f"simd_{op}_{t_in}_at_{op_t}_to_{t_out}_w{lanes}", op, t_in,
+                              t_in, t_out, lanes, op_t=op_t))
+        tests.append(mac("mac_acc_int8_at_int32_w8", "int8", "int32", "int32", 8, 3))
     # matvec_acc's worked example on TreeAccumulate at W = 2: rows (1, 2, 3, 4) . p = (1, 2, 0,
     # 1) in two beats, q = 1: 1 + 5 = 6, then 6 + 4 = 10
     t = Test("tree_seed_matvec_w2", "TreeAccumulate", ["int64", "int64"], "int64", "int64", 2,
