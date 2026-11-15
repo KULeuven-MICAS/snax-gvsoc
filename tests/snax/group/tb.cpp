@@ -17,7 +17,10 @@
 // component does) on a dot product of int64, beat i of a and b the head's i-th
 // firing's, and checks each result the last unit pushes against its job's sum:
 // the case's own data when it has some (lanes, data a, data b, sums), else 4
-// lanes of a_of and b_of and the sum of each job's products.
+// lanes of a_of and b_of and the sum of each job's products. A case with dout
+// D packs the outer output D to a word (snax_group.hpp's SnaxPacker): the
+// rule's outer room is the packer's, each cycle's word sent is compared, and
+// the words sent against the case's words, push n's result taken as -(n + 1).
 //
 //   tb CASE...
 //
@@ -50,6 +53,7 @@ struct CycleLine
     int ready = 1;
     std::vector<int> fire, give;    // per unit
     std::vector<int> occupancy;     // per buffer
+    int sent = 0;                   // with dout: a word went to the writer
     int busy = 0;
     int lineno = 0;
 };
@@ -66,6 +70,8 @@ struct Case
     std::vector<CycleLine> cycles;
     int lanes = 0;                      // 0: no data of its own
     std::vector<int64_t> a, b, sums;    // a and b element i * lanes + l, a job's sum each
+    int dout = 1;                       // the outer output's results per word (packer)
+    std::vector<uint64_t> words;        // with dout: the words the packer sends
 };
 
 static std::vector<std::string> fields(const std::string &line, char sep)
@@ -134,7 +140,7 @@ static bool parse(const std::string &path, Case &c)
             {
                 buffers += e.depth > 0;
             }
-            size_t want = 2 + c.units.size() + (buffers ? 1 : 0);
+            size_t want = 2 + c.units.size() + (buffers ? 1 : 0) + (c.dout > 1 ? 1 : 0);
             CycleLine l;
             l.lineno = lineno;
             ok = cols.size() == want;
@@ -166,6 +172,12 @@ static bool parse(const std::string &path, Case &c)
                 {
                     l.occupancy = ints(cols[1 + c.units.size()]);
                     ok = l.occupancy.size() == buffers;
+                }
+                if (ok && c.dout > 1)
+                {
+                    std::vector<int> sent = ints(cols[cols.size() - 2]);
+                    ok = sent.size() == 1;
+                    l.sent = ok ? sent[0] : 0;
                 }
                 std::vector<int> busy = ints(cols.back());
                 ok = ok && busy.size() == 1;
@@ -235,6 +247,15 @@ static bool parse(const std::string &path, Case &c)
                 int64s(ss, name == "a" ? c.a : c.b);
         }
         else if (key == "sums") { ok = int64s(ss, c.sums); }
+        else if (key == "dout") { ok = (bool)(ss >> c.dout) && (c.dout == 2 || c.dout == 4 || c.dout == 8); }
+        else if (key == "words")
+        {
+            std::string w;
+            while (ok && ss >> w)
+            {
+                c.words.push_back(std::stoull(w, nullptr, 0));
+            }
+        }
         else if (key == "cycles") { in_cycles = true; }
         else { ok = false; }
         if (!ok)
@@ -332,8 +353,12 @@ static int run(const Case &c)
     std::unique_ptr<SnaxGroupDatapaths> data = dot_datapaths(c, rule);
     int head_fired = 0, pushed = 0;
     // Each job's sum: the head fires n / JOBS beats a job
-    uint32_t per_job = c.jobs ? ts[0] * ts[1] : 0;
+    uint32_t per_job = c.jobs && ts.size() > 1 ? ts[0] * ts[1] : 0;
     const int lanes = c.lanes ? c.lanes : LANES;
+    SnaxPacker packer;
+    packer.d_out = c.dout;
+    uint32_t results = 0, packed = 0;   // the run's results and the pushes into the packer
+    std::vector<uint64_t> words;
     for (size_t t = 0; t < c.cycles.size(); t++)
     {
         int64_t cycle = t;
@@ -349,6 +374,9 @@ static int run(const Case &c)
             if (answer == SnaxGroupRule::TAKEN)
             {
                 run_busy = 0;
+                results = rule.firings_per_run[output] / rule.job_beats[output];
+                packed = 0;
+                packer.clear();
             }
             if (c.start_result != tb_start_names[answer])
             {
@@ -374,8 +402,24 @@ static int run(const Case &c)
                 seeds.push_back(u.seed ? (bool)l.valid[at++] : true);
             }
             std::vector<bool> room(c.units.size(), true);
-            room[output] = l.ready;
+            bool last = packed + 1 == results;
+            room[output] = packer.room(l.ready, last);
             step = rule.step(cycle, inputs, seeds, room);
+            int sent = 0;
+            if (step.units[output].push)
+            {
+                uint64_t word;
+                sent = packer.push((uint64_t)(-(int64_t)(packed + 1)), last, &word);
+                if (sent)
+                {
+                    words.push_back(word);
+                }
+                packed++;
+            }
+            if (c.dout > 1 && sent != l.sent)
+            {
+                fail("sent " + std::to_string(sent) + ", expected " + std::to_string(l.sent));
+            }
             if (data)
             {
                 std::vector<uint64_t> a(lanes), bb(lanes);
@@ -477,6 +521,16 @@ static int run(const Case &c)
     {
         printf("%s: %zu run line(s) expected, %zu given\n", c.name.c_str(), c.expects.size(),
             next_expect);
+        errors++;
+    }
+    if (c.dout > 1 && words != c.words)
+    {
+        printf("%s: %zu word(s) sent, the case's %zu differ\n", c.name.c_str(), words.size(),
+            c.words.size());
+        for (size_t i = 0; i < words.size(); i++)
+        {
+            printf("  word %zu: 0x%016llx\n", i, (unsigned long long)words[i]);
+        }
         errors++;
     }
     return errors;

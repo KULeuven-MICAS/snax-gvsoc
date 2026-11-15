@@ -86,6 +86,18 @@
 // flight, beats in a buffer: accel.py's idle). busy + stall_in + stall_out +
 // flush is the run's busy cycles, E - s; the run line's firings are the
 // head's (the first unit in the topological order).
+//
+// SnaxPacker: the outer output's packer, when its d_out results fill one 64-bit
+// word (a one-lane int32 fold at d_out 2, int16 at 4, int8 at 8; D174), placed
+// between the owning unit and its writer as the Chisel's FifoPacker. A run clears
+// its slice pointer; each push puts the result's low 64 / d_out bits at the
+// slice; the word goes to the writer when the slice is d_out - 1 (full) or the
+// push is the run's last, the slices above it zero, and the pointer clears. Only
+// such a sending push needs the writer: room(ready, last) is the unit's outer
+// room, true on a filling push, so no cycle is added and only the writer's
+// beats drop by d_out. last is the run's last result, from the count of pushes
+// (pushes == results - 1), never from this cycle's push, so room does not
+// depend on itself. At d_out 1 every push sends, unchanged.
 
 #pragma once
 
@@ -662,4 +674,50 @@ private:
     std::vector<SnaxEnables> en, ben;
     std::vector<std::vector<const uint64_t *>> in;
     std::vector<const uint64_t *> buffer_in;
+};
+
+
+
+// NB (D174): the Chisel's FifoPacker, cycle for cycle (module doc)
+struct SnaxPacker
+{
+    int d_out = 1;
+    int slice = 0;
+    uint64_t word = 0;
+
+    void clear()
+    {
+        this->slice = 0;
+        this->word = 0;
+    }
+
+    bool sending(bool last) const
+    {
+        return this->slice == this->d_out - 1 || last;
+    }
+
+    bool room(bool ready, bool last) const
+    {
+        return ready || !this->sending(last);
+    }
+
+    // A push of value: true, with the word in *out, when it sends
+    bool push(uint64_t value, bool last, uint64_t *out)
+    {
+        const int bits = 64 / this->d_out;
+        const uint64_t mask = bits == 64 ? ~(uint64_t)0 : (((uint64_t)1 << bits) - 1);
+        if (this->slice == 0)
+        {
+            this->word = 0;
+        }
+        this->word |= (value & mask) << (this->slice * bits);
+        if (this->sending(last))
+        {
+            *out = this->word;
+            this->slice = 0;
+            return true;
+        }
+        this->slice++;
+        return false;
+    }
 };

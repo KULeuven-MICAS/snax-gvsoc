@@ -379,6 +379,11 @@ def main():
             tests.append(simd(f"simd_{op}_{t_in}_at_{op_t}_to_{t_out}_w{lanes}", op, t_in,
                               t_in, t_out, lanes, op_t=op_t))
         tests.append(mac("mac_acc_int8_at_int32_w8", "int8", "int32", "int32", 8, 3))
+        # the folds at the narrow types PACK1a runs: int8 and int16 in, int32 out
+        for t_in, lanes in (("int8", 8), ("int16", 4)):
+            tests.append(tree(f"tree_{t_in}_to_int32_w{lanes}", t_in, "int32", lanes, 3))
+            tests.append(serial(f"serial_{t_in}_to_int32_w{lanes}", t_in, "int32", lanes, 2))
+            tests.append(lane_acc(f"lane_acc_{t_in}_to_int32_w{lanes}", t_in, "int32", lanes, 3))
     # matvec_acc's worked example on TreeAccumulate at W = 2: rows (1, 2, 3, 4) . p = (1, 2, 0,
     # 1) in two beats, q = 1: 1 + 5 = 6, then 6 + 4 = 10
     t = Test("tree_seed_matvec_w2", "TreeAccumulate", ["int64", "int64"], "int64", "int64", 2,

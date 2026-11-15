@@ -15,6 +15,7 @@ A group is a graph of units whose links are edges, each a wire (depth 0) or a bu
 - **Reading.** A unit reads its input in every cycle it wants to, has a beat and is not frozen. At span S (SerialAccumulate) it reads lane l in place, one a cycle, and takes the beat on lane S − 1, so a wire's producer holds its result until the last lane. At span 1 the read is its firing.
 - **Seed.** A seeded fold's job's first beat waits for its seed too (fire = a.valid and (not first or seed.valid)), and its firing takes the seed (seed.ready = fire and first).
 - **Busy.** The group is busy from the cycle after the start to the push of the last unit's last result; its classes are judged at its boundary (`docs/EVENTS.md`).
+- **Packer** (D174, `snax_group.hpp`'s `SnaxPacker`, snax-forge's `FifoPacker`). With d_out results to a word, the slice pointer clears at the start; a push puts the result's low 64 / d_out bits at the slice; the word goes to the writer when the slice is d_out − 1 or the push is the run's last result (counted, pushes = results − 1, not this cycle's push), the slices above zero. The outer output's room is the writer's ready only on such a sending push; a filling push needs none, so no cycle is added.
 
 ## A case file
 
@@ -30,6 +31,8 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 | `lanes L` | optional, with the next two: the lanes of the case's own data |
 | `data a\|b V...` | the head's input a or b, element i * L + l lane l of the beat it fires i-th, signed decimal int64 |
 | `sums S...` | each job's expected result, in push order (JOBS of them) |
+| `dout D` | optional: the outer output packed D results to a 64-bit word (D174; 2, 4 or 8), the cycle lines then with a `sent` column |
+| `words W...` | with `dout`: the words the packer sends, in order (hex), push n's result taken as -(n + 1) so each slice shows |
 | `cycles` | the cycle lines follow |
 
 A cycle line is `V... R | F G | F G ... | O... | B`:
@@ -37,6 +40,7 @@ A cycle line is `V... R | F G | F G ... | O... | B`:
 - `V... R`: the outer inputs' valid, unit by unit in port order (a seeded unit's seed last among its own), then the outer output's ready;
 - `F G` per unit: whether it fires (takes its input beat) and gives (pushes a result into its link or the outer output);
 - `O...`: per buffer its occupancy after the cycle (absent when every link is a wire);
+- `S`, with `dout`: whether a word went to the writer;
 - `B`: busy.
 
 The rule is stepped only in busy cycles, each unit's outer valids ANDed, a seed's apart.
@@ -52,6 +56,9 @@ The rule is stepped only in busy cycles, each unit's outer valids ANDed, a seed'
 | `dot4_jobs0` | dot 4 with JOBS 0: the empty run, ignored, busy never rises |
 | `seed_none`, `seed_first`, `seed_both` | the fold's seed: acc (TreeAccumulate, T 2) -> wire -> sum (TreeAccumulate, T 2), JOBS 2, neither, the first or both seeded, every seed there from the start: the same cycles all three (gen.py checks it) |
 | `seed_late` | matvec_seed's sum alone (TreeAccumulate, T 4, JOBS 2), its seed missing in cycles 1 to 3 and 8 to 9: each job's first beat waits for it (stall_in), the job's other beats do not |
+| `pack_d<D>_j<J>` | sum (TreeAccumulate, T 2) alone, its result packed D = 2, 4, 8 to a word (int32, int16, int8 results), JOBS 1 (one short word), 9 (a short last word) and 10 (whole words at D 2) |
+| `pack_d2_backpressure` | the same at D 2, JOBS 4, the writer not ready in cycles 3 to 5: the filling push goes ahead, the sending one waits (stall_out) |
+| `pack_dot3_d2_j3` | dot 3 (T 2) at D 2, JOBS 3: one whole word, then a short one on the last push; the dot product checked as the other dot cases |
 | `seed_serial_late` | Mac (T 2) -> wire -> SerialAccumulate (span 4, seeded, T 1), JOBS 2, the seed missing in cycles 1 to 4 and 7: the sum reads its job's first beat lane by lane only while its seed is there, the Mac holds its result |
 
 Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, and the formulas C2 = JT + 2, C3 = JT + 1, C4 = JT + 2, C5 = J(T + W - 1) + 2, C6 = (J - 1) max(T, W) + T + W + 2):
@@ -67,4 +74,4 @@ Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, 
 
     tests/snax/group/run.sh
 
-It prints `PASS` per case (`, data` where the dot product is checked too) and ends with `30 passed, 0 failed`.
+It prints `PASS` per case (`, data` where the dot product is checked too) and ends with `41 passed, 0 failed`.

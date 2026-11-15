@@ -1,0 +1,19 @@
+# sum (TreeAccumulate, T 2), JOBS 1, its result packed 4 to a word (16-bit results)
+# a word every d_out pushes, the run's last push sending a short one; push n's result is -(n + 1), so a word shows its slices
+
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 1
+jobs 1
+dout 4
+start 0 taken
+expect run index=0 firings=2 busy=2 stall_in=0 stall_out=0 flush=1
+# E - s = 3
+words 0x000000000000ffff
+
+# a ready | sum fire give | sent | busy
+cycles
+1 1 | 0 0 | 0 | 0    # 0: idle
+1 1 | 1 0 | 0 | 1    # 1: sum fires 0
+1 1 | 1 0 | 0 | 1    # 2: sum fires 1 (gives)
+1 1 | 0 1 | 1 | 1    # 3: sum pushes (word sent)
+1 1 | 0 0 | 0 | 0    # 4: idle
+1 1 | 0 0 | 0 | 0    # 5: idle

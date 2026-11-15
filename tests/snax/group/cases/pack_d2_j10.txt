@@ -1,0 +1,37 @@
+# sum (TreeAccumulate, T 2), JOBS 10, its result packed 2 to a word (32-bit results)
+# a word every d_out pushes, the run's last push sending a short one; push n's result is -(n + 1), so a word shows its slices
+
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 1
+jobs 10
+dout 2
+start 0 taken
+expect run index=0 firings=20 busy=20 stall_in=0 stall_out=0 flush=1
+# E - s = 21
+words 0xfffffffeffffffff 0xfffffffcfffffffd 0xfffffffafffffffb 0xfffffff8fffffff9 0xfffffff6fffffff7
+
+# a ready | sum fire give | sent | busy
+cycles
+1 1 | 0 0 | 0 | 0    # 0: idle
+1 1 | 1 0 | 0 | 1    # 1: sum fires 0
+1 1 | 1 0 | 0 | 1    # 2: sum fires 1 (gives)
+1 1 | 1 1 | 0 | 1    # 3: sum pushes; sum fires 2
+1 1 | 1 0 | 0 | 1    # 4: sum fires 3 (gives)
+1 1 | 1 1 | 1 | 1    # 5: sum pushes; sum fires 4 (word sent)
+1 1 | 1 0 | 0 | 1    # 6: sum fires 5 (gives)
+1 1 | 1 1 | 0 | 1    # 7: sum pushes; sum fires 6
+1 1 | 1 0 | 0 | 1    # 8: sum fires 7 (gives)
+1 1 | 1 1 | 1 | 1    # 9: sum pushes; sum fires 8 (word sent)
+1 1 | 1 0 | 0 | 1    # 10: sum fires 9 (gives)
+1 1 | 1 1 | 0 | 1    # 11: sum pushes; sum fires 10
+1 1 | 1 0 | 0 | 1    # 12: sum fires 11 (gives)
+1 1 | 1 1 | 1 | 1    # 13: sum pushes; sum fires 12 (word sent)
+1 1 | 1 0 | 0 | 1    # 14: sum fires 13 (gives)
+1 1 | 1 1 | 0 | 1    # 15: sum pushes; sum fires 14
+1 1 | 1 0 | 0 | 1    # 16: sum fires 15 (gives)
+1 1 | 1 1 | 1 | 1    # 17: sum pushes; sum fires 16 (word sent)
+1 1 | 1 0 | 0 | 1    # 18: sum fires 17 (gives)
+1 1 | 1 1 | 0 | 1    # 19: sum pushes; sum fires 18
+1 1 | 1 0 | 0 | 1    # 20: sum fires 19 (gives)
+1 1 | 0 1 | 1 | 1    # 21: sum pushes (word sent)
+1 1 | 0 0 | 0 | 0    # 22: idle
+1 1 | 0 0 | 0 | 0    # 23: idle

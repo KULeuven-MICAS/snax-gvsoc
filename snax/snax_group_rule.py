@@ -41,6 +41,11 @@ beat) > flush.
 
 A group is one chain: a unit with two out-edges (a fork) or two in-edges (a join),
 a cycle, or units no link joins are refused (GroupError), as snax_cfg.py's ``gen.chain``.
+
+With ``d_out`` above 1 the outer output goes through a packer (D174, snax_group.hpp's
+SnaxPacker): the owning unit's outer room is ``ready`` only on a push that sends the word (its
+slice is d_out - 1, or the push is the run's last result, from the count of pushes), true on a
+push the packer keeps; ``sent`` lists, per cycle, whether a word went to the writer.
 """
 
 
@@ -104,7 +109,7 @@ class GroupRule:
             n[k] = (jobs if not succ else n[succ[0]]) * job_beats[k]
         return n
 
-    def run(self, jobs, job_beats, valid, ready, cycles):
+    def run(self, jobs, job_beats, valid, ready, cycles, d_out=1):
         """Steps a run started in cycle 0 for ``cycles`` cycles: valid(c) the outer inputs'
         valids (a unit with outer inputs has its beat when all are 1), ready(c) the outer
         output's; valid(c) gives every unit's outer inputs in unit and port order, a seeded
@@ -119,12 +124,17 @@ class GroupRule:
         occ = [0] * len(links)
         rows, end = [], None
         empty = jobs == 0 or 0 in job_beats
+        results = 0 if empty else firings_per_run[self.output] // job_beats[self.output]
+        pushes, slice_ = 0, 0
+        self.sent = []
         for c in range(cycles):
             v, r = valid(c), ready(c)
             busy = c >= 1 and not empty and (end is None or c <= end)
             if not busy:
                 rows.append((v, r, [(0, 0)] * n, list(occ), 0, "-", "idle"))
+                self.sent.append(0)
                 continue
+            sending = slice_ == d_out - 1 or pushes + 1 == results
             ins, seeds, at = [], [], 0
             for u in self.units:
                 mine = list(v[at:at + u["inputs"]])
@@ -150,7 +160,7 @@ class GroupRule:
             frozen, fires = [False] * n, [False] * n
             for k in reversed(self.order):
                 u = self.units[k]
-                room = (r if k == self.output else True) and all(
+                room = ((r or not sending) if k == self.output else True) and all(
                     fires[links[i]["dst"]] if links[i]["depth"] == 0
                     else occ[i] < links[i]["depth"] or fires[links[i]["dst"]]
                     for i in self.outs[k])
@@ -183,6 +193,9 @@ class GroupRule:
                     notes.append(f"{u['name']} pushes")
                 fires[k] = fire
                 out[k] = (int(fire), int(push))
+                if push and k == self.output:
+                    pushes += 1
+                    slice_ = 0 if sending else slice_ + 1
             for i, e in enumerate(links):
                 if e["depth"]:
                     occ[i] += out[e["src"]][1] - out[e["dst"]][0]
@@ -192,5 +205,6 @@ class GroupRule:
                     and not any(occ))
             if done:
                 end = c
+            self.sent.append(int(out[self.output][1] and sending))
             rows.append((v, r, out, list(occ), 1, cls, "; ".join(reversed(notes)) or cls))
         return rows, end

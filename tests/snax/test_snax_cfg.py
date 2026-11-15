@@ -752,6 +752,21 @@ class LinkedGroup(unittest.TestCase):
     def link(self, **kw):
         self.acc["accelerators"][0]["groups"][0]["links"][0].update(kw)
 
+    def test_a_packed_output(self):
+        """sum.out at int32 packed two to a word (d_out 2, D174) on the writer's one channel;
+        d_out on an input, a d_out that does not fill a word, or one not 2, 4 or 8, refused."""
+        out = self.acc["accelerators"][0]["groups"][0]["units"][1]["ports"]["out"]
+        out.update(dtype="int32", d_out=2)
+        (group,) = self.load().description.groups
+        self.assertEqual(group.units[1].ports["out"].d_out, 2)
+        out.update(dtype="int64")
+        self.fails(snax_cfg.CfgSlotError, "d_out 2 results of 64 bits are 128 bits")
+        out.update(dtype="int32", d_out=3)
+        self.fails(snax_cfg.CfgTypeError, "an output's results per word, 2, 4 or 8")
+        del out["d_out"]
+        self.acc["accelerators"][0]["groups"][0]["units"][0]["ports"]["a"]["d_out"] = 2
+        self.fails(snax_cfg.CfgTypeError, "an output's results per word")
+
     def test_gen_link(self):
         self.link(to="mac.a")  # out to an in port, but mac.a is outer: also on inputs
         self.fails(snax_cfg.CfgSlotError, "gen.")
