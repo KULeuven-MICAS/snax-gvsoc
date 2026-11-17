@@ -8,7 +8,8 @@ check_traces() on a forge/ run's trace.log. Run from snax-gvsoc:
 
 The log is one run written by hand in GVSoC's header and docs/EVENTS.md's
 grammar: the unit starts at 10 and ends at 20 (stall_in 11-12, busy 13-20),
-reader0 ends at 21 (busy 11-18, idle 19-21).
+reader0 ends at 21 (busy 11-18, idle 19-21); the end of the simulation's
+snapshot, mark=-1, at 30.
 """
 
 import sys
@@ -38,6 +39,10 @@ LOG = [
     line(UNIT, "summary", 20, "run index=0 firings=8 busy=8 stall_in=2 stall_out=0 flush=0"),
     line(STREAMER, "summary", 21,
          "mover mover=reader0 run=0 busy=8 stall_xbar=0 stall_fifo=0 idle=3 qmax=1,1"),
+    line(STREAMER, "summary", 30,
+         "snap mark=-1 mover=reader0 busy=8 stall_xbar=0 stall_fifo=0 idle=3"),
+    line(UNIT, "summary", 30, "snap mark=-1 busy=8 stall_in=2 stall_out=0 flush=0"),
+    line(UNIT, "summary", 30, "snap mark=-1 unit=add firings=8 pushes=8"),
 ]
 CLASS = 5  # LOG[CLASS] is a streamer class line, line 6 of the file
 
@@ -51,7 +56,8 @@ class Parse(unittest.TestCase):
     def test_a_whole_log_parses_and_its_classes_match(self):
         parsed = classes.parse("\n".join(LOG) + "\n")
         self.assertEqual([x.kind for x in parsed],
-                         ["start", "class", "class", "class", "fire", "class", "run", "mover"])
+                         ["start", "class", "class", "class", "fire", "class", "run", "mover",
+                          "snap", "snap", "snap"])
         self.assertEqual(classes.unit_runs(parsed), {0: [8, 8, 2, 0, 0]})
         self.assertIsNone(classes.check(parsed))
 
@@ -106,6 +112,12 @@ class CheckTraces(unittest.TestCase):
         why, where = self.run_checks(cut(LOG, CLASS, len(LOG[CLASS]) - 2))
         self.assertEqual(where, "trace.log")
         self.assertTrue(why.endswith("trace.log line 7: not a trace line: 'le'"), why)
+
+    def test_a_snapshot_off_the_run_lines_fails_with_the_numbers(self):
+        off = [*LOG[:-1], LOG[-1].replace("firings=8", "firings=9")]
+        why, where = self.run_checks(off)
+        self.assertEqual(where, "trace.log")
+        self.assertIn("unit=add: firings 9 vs the run lines' 8", why)
 
     def test_a_cut_run_line_fails_the_run_not_the_counter(self):
         why, where = self.run_checks(cut(LOG, 6, LOG[6].index(" flush")))
