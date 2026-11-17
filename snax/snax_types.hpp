@@ -156,11 +156,12 @@ inline void snax_lane_set(uint64_t *words, int width, int lane, uint64_t v)
 // A SimdLanes beat, as NumPy's out = (T(a) op T(b)).astype(out_t): per lane,
 // a and b each at its own port's type, both extended to T (the unit's opType,
 // which holds both), the op at T, and the result cast to out_t. The words:
-// lanes * width / 64 per port, out's cleared here.
+// lanes * width / 64 per port (one at fewer lanes than a word), out's cleared
+// here.
 inline void snax_op_elementwise_at(int op, int lanes, SnaxType a_t, SnaxType b_t,
     SnaxType t, SnaxType out_t, const uint64_t *a, const uint64_t *b, uint64_t *out)
 {
-    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    for (int w = 0; w < (lanes * out_t.width + 63) / 64; w++)
     {
         out[w] = 0;
     }
@@ -198,7 +199,7 @@ inline bool snax_holds(SnaxType t, SnaxType a)
 inline void snax_op_elementwise_k(int op, int lanes, SnaxType a_t, SnaxType t,
     SnaxType out_t, const uint64_t *a, uint64_t k, uint64_t *out)
 {
-    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    for (int w = 0; w < (lanes * out_t.width + 63) / 64; w++)
     {
         out[w] = 0;
     }
@@ -220,7 +221,7 @@ inline void snax_op_elementwise_k(int op, int lanes, SnaxType a_t, SnaxType t,
 inline void snax_op_axpby(int lanes, SnaxType a_t, SnaxType b_t, SnaxType t, SnaxType out_t,
     const uint64_t *a, const uint64_t *b, uint64_t k1, bool has_k2, uint64_t k2, uint64_t *out)
 {
-    for (int w = 0; w < lanes * out_t.width / 64; w++)
+    for (int w = 0; w < (lanes * out_t.width + 63) / 64; w++)
     {
         out[w] = 0;
     }
