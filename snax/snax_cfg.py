@@ -108,12 +108,15 @@ one snax_streamer_cfg takes one accelerator, whatever its name); each
 accelerator's inputs and outputs are its set's readers and writers in number;
 they are exactly the ports on no link, group by group, unit by unit in port
 order (gen.outer), each link goes from an out port to an in port of its
-group's units with the same dtype and lanes (gen.link), no port is on two
-links (gen.link_port) and a group's links connect its units (gen.group), the
+group's units with the same dtype and lanes, neither end sliced nor packed
+(gen.link), no port is on two links (gen.link_port) and a group's links
+connect its units (gen.group), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
-1), since SnaxGroup has no FIFO slicer; an outer output with d_out (D174) fills
-one word with d_out results, on one channel, through SnaxGroup's packer; each set's snax_num_rw_csr and
+1); an outer output with d_out (D174) fills one word with d_out results, on one
+channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
+word on one channel, d_in pops of its lanes through SnaxGroup's slicer, d_in
+the word's elements / lanes; each set's snax_num_rw_csr and
 snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
 opType holds its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
@@ -404,13 +407,15 @@ class Csr:
 @dataclass(frozen=True)
 class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes, its
-    direction (in or out) and, on an outer output a packer feeds, d_out (D174)."""
+    direction (in or out) and, on an outer output a packer feeds, d_out (D174), on an outer
+    input a slicer feeds, d_in (D180)."""
 
     port: str
     dtype: str
     lanes: int
     dir: str
     d_out: int = 1
+    d_in: int = 1
 
     @property
     def width(self) -> int:
@@ -812,7 +817,12 @@ def _port(node: _Node) -> Port:
     if d_out not in (1, 2, 4, 8) or (d_out > 1 and direction != 'out'):
         raise CfgTypeError(node.file, node.where('d_out'),
             f'{d_out}: an output\'s results per word, 2, 4 or 8 (absent at 1)')
-    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction, d_out=d_out)
+    d_in = node.get('d_in', int, 1)
+    if d_in not in (1, 2, 4, 8) or (d_in > 1 and direction != 'in'):
+        raise CfgTypeError(node.file, node.where('d_in'),
+            f'{d_in}: an input\'s pops per word, 2, 4 or 8 (absent at 1)')
+    return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction, d_out=d_out,
+                d_in=d_in)
 
 
 def _unit(node: _Node) -> Unit:
@@ -1128,6 +1138,10 @@ def _check_links(node: _Node, acc: Accelerator):
             if (a[0].dtype, a[0].lanes) != (b[0].dtype, b[0].lanes):
                 fail('groups', f'{what}: {k.from_} is {a[0].lanes} lanes of {a[0].dtype}, '
                      f'{k.to} {b[0].lanes} of {b[0].dtype}; both ends are the same')
+            for end, p in ((k.from_, a[0]), (k.to, b[0])):
+                if p.d_in > 1 or p.d_out > 1:
+                    fail('groups', f'{what}: {end} has d_in {p.d_in} and d_out {p.d_out}; a '
+                         'linked port has no slicer or packer, so both are 1 (absent)')
             for end in (k.from_, k.to):
                 if end in linked:
                     fail('groups', f'gen.link_port: group {g.name}\'s link {k.name}: port {end} '
@@ -1323,8 +1337,8 @@ def _check_slot(acc: _Node, slot: AccSlot):
 def _check_description(acc: _Node, slot: AccSlot):
     """accelerator.json against the slot: one accelerator per set, in the sets' order; each
     accelerator's outer ports against its set's movers, each port's words per beat against
-    its mover's num_channel (SnaxGroup has no FIFO slicer, so they must match: the streamer
-    would refuse the beat's size mid-run), and each set's CSR counts."""
+    its mover's num_channel (or one word, sliced or packed: the streamer would refuse the
+    beat's size mid-run), and each set's CSR counts."""
     desc = slot.description
 
     def fail(key, why):
@@ -1370,7 +1384,8 @@ def _check_description(acc: _Node, slot: AccSlot):
 def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: int,
                 mover: str):
     """Why an outer port's words per beat are not its mover's num_channel (or its user's on a
-    shared mover), or None: SnaxGroup has no FIFO slicer, so they must match."""
+    shared mover), or None: they must match, or with d_out or d_in one word fills or empties
+    in d results on one channel."""
     unit, _, name = entry.partition('.')
     u = accelerator.unit(unit)
     port = u.ports[name]
@@ -1380,6 +1395,12 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
             return (f'{entry}: d_out {port.d_out} results of {bits // port.d_out} bits are '
                     f'{bits} bits, not one 64-bit word, or {mover} has num_channel {channels}, '
                     'not 1')
+        return None
+    if port.d_in > 1:  # sliced (D180): one word gives d_in pops of lanes x width bits
+        if port.lanes * port.width * port.d_in != 64 or channels != 1:
+            return (f'{entry}: d_in {port.d_in} pops of {port.lanes} x {port.width} bits are '
+                    f'{port.lanes * port.width * port.d_in} bits, not one 64-bit word, or '
+                    f'{mover} has num_channel {channels}, not 1')
         return None
     if CATALOGUE[u.datapath].reduces and output:
         if channels != 1:
@@ -1392,8 +1413,7 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
                 '64-bit channel words')
     if bits // 64 != channels:
         return (f'{entry}: lanes {port.lanes} x {port.width} bits is {bits // 64} 64-bit words '
-                f'per beat, but {mover} has num_channel {channels}: SnaxGroup has no FIFO '
-                'slicer, so they must match')
+                f'per beat, but {mover} has num_channel {channels}: they must match')
     return None
 
 

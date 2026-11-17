@@ -81,6 +81,8 @@ For a linked group:
 
 An output packed d_out results to a word (D174) still has one `push` line per result; its writer writes one word every d_out pushes, and on the run's last push, so the writer's `b` counts words, not results: the writer's grant of word w follows the push of result (w + 1) · d_out − 1, or the last one.
 
+An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word.
+
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
 | `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS; a linked group's head's), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |

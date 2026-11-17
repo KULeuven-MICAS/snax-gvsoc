@@ -46,18 +46,14 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #endif  // FORGE_QUIET
     csrw_ss(ACC_RW_JOBS, 3);
     csrw_ss(ACC_RW_JOB_BEATS, 2);
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
+#endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 4);  // run acc
 #endif  // FORGE_QUIET
     csrw_ss(ACC_STREAMER_START_CSR, 1);
     csrw_ss(ACC_RW_START, 1);
-#ifdef FORGE_QUIET
-    while (csrr_ss(ACC_RO_STATUS) & 1) {
-    }
-    while (csrr_ss(ACC_STREAMER_BUSY_CSR)) {
-    }
-#endif  // FORGE_QUIET
     while (csrr_ss(ACC_RO_STATUS) & 1) {
     }
     while (csrr_ss(ACC_STREAMER_BUSY_CSR)) {
@@ -67,9 +63,6 @@ static __attribute__((noinline)) int forge_core_0(void) {
     write_csr(0x7c5, 5);  // dma store_y
 #endif  // FORGE_QUIET
     snrt_dma_start_1d(y, (void *)0x100000c0, 64);
-#ifdef FORGE_QUIET
-    snrt_dma_wait_all();
-#endif  // FORGE_QUIET
     snrt_dma_wait_all();
     return 0;
 }

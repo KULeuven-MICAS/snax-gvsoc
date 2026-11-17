@@ -19,7 +19,9 @@
 //
 // Every port carries whole 64-bit channel words, lane l of a b-bit type at
 // bits [l * b, (l + 1) * b) (snax_types.hpp), but a fold's one-lane output,
-// one word. The enables (SnaxEnables) come from the control model per cycle:
+// one word, and a port whose lanes are a slice of a word (lanes x b divides
+// 64: a sliced input or a packed output, D180, D174), one word, its lanes in
+// the low bits. The enables (SnaxEnables) come from the control model per cycle:
 // fire (a beat taken from every input), first (the job's first beat, d = 0),
 // read and lane (a SerialAccumulate reading lane `lane` in place), en (a
 // plain Mac's output register, regOut), load, wslot and rslot (a LinkBuffer's
@@ -141,7 +143,7 @@ protected:
 
 inline int snax_words(int lanes, SnaxType t)
 {
-    return lanes * t.width / 64;
+    return std::max(1, lanes * t.width / 64);
 }
 
 
@@ -464,14 +466,15 @@ using SnaxDatapathFactory =
 
 struct SnaxDatapathEntry
 {
-    bool whole_words;           // each input's lanes fill whole 64-bit words
+    bool whole_words;           // each input's lanes fill whole 64-bit words, or a slice of one
     SnaxDatapathFactory make;
 };
 
-// Whether the elements of lanes of t fill whole 64-bit words
+// Whether the elements of lanes of t fill whole 64-bit words, or a slice of one word (lanes x
+// width divides 64: a sliced input's beat, D180)
 inline bool snax_whole_words(int lanes, SnaxType t)
 {
-    return lanes > 0 && lanes * t.width % 64 == 0;
+    return lanes > 0 && (lanes * t.width % 64 == 0 || 64 % (lanes * t.width) == 0);
 }
 
 inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
@@ -581,7 +584,7 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
         bool seed = p.seed && i + 1 == p.in_types.size();  // one element in one word
         if (it->second.whole_words && !seed && !snax_whole_words(p.lanes, t))
         {
-            *why = "an input's lanes are not whole 64-bit words";
+            *why = "an input's lanes are neither whole 64-bit words nor a slice of one";
             return nullptr;
         }
     }

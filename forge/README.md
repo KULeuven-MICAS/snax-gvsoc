@@ -25,7 +25,7 @@ Every hjson and C file starts with a comment naming the design point.
 | Kind | Folders |
 |---|---|
 | element-wise, int64 | `vecadd`, `vecmul`, `vecadd_n7` (a padded tail) |
-| element-wise, narrow types | `vecadd_i32`, `vecmul_i32`, `vecmul_i32_i64`, `vecadd_i8`, `matadd` (int32, the first 2-D bind) |
+| element-wise, narrow types | `vecadd_i32`, `vecmul_i32`, `vecmul_i32_i64`, `vecadd_i8`, `matadd` (int32, the first 2-D bind), `vecadd_i32_w1` (one lane: inputs sliced 2 from a word, the output packed 2 to one) |
 | one stream and scalars | `relu`, `axpy` (a CSR scalar), `axpy_baked` (the scalar baked in) |
 | reductions | `vsum`, `vsum_tree`, `vsum_tree_i32`, `vsum_tree_i8`, `vsum_tree_n21`, `rowsum`, `rowsum_serial`, `rowsum_3x7`, `rowsum_2`, `rowsum_2_padded` (`padded_rows` layout) |
 | dot, the six variants | `dot_1` (two accelerators), `dot_1_enc` (one accelerator of two groups), `dot_2` to `dot_6` (one group of linked units) |

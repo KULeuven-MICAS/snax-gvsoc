@@ -60,18 +60,14 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #endif  // FORGE_QUIET
     csrw_ss(MATVEC_RW_JOBS, 16);
     csrw_ss(MATVEC_RW_MAC_JOB_BEATS, 128);
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
+#endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 5);  // run matvec
 #endif  // FORGE_QUIET
     csrw_ss(MATVEC_STREAMER_START_CSR, 1);
     csrw_ss(MATVEC_RW_START, 1);
-#ifdef FORGE_QUIET
-    while (csrr_ss(MATVEC_RO_STATUS) & 1) {
-    }
-    while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
-    }
-#endif  // FORGE_QUIET
     while (csrr_ss(MATVEC_RO_STATUS) & 1) {
     }
     while (csrr_ss(MATVEC_STREAMER_BUSY_CSR)) {
@@ -81,9 +77,6 @@ static __attribute__((noinline)) int forge_core_0(void) {
     write_csr(0x7c5, 6);  // dma store_q
 #endif  // FORGE_QUIET
     snrt_dma_start_1d(q, (void *)0x10011000, 128);
-#ifdef FORGE_QUIET
-    snrt_dma_wait_all();
-#endif  // FORGE_QUIET
     snrt_dma_wait_all();
     return 0;
 }

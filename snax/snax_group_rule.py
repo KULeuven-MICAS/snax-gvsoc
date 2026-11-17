@@ -46,6 +46,12 @@ With ``d_out`` above 1 the outer output goes through a packer (D174, snax_group.
 SnaxPacker): the owning unit's outer room is ``ready`` only on a push that sends the word (its
 slice is d_out - 1, or the push is the run's last result, from the count of pushes), true on a
 push the packer keeps; ``sent`` lists, per cycle, whether a word went to the writer.
+
+With ``d_in`` above 1 on an outer input, a slicer (D180, snax_group.hpp's SnaxSlicer) sits
+between its reader and the unit: the rule sees its held word (``full``), not the reader's
+valid; a firing (a seed's take) pops a slice, the d_in-th clears ``full``; it takes the
+reader's word when empty or on that last pop, only in busy cycles, so the word shows the
+cycle after. ``took`` lists, per cycle, whether each sliced input took a word.
 """
 
 
@@ -109,13 +115,14 @@ class GroupRule:
             n[k] = (jobs if not succ else n[succ[0]]) * job_beats[k]
         return n
 
-    def run(self, jobs, job_beats, valid, ready, cycles, d_out=1):
+    def run(self, jobs, job_beats, valid, ready, cycles, d_out=1, d_in=()):
         """Steps a run started in cycle 0 for ``cycles`` cycles: valid(c) the outer inputs'
         valids (a unit with outer inputs has its beat when all are 1), ready(c) the outer
         output's; valid(c) gives every unit's outer inputs in unit and port order, a seeded
-        unit's seed last among its own. Rows of (valids, ready, per unit (fire, give), per
-        link its occupancy, busy, class, notes) and the run's last cycle E (None when it does
-        not end)."""
+        unit's seed last among its own, a sliced input's its reader's. ``d_in`` the outer
+        inputs' pops per word in that order (missing: 1). Rows of (valids, ready, per unit
+        (fire, give), per link its occupancy, busy, class, notes) and the run's last cycle E
+        (None when it does not end)."""
         n, links = len(self.units), self.links
         firings_per_run = self.firings_per_run(jobs, job_beats)
         fired, lane = [0] * n, [0] * n
@@ -127,17 +134,25 @@ class GroupRule:
         results = 0 if empty else firings_per_run[self.output] // job_beats[self.output]
         pushes, slice_ = 0, 0
         self.sent = []
+        # each outer input's unit and whether it is that unit's seed, in valid(c)'s order
+        port = [(k, bool(u.get("seed")) and j == u["inputs"] - 1)
+                for k, u in enumerate(self.units) for j in range(u["inputs"])]
+        sliced = {i: d for i, d in enumerate(d_in) if d > 1}
+        full, count = dict.fromkeys(sliced, False), dict.fromkeys(sliced, 0)
+        self.took = []
         for c in range(cycles):
             v, r = valid(c), ready(c)
             busy = c >= 1 and not empty and (end is None or c <= end)
             if not busy:
                 rows.append((v, r, [(0, 0)] * n, list(occ), 0, "-", "idle"))
                 self.sent.append(0)
+                self.took.append([0] * len(sliced))
                 continue
             sending = slice_ == d_out - 1 or pushes + 1 == results
+            seen = [int(full[i]) if i in sliced else x for i, x in enumerate(v)]
             ins, seeds, at = [], [], 0
             for u in self.units:
-                mine = list(v[at:at + u["inputs"]])
+                mine = list(seen[at:at + u["inputs"]])
                 at += u["inputs"]
                 seeds.append(mine.pop() if u.get("seed") else 1)
                 ins.append(all(mine))
@@ -157,7 +172,7 @@ class GroupRule:
                 offer[k] = head[k] if u["L"] > 0 else gives[k]
             out, notes = [None] * n, []
             busy_cls = waits = False
-            frozen, fires = [False] * n, [False] * n
+            frozen, fires, seeded = [False] * n, [False] * n, [False] * n
             for k in reversed(self.order):
                 u = self.units[k]
                 room = ((r or not sending) if k == self.output else True) and all(
@@ -184,6 +199,7 @@ class GroupRule:
                     notes.append(f"{u['name']} fires {fired[k]}" + (" (gives)" if gives[k] else "")
                                  + (f", lane {lane[k]}" if u["span"] > 1 else "")
                                  + (", takes its seed" if seed else ""))
+                    seeded[k] = bool(seed)
                     fired[k] += 1
                     last[k] = c
                     lane[k] = 0
@@ -196,6 +212,23 @@ class GroupRule:
                 if push and k == self.output:
                     pushes += 1
                     slice_ = 0 if sending else slice_ + 1
+            # NB (D180): a slicer pops on its unit's firing (a seed's on its take); it takes the
+            # reader's word when empty or on its last pop, so the word shows the next cycle
+            took = []
+            for i, d in sliced.items():
+                k, seed = port[i]
+                pop = seeded[k] if seed else fires[k]
+                last_pop = pop and count[i] == d - 1
+                take = bool(v[i]) and (not full[i] or last_pop)
+                if last_pop:
+                    full[i] = False
+                elif pop:
+                    count[i] += 1
+                if take:
+                    full[i], count[i] = True, 0
+                    notes.append(f"input {i} takes a word")
+                took.append(int(take))
+            self.took.append(took)
             for i, e in enumerate(links):
                 if e["depth"]:
                     occ[i] += out[e["src"]][1] - out[e["dst"]][0]

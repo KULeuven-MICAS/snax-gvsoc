@@ -98,6 +98,18 @@
 // beats drop by d_out. last is the run's last result, from the count of pushes
 // (pushes == results - 1), never from this cycle's push, so room does not
 // depend on itself. At d_out 1 every push sends, unchanged.
+//
+// SnaxSlicer: an outer input's slicer, when its lanes W are fewer than a
+// word's elements and divide them (int32 W = 1; int16 W = 1, 2; int8 W = 1,
+// 2, 4; D180), placed between the reader and the unit as the Chisel's
+// FifoSlicer, the packer's mirror. It holds one 64-bit word and gives d_in =
+// elements / W pops of it, low slice first, each slice W lanes in the low
+// bits of the unit's beat. The unit sees full, not the reader's valid; a
+// firing (a seed input: the firing that takes the seed) pops the slice at
+// count, the d_in-th empties it. It takes the reader's word when it is empty
+// or on its last pop, judged on its state before the cycle's pop, and only in
+// busy cycles, so the word shows the cycle after (the RTL's registered
+// output). A run's start drops what it holds.
 
 #pragma once
 
@@ -719,5 +731,55 @@ struct SnaxPacker
         }
         this->slice++;
         return false;
+    }
+};
+
+
+// NB (D180): the Chisel's FifoSlicer, cycle for cycle (module doc)
+struct SnaxSlicer
+{
+    int d_in = 1;
+    bool full = false;
+    int count = 0;
+    uint64_t word = 0;
+
+    void clear()
+    {
+        this->full = false;
+        this->count = 0;
+        this->word = 0;
+    }
+
+    // Whether it takes the reader's word this cycle, on its state before the cycle's pop:
+    // empty, or pop is its last
+    bool open(bool pop) const
+    {
+        return !this->full || (pop && this->count == this->d_in - 1);
+    }
+
+    // A pop: the slice at count, in the low bits; the last empties it
+    uint64_t pop()
+    {
+        const int bits = 64 / this->d_in;
+        const uint64_t mask = bits == 64 ? ~(uint64_t)0 : (((uint64_t)1 << bits) - 1);
+        uint64_t slice = (this->word >> (this->count * bits)) & mask;
+        if (this->count == this->d_in - 1)
+        {
+            this->full = false;
+            this->count = 0;
+        }
+        else
+        {
+            this->count++;
+        }
+        return slice;
+    }
+
+    // A word taken from the reader, its first slice next
+    void take(uint64_t word)
+    {
+        this->word = word;
+        this->full = true;
+        this->count = 0;
     }
 };

@@ -15,6 +15,7 @@ A group is a graph of units whose links are edges, each a wire (depth 0) or a bu
 - **Reading.** A unit reads its input in every cycle it wants to, has a beat and is not frozen. At span S (SerialAccumulate) it reads lane l in place, one a cycle, and takes the beat on lane S − 1, so a wire's producer holds its result until the last lane. At span 1 the read is its firing.
 - **Seed.** A seeded fold's job's first beat waits for its seed too (fire = a.valid and (not first or seed.valid)), and its firing takes the seed (seed.ready = fire and first).
 - **Busy.** The group is busy from the cycle after the start to the push of the last unit's last result; its classes are judged at its boundary (`docs/EVENTS.md`).
+- **Slicer** (D180, `snax_group.hpp`'s `SnaxSlicer`, snax-forge's `FifoSlicer`). With d_in pops to a word, the unit sees the held word, not the reader's valid; a firing (a seed's take) pops a slice and the d_in-th empties it; the slicer takes the reader's word when empty or on that last pop, only while busy, so the word shows the cycle after. The start drops what it holds.
 - **Packer** (D174, `snax_group.hpp`'s `SnaxPacker`, snax-forge's `FifoPacker`). With d_out results to a word, the slice pointer clears at the start; a push puts the result's low 64 / d_out bits at the slice; the word goes to the writer when the slice is d_out − 1 or the push is the run's last result (counted, pushes = results − 1, not this cycle's push), the slices above zero. The outer output's room is the writer's ready only on such a sending push; a filling push needs none, so no cycle is added.
 
 ## A case file
@@ -33,6 +34,7 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 | `sums S...` | each job's expected result, in push order (JOBS of them) |
 | `dout D` | optional: the outer output packed D results to a 64-bit word (D174; 2, 4 or 8), the cycle lines then with a `sent` column |
 | `words W...` | with `dout`: the words the packer sends, in order (hex), push n's result taken as -(n + 1) so each slice shows |
+| `din I D` | optional, one per sliced input: outer input I (0-based, the order of the `V` columns) through a slicer of D pops a word (D180; 2, 4 or 8), its `V` column then its reader's valid and the cycle lines with a `took` column |
 | `cycles` | the cycle lines follow |
 
 A cycle line is `V... R | F G | F G ... | O... | B`:
@@ -40,6 +42,7 @@ A cycle line is `V... R | F G | F G ... | O... | B`:
 - `V... R`: the outer inputs' valid, unit by unit in port order (a seeded unit's seed last among its own), then the outer output's ready;
 - `F G` per unit: whether it fires (takes its input beat) and gives (pushes a result into its link or the outer output);
 - `O...`: per buffer its occupancy after the cycle (absent when every link is a wire);
+- `T...`, with `din`: per sliced input, whether its slicer took a word from the reader;
 - `S`, with `dout`: whether a word went to the writer;
 - `B`: busy.
 
@@ -59,6 +62,10 @@ The rule is stepped only in busy cycles, each unit's outer valids ANDed, a seed'
 | `pack_d<D>_j<J>` | sum (TreeAccumulate, T 2) alone, its result packed D = 2, 4, 8 to a word (int32, int16, int8 results), JOBS 1 (one short word), 9 (a short last word) and 10 (whole words at D 2) |
 | `pack_d2_backpressure` | the same at D 2, JOBS 4, the writer not ready in cycles 3 to 5: the filling push goes ahead, the sending one waits (stall_out) |
 | `pack_dot3_d2_j3` | dot 3 (T 2) at D 2, JOBS 3: one whole word, then a short one on the last push; the dot product checked as the other dot cases |
+| `slice_d<D>_j<J>` | sum (TreeAccumulate, T 2) alone, its input sliced D = 2, 4, 8 (int32, int16, int8 lanes), JOBS 3 (whole words at D 2, a short last word at D 4) and 2 (four pops of one word at D 8): the first pop a cycle after the take, then no gap |
+| `slice_d2_reader_gap`, `slice_d2_backpressure` | the same at D 2, JOBS 3: the reader without a word in cycles 3 to 5 (stall_in), or the writer not ready in cycles 4 to 6 (stall_out, the slicer keeps its word) |
+| `slice_seed_d2` | matvec_seed's sum (TreeAccumulate, T 4, JOBS 3), its seed sliced 2: one seed word serves two jobs |
+| `slice_dot3_d2_j2` | dot 3 (T 2), JOBS 2, a and b sliced 2 and the sum packed 2: matvec_3's form at int8, W = 4, one cycle after `pack_dot3` |
 | `seed_serial_late` | Mac (T 2) -> wire -> SerialAccumulate (span 4, seeded, T 1), JOBS 2, the seed missing in cycles 1 to 4 and 7: the sum reads its job's first beat lane by lane only while its seed is there, the Mac holds its result |
 
 Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, and the formulas C2 = JT + 2, C3 = JT + 1, C4 = JT + 2, C5 = J(T + W - 1) + 2, C6 = (J - 1) max(T, W) + T + W + 2):
@@ -74,4 +81,4 @@ Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, 
 
     tests/snax/group/run.sh
 
-It prints `PASS` per case (`, data` where the dot product is checked too) and ends with `41 passed, 0 failed`.
+It prints `PASS` per case (`, data` where the dot product is checked too) and ends with `48 passed, 0 failed`.
