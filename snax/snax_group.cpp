@@ -69,6 +69,10 @@
 //   busy           wire<bool> master, driven on every change, in the cycle the
 //                  change is decided: true in the cycle a start is taken (busy
 //                  from the next), false in the run's last cycle
+//   mark           wire<uint32_t> slave, core 0's writes to CSR 0x7C5: a snapshot
+//                  of the counters, running totals since boot (the run lines'
+//                  classes and every unit's firings and pushes), as snap lines;
+//                  the end of the simulation takes the last one, mark -1
 //
 // Its event runs every busy cycle, so it runs before the streamer's step.
 //
@@ -96,7 +100,11 @@ public:
 private:
     static vp::IoReqStatus ctrl_req(vp::Block *__this, vp::IoReq *req);
     static void cycle_handler(vp::Block *__this, vp::ClockEvent *event);
+    static void mark_sync(vp::Block *__this, uint32_t mark);
     void reset(bool active) override;
+    void stop() override;
+    // The counters as snap lines, mark the snapshot's (-1 at the end)
+    void snap(int64_t mark);
 
     SnaxType type_prop(js::Config *config, const char *width, const char *is_signed,
         const std::string &where);
@@ -108,6 +116,7 @@ private:
     SnaxEvents ev;
     vp::IoSlave ctrl_itf;
     vp::WireMaster<bool> busy_itf;
+    vp::WireSlave<uint32_t> mark_itf;
     vp::ClockEvent cycle_event;
     vp::IoReq beat_req;
     SnaxSignals sigs;
@@ -150,6 +159,13 @@ private:
     uint32_t pushes;                    // results pushed in this run
     uint32_t results = 0;               // the outer output's results in this run
     SnaxPacker packer;                  // its packer, at d_out 1 none (snax_group.hpp)
+
+    // The snapshots' counters since boot: the busy cycles per class, and per unit (named as
+    // in accelerator.json) its firings and its pushes
+    int64_t total_classes[SnaxGroupRule::NB_CLASSES];
+    std::vector<std::string> unit_names;
+    std::vector<int64_t> unit_firings;
+    std::vector<int64_t> unit_pushes;
 };
 
 
@@ -471,6 +487,9 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     this->ctrl_itf.set_req_meth(&SnaxGroup::ctrl_req);
     this->new_slave_port("ctrl", &this->ctrl_itf);
     this->new_master_port("busy", &this->busy_itf);
+    this->mark_itf.set_sync_meth(&SnaxGroup::mark_sync);
+    this->new_slave_port("mark", &this->mark_itf);
+    this->unit_names = names;
 
     this->trace.msg(vp::Trace::LEVEL_DEBUG, "%s\n", described.c_str());
 }
@@ -487,6 +506,42 @@ void SnaxGroup::reset(bool active)
         this->packer.clear();
         this->line_class = -1;
         this->rate = 1;
+        std::fill(std::begin(this->total_classes), std::end(this->total_classes), 0);
+        this->unit_firings.assign(this->unit_names.size(), 0);
+        this->unit_pushes.assign(this->unit_names.size(), 0);
+    }
+}
+
+
+// The last snapshot, at the end of the simulation
+void SnaxGroup::stop()
+{
+    this->snap(-1);
+}
+
+
+void SnaxGroup::mark_sync(vp::Block *__this, uint32_t mark)
+{
+    ((SnaxGroup *)__this)->snap(mark);
+}
+
+
+// The group's line, then one per unit in the order of the property units
+void SnaxGroup::snap(int64_t mark)
+{
+    long cycle = (long)this->clock.get_cycles();
+    this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+        "%ld snap mark=%ld busy=%ld stall_in=%ld stall_out=%ld flush=%ld\n", cycle, (long)mark,
+        (long)this->total_classes[SnaxGroupRule::BUSY],
+        (long)this->total_classes[SnaxGroupRule::STALL_IN],
+        (long)this->total_classes[SnaxGroupRule::STALL_OUT],
+        (long)this->total_classes[SnaxGroupRule::FLUSH]);
+    for (size_t k = 0; k < this->unit_names.size(); k++)
+    {
+        this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld snap mark=%ld unit=%s firings=%ld pushes=%ld\n", cycle, (long)mark,
+            this->unit_names[k].c_str(), (long)this->unit_firings[k],
+            (long)this->unit_pushes[k]);
     }
 }
 
@@ -638,6 +693,12 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
             _this->probe(_this->out_itf, true);
 
         const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, seeds, _this->room);
+        _this->total_classes[step.cls]++;
+        for (size_t k = 0; k < step.units.size(); k++)
+        {
+            _this->unit_firings[k] += step.units[k].fire;
+            _this->unit_pushes[k] += step.units[k].push;
+        }
         const SnaxGroupRule::UnitStep &head = step.units[_this->rule.topological().front()];
         const SnaxGroupRule::UnitStep &tail = step.units[_this->rule.output_unit()];
         _this->sigs.set(_this->sig_busy, 1);

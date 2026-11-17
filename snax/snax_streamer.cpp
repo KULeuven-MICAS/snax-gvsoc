@@ -91,10 +91,17 @@
 // The busy wire (a port mux's check, snax_port_mux.cpp): true from the start
 // write (s) until the run ends, at the commit before e.
 //
+// The wire mark (core 0's writes to CSR 0x7C5) takes a snapshot of each mover's
+// cycle classes, running totals since boot (its mover lines' classes added up), as
+// snap lines; the end of the simulation takes the last one, mark -1. A snapshot taken
+// while the streamer sleeps in a run counts the cycles slept through so far in the
+// mover's sleeping class, as the commit that wakes it will.
+//
 // Not modelled: reader-writers, byte masks, address
 // remapping (logic word sizes), datapath extensions, a second clock domain;
 // snax_streamer.py refuses their keys.
 
+#include <algorithm>
 #include <deque>
 #include <memory>
 #include <string>
@@ -157,6 +164,7 @@ struct Mover
 
     // Cycle classes of the current run, and the class of the cycles it sleeps
     int64_t classes[NB_CLASSES];
+    int64_t total[NB_CLASSES];  // since boot, over its runs
     CycleClass gap_class;
     int line_class;             // the class of its last class line in this run, -1 none
     bool done;                  // its done line is written for this run
@@ -203,7 +211,11 @@ private:
     static void step_handler(vp::Block *__this, vp::ClockEvent *event);
     static void commit_handler(vp::Block *__this, vp::ClockEvent *event);
     static void summary_handler(vp::Block *__this, vp::ClockEvent *event);
+    static void mark_sync(vp::Block *__this, uint32_t mark);
     void reset(bool active) override;
+    void stop() override;
+    // Each mover's classes since boot as snap lines, mark the snapshot's (-1 at the end)
+    void snap(int64_t mark);
 
     void start(int64_t cycle);
     bool busy_at(int64_t cycle);
@@ -234,6 +246,7 @@ private:
     std::vector<vp::IoSlave> reader_itf;
     std::vector<vp::IoSlave> writer_itf;
     vp::WireMaster<bool> busy_itf;
+    vp::WireSlave<uint32_t> mark_itf;
     vp::ClockEvent step_event;
     vp::ClockEvent commit_event;
     vp::ClockEvent summary_event;
@@ -313,6 +326,8 @@ SnaxStreamer::SnaxStreamer(vp::ComponentConf &config)
     this->csr_itf.set_req_meth(&SnaxStreamer::csr_req);
     this->new_slave_port("input", &this->csr_itf);
     this->new_master_port("busy", &this->busy_itf);
+    this->mark_itf.set_sync_meth(&SnaxStreamer::mark_sync);
+    this->new_slave_port("mark", &this->mark_itf);
 
     // From here the movers do not move in memory: channels point to them
     for (Mover &mover : this->movers)
@@ -369,6 +384,10 @@ void SnaxStreamer::reset(bool active)
         {
             mover.agu_busy = false;
             mover.handed = 0;
+            for (int c = 0; c < NB_CLASSES; c++)
+            {
+                mover.total[c] = 0;
+            }
         }
         for (Channel &ch : this->channels)
         {
@@ -750,6 +769,7 @@ void SnaxStreamer::classify(Mover &mover, CycleClass cls, int64_t first, int64_t
         return;
     }
     mover.classes[cls] += cycles;
+    mover.total[cls] += cycles;
     snax_class_line(this->ev.beats, &mover.line_class, cls, class_names[cls], first,
         mover.name.c_str());
 }
@@ -787,6 +807,43 @@ void SnaxStreamer::summary_handler(vp::Block *__this, vp::ClockEvent *event)
             "qmax=%s\n", (long)cycle, mover.name.c_str(), _this->runs - 1,
             (long)mover.classes[BUSY], (long)mover.classes[STALL_XBAR],
             (long)mover.classes[STALL_FIFO], (long)mover.classes[IDLE], qmax.c_str());
+    }
+}
+
+
+// The last snapshot, at the end of the simulation
+void SnaxStreamer::stop()
+{
+    this->snap(-1);
+}
+
+
+void SnaxStreamer::mark_sync(vp::Block *__this, uint32_t mark)
+{
+    ((SnaxStreamer *)__this)->snap(mark);
+}
+
+
+// One line per mover, in mover order. In a run whose cycles up to the one before this
+// are not all classed yet (the streamer sleeps), those are counted in the mover's
+// sleeping class, without classing them: the commit that wakes it does.
+void SnaxStreamer::snap(int64_t mark)
+{
+    int64_t cycle = this->clock.get_cycles();
+    bool in_run = this->span.started && !this->span.ended();
+    int64_t slept = in_run ? std::max<int64_t>(0, cycle - 1 - this->classed_cycle) : 0;
+    for (Mover &mover : this->movers)
+    {
+        int64_t total[NB_CLASSES];
+        for (int c = 0; c < NB_CLASSES; c++)
+        {
+            total[c] = mover.total[c];
+        }
+        total[mover.gap_class] += slept;
+        this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld snap mark=%ld mover=%s busy=%ld stall_xbar=%ld stall_fifo=%ld idle=%ld\n",
+            (long)cycle, (long)mark, mover.name.c_str(), (long)total[BUSY],
+            (long)total[STALL_XBAR], (long)total[STALL_FIFO], (long)total[IDLE]);
     }
 }
 

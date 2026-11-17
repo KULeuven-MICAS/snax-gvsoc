@@ -45,6 +45,10 @@
 // (docs/notes/NOTES.md); one that comes after it on a superbank already
 // granted to a narrow request is fatal.
 //
+// The wire mark (core 0's writes to CSR 0x7C5) takes a snapshot of the counters,
+// running totals since boot, as snap lines; the end of the simulation takes the last one,
+// mark -1, after the input and bank lines.
+//
 // Counters, grant, stall and dma lines and VCD signals: docs/EVENTS.md. The
 // property trace_inputs picks the inputs that get beat and stall lines: a
 // list joined by ',' of input names or indices and dma; by default every input
@@ -81,6 +85,9 @@ private:
     static vp::IoReqStatus req(vp::Block *__this, vp::IoReq *req, int id);
     static vp::IoReqStatus dma_req(vp::Block *__this, vp::IoReq *req);
     static void priority_sync(vp::Block *__this, bool value, int id);
+    static void mark_sync(vp::Block *__this, uint32_t mark);
+    // The counters as snap lines, mark the snapshot's (-1 at the end)
+    void snap(int64_t mark);
     static void arbitrate(vp::Block *__this, vp::ClockEvent *event);
     static void held_cycle(vp::Block *__this, vp::ClockEvent *event);
     static void respond(vp::Block *__this, vp::ClockEvent *event);
@@ -112,6 +119,7 @@ private:
     std::vector<vp::WireSlave<bool>> priority_itf;
     std::vector<vp::IoMaster> banks;
     vp::IoSlave dma;
+    vp::WireSlave<uint32_t> mark_itf;
     vp::ClockEvent arb_event;
     // Queues the arbitration of a cycle that starts with a held request
     vp::ClockEvent held_event;
@@ -284,6 +292,8 @@ SnaxTcdmXbar::SnaxTcdmXbar(vp::ComponentConf &config)
         this->dma.set_req_meth(&SnaxTcdmXbar::dma_req);
         this->new_slave_port("dma", &this->dma);
     }
+    this->mark_itf.set_sync_meth(&SnaxTcdmXbar::mark_sync);
+    this->new_slave_port("mark", &this->mark_itf);
 }
 
 
@@ -311,7 +321,7 @@ void SnaxTcdmXbar::reset(bool active)
 }
 
 
-// The counters, as summary lines (docs/EVENTS.md)
+// The counters, as summary lines, then the last snapshot (docs/EVENTS.md)
 void SnaxTcdmXbar::stop()
 {
     long cycle = (long)this->clock.get_cycles();
@@ -327,6 +337,32 @@ void SnaxTcdmXbar::stop()
         this->ev.summary.msg(vp::Trace::LEVEL_INFO,
             "%ld bank index=%d reads=%ld writes=%ld conflicts=%ld\n", cycle, bank,
             (long)this->bank_reads[bank], (long)this->bank_writes[bank],
+            (long)this->bank_conflicts[bank]);
+    }
+    this->snap(-1);
+}
+
+
+void SnaxTcdmXbar::mark_sync(vp::Block *__this, uint32_t mark)
+{
+    ((SnaxTcdmXbar *)__this)->snap(mark);
+}
+
+
+void SnaxTcdmXbar::snap(int64_t mark)
+{
+    long cycle = (long)this->clock.get_cycles();
+    for (int i = 0; i < this->nb_inputs; i++)
+    {
+        this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld snap mark=%ld input=%d grants=%ld stalls=%ld\n", cycle, (long)mark, i,
+            (long)this->input_grants[i], (long)this->input_stalls[i]);
+    }
+    for (int bank = 0; bank < this->nb_banks; bank++)
+    {
+        this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+            "%ld snap mark=%ld bank=%d reads=%ld writes=%ld conflicts=%ld\n", cycle,
+            (long)mark, bank, (long)this->bank_reads[bank], (long)this->bank_writes[bank],
             (long)this->bank_conflicts[bank]);
     }
 }
