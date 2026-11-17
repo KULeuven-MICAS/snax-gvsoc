@@ -61,7 +61,9 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #endif  // FORGE_QUIET
     csrw_ss(MVT_VADD_RW_MVT_JOBS, 40);
     csrw_ss(MVT_VADD_RW_MVT_VSUM_X1_JOB_BEATS, 5);
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
+#endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 5);  // run mvt
 #endif  // FORGE_QUIET
@@ -108,24 +110,22 @@ static __attribute__((noinline)) int forge_core_0(void) {
     write_csr(0x7c5, 8);  // acc config vadd
 #endif  // FORGE_QUIET
     csrw_ss(MVT_VADD_RW_VADD_JOBS, 5);
+#ifndef FORGE_QUIET
     while (csrr_ss(MVT_VADD_RO_MVT_STATUS) & 1) {
     }
     while (csrr_ss(MVT_VADD_STREAMER_BUSY_CSR)) {
     }
+#endif  // FORGE_QUIET
     forge_counter[0] = csrr_ss(MVT_VADD_RO_MVT_BUSY_COUNTER);
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
+#endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 9);  // run vadd
 #endif  // FORGE_QUIET
     csrw_ss(MVT_VADD_RW_PORT_MUX_SEL, 1);
     csrw_ss(MVT_VADD_STREAMER_START_CSR, 1);
     csrw_ss(MVT_VADD_RW_VADD_START, 1);
-#ifdef FORGE_QUIET
-    while (csrr_ss(MVT_VADD_RO_VADD_STATUS) & 1) {
-    }
-    while (csrr_ss(MVT_VADD_STREAMER_BUSY_CSR)) {
-    }
-#endif  // FORGE_QUIET
     while (csrr_ss(MVT_VADD_RO_VADD_STATUS) & 1) {
     }
     while (csrr_ss(MVT_VADD_STREAMER_BUSY_CSR)) {
@@ -173,7 +173,9 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #endif  // FORGE_QUIET
     csrw_ss(MVT_VADD_RW_MVT_JOBS, 40);
     csrw_ss(MVT_VADD_RW_MVT_VSUM_X1_JOB_BEATS, 5);
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
+#endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 14);  // run mvt
 #endif  // FORGE_QUIET
@@ -220,24 +222,22 @@ static __attribute__((noinline)) int forge_core_0(void) {
     write_csr(0x7c5, 17);  // acc config vadd
 #endif  // FORGE_QUIET
     csrw_ss(MVT_VADD_RW_VADD_JOBS, 5);
+#ifndef FORGE_QUIET
     while (csrr_ss(MVT_VADD_RO_MVT_STATUS) & 1) {
     }
     while (csrr_ss(MVT_VADD_STREAMER_BUSY_CSR)) {
     }
+#endif  // FORGE_QUIET
     forge_counter[2] = csrr_ss(MVT_VADD_RO_MVT_BUSY_COUNTER);
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
+#endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 18);  // run vadd
 #endif  // FORGE_QUIET
     csrw_ss(MVT_VADD_RW_PORT_MUX_SEL, 1);
     csrw_ss(MVT_VADD_STREAMER_START_CSR, 1);
     csrw_ss(MVT_VADD_RW_VADD_START, 1);
-#ifdef FORGE_QUIET
-    while (csrr_ss(MVT_VADD_RO_VADD_STATUS) & 1) {
-    }
-    while (csrr_ss(MVT_VADD_STREAMER_BUSY_CSR)) {
-    }
-#endif  // FORGE_QUIET
     while (csrr_ss(MVT_VADD_RO_VADD_STATUS) & 1) {
     }
     while (csrr_ss(MVT_VADD_STREAMER_BUSY_CSR)) {
@@ -247,11 +247,10 @@ static __attribute__((noinline)) int forge_core_0(void) {
     write_csr(0x7c5, 19);  // dma store_x2
 #endif  // FORGE_QUIET
     snrt_dma_start_1d(x2, (void *)0x10003340, 320);
-#ifdef FORGE_QUIET
+    snrt_dma_wait_all();
+#ifndef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
-    snrt_dma_wait_all();
-    snrt_dma_wait_all();
     return 0;
 }
 
