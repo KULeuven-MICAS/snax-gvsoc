@@ -91,6 +91,8 @@ class SnaxStreamer(gvsoc.systree.Component):
         Reader i's beats to the accelerator (num_channel * 8 bytes; size 0 probes).
     writer_<j> : io slave
         Writer j's beats from the accelerator (num_channel * 8 bytes; size 0 probes).
+    mark : wire<uint32_t> slave
+        Core 0's snapshot mark: the snap lines (docs/EVENTS.md).
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, template: dict,

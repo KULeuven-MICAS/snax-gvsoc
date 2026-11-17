@@ -200,6 +200,8 @@ class SnaxAccelerator(gvsoc.systree.Component):
         The streamers' TCDM ports (nb_tcdm_ports of them), set after set.
     tcdm_prio_<i> : wire<bool> master
         The priority bit of each TCDM port's request.
+    mark : wire<uint32_t> slave
+        Core 0's snapshot mark (docs/EVENTS.md), to every streamer and group.
     """
 
     # Set by for_slot: the sets' CSR layout (SetLayout), the description, the TCDM size, and
@@ -243,6 +245,7 @@ class SnaxAccelerator(gvsoc.systree.Component):
             streamer = SnaxStreamer(self, f'streamer_{row.name}', template=row.template,
                 csr_base=row.first, tcdm_size=self.tcdm_size)
             csr_mux.o_MAP(streamer.i_INPUT(), base=4 * row.first, size=4 * row.streamer_csrs)
+            self.bind(self, 'mark', streamer, 'mark')
 
             acc = row.accelerator
             # The set's end: the next set's streamer, past the last set everything to the last
@@ -264,6 +267,7 @@ class SnaxAccelerator(gvsoc.systree.Component):
                     csr_base=base)
                 shell.o_CTRL(comp.i_CTRL())
                 comp.o_BUSY(shell.i_BUSY())
+                self.bind(self, 'mark', comp, 'mark')
                 for u in group.units:
                     owner[u.name] = comp
 

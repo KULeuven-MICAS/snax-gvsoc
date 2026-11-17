@@ -238,6 +238,8 @@ class SnitchClusterTcdm(gvsoc.systree.Component):
                 self.bind(self, f'snax_prio_{i}', snax_xbar, f'prio_{i}')
             if dma_in_snax_xbar:
                 self.bind(self, 'dma_input', snax_xbar, 'dma')
+            # Core 0's snapshot mark (docs/EVENTS.md)
+            self.bind(self, 'snax_mark', snax_xbar, 'mark')
 
     def i_INPUT(self, port: int) -> gvsoc.systree.SlaveItf:
         return gvsoc.systree.SlaveItf(self, f'in_{port}', signature='io')
@@ -388,6 +390,11 @@ class SnitchCluster(gvsoc.systree.Component):
                 if hasattr(acc, 'o_TCDM_PRIORITY'):
                     acc.o_TCDM_PRIORITY(port, tcdm.i_SNAX_PRIORITY(snax_port))
                 snax_port += 1
+            # Core 0's writes to CSR 0x7C5, the snapshot mark of every SNAX component
+            # (docs/EVENTS.md): its one obs_mark wire bound to each of them
+            self.bind(cores[0], 'obs_mark', acc, 'mark')
+        if nb_snax_ports > 0:
+            self.bind(cores[0], 'obs_mark', tcdm, 'snax_mark')
 
         # Cluster DMA
         # SNAX: the arch may replace these defaults (ClusterArch's dma)

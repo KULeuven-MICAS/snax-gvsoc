@@ -94,3 +94,4 @@ Every upstream file we edit gets one comment line near its top, `Modified for SN
 | `pulp/pulp/idma/idma.hpp` | A comment line: the `IDMA_SNAX_*` constants are kept equal to `snax/snax_events.hpp`'s by hand |
 | `Makefile` | `FAST=1` passes `-DBUILD_ASSERT=OFF` to the build (no asserts flavour; `ON` otherwise); `regress` passes `J` as `-j` |
 | `core/models/cpu/iss/src/snitch/snitch.cpp`, `include/cores/snitch/class.hpp` | `csr_obs`, snax_cluster's observability CSR 0x7C5 (`CsrObsRegister`): a plain 32-bit R/W register, reset 0; a write by core 0 (`snax_cluster_core_idx` 0) also syncs the master wire `obs_mark` with the value written (`obs_access`), the SNAX components' snapshot mark (`docs/EVENTS.md`) |
+| `pulp/pulp/snitch/snitch_cluster/snitch_cluster.py` | `SnitchCluster` binds core 0's `obs_mark` wire to each accelerator's `mark` and to `SnitchClusterTcdm`'s `snax_mark`, which binds it to `SnaxTcdmXbar`'s `mark` |
