@@ -113,7 +113,7 @@ The trace levels are trace names (`docs/EVENTS.md`), each a `--trace` pattern, h
 
 ## The regression
 
-`make regress` runs the six g++ testbenches, builds `sw/` and every program, then runs the cluster tests, `snax-shell` and every `forge/` folder on `snax_hjson` (their counters checked against their units' run lines) and the plain tests on `snitch`. `tests/snax/regress.py` says what each checks. It ends:
+`make regress` runs the six g++ testbenches, builds `sw/` and every program, then runs the cluster tests, `snax-shell` and every `forge/` folder on `snax_hjson` (their counters checked against their units' run lines, their snapshots against their summary lines) and each fixture's quiet build (its snapshots and, with one accelerator run, that run's window, `docs/EVENTS.md`'s Snapshots), and the plain tests on `snitch`. `tests/snax/regress.py` says what each checks. It ends:
 
     forge/'s accelerators: forge.dot_1, forge.dot_2, ...
       29 run
@@ -123,7 +123,7 @@ The trace levels are trace names (`docs/EVENTS.md`), each a `--trace` pattern, h
 
 - `K=SUBSTRING` runs only the programs whose name holds it (`make regress K=forge`). `make regress -k` does not: make reads `-k` itself.
 - `J=N` runs N programs at a time (default the CPU count; `J=1` one after another).
-- Each run's output is in `build/regress/work/<name>/run.log`, a `forge/` run's traces in `trace.log` beside it. A failure prints the file it read and its last 20 lines.
+- Each run's output is in `build/regress/work/<name>/run.log`, a `forge/` or quiet run's traces in `trace.log` beside it. A failure prints the file it read and its last 20 lines.
 
 ## Unit tests and testbenches
 
