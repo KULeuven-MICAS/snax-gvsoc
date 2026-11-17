@@ -175,13 +175,18 @@ public:
     iss_reg_t mem_pc;
     CsrReg csr_fmode;
     // snax_cluster's CsrObsRegister (0x7C5, snitch.sv): 32 bits R/W, reset 0; the RTL
-    // drives its low ObsWidth bits on the core's obs_o, which the cluster takes from core 0
+    // drives its low ObsWidth bits on the core's obs_o, which the cluster takes from core 0.
+    // A write by core 0 also drives obs_mark with the value written, the SNAX components'
+    // snapshot mark (docs/EVENTS.md)
     CsrReg csr_obs;
+    vp::WireMaster<uint32_t> obs_mark_itf;
 
 private:
     bool barrier_update(bool is_write, iss_reg_t &value);
     static void barrier_sync(vp::Block *__this, bool value);
     bool ssr_access(bool is_write, iss_reg_t &value);
+    bool obs_access(bool is_write, iss_reg_t &value);
+    bool obs_core0;
     bool snax_csr_access(SnaxCsr *csr, bool is_write, iss_reg_t &value);
     static void handle_wait_acc_ready(vp::Block *__this, vp::ClockEvent *event);
 

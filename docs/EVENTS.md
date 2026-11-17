@@ -8,7 +8,7 @@ Each SNAX component has four GVSoC traces (`vp::Trace`, `snax/snax_events.hpp`),
 
 | Trace | Holds | On at |
 |---|---|---|
-| `summary` | counters: per run of a unit or streamer at its end, the others' at the end of the simulation | every level, `off` included |
+| `summary` | counters: per run of a unit or streamer at its end, the others' at the end of the simulation; the snapshots (section Snapshots) | every level, `off` included |
 | `events` | what happens once per task: starts, dones, CSR accesses, waits, function entries, DMA copies | `task` |
 | `beats` | one line per beat: grants, DMA beats and bursts, firings, pushes; one per change of a unit's or mover's cycle class | `beat` |
 | `stalls` | one line per refused request and per change of a queue's count | `stall` |
@@ -186,3 +186,28 @@ For gtkwave only (snax-forge never reads them): `vp::Signal`s the SNAX component
 ### Instructions (`pe<i>/insn`)
 
 GVSoC's own instruction trace, on at `finegrained`, one `--trace` regex per core the sources name; its line is GVSoC's, not this grammar.
+
+## Snapshots
+
+The SNAX components count from boot and never reset their counters. A snapshot writes every counter as it stands, running totals since boot, one `snap` line each, on the component's `summary` trace; snax-forge subtracts consecutive snapshots to price a window of the program.
+
+**Trigger.** Every write to CSR `0x7C5` (`csr_obs`) by core 0 (`csrw`, `csrrw`, `csrrs`, `csrrc` and their immediate forms) takes one, in the cycle of the write: `mark` is the register's value after it, the value written (the quiet build, `forge_quiet.elf`, writes each section's mark, `obs_marks.json`). Core 0 drives the wire `obs_mark`, bound to the `mark` wire of the crossbar, of every group and of every streamer; the other cores' writes to `0x7C5` take none. The end of the simulation takes the last one, `mark=-1`.
+
+| Component | Line, one per | Fields |
+|---|---|---|
+| crossbar | input, in index order | `mark`, `input` (its index, as in the `input` lines), `grants`, `stalls` |
+| crossbar | bank, in index order | `mark`, `bank` (its index), `reads`, `writes`, `conflicts` |
+| group | group | `mark`, `busy`, `stall_in`, `stall_out`, `flush` (its `run` lines' classes added up over its runs) |
+| group | unit, in `accelerator.json`'s order | `mark`, `unit` (its name in `accelerator.json`), `firings` (once per span, as the rule's `fire`), `pushes` (results given to its link or its outer output) |
+| streamer | mover, in mover order | `mark`, `mover` (`reader<i>`, `writer<j>`), `busy`, `stall_xbar`, `stall_fifo`, `idle` (its `mover` lines' classes added up over its runs) |
+
+A linked group writes every unit's line (`dot_3`: `mul` and `sum`); a group of one unit, that unit's.
+
+**Order.** Within a component the lines come in the table's order: the crossbar's inputs then its banks, a group's own line then its units'. At the end of the simulation the crossbar writes its snapshot after its `input` and `bank` lines; a group or a streamer writes no other line then.
+
+**Windows.** Number the snapshots from 1 in the order they are taken, snapshot 0 being boot's (every counter 0). Window k is snapshot k + 1 minus snapshot k, field by field: window 0 runs from boot to the first mark's write (the first snapshot itself), window k from the k-th snapshot's write to the next one's, the last to the end (`mark=-1`).
+
+- Every cycle a component counts lands in exactly one window, so the windows add up to the `mark=-1` snapshot, which equals the whole-run counters: the crossbar's `input` and `bank` lines, the sums of a group's `run` lines and of a mover's `mover` lines.
+- A snapshot counts what the component has counted when the write reaches it: a cycle the component handles after the write, in the write's own cycle, falls in the next window.
+- A streamer classes the cycles it sleeps through in a run only when it wakes; a snapshot taken in between counts the cycles slept so far in the class the mover slept in, as that wake will.
+- `tests/snax/snapshots.py` checks the `mark=-1` snapshot on every forge run of `make regress`, and on the quiet build of every fixture with one accelerator run, that the window from its `run` mark to the next equals that run's `run` and `mover` lines.

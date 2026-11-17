@@ -40,13 +40,18 @@ Iss::Iss(IssWrapper &top)
     this->csr_ssr.register_callback(std::bind(&Iss::ssr_access, this, std::placeholders::_1,
         std::placeholders::_2));
     this->csr.declare_csr(&this->csr_fmode, "fmode", 0x800);
-    // snax_cluster's observability register, a plain R/W CSR as snitch.sv's CsrObsRegister
+    // snax_cluster's observability register, a plain R/W CSR as snitch.sv's CsrObsRegister;
+    // core 0's writes also go out on obs_mark (obs_access)
     this->csr.declare_csr(&this->csr_obs, "obs", 0x7C5);
+    this->csr_obs.register_callback(std::bind(&Iss::obs_access, this, std::placeholders::_1,
+        std::placeholders::_2));
+    this->top.new_master_port("obs_mark", &this->obs_mark_itf, (vp::Block *)this);
 
     // snax_cluster's start-up code reads its cluster base address (0xBC1 low,
     // 0xBC2 high) and {core count, core index} (0xBC3) from these CSRs, which
     // the RTL makes read-only: a write mask of 0 ignores writes as it does.
     js::Config *config = this->top.get_js_config();
+    this->obs_core0 = config->get_child_int("snax_cluster_core_idx") == 0;
     iss_reg_t snax_base = (uint32_t)config->get_child_int("snax_cluster_base_addr");
     iss_reg_t snax_core_id = ((uint32_t)config->get_child_int("snax_cluster_nb_cores") << 16)
         | ((uint32_t)config->get_child_int("snax_cluster_core_idx") & 0xFFFF);
@@ -134,6 +139,22 @@ bool Iss::barrier_update(bool is_write, iss_reg_t &value)
     }
 
     return false;
+}
+
+
+// This gets called when the obs CSR (0x7C5) is accessed. Returning true lets the CSR
+// do as before: a write stores the value (write mask all ones), a read returns the value
+// stored, so csrrw, csrrs and csrrc return the old value. A write by core 0 (the RTL's
+// cluster obs_o is core 0's) also syncs obs_mark with the value written: csrrs and csrrc
+// give the register's new value. The SNAX components take their snapshot then
+// (docs/EVENTS.md).
+bool Iss::obs_access(bool is_write, iss_reg_t &value)
+{
+    if (is_write && this->obs_core0 && this->obs_mark_itf.is_bound())
+    {
+        this->obs_mark_itf.sync((uint32_t)value);
+    }
+    return true;
 }
 
 
