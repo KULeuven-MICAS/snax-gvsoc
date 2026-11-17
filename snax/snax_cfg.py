@@ -108,8 +108,9 @@ one snax_streamer_cfg takes one accelerator, whatever its name); each
 accelerator's inputs and outputs are its set's readers and writers in number;
 they are exactly the ports on no link, group by group, unit by unit in port
 order (gen.outer), each link goes from an out port to an in port of its
-group's units with the same dtype and lanes (gen.link), no port is on two
-links (gen.link_port) and a group's links connect its units (gen.group), the
+group's units with the same dtype and lanes, neither end sliced nor packed
+(gen.link), no port is on two links (gen.link_port) and a group's links
+connect its units (gen.group), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
 1); an outer output with d_out (D174) fills one word with d_out results, on one
@@ -1137,6 +1138,10 @@ def _check_links(node: _Node, acc: Accelerator):
             if (a[0].dtype, a[0].lanes) != (b[0].dtype, b[0].lanes):
                 fail('groups', f'{what}: {k.from_} is {a[0].lanes} lanes of {a[0].dtype}, '
                      f'{k.to} {b[0].lanes} of {b[0].dtype}; both ends are the same')
+            for end, p in ((k.from_, a[0]), (k.to, b[0])):
+                if p.d_in > 1 or p.d_out > 1:
+                    fail('groups', f'{what}: {end} has d_in {p.d_in} and d_out {p.d_out}; a '
+                         'linked port has no slicer or packer, so both are 1 (absent)')
             for end in (k.from_, k.to):
                 if end in linked:
                     fail('groups', f'gen.link_port: group {g.name}\'s link {k.name}: port {end} '

@@ -803,6 +803,17 @@ class LinkedGroup(unittest.TestCase):
         self.link(depth=-1)
         self.fails(snax_cfg.CfgSlotError, "gen.link:")
 
+    def test_gen_link_sliced_or_packed(self):
+        """A linked port carries no d_in or d_out above 1: it has no slicer or packer."""
+        units = self.acc["accelerators"][0]["groups"][0]["units"]
+        units[1]["ports"]["a"].update(dtype="int32", d_in=2)
+        units[0]["ports"]["out"]["dtype"] = "int32"
+        self.fails(snax_cfg.CfgSlotError, "gen.link: group dot's link out_partial: sum.a has "
+                   "d_in 2 and d_out 1; a linked port has no slicer or packer")
+        del units[1]["ports"]["a"]["d_in"]
+        units[0]["ports"]["out"]["d_out"] = 2
+        self.fails(snax_cfg.CfgSlotError, "mac.out has d_in 1 and d_out 2")
+
     def test_gen_link_port(self):
         links = self.acc["accelerators"][0]["groups"][0]["links"]
         links.append(dict(links[0], name="again", depth=1))
