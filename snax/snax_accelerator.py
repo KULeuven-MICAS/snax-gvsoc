@@ -51,7 +51,8 @@ them, the last, or -1), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
 JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
 from its CSRs (scalars, each [slot, words]); d_out, its outer output's results per 64-bit
-word (1 unless packed, D174); and its links as edges, each {from, to, to_input, depth}:
+word (1 unless packed, D174); d_in, per input its pops per 64-bit word (1 unless sliced,
+D180); and its links as edges, each {from, to, to_input, depth}:
 the producer's and the consumer's names and the consumer's input it feeds,
 its index in that unit's inputs.
 """
@@ -168,7 +169,7 @@ def group_units(accelerator, group) -> tuple:
             'k2': str(u.params['k2']) if 'k2' in u.params else '',
             'scalars': [[s, len(scalar_csrs(s, dtype))] for s, dtype in u.scalars.items()],
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
-            'd_out': out_port.d_out,
+            'd_out': out_port.d_out, 'd_in': [p.d_in for p in in_ports],
         })
     links = []
     for x in group.links:

@@ -681,6 +681,28 @@ class AccJson(unittest.TestCase):
         self.unit()["ports"]["a"]["dir"] = "inout"
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.dir", "must be in or out")
 
+    def test_a_sliced_input(self):
+        """A fold's a at int16, 2 lanes, sliced 2 (d_in 2, D180) from one word on the reader's
+        one channel; a d_in that does not empty a word, one not 2, 4 or 8, d_in on an output,
+        and no d_in at all (32 bits a beat), refused."""
+        self.acc = acc_json(accelerator("vsum_slice", fold("acc", 0, "int16", 2), between=1))
+        self.streamer = streamer([1], [1])
+        self.rw = 3
+        a = self.unit()["ports"]["a"]
+        a["d_in"] = 2
+        self.assertEqual(self.load().description.groups[0].units[0].ports["a"].d_in, 2)
+        a["d_in"] = 4
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].inputs[0]",
+                   "d_in 4 pops of 2 x 16 bits are 128 bits, not one 64-bit word")
+        a["d_in"] = 3
+        self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.d_in",
+                   "an input's pops per word, 2, 4 or 8")
+        del a["d_in"]
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].inputs[0]",
+                   "not a whole number of 64-bit channel words")
+        self.unit()["ports"]["out"]["d_in"] = 2
+        self.fails(snax_cfg.CfgTypeError, "units[0].ports.out.d_in", "an input's pops per word")
+
     def test_unit_csrs(self):
         """SimdLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
         modelled."""
