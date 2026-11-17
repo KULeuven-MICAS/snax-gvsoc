@@ -60,6 +60,8 @@ class SnaxTcdmXbar(gvsoc.systree.Component):
     dma : io slave
         The DMA, TCDM offsets: one beat per request, inside one aligned line
         of superbank_banks * bank_width bytes. Only with superbank_banks.
+    mark : wire<uint32_t> slave
+        Core 0's snapshot mark: the snap lines (docs/EVENTS.md).
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, nb_inputs: int,

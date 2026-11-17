@@ -32,7 +32,7 @@ the default file's, so gvrun warns and runs it on the JSON config), with the
 counter checks;
 then each folder's quiet build (forge_quiet.elf, -DFORGE_QUIET: every start
 waited on at once, each section marked in CSR 0x7C5, no prints), named forge_quiet.<design>,
-a plain run (exit code only);
+with every SNAX component's `summary` trace on and the snapshot checks below;
 then
 the plain tests on the `snitch` target: one per sw/tests/*.c (the 17 of COPIED in sw/sync.py), each
 from build/sw/tests/; a plain ELF missing is a failure.
@@ -61,9 +61,18 @@ passes when, per run of the unit and of each mover, the lengths of its
 class runs (the `class` lines) add up per class to its summary line's
 counts and cover its busy span exactly.
 
-Both checks read trace.log through classes.parse(): a line of it that is not
-a whole trace line fails the run, naming the file and the line number,
-instead of being skipped (check_traces).
+The snapshot checks (snapshots.py, docs/EVENTS.md's Snapshots): every
+forge/ fixture run and snax-shell also has the crossbar's `summary` trace on
+(XBAR_TRACE); each passes when every component's mark=-1 snapshot equals its
+whole-run lines (the crossbar's `input` and `bank` lines, the sums of a
+group's `run` lines and of each mover's `mover` lines). A quiet build passes
+it too and, when its fixture has one accelerator run (one `run` mark in
+obs_marks.json), the window from that mark to the next must equal the run's
+`run` and `mover` lines (check_quiet).
+
+These checks read trace.log through classes.parse(): a line of it that is
+not a whole trace line fails the run, naming the file and the line number,
+instead of being skipped (check_traces, check_quiet).
 
 gvrun runs with PYTHONDONTWRITEBYTECODE=1, so no __pycache__ lands beside
 the modules it imports. Each run's stdout and stderr go to build/regress/work/<name>/run.log, a
@@ -92,6 +101,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import classes
+import snapshots
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -120,6 +130,11 @@ SHELL_BEATS = 16
 UNIT_TRACES = ("summary", "events", "beats")
 # A streamer per set, snax_acc<i>/streamer_<set>
 CLASS_TRACES = [f"snax_acc[0-9]*/streamer_[^/]*/{t}$" for t in ("summary", "events", "beats")]
+# The crossbar's summary, for the snapshot check (its input and bank lines)
+XBAR_TRACE = "tcdm/snax_xbar/summary$"
+# A quiet run's traces: every SNAX component's summary (the groups, the streamers and the
+# crossbar; the shells and port muxes have none), for the snapshot checks
+QUIET_TRACES = ["snax_acc[0-9]*/[^/]*/summary$", XBAR_TRACE]
 # The cluster tests built once into one ELF per case, <program>-<case>.elf
 CASES = [
     ("stream-timing", ["zero_bound", "a_alone", "ab_other_banks", "ab_same_banks", "a_stride0",
@@ -230,8 +245,35 @@ def check_traces(log, traces, counters):
     why = counters(log.read_text(errors="replace"), parsed)
     if why is not None:
         return why, log
-    why = classes.check(parsed)
+    why = classes.check(parsed) or snapshots.check_end(parsed)
     return (None, None) if why is None else (why, traces)
+
+
+def run_mark(design):
+    """The mark of forge/<design>/'s one accelerator run (obs_marks.json), None when it
+    has another number of runs."""
+    marks = json.loads((FORGE_DIR / design / "obs_marks.json").read_text())
+    runs = [m["mark"] for m in marks if m["kind"] == "run"]
+    return runs[0] if len(runs) == 1 else None
+
+
+def check_quiet(traces, mark):
+    """A quiet run's checks on its trace.log (traces): every line parses, the mark=-1
+    snapshot equals the whole-run lines and, with mark (one accelerator run), the window
+    from mark to the next equals the run's lines (snapshots.py). Returns None when they
+    hold, else why not."""
+    try:
+        name = str(traces.relative_to(ROOT))
+    except ValueError:  # not below the checkout
+        name = str(traces)
+    try:
+        parsed = classes.parse(traces.read_text(errors="replace"), name)
+    except classes.LineError as e:
+        return str(e)
+    why = snapshots.check_end(parsed)
+    if why is None and mark is not None:
+        why = snapshots.check_window(parsed, mark)
+    return why
 
 
 def make(path, *args):
@@ -299,7 +341,7 @@ class Check:
                                   ["--param", f"hjson={cluster_file(design)}",
                                    *(f"--trace={t}:{traces}"
                                      for t in (*(f"{p}/{u}$" for p in units for u in UNIT_TRACES),
-                                               *CLASS_TRACES))])
+                                               *CLASS_TRACES, XBAR_TRACE))])
         if log is not None:
             # The traces in their own file: GVSoC buffers its stdout, so the
             # program's output there could cut a trace line in two
@@ -307,6 +349,24 @@ class Check:
                                       lambda text, runs: counters(text, runs, manifest))
             if why is not None:
                 failed.append((name, why, where))
+        return failed
+
+    def run_quiet(self, name, design, elf):
+        """Runs a quiet build (elf) on FORGE_TARGET with forge/<design>/'s cluster file and
+        QUIET_TRACES on, into trace.log beside the run's log; then check_quiet(), the
+        window checked when the fixture has one accelerator run (run_mark())."""
+        if self.selected(name):
+            self.submit(self._run_quiet, name, design, elf)
+
+    def _run_quiet(self, name, design, elf):
+        traces = WORK / name / "trace.log"
+        log, failed = self._gvrun(name, FORGE_TARGET, elf, None,
+                                  ["--param", f"hjson={cluster_file(design)}",
+                                   *(f"--trace={t}:{traces}" for t in QUIET_TRACES)])
+        if log is not None:
+            why = check_quiet(traces, run_mark(design))
+            if why is not None:
+                failed.append((name, why, traces))
         return failed
 
     def run_script(self, name, script):
@@ -406,9 +466,8 @@ def main():
         name = f"{FORGE_APP}_quiet.{design}"
         if check.selected(name):  # built with forge.<design> (ELFS), or alone under K
             make(APPS / FORGE_APP, f"DESIGN={design}")
-            check.run(name, FORGE_TARGET,
-                      BUILD / "apps" / FORGE_APP / design / f"{FORGE_APP}_quiet.elf",
-                      options=["--param", f"hjson={cluster_file(design)}"])
+            check.run_quiet(name, design,
+                            BUILD / "apps" / FORGE_APP / design / f"{FORGE_APP}_quiet.elf")
 
     check.section(f"plain tests on snitch ({PLAIN_DIR.relative_to(ROOT)})")
     for test in PLAIN_TESTS:

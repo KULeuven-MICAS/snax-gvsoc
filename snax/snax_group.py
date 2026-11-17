@@ -48,6 +48,8 @@ class SnaxGroup(gvsoc.systree.Component):
         A start: JOBS, then each fold's JOB_BEATS without a fixed t.
     busy : wire<bool> master
         Busy from the next cycle on, driven on every change.
+    mark : wire<uint32_t> slave
+        Core 0's snapshot mark: the snap lines (docs/EVENTS.md).
     """
 
     SOURCES = ['snax_group.cpp']

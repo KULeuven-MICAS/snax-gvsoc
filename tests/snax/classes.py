@@ -17,7 +17,9 @@ parse() reads a trace file line by line: every line must be a trace line
 `mover` or `class` line must have its fields, its counts integers. Any other
 line fails with the file and its line number, never skipped: a line cut in
 two by another writer turns into a wrong count when skipped. regress.py's
-counter check reads the unit's `run` lines from the same parse.
+counter check reads the unit's `run` lines from the same parse, and
+snapshots.py the `snap` lines (a `snap` line must have its `mark`); check()
+ignores them.
 
 `python3 tests/snax/classes.py LOG ...` checks each log, which needs the
 components' `summary` and `beats` traces on and nothing else in it, and
@@ -37,8 +39,8 @@ UNIT_CLASSES = ["busy", "stall_in", "stall_out", "flush"]
 MOVER_CLASSES = ["busy", "stall_xbar", "stall_fifo", "idle"]
 # The fields a line of these kinds must have, and those of them that are counts
 FIELDS = {"run": ["index", "firings", *UNIT_CLASSES], "mover": ["mover", "run", *MOVER_CLASSES],
-          "class": ["mode"]}
-COUNTS = {"run": FIELDS["run"], "mover": FIELDS["mover"][1:], "class": []}
+          "class": ["mode"], "snap": ["mark"]}
+COUNTS = {"run": FIELDS["run"], "mover": FIELDS["mover"][1:], "class": [], "snap": []}
 
 Line = namedtuple("Line", "number path trace cycle kind fields")
 
