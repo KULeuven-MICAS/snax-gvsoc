@@ -74,13 +74,28 @@ def packed_words(sent_at, pushes_at, d_out):
 
 
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
-          formula_total=None, comment=(), data=None, d_out=1):
+          formula_total=None, comment=(), data=None, d_out=1, d_in=()):
     # A chain: link k joins unit k to unit k + 1's only input
     links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
              for k, d in enumerate(depths)]
     m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4],
                         seed=len(u) > 5 and u[5]) for u in units], links)
-    rows, end = m.run(jobs, ts, valid, ready, 64, d_out)
+    sliced = [(i, d) for i, d in enumerate(d_in) if d > 1]
+    if sliced:  # a sliced input's reader has ceil(pops / d_in) words, then no more
+        fired = m.firings_per_run(jobs, ts)
+        port = [(k, len(u) > 5 and u[5] and j == u[4] - 1)
+                for k, u in enumerate(units) for j in range(u[4])]
+        pops = [fired[port[i][0]] // (ts[port[i][0]] if port[i][1] else 1) for i, _ in sliced]
+        words = [-(-n // d) for n, (_, d) in zip(pops, sliced)]
+        given = valid
+
+        def valid(c):
+            v = list(given(c))
+            for at, (i, _) in enumerate(sliced):
+                if sum(t[at] for t in m.took) >= words[at]:
+                    v[i] = 0
+            return tuple(v)
+    rows, end = m.run(jobs, ts, valid, ready, 64, d_out, d_in)
     if end is None:
         empty = jobs == 0 or 0 in ts
         assert empty, name
@@ -102,6 +117,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
     lines.append(f"jobs {jobs}")
     if d_out > 1:
         lines.append(f"dout {d_out}")
+    lines += [f"din {i} {d}" for i, d in sliced]
     result = "ignored" if (jobs == 0 or 0 in ts) else "taken"
     lines.append(f"start 0 {result}")
     if end is not None:
@@ -122,11 +138,14 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
              else [*(["a"] * (u[4] - 1)), f"{u[0]}.seed"]) if u[4] else [])]
     lines += ["", f"# {' '.join(names)} ready | " + " | ".join(f"{u[0]} fire give" for u in units)
               + (" | " + " ".join(f"occ{k}" for k, d in enumerate(depths) if d) if any(depths) else "")
+              + (" | " + " ".join(f"took{i}" for i, _ in sliced) if sliced else "")
               + (" | sent" if d_out > 1 else "") + " | busy", "cycles"]
     for c, (v, r, out, occ, busy, cls, note) in enumerate(rows):
         cols = " ".join(map(str, v)) + f" {r} | " + " | ".join(f"{f} {g}" for f, g in out)
         if any(depths):
             cols += " | " + " ".join(str(occ[k]) for k, d in enumerate(depths) if d)
+        if sliced:
+            cols += " | " + " ".join(map(str, m.took[c]))
         if d_out > 1:
             cols += f" | {m.sent[c]}"
             note += " (word sent)" if m.sent[c] else ""
@@ -196,6 +215,38 @@ def pack_cases():
           comment=["three results: one whole word, then a short one on the last push"])
 
 
+def slice_cases():
+    """The input's slicer (D180): one word from the reader, d_in pops, low slice first, a word
+    taken only while busy and shown the cycle after, the next taken on the last pop. sum
+    (TreeAccumulate, T 2) alone, its input sliced 2, 4 and 8 (int32, int16, int8 lanes), JOBS
+    3 and 2 (6 pops: whole words at 2, a short last word at 4; 4 pops of one word at 8); the
+    reader without a word in cycles 3 to 5; the writer not ready in cycles 4 to 6;
+    matvec_seed's sum with its seed sliced 2; and dot 3 with a and b sliced 2 and the sum
+    packed 2, matvec_3's form at int8, W = 4."""
+    sum_ = [("sum", "TreeAccumulate", 1, 1, 1)]
+    for d, j in ((2, 3), (4, 3), (8, 2)):
+        write(f"slice_d{d}_j{j}", f"sum (TreeAccumulate, T 2), JOBS {j}, its input sliced {d} "
+              f"({64 // d}-bit lanes)", sum_, [], j, [2], valid=lambda c: (1,), d_in=(d,),
+              comment=["the reader valid from cycle 0: the word is taken in cycle 1 (busy) and "
+                       "popped from cycle 2; the run's last word may be left part popped"])
+    write("slice_d2_reader_gap", "sum (TreeAccumulate, T 2), JOBS 3, its input sliced 2, the "
+          "reader without a word in cycles 3 to 5", sum_, [], 3, [2],
+          valid=lambda c: (0,) if c in (3, 4, 5) else (1,), d_in=(2,),
+          comment=["the second word arrives late: the sum waits for it (stall_in)"])
+    write("slice_d2_backpressure", "sum (TreeAccumulate, T 2), JOBS 3, its input sliced 2, the "
+          "writer not ready in cycles 4 to 6", sum_, [], 3, [2], valid=lambda c: (1,),
+          ready=lambda c: 0 if c in (4, 5, 6) else 1, d_in=(2,),
+          comment=["the sum's head held (stall_out): no pop, the slicer keeps its word"])
+    write("slice_seed_d2", "matvec_seed's sum: TreeAccumulate, T 4, JOBS 3, its seed sliced 2",
+          [("sum", "TreeAccumulate", 1, 1, 2, 1)], [], 3, [4], valid=lambda c: (1, 1),
+          d_in=(1, 2), comment=["a seed popped on each job's first firing: a seed word "
+                                "serves two jobs"])
+    write("slice_dot3_d2_j2", "dot 3 at N = 8, W = 4 (T = 2), JOBS 2, a and b sliced 2, the "
+          "sum packed 2 to a word", VARIANTS[3][0], [0], 2, [1, 2], d_out=2, d_in=(2, 2),
+          comment=["matvec_3 at int8, W = 4: both readers sliced, one cycle later than "
+                   "pack_dot3"])
+
+
 def main():
     table = {}
     for v, (units, depth, fold) in VARIANTS.items():
@@ -231,6 +282,7 @@ def main():
           [2, 1], comment=["the shell ends it in its own cycle (tests/snax/shell)"])
     seed_cases()
     pack_cases()
+    slice_cases()
     print("T, J | " + " | ".join(f"dot {v}" for v in VARIANTS))
     for t in (2, 4):
         for j in (1, 2):
