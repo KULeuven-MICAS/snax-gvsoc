@@ -21,6 +21,10 @@
 // D packs the outer output D to a word (snax_group.hpp's SnaxPacker): the
 // rule's outer room is the packer's, each cycle's word sent is compared, and
 // the words sent against the case's words, push n's result taken as -(n + 1).
+// A case with din I D slices outer input I D to a word (snax_group.hpp's
+// SnaxSlicer): its V column is its reader's valid, the rule sees the slicer's
+// full, each cycle's word taken is compared, and the slices popped from each
+// whole word, put back low first, must give that word.
 //
 //   tb CASE...
 //
@@ -31,6 +35,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "snax_datapath.hpp"
@@ -53,6 +58,7 @@ struct CycleLine
     int ready = 1;
     std::vector<int> fire, give;    // per unit
     std::vector<int> occupancy;     // per buffer
+    std::vector<int> took;          // with din: per sliced input, a word taken from its reader
     int sent = 0;                   // with dout: a word went to the writer
     int busy = 0;
     int lineno = 0;
@@ -72,6 +78,7 @@ struct Case
     std::vector<int64_t> a, b, sums;    // a and b element i * lanes + l, a job's sum each
     int dout = 1;                       // the outer output's results per word (packer)
     std::vector<uint64_t> words;        // with dout: the words the packer sends
+    std::vector<std::pair<int, int>> din;   // per sliced input: its index and its pops a word
 };
 
 static std::vector<std::string> fields(const std::string &line, char sep)
@@ -140,7 +147,8 @@ static bool parse(const std::string &path, Case &c)
             {
                 buffers += e.depth > 0;
             }
-            size_t want = 2 + c.units.size() + (buffers ? 1 : 0) + (c.dout > 1 ? 1 : 0);
+            size_t want = 2 + c.units.size() + (buffers ? 1 : 0) + (c.din.empty() ? 0 : 1) +
+                (c.dout > 1 ? 1 : 0);
             CycleLine l;
             l.lineno = lineno;
             ok = cols.size() == want;
@@ -172,6 +180,11 @@ static bool parse(const std::string &path, Case &c)
                 {
                     l.occupancy = ints(cols[1 + c.units.size()]);
                     ok = l.occupancy.size() == buffers;
+                }
+                if (ok && !c.din.empty())
+                {
+                    l.took = ints(cols[1 + c.units.size() + (buffers ? 1 : 0)]);
+                    ok = l.took.size() == c.din.size();
                 }
                 if (ok && c.dout > 1)
                 {
@@ -248,6 +261,21 @@ static bool parse(const std::string &path, Case &c)
         }
         else if (key == "sums") { ok = int64s(ss, c.sums); }
         else if (key == "dout") { ok = (bool)(ss >> c.dout) && (c.dout == 2 || c.dout == 4 || c.dout == 8); }
+        else if (key == "din")
+        {
+            // din I D, I an outer input in the V columns' order
+            int i, d, nb_in = 0;
+            for (const UnitLine &u : c.units)
+            {
+                nb_in += u.inputs;
+            }
+            ok = (bool)(ss >> i >> d) && i >= 0 && i < nb_in && (d == 2 || d == 4 || d == 8) &&
+                (c.din.empty() || c.din.back().first < i);
+            if (ok)
+            {
+                c.din.push_back({i, d});
+            }
+        }
         else if (key == "words")
         {
             std::string w;
@@ -359,6 +387,36 @@ static int run(const Case &c)
     packer.d_out = c.dout;
     uint32_t results = 0, packed = 0;   // the run's results and the pushes into the packer
     std::vector<uint64_t> words;
+    // Per sliced input: its unit, whether it is the unit's seed, its slicer, the words taken
+    // from its reader, and the slices popped from the word it holds, put back
+    struct Sliced
+    {
+        size_t unit;
+        bool seed;
+        SnaxSlicer slicer;
+        uint32_t taken = 0;
+        uint64_t popped = 0;
+    };
+    std::vector<Sliced> sliced;
+    for (const std::pair<int, int> &x : c.din)
+    {
+        Sliced s;
+        int at = 0;
+        for (size_t k = 0; k < c.units.size(); k++)
+        {
+            if (x.first < at + c.units[k].inputs)
+            {
+                s.unit = k;
+                s.seed = c.units[k].seed && x.first == at + c.units[k].inputs - 1;
+                break;
+            }
+            at += c.units[k].inputs;
+        }
+        s.slicer.d_in = x.second;
+        sliced.push_back(s);
+    }
+    // Word n of a sliced reader: every byte distinct
+    auto reader_word = [](uint32_t n) { return 0x0706050403020100ull + n * 0x0808080808080808ull; };
     for (size_t t = 0; t < c.cycles.size(); t++)
     {
         int64_t cycle = t;
@@ -377,6 +435,11 @@ static int run(const Case &c)
                 results = rule.firings_per_run[output] / rule.job_beats[output];
                 packed = 0;
                 packer.clear();
+                for (Sliced &s : sliced)
+                {
+                    s.slicer.clear();
+                    s.taken = 0;
+                }
             }
             if (c.start_result != tb_start_names[answer])
             {
@@ -387,8 +450,15 @@ static int run(const Case &c)
         run_busy += l.busy;
         SnaxGroupRule::Step step;
         step.units.assign(c.units.size(), SnaxGroupRule::UnitStep());
+        std::vector<int> took(sliced.size(), 0);
         if (busy)
         {
+            // a sliced input's beat is its slicer's word, not its reader's valid
+            std::vector<int> seen = l.valid;
+            for (size_t j = 0; j < sliced.size(); j++)
+            {
+                seen[c.din[j].first] = sliced[j].slicer.full;
+            }
             std::vector<bool> inputs, seeds;
             size_t at = 0;
             for (const UnitLine &u : c.units)
@@ -396,15 +466,39 @@ static int run(const Case &c)
                 bool all = true;
                 for (int i = 0; i < u.inputs - (int)u.seed; i++)
                 {
-                    all = all && l.valid[at++];
+                    all = all && seen[at++];
                 }
                 inputs.push_back(all);
-                seeds.push_back(u.seed ? (bool)l.valid[at++] : true);
+                seeds.push_back(u.seed ? (bool)seen[at++] : true);
             }
             std::vector<bool> room(c.units.size(), true);
             bool last = packed + 1 == results;
             room[output] = packer.room(l.ready, last);
             step = rule.step(cycle, inputs, seeds, room);
+            // NB (D180): pop on the unit's firing (a seed's take), then take the reader's word
+            // when the slicer was empty or that was its last pop
+            for (size_t j = 0; j < sliced.size(); j++)
+            {
+                Sliced &s = sliced[j];
+                bool pop = s.seed ? step.units[s.unit].seed : step.units[s.unit].fire;
+                bool open = s.slicer.open(pop);
+                if (pop)
+                {
+                    int bits = 64 / s.slicer.d_in, at = s.slicer.count;
+                    s.popped = (at ? s.popped : 0) | s.slicer.pop() << (bits * at);
+                    if (at == s.slicer.d_in - 1 && s.popped != reader_word(s.taken - 1))
+                    {
+                        fail("input " + std::to_string(c.din[j].first) + ": its slices give " +
+                            std::to_string(s.popped) + ", not the word taken " +
+                            std::to_string(reader_word(s.taken - 1)));
+                    }
+                }
+                if (open && l.valid[c.din[j].first])
+                {
+                    s.slicer.take(reader_word(s.taken++));
+                    took[j] = 1;
+                }
+            }
             int sent = 0;
             if (step.units[output].push)
             {
@@ -463,6 +557,16 @@ static int run(const Case &c)
                     pushed++;
                 }
             }
+        }
+        if (!c.din.empty() && took != l.took)
+        {
+            std::string got, want;
+            for (size_t j = 0; j < took.size(); j++)
+            {
+                got += (j ? " " : "") + std::to_string(took[j]);
+                want += (j ? " " : "") + std::to_string(l.took[j]);
+            }
+            fail("took " + got + ", expected " + want);
         }
         if (busy != l.busy)
         {
