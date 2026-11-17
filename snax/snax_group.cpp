@@ -30,6 +30,10 @@
 //                                   element type (snax_types.hpp: 8 to 64
 //                                   bits, signed or not)
 //                lanes              elements per input beat
+//                d_in               optional, per input: an outer input's pops
+//                                   per 64-bit word, through a slicer when
+//                                   above 1 (2, 4 or 8, lanes x width x d_in
+//                                   = 64 bits; D180); absent, 1 for each
 //                op                 SimdLanes' op (add ... max, or axpby);
 //                                   a fold's add
 //                k                  SimdLanes' constant at one stream,
@@ -56,9 +60,11 @@
 // Ports:
 //   <unit>_<port>  io masters to the streamer's reader_<i> and writer_<j>, one
 //                  per outer port, each beat its port's words (the mover's
-//                  num_channel must match: no FIFO slicer here): a probe
+//                  num_channel must match), or one word for a sliced input
+//                  (d_in above 1) or a packed output (d_out above 1): a probe
 //                  (size 0) of every port, then the beats moved, so nothing
-//                  moves unless the rule says so
+//                  moves unless the rule says so; a sliced input's reader is
+//                  probed and moved only when its slicer takes a word
 //   ctrl           io slave: a start, JOBS then the T of each unit with t 0, in
 //                  unit order, 32-bit words (a group without one: JOBS and a
 //                  word 1, as SnaxShell sends it), then each unit's scalars'
@@ -126,7 +132,8 @@ private:
     SnaxSignal sig_class;
 
     // An outer input: its port, its unit, its words per beat, the beat taken, and whether it
-    // is the unit's seed (taken once per job)
+    // is the unit's seed (taken once per job); with d_in above 1 its slicer, the beat its
+    // slice, and the beat id of the word it holds (-1 untagged)
     struct OuterIn
     {
         vp::IoMaster itf;
@@ -134,6 +141,8 @@ private:
         int words;
         std::vector<uint64_t> beat;
         bool seed = false;
+        SnaxSlicer slicer;
+        long word_id = -1;
     };
 
     std::vector<OuterIn> in_itf;        // sized once, before any port is registered
@@ -231,6 +240,13 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 "-1\n", w.c_str(), seed, ins.size() - 1);
         }
         p.seed = seed != -1;
+        js::Config *d_ins = u->get("d_in");
+        std::vector<js::Config *> slices = d_ins ? this->props.as_list(d_ins, w + ".d_in")
+            : std::vector<js::Config *>();
+        if (d_ins && slices.size() != ins.size())
+        {
+            this->trace.fatal("Property %s.d_in: one per input (%ld)\n", w.c_str(), ins.size());
+        }
         for (size_t i = 0; i < ins.size(); i++)
         {
             std::string at_i = "[" + std::to_string(i) + "]";
@@ -238,6 +254,16 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 this->props.as_bool(signs[i], w + ".in_signed" + at_i)});
             std::string port = dynamic_cast<js::ConfigString *>(ins[i]) ? ins[i]->get_str() : "";
             bool is_seed = p.seed && (int)i == seed;
+            int d_in = d_ins ? this->props.as_int(slices[i], w + ".d_in[" + std::to_string(i) +
+                "]") : 1;
+            int lanes = is_seed ? 1 : p.lanes;
+            if ((d_in != 1 && d_in != 2 && d_in != 4 && d_in != 8) ||
+                (d_in > 1 && (port.empty() || lanes * p.in_types.back().width * d_in != 64)))
+            {
+                this->trace.fatal("Property %s.d_in[%ld]: %d, must be 1, 2, 4 or 8, and above 1 "
+                    "only on an outer input whose %d lanes of %d bits are 64 / d_in\n",
+                    w.c_str(), i, d_in, lanes, p.in_types.back().width);
+            }
             if (port.empty() && is_seed)
             {
                 this->trace.fatal("Property %s.inputs[%ld]: \"\", but the seed is an outer "
@@ -251,7 +277,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             OuterIn &o = this->in_itf[at];
             o.unit = k;
             o.seed = is_seed;
-            o.words = is_seed ? 1 : snax_words(p.lanes, p.in_types.back());
+            o.words = is_seed || d_in > 1 ? 1 : snax_words(p.lanes, p.in_types.back());
+            o.slicer.d_in = d_in;
             o.beat.assign(o.words, 0);
             this->new_master_port(port, &o.itf);
             this->unit_ins.back().push_back(at++);
@@ -504,6 +531,11 @@ void SnaxGroup::reset(bool active)
         this->pushes = 0;
         this->results = 0;
         this->packer.clear();
+        for (OuterIn &o : this->in_itf)
+        {
+            o.slicer.clear();
+            o.word_id = -1;
+        }
         this->line_class = -1;
         this->rate = 1;
         std::fill(std::begin(this->total_classes), std::end(this->total_classes), 0);
@@ -634,6 +666,11 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
             _this->pushes = 0;
             _this->results = results;
             _this->packer.clear();
+            for (OuterIn &o : _this->in_itf)
+            {
+                o.slicer.clear();
+                o.word_id = -1;
+            }
             _this->line_class = -1;
             if (_this->busy_itf.is_bound())
             {
@@ -682,10 +719,12 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
         std::vector<bool> &inputs = _this->inputs, &seeds = _this->seeds;
         std::fill(inputs.begin(), inputs.end(), true);
         std::fill(seeds.begin(), seeds.end(), true);
+        // a sliced input's beat is its slicer's word, not the reader's
         for (OuterIn &o : _this->in_itf)
         {
             std::vector<bool> &has = o.seed ? seeds : inputs;
-            has[o.unit] = _this->probe(o.itf, false) && has[o.unit];
+            bool there = o.slicer.d_in > 1 ? o.slicer.full : _this->probe(o.itf, false);
+            has[o.unit] = there && has[o.unit];
         }
         // A push the packer keeps needs no room at the writer: only a sending one asks it
         bool last = _this->pushes + 1 == _this->results;
@@ -708,7 +747,9 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
         snax_class_line(_this->ev.beats, &_this->line_class, step.cls,
             snax_group_class_names[step.cls], cycle);
 
-        // The beats of each unit that fires, its outer inputs in port order (outer)
+        // The beats of each unit that fires, its outer inputs in port order (outer). A sliced
+        // input pops on that firing (a seed's on its take), its slice the beat, then takes the
+        // reader's word when its slicer was empty or that was its last pop.
         std::string beats, values;
         bool traced = _this->ev.beats.get_active();
         for (size_t k = 0; k < _this->unit_ins.size(); k++)
@@ -717,18 +758,33 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
             {
                 OuterIn &o = _this->in_itf[i];
                 bool moved = o.seed ? step.units[k].seed : step.units[k].fire;
-                if (moved)
+                bool sliced = o.slicer.d_in > 1;
+                bool open = sliced && o.slicer.open(moved);
+                long id = -1;
+                if (moved && sliced)
+                {
+                    o.beat[0] = o.slicer.pop();
+                    id = o.word_id;
+                }
+                else if (moved)
                 {
                     _this->move(o.itf, false, o.beat.data(), o.words);
+                    id = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT
+                        ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L;
                 }
                 // the head's firing lists every outer input; a seed not taken in it as -1
                 if (traced && step.units[k].fire && k == _this->rule.topological().front())
                 {
-                    bool tagged = moved &&
-                        snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT;
-                    snax_join(beats, std::to_string(tagged
-                        ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L));
+                    snax_join(beats, std::to_string(id));
                     snax_join(values, snax_words_text(o.beat.data(), o.beat.size()));
+                }
+                if (open && _this->probe(o.itf, false))
+                {
+                    uint64_t word;
+                    _this->move(o.itf, false, &word, 1);
+                    o.slicer.take(word);
+                    o.word_id = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT
+                        ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L;
                 }
             }
         }
