@@ -17,6 +17,7 @@
 /*
  * Authors: Germain Haugou, ETH Zurich (germain.haugou@iis.ee.ethz.ch)
  */
+// Modified for SNAX-GVSoC (KU Leuven MICAS), see UPSTREAM.md
 
 #include <vp/vp.hpp>
 #include "fe/idma_fe_xdma.hpp"
@@ -46,6 +47,8 @@ private:
     IDmaMe2D me;
     IDmaBeAxi be_axi_read;
     IDmaBeAxi be_axi_write;
+    // SNAX: the port into the local memory both TCDM back-ends share
+    IDmaTcdmPort tcdm_port;
     IDmaBeTcdm be_tcdm_read;
     IDmaBeTcdm be_tcdm_write;
     IDmaBe be;
@@ -58,7 +61,9 @@ SnitchDma::SnitchDma(vp::ComponentConf &config)
     fe(this, &this->me),
     me(this, &this->fe, &this->be),
     be_axi_read(this, "axi_read", &this->be), be_axi_write(this, "axi_write", &this->be),
-    be_tcdm_read(this, "tcdm_read", &this->be), be_tcdm_write(this, "tcdm_write", &this->be),
+    tcdm_port(this),
+    be_tcdm_read(this, "tcdm_read", &this->be, &this->tcdm_port),
+    be_tcdm_write(this, "tcdm_write", &this->be, &this->tcdm_port),
     be(this, &this->me, &this->be_tcdm_read, &this->be_tcdm_write,
         &this->be_axi_read, &this->be_axi_write)
 {

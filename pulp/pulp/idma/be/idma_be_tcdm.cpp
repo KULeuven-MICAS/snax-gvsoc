@@ -25,7 +25,105 @@
 
 
 
-IDmaBeTcdm::IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer *be)
+// SNAX: the DMA's port into the local memory
+IDmaTcdmPort::IDmaTcdmPort(vp::Component *idma)
+:   Block(idma, "tcdm_port"),
+    event(this, &IDmaTcdmPort::handler)
+{
+}
+
+
+
+void IDmaTcdmPort::reset(bool active)
+{
+    if (active)
+    {
+        this->write_prio = true;
+    }
+}
+
+
+
+void IDmaTcdmPort::attach(IDmaBeTcdm *be)
+{
+    this->backends.push_back(be);
+}
+
+
+
+void IDmaTcdmPort::wake(int64_t cycle)
+{
+    this->event.enqueue(std::max(cycle - this->clock.get_cycles(), (int64_t)1));
+}
+
+
+
+// One read or one write a cycle, by the priority bit
+void IDmaTcdmPort::handler(vp::Block *__this, vp::ClockEvent *event)
+{
+    IDmaTcdmPort *_this = (IDmaTcdmPort *)__this;
+    int64_t now = _this->clock.get_cycles();
+    IDmaBeTcdm *read = NULL, *write = NULL;
+    for (IDmaBeTcdm *be: _this->backends)
+    {
+        int64_t ask = be->port_read_ask();
+        if (read == NULL && ask != -1 && ask <= now)
+        {
+            read = be;
+        }
+        ask = be->port_write_ask();
+        if (write == NULL && ask != -1 && ask <= now)
+        {
+            write = be;
+        }
+    }
+
+    if (read != NULL && write != NULL)
+    {
+        if (_this->write_prio)
+        {
+            write->port_grant_write();
+        }
+        else
+        {
+            read->port_grant_read();
+        }
+        _this->write_prio = !_this->write_prio;
+    }
+    else if (read != NULL)
+    {
+        read->port_grant_read();
+        _this->write_prio = false;
+    }
+    else if (write != NULL)
+    {
+        write->port_grant_write();
+        _this->write_prio = true;
+    }
+
+    // The next cycle a side asks in
+    int64_t next = -1;
+    for (IDmaBeTcdm *be: _this->backends)
+    {
+        for (int64_t ask: {be->port_read_ask(), be->port_write_ask()})
+        {
+            if (ask != -1)
+            {
+                ask = std::max(ask, now + 1);
+                next = next == -1 ? ask : std::min(next, ask);
+            }
+        }
+    }
+    if (next != -1)
+    {
+        _this->event.enqueue(next - now);
+    }
+}
+
+
+
+IDmaBeTcdm::IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer *be,
+    IDmaTcdmPort *port)
 :   Block(idma, itf_name),
     fsm_event(this, &IDmaBeTcdm::fsm_handler),
     delayed_write_event(this, &IDmaBeTcdm::delayed_write_handler)
@@ -54,6 +152,19 @@ IDmaBeTcdm::IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer
     // SNAX: the path from the DMA to the TCDM for writes
     js::Config *tcdm_write_latency = idma->get_js_config()->get("tcdm_write_latency");
     this->tcdm_write_latency = tcdm_write_latency ? tcdm_write_latency->get_int() : 0;
+    // SNAX: the way into the local memory through the DMA's port
+    js::Config *request = idma->get_js_config()->get("tcdm_read_request_latency");
+    this->tcdm_read_request_latency = request ? request->get_int() : 0;
+    js::Config *response = idma->get_js_config()->get("tcdm_read_response_latency");
+    this->tcdm_read_response_latency = response ? response->get_int() : 0;
+    js::Config *coupled = idma->get_js_config()->get("coupled_write_latency");
+    this->coupled_write_latency = coupled ? coupled->get_int() : 0;
+    this->port = NULL;
+    if (port != NULL && this->tcdm_read_request_latency + this->tcdm_read_response_latency > 0)
+    {
+        this->port = port;
+        port->attach(this);
+    }
 }
 
 
@@ -72,6 +183,12 @@ void IDmaBeTcdm::activate_burst()
 
 void IDmaBeTcdm::enqueue_burst(uint64_t base, uint64_t size, bool is_write, IdmaTransfer *transfer)
 {
+    if (this->port != NULL && !is_write)
+    {
+        this->port_enqueue_read(transfer, base, size);
+        return;
+    }
+
     // Just enqueue the burst and trigger the FSM, the FSM will take care of sending the requests
     this->burst_queue_base.push(base);
     this->burst_queue_size.push(size);
@@ -112,6 +229,12 @@ uint64_t IDmaBeTcdm::get_burst_size(uint64_t base, uint64_t size)
 
 bool IDmaBeTcdm::can_accept_burst()
 {
+    // SNAX: with the port, read bursts waiting for their AR have their own queue
+    if (this->port != NULL
+        && this->port_bursts.size() - this->port_ar_bursts >= (size_t)this->burst_queue_maxsize)
+    {
+        return false;
+    }
     // Accept a burst if we have room in the queue of pending bursts
     return this->burst_queue_base.size() < this->burst_queue_maxsize;
 }
@@ -157,6 +280,17 @@ void IDmaBeTcdm::reset(bool active)
         this->last_line_timestamp = -1;
         this->last_read_push_timestamp = -2;
         this->delayed_lines.clear();
+
+        this->port_bursts.clear();
+        for (PortLine &line: this->port_lines)
+        {
+            delete[] line.data;
+        }
+        this->port_lines.clear();
+        this->port_ar_bursts = 0;
+        this->port_asked_bursts = 0;
+        this->port_next_ar = 0;
+        this->port_last_read_grant = -2;
     }
 }
 
@@ -210,10 +344,15 @@ void IDmaBeTcdm::write_line()
         if (this->tcdm_write_latency > 0)
         {
             // SNAX: the line reaches the TCDM later and is acknowledged now
-            this->delayed_lines.push_back({this->clock.get_cycles()
-                + (int64_t)this->tcdm_write_latency, base,
-                std::vector<uint8_t>(data, data + size), ids});
-            if (!this->delayed_write_event.is_enqueued())
+            int64_t ask = this->clock.get_cycles() + (int64_t)this->tcdm_write_latency;
+            this->delayed_lines.push_back({ask, base, std::vector<uint8_t>(data, data + size),
+                ids});
+            if (this->port != NULL)
+            {
+                // SNAX: written at its grant on the DMA's port
+                this->port->wake(ask);
+            }
+            else if (!this->delayed_write_event.is_enqueued())
             {
                 this->delayed_write_event.enqueue(this->tcdm_write_latency);
             }
@@ -276,33 +415,169 @@ void IDmaBeTcdm::delayed_write_handler(vp::Block *__this, vp::ClockEvent *event)
 
     while (_this->delayed_lines.size() > 0 && _this->delayed_lines.front().cycle <= now)
     {
-        DelayedLine &line = _this->delayed_lines.front();
-        _this->trace.msg(vp::Trace::LEVEL_TRACE, "Line reaches TCDM (base: 0x%lx, size: 0x%lx)\n",
-            line.base, line.data.size());
-        vp::IoReq *req = &_this->delayed_req;
-        req->prepare();
-        _this->tag(req, line.ids);
-        req->set_is_write(true);
-        req->set_addr(line.base - _this->loc_base);
-        req->set_size(line.data.size());
-        req->set_data(line.data.data());
-        vp::IoReqStatus status = _this->ico_itf.req(req);
-        if (status == vp::IoReqStatus::IO_REQ_INVALID)
-        {
-            _this->trace.force_warning("Invalid access during TCDM write line (base: 0x%lx, "
-                "size: 0x%lx)\n", line.base, line.data.size());
-        }
-        else if (status != vp::IoReqStatus::IO_REQ_OK)
-        {
-            _this->trace.fatal("Asynchronous response is not supported on TCDM backend\n");
-        }
-        _this->delayed_lines.pop_front();
+        _this->write_delayed_line();
     }
 
     if (_this->delayed_lines.size() > 0)
     {
         _this->delayed_write_event.enqueue(_this->delayed_lines.front().cycle - now);
     }
+}
+
+
+
+// SNAX: the first delayed line reaches the TCDM
+void IDmaBeTcdm::write_delayed_line()
+{
+    DelayedLine &line = this->delayed_lines.front();
+    this->trace.msg(vp::Trace::LEVEL_TRACE, "Line reaches TCDM (base: 0x%lx, size: 0x%lx)\n",
+        line.base, line.data.size());
+    vp::IoReq *req = &this->delayed_req;
+    req->prepare();
+    this->tag(req, line.ids);
+    req->set_is_write(true);
+    req->set_addr(line.base - this->loc_base);
+    req->set_size(line.data.size());
+    req->set_data(line.data.data());
+    vp::IoReqStatus status = this->ico_itf.req(req);
+    if (status == vp::IoReqStatus::IO_REQ_INVALID)
+    {
+        this->trace.force_warning("Invalid access during TCDM write line (base: 0x%lx, "
+            "size: 0x%lx)\n", line.base, line.data.size());
+    }
+    else if (status != vp::IoReqStatus::IO_REQ_OK)
+    {
+        this->trace.fatal("Asynchronous response is not supported on TCDM backend\n");
+    }
+    this->delayed_lines.pop_front();
+}
+
+
+
+// SNAX: a read burst, which takes its AR when it can
+void IDmaBeTcdm::port_enqueue_read(IdmaTransfer *transfer, uint64_t base, uint64_t size)
+{
+    uint64_t lines = 0;
+    for (uint64_t line_base = base, left = size; left > 0; lines++)
+    {
+        uint64_t line_size = this->get_line_size(line_base, left);
+        line_base += line_size;
+        left -= line_size;
+    }
+    this->port_bursts.push_back({transfer, -1, base, size, lines, 0});
+    this->port_read_fsm();
+}
+
+
+
+void IDmaBeTcdm::port_read_fsm()
+{
+    int64_t now = this->clock.get_cycles();
+
+    // The next AR: a slot free, one AR a cycle
+    if (this->port_ar_bursts < this->port_bursts.size()
+        && this->port_ar_bursts < (size_t)this->burst_queue_maxsize)
+    {
+        if (now >= this->port_next_ar)
+        {
+            this->port_bursts[this->port_ar_bursts].ar = now;
+            this->port_ar_bursts++;
+            this->port_next_ar = now + 1;
+            this->trace.msg(vp::Trace::LEVEL_TRACE, "Read burst AR (in flight: %ld)\n",
+                (long)this->port_ar_bursts);
+            int64_t ask = this->port_read_ask();
+            if (ask != -1)
+            {
+                this->port->wake(ask);
+            }
+            if (this->port_ar_bursts < this->port_bursts.size())
+            {
+                this->fsm_event.enqueue();
+            }
+        }
+        else
+        {
+            this->fsm_event.enqueue(this->port_next_ar - now);
+        }
+    }
+}
+
+
+
+int64_t IDmaBeTcdm::port_read_ask()
+{
+    if (this->port == NULL || this->port_asked_bursts >= this->port_ar_bursts)
+    {
+        return -1;
+    }
+    PortBurst &burst = this->port_bursts[this->port_asked_bursts];
+    return std::max(burst.ar + (int64_t)this->tcdm_read_request_latency,
+        this->port_last_read_grant + 1);
+}
+
+
+
+int64_t IDmaBeTcdm::port_write_ask()
+{
+    if (this->port == NULL || this->delayed_lines.empty())
+    {
+        return -1;
+    }
+    return this->delayed_lines.front().cycle;
+}
+
+
+
+// A read line granted on the port: read now, its data to the write side later
+void IDmaBeTcdm::port_grant_read()
+{
+    int64_t now = this->clock.get_cycles();
+    PortBurst &burst = this->port_bursts[this->port_asked_bursts];
+    uint64_t base = burst.next_base;
+    uint64_t size = this->get_line_size(base, burst.left);
+
+    this->trace.msg(vp::Trace::LEVEL_TRACE, "Reading line from TCDM (base: 0x%lx, size: 0x%lx)\n",
+            base, size);
+
+    vp::IoReq *req = &this->port_req;
+    req->prepare();
+    this->tag(req, this->beat_ids(burst.transfer, base, false));
+    req->set_is_write(false);
+    req->set_addr(base - this->loc_base);
+    req->set_size(size);
+    // Freed when the write side acknowledges it
+    req->set_data(new uint8_t[size]);
+    vp::IoReqStatus status = this->ico_itf.req(req);
+    if (status == vp::IoReqStatus::IO_REQ_INVALID)
+    {
+        trace.force_warning("Invalid access during TCDM read line (base: 0x%lx, size: 0x%lx)\n",
+            base, size);
+    }
+    else if (status != vp::IoReqStatus::IO_REQ_OK)
+    {
+        trace.fatal("Asynchronous response is not supported on TCDM backend\n");
+    }
+
+    burst.next_base += size;
+    burst.left -= size;
+    if (burst.left == 0)
+    {
+        this->port_asked_bursts++;
+    }
+    this->port_last_read_grant = now;
+
+    int64_t cycle = now + req->get_latency() + this->tcdm_read_response_latency
+        + this->coupled_write_latency;
+    this->port_lines.push_back({cycle, burst.transfer, req->get_data(), size});
+    this->fsm_event.enqueue(std::max(cycle - now, (int64_t)1));
+}
+
+
+
+// The first line waiting for the port is written now
+void IDmaBeTcdm::port_grant_write()
+{
+    this->write_delayed_line();
 }
 
 
@@ -436,6 +711,21 @@ void IDmaBeTcdm::write_data_ack(uint8_t *data)
 {
     // Release the data since we are now sure it won't be used anymore
     delete[] data;
+    // SNAX: the write side sent a line of the first read burst; its last frees the burst's
+    // slot for the next cycle's AR
+    if (this->port != NULL && this->port_ar_bursts > 0)
+    {
+        PortBurst &burst = this->port_bursts.front();
+        burst.sent++;
+        if (burst.sent == burst.lines)
+        {
+            this->port_bursts.pop_front();
+            this->port_ar_bursts--;
+            this->port_asked_bursts--;
+            this->port_next_ar = std::max(this->port_next_ar, this->clock.get_cycles() + 1);
+            this->be->update();
+        }
+    }
     // And check if there is any action to take since backend may became ready
     this->update();
 }
@@ -446,6 +736,29 @@ void IDmaBeTcdm::write_data_ack(uint8_t *data)
 void IDmaBeTcdm::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
 {
     IDmaBeTcdm *_this = (IDmaBeTcdm *)__this;
+
+    if (_this->port != NULL)
+    {
+        // SNAX: the next AR, and the read lines due to the write side, in order
+        _this->port_read_fsm();
+        int64_t now = _this->clock.get_cycles();
+        while (_this->port_lines.size() > 0)
+        {
+            PortLine line = _this->port_lines.front();
+            if (line.cycle > now)
+            {
+                _this->fsm_event.enqueue(line.cycle - now);
+                break;
+            }
+            if (!_this->be->is_ready_to_accept_data(line.transfer))
+            {
+                _this->fsm_event.enqueue();
+                break;
+            }
+            _this->port_lines.pop_front();
+            _this->be->write_data(line.transfer, line.data, line.size);
+        }
+    }
 
     // Check if we should acknowledge the previous line, this can happen when the write request
     // got a latency
@@ -513,5 +826,5 @@ void IDmaBeTcdm::update()
 
 bool IDmaBeTcdm::is_empty()
 {
-    return this->burst_queue_base.empty();
+    return this->burst_queue_base.empty() && this->port_bursts.empty();
 }
