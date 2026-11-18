@@ -9,7 +9,7 @@ The DMA core copies between DRAM (L2) and L1, and transposes a 64 × 64 matrix A
 3. takes `mcycle` before the first `snrt_dma_start_1d` or `_2d`, after the last one and after `snrt_dma_wait_all`;
 4. stops the counters, reads them and checks the copy (a transpose: T against A's columns, both in L1).
 
-Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier, core 0 prints one line per case.
+Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier, core 0 prints one line per case. A case whose RTL values are not measured yet holds `UNPINNED` and is printed but not compared.
 
 | Case | Copies |
 |---|---|
@@ -22,6 +22,9 @@ Each case runs twice and the second run is kept, so instruction cache refills st
 | `t-l1l1 64x1 B p64`, `p72` | the whole int8 A in L1, rows of 64 B, or of 72 B (9 words, as snax-forge's `padded_rows`): 4096 bursts |
 | `t-l1l1 64x8 B p512` | an int64 A in L1: 4096 bursts of 8 B |
 | `t-l2l1 64x1 B p64` | the int8 A read from DRAM, T in L1 |
+| `l1l1 1x4096` | one 4 KiB copy inside L1 |
+| `s-l1l1 64x64 B p128`, `64x8 B p64` | one 2-D copy inside L1 of 64 rows of one beat (stride 128 B) or of one word (stride 64 B) |
+| `s-l1l2 64x1 B p64` | one 2-D copy of 64 one-byte rows from L1 (stride 64 B) into DRAM, back to back |
 
 | Field | Meaning |
 |---|---|
@@ -69,4 +72,4 @@ Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from that 
 
 ## Expected output
 
-Sixteen lines: fourteen cases, `Number of errors: 0` and `Cases off the RTL's busy, r, w: 0`; exit code 0.
+Twenty-one lines: eighteen cases, `Number of errors: 0`, `Cases off the RTL's busy, r, w: 0` and `Cases not pinned yet: 0`; exit code 0.

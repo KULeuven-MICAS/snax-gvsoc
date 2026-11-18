@@ -32,16 +32,23 @@ static const enum snrt_perf_cnt_type cnt_type[NB_CNT] = {
     SNRT_PERF_CNT_DMA_R_STALL,   // read data waiting on a full buffer
 };
 
-// T_L1 and T_L2 transpose A, in L1 or in DRAM, into T in L1: for each
-// column k, snrt_dma_start_2d(T + pitch * k, A + bytes * k, bytes, bytes,
-// A's pitch, N), N bursts of one element.
-enum dir { IDLE, L2_TO_L1, L1_TO_L2, T_L1, T_L2 };
+// L2_TO_L1, L1_TO_L2 and L1_TO_L1 copy with snrt_dma_start_1d. T_L1 and
+// T_L2 transpose A, in L1 or in DRAM, into T in L1: for each column k,
+// snrt_dma_start_2d(T + pitch * k, A + bytes * k, bytes, bytes, A's pitch,
+// N), N bursts of one element. S_L1L1 and S_L1L2 copy `copies` rows of
+// `bytes` from L1 at the stride `pitch` with one snrt_dma_start_2d, into L1
+// at the same stride or into DRAM back to back.
+enum dir { IDLE, L2_TO_L1, L1_TO_L2, T_L1, T_L2, L1_TO_L1, S_L1L1, S_L1L2 };
+
+// A case whose RTL values are not measured yet: it is printed, not compared.
+#define UNPINNED 0xffffffffu
 
 typedef struct {
     enum dir dir;
     // A copy: `copies` back-to-back copies, each `bytes` long, placed one
     // after the other. A transpose: `copies` columns of N elements of
-    // `bytes` each, A and T at the row pitch `pitch` in L1.
+    // `bytes` each, A and T at the row pitch `pitch` in L1. A strided copy:
+    // `copies` rows of `bytes` at the stride `pitch`.
     uint32_t copies;
     uint32_t bytes;
     uint32_t pitch;
@@ -60,11 +67,15 @@ static const dma_case_t cases[] = {
     {L2_TO_L1, 2, 800, 0, 39, 26, 26},
     {L2_TO_L1, 4, 800, 0, 65, 52, 52},
     {L1_TO_L2, 1, 800, 0, 20, 13, 13},
-    {T_L1, 1, 1, 64, 173, 64, 64},         // one int8 column
-    {T_L1, N, 1, 64, 10925, 4096, 4096},   // int8, rows contiguous
-    {T_L1, N, 1, 72, 10925, 4096, 4096},   // int8, rows of 9 words
-    {T_L1, N, 8, 512, 10925, 4096, 4096},  // int64
-    {T_L2, N, 1, 64, 17759, 4096, 4096},   // int8 from DRAM
+    {T_L1, 1, 1, 64, 173, 64, 64},           // one int8 column
+    {T_L1, N, 1, 64, 10925, 4096, 4096},     // int8, rows contiguous
+    {T_L1, N, 1, 72, 10925, 4096, 4096},     // int8, rows of 9 words
+    {T_L1, N, 8, 512, 10925, 4096, 4096},    // int64
+    {T_L2, N, 1, 64, 17759, 4096, 4096},     // int8 from DRAM
+    {L1_TO_L1, 1, 4096, 0, UNPINNED, 0, 0},  // one long copy in L1
+    {S_L1L1, 64, 64, 128, UNPINNED, 0, 0},   // rows of one beat
+    {S_L1L1, 64, 8, 64, UNPINNED, 0, 0},     // rows of one word
+    {S_L1L2, 64, 1, 64, UNPINNED, 0, 0},     // one byte a row, into DRAM
 };
 #define NB_CASES (sizeof(cases) / sizeof(cases[0]))
 
@@ -120,6 +131,20 @@ static uint32_t check_transpose(const uint8_t *t, const uint8_t *a,
     return errors;
 }
 
+// The rows of `copies` x `bytes` at `dst` (stride `ds`) that differ from
+// those at `src` (stride `ss`).
+static uint32_t check_rows(const uint8_t *dst, uint32_t ds, const uint8_t *src,
+                           uint32_t ss, uint32_t bytes, uint32_t copies) {
+    uint32_t errors = 0;
+    for (uint32_t k = 0; k < copies; k++) {
+        uint32_t bad = 0;
+        for (uint32_t i = 0; i < bytes; i++)
+            bad |= dst[k * ds + i] != src[k * ss + i];
+        errors += bad;
+    }
+    return errors;
+}
+
 static void run_case(const dma_case_t *c, uint8_t *l1, uint8_t *t,
                      result_t *r) {
     // Read the case before the first mark: `cases` is in DRAM, and
@@ -128,12 +153,17 @@ static void run_case(const dma_case_t *c, uint8_t *l1, uint8_t *t,
     const uint32_t copies = c->copies;
     const uint32_t bytes = c->bytes;
     const uint32_t pitch = c->pitch;
-    const int transpose = c->dir == T_L1 || c->dir == T_L2;
-    const uint32_t total = transpose ? N * pitch : copies * bytes;
-    const uint32_t src_pitch = c->dir == T_L2 ? N * bytes : pitch;
+    const enum dir dir = c->dir;
+    const int transpose = dir == T_L1 || dir == T_L2;
+    const uint32_t total = transpose       ? N * pitch
+                           : dir == S_L1L1 ? copies * pitch
+                                           : copies * bytes;
+    const uint32_t src_pitch = dir == T_L2 ? N * bytes : pitch;
     uint8_t *src =
-        c->dir == L1_TO_L2 || c->dir == T_L1 ? l1 : (uint8_t *)src_l2;
-    uint8_t *dst = c->dir == L1_TO_L2 ? (uint8_t *)dst_l2 : transpose ? t : l1;
+        dir == L2_TO_L1 || dir == T_L2 || dir == IDLE ? (uint8_t *)src_l2 : l1;
+    uint8_t *dst = dir == L1_TO_L2 || dir == S_L1L2 ? (uint8_t *)dst_l2
+                   : dir == L2_TO_L1 || dir == IDLE ? l1
+                                                    : t;
 
     clear((uint32_t *)dst, total);
 
@@ -151,6 +181,10 @@ static void run_case(const dma_case_t *c, uint8_t *l1, uint8_t *t,
         for (uint32_t k = 0; k < copies; k++)  // column k -> row k
             snrt_dma_start_2d(dst + k * pitch, src + k * bytes, bytes, bytes,
                               src_pitch, N);
+    } else if (dir == S_L1L1) {
+        snrt_dma_start_2d(dst, src, bytes, pitch, pitch, copies);
+    } else if (dir == S_L1L2) {
+        snrt_dma_start_2d(dst, src, bytes, bytes, pitch, copies);
     } else {
         for (uint32_t k = 0; k < copies; k++)
             snrt_dma_start_1d(dst + k * bytes, src + k * bytes, bytes);
@@ -164,14 +198,21 @@ static void run_case(const dma_case_t *c, uint8_t *l1, uint8_t *t,
     r->issue = t1 - t0;
     r->done = t2 - t0;
     for (int i = 0; i < NB_CNT; i++) r->cnt[i] = snrt_get_perf_counter(i);
-    r->errors = transpose ? check_transpose(t, l1, bytes, copies, pitch)
-                          : compare((uint32_t *)dst, (uint32_t *)src, total);
+    if (transpose)
+        r->errors = check_transpose(t, l1, bytes, copies, pitch);
+    else if (dir == S_L1L1)
+        r->errors = check_rows(dst, pitch, src, pitch, bytes, copies);
+    else if (dir == S_L1L2)
+        r->errors = check_rows(dst, bytes, src, pitch, bytes, copies);
+    else
+        r->errors = compare((uint32_t *)dst, (uint32_t *)src, total);
 }
 
-// A case's name: "dma l2l1 1x64 B", and a transpose's row pitch after it.
+// A case's name: "dma l2l1 1x64 B", and a transpose's or a strided copy's
+// pitch after it.
 static void label(const dma_case_t *c, const char *dir) {
     printf("dma %s %ux%u B", dir, c->copies, c->bytes);
-    if (c->dir == T_L1 || c->dir == T_L2) printf(" p%u", c->pitch);
+    if (c->pitch) printf(" p%u", c->pitch);
 }
 
 int main() {
@@ -188,6 +229,9 @@ int main() {
             // there.
             if (c->dir == T_L1 || c->dir == T_L2)
                 load(l1, N * c->bytes, c->pitch);
+            // The other copies from L1 read data.h's words there.
+            if (c->dir == L1_TO_L1 || c->dir == S_L1L1 || c->dir == S_L1L2)
+                load(l1, 8 * N, 8 * N);
             // The first run fills the instruction cache; the second counts.
             run_case(c, l1, t, &results[i]);
             run_case(c, l1, t, &results[i]);
@@ -199,6 +243,7 @@ int main() {
     if (snrt_cluster_core_idx() == 0) {
         uint32_t errors = 0;
         uint32_t mismatches = 0;
+        uint32_t unpinned = 0;
         for (uint32_t i = 0; i < NB_CASES; i++) {
             const dma_case_t *c = &cases[i];
             const result_t *r = &results[i];
@@ -206,7 +251,10 @@ int main() {
                               : c->dir == L2_TO_L1 ? "l2l1"
                               : c->dir == L1_TO_L2 ? "l1l2"
                               : c->dir == T_L1     ? "t-l1l1"
-                                                   : "t-l2l1";
+                              : c->dir == T_L2     ? "t-l2l1"
+                              : c->dir == L1_TO_L1 ? "l1l1"
+                              : c->dir == S_L1L1   ? "s-l1l1"
+                                                   : "s-l1l2";
             label(c, dir);
             printf(
                 ": issue %u done %u busy %u r %u w %u ar_stall %u w_stall %u "
@@ -214,8 +262,10 @@ int main() {
                 r->issue, r->done, r->cnt[0], r->cnt[1], r->cnt[2], r->cnt[3],
                 r->cnt[4], r->cnt[5], r->errors);
             errors += r->errors;
-            if (r->cnt[0] != c->rtl_busy || r->cnt[1] != c->rtl_r ||
-                r->cnt[2] != c->rtl_w) {
+            if (c->rtl_busy == UNPINNED) {
+                unpinned++;
+            } else if (r->cnt[0] != c->rtl_busy || r->cnt[1] != c->rtl_r ||
+                       r->cnt[2] != c->rtl_w) {
                 label(c, dir);
                 printf(": busy r w %u %u %u, the RTL's %u %u %u\n", r->cnt[0],
                        r->cnt[1], r->cnt[2], c->rtl_busy, c->rtl_r, c->rtl_w);
@@ -224,6 +274,7 @@ int main() {
         }
         printf("Number of errors: %u\n", errors);
         printf("Cases off the RTL's busy, r, w: %u\n", mismatches);
+        printf("Cases not pinned yet: %u\n", unpinned);
         return errors + mismatches;
     }
 
