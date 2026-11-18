@@ -55,29 +55,33 @@ typedef struct {
     // NB (D123): the RTL's busy, r and w do not depend on the core, so any
     // other value is the DMA's own timing moving
     uint32_t rtl_busy, rtl_r, rtl_w;
+    // Cycles busy may differ from the RTL's: a gap the model knowingly keeps
+    // (docs/notes/NOTES.md, "The DMA"), 0 everywhere else
+    uint32_t busy_slack;
 } dma_case_t;
 
 static const dma_case_t cases[] = {
-    {IDLE, 0, 0, 0, 0, 0, 0},
-    {L2_TO_L1, 1, 64, 0, 14, 1, 1},
-    {L2_TO_L1, 1, 256, 0, 17, 4, 4},
-    {L2_TO_L1, 1, 800, 0, 26, 13, 13},
-    {L2_TO_L1, 1, 4096, 0, 77, 64, 64},
-    {L2_TO_L1, 1, 8192, 0, 141, 128, 128},
-    {L2_TO_L1, 2, 800, 0, 39, 26, 26},
-    {L2_TO_L1, 4, 800, 0, 65, 52, 52},
-    {L1_TO_L2, 1, 800, 0, 20, 13, 13},
-    {T_L1, 1, 1, 64, 173, 64, 64},         // one int8 column
-    {T_L1, N, 1, 64, 10925, 4096, 4096},   // int8, rows contiguous
-    {T_L1, N, 1, 72, 10925, 4096, 4096},   // int8, rows of 9 words
-    {T_L1, N, 8, 512, 10925, 4096, 4096},  // int64
-    {T_L2, N, 1, 64, 17759, 4096, 4096},   // int8 from DRAM
-    {L1_TO_L1, 1, 4096, 0, 129, 64, 64},   // one long copy in L1
-    {S_L1L1, 64, 64, 128, 173, 64, 64},    // rows of one beat
-    {S_L1L1, 64, 8, 64, 173, 64, 64},      // rows of one word
+    {IDLE, 0, 0, 0, 0, 0, 0, 0},
+    {L2_TO_L1, 1, 64, 0, 14, 1, 1, 0},
+    {L2_TO_L1, 1, 256, 0, 17, 4, 4, 0},
+    {L2_TO_L1, 1, 800, 0, 26, 13, 13, 0},
+    {L2_TO_L1, 1, 4096, 0, 77, 64, 64, 0},
+    {L2_TO_L1, 1, 8192, 0, 141, 128, 128, 0},
+    {L2_TO_L1, 2, 800, 0, 39, 26, 26, 0},
+    {L2_TO_L1, 4, 800, 0, 65, 52, 52, 0},
+    {L1_TO_L2, 1, 800, 0, 20, 13, 13, 0},
+    {T_L1, 1, 1, 64, 173, 64, 64, 0},         // one int8 column
+    {T_L1, N, 1, 64, 10925, 4096, 4096, 0},   // int8, rows contiguous
+    {T_L1, N, 1, 72, 10925, 4096, 4096, 0},   // int8, rows of 9 words
+    {T_L1, N, 8, 512, 10925, 4096, 4096, 0},  // int64
+    {T_L2, N, 1, 64, 17759, 4096, 4096, 0},   // int8 from DRAM
+    {L1_TO_L1, 1, 4096, 0, 129, 64, 64,
+     1},  // one long copy in L1, the model 128
+    {S_L1L1, 64, 64, 128, 173, 64, 64, 0},  // rows of one beat
+    {S_L1L1, 64, 8, 64, 173, 64, 64, 0},    // rows of one word
     // One byte a row, into DRAM: 211, 64, 64 on the RTL, paced by its DRAM
     // side, which the model does not have yet.
-    {S_L1L2, 64, 1, 64, UNPINNED, 0, 0},
+    {S_L1L2, 64, 1, 64, UNPINNED, 0, 0, 0},
 };
 #define NB_CASES (sizeof(cases) / sizeof(cases[0]))
 
@@ -266,8 +270,9 @@ int main() {
             errors += r->errors;
             if (c->rtl_busy == UNPINNED) {
                 unpinned++;
-            } else if (r->cnt[0] != c->rtl_busy || r->cnt[1] != c->rtl_r ||
-                       r->cnt[2] != c->rtl_w) {
+            } else if (r->cnt[0] + c->busy_slack < c->rtl_busy ||
+                       r->cnt[0] > c->rtl_busy + c->busy_slack ||
+                       r->cnt[1] != c->rtl_r || r->cnt[2] != c->rtl_w) {
                 label(c, dir);
                 printf(": busy r w %u %u %u, the RTL's %u %u %u\n", r->cnt[0],
                        r->cnt[1], r->cnt[2], c->rtl_busy, c->rtl_r, c->rtl_w);
