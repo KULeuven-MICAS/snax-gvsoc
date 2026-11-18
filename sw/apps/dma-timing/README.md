@@ -2,12 +2,12 @@
 
 The DMA timing program, on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL; the DMA's values do not depend on the cluster's accelerator.
 
-The DMA core copies between DRAM (L2) and L1. For each case it:
+The DMA core copies between DRAM (L2) and L1, and transposes a 64 × 64 matrix A into T in L1 by 2-D transfers of one element per burst: for each column k of A, `snrt_dma_start_2d(T + p·k, A + b·k, b, b, p_A, 64)`, b the element's bytes, p the row pitch. For a transpose, A is first loaded into L1 at the pitch (not measured). For each case it:
 
 1. clears the destination;
 2. resets and enables the cluster's perf counters 0 to 5, and reads one enable back, so the posted stores have landed before the DMA turns busy;
-3. takes `mcycle` before the first `snrt_dma_start_1d`, after the last one and after `snrt_dma_wait_all`;
-4. stops the counters, reads them and checks the copy.
+3. takes `mcycle` before the first `snrt_dma_start_1d` or `_2d`, after the last one and after `snrt_dma_wait_all`;
+4. stops the counters, reads them and checks the copy (a transpose: T against A's columns, both in L1).
 
 Each case runs twice and the second run is kept, so instruction cache refills stay out of the numbers. After the barrier, core 0 prints one line per case.
 
@@ -18,6 +18,10 @@ Each case runs twice and the second run is kept, so instruction cache refills st
 | `l2l1 2x800` | two copies back to back, at +0 and +800 B |
 | `l2l1 4x800` | four copies back to back, at +0, +800, +1600, +2400 B |
 | `l1l2 1x800` | one L1 to L2 copy |
+| `t-l1l1 1x1 B p64` | one column of an int8 A in L1 (64 B rows): 64 bursts |
+| `t-l1l1 64x1 B p64`, `p72` | the whole int8 A in L1, rows of 64 B, or of 72 B (9 words, as snax-forge's `padded_rows`): 4096 bursts |
+| `t-l1l1 64x8 B p512` | an int64 A in L1: 4096 bursts of 8 B |
+| `t-l2l1 64x1 B p64` | the int8 A read from DRAM, T in L1 |
 
 | Field | Meaning |
 |---|---|
@@ -65,4 +69,4 @@ Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from that 
 
 ## Expected output
 
-Eleven lines: nine cases, `Number of errors: 0` and `Cases off the RTL's busy, r, w: 0`; exit code 0.
+Sixteen lines: fourteen cases, `Number of errors: 0` and `Cases off the RTL's busy, r, w: 0`; exit code 0.
