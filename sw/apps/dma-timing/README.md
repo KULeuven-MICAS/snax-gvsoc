@@ -72,4 +72,4 @@ Keep from the RTL run: the printed lines, `dma_trace_00001_00000.log` from that 
 
 ## Expected output
 
-Twenty-one lines: eighteen cases, `Number of errors: 0`, `Cases off the RTL's busy, r, w: 0` and `Cases not pinned yet: 0`; exit code 0.
+Twenty-one lines: eighteen cases, `Number of errors: 0`, `Cases off the RTL's busy, r, w: 0` and `Cases not pinned yet: 1`; exit code 0. The one case not pinned, `s-l1l2 64x1 B p64`, is 211, 64, 64 on the RTL, where its short writes into DRAM are paced by the testbench's memory (docs/notes/NOTES.md, "The DMA").

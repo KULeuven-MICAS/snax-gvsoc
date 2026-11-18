@@ -36,6 +36,13 @@ What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC 
   - `busy_o` (`DMA_BUSY`, `dmstati 2`, which `snrt_dma_wait_all` polls) drops before the write response.
   - A 3-deep request FIFO, at most 3 bursts in flight per direction, a 3-beat buffer between reads and writes, and bursts that end at the nearer 4 KiB boundary. The testbench DRAM takes 2 reads and 2 writes in flight.
   - `DMA_BUF_W_STALL` and `DMA_BUF_R_STALL` are never set.
+  - **The way into L1** (the backend `idma_backend_rw_axi`, read from a run's iDMA trace and waveform, `dma-timing`'s short-burst cases). The DMA reaches L1 over AXI even when both ends are in L1, and the rule below sets its cycles:
+    1. A burst is one AXI transaction: AR, R, then AW, W, B.
+    2. At most 3 bursts are in flight; a slot frees at the burst's last W, not at its B: AR(k + 3) = W(k) + 1. B gates nothing.
+    3. The write is coupled to its read (`rw_coupling_avail`): AW(k) in R(k)'s cycle, W(k) one cycle later.
+    4. L1 has one port for the DMA (`axi_to_mem_interleaved` with `NumBanks(1)`, `snitch_cluster.sv`), one read or one write a cycle. A read reaches it 2 cycles after its AR and returns 3 cycles after its grant (the 5 of `L_rd`); a write reaches it the cycle after its W.
+  - So a long copy pays the latency once: one beat a cycle from DRAM to L1 or from L1 to DRAM, one every 2 cycles inside L1 (R and W alternate on the port: `l1l1 1x4096` busy 129). Short bursts inside L1 run 3 per 8 cycles, whatever their size of 1 to 64 B (`t-l1l1`, `s-l1l1`: busy 173 for 64 bursts, 10 925 for 4096).
+  - Short bursts from L1 into DRAM are paced by the DRAM side: B returns 2 per 7 cycles and at most 8 writes wait for theirs (`s-l1l2 64x1 B p64` busy 211), the testbench's memory rather than the iDMA (open item 146).
 - **The model** (`DMA_TIMING` in `snax/snax_hjson.py`):
   - `read_latency` 5 and `hbm_latency` 6, so DRAM is 11 on both sides; DRAM moves 64 B a cycle.
   - `tcdm_write_latency` 2: a beat is in L1 2 cycles after it leaves the DMA, which is done at the send.
@@ -43,7 +50,7 @@ What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC 
   - A beat reaches L1 16 cycles after its `dmcpyi` on both sides (`l2l1 1x64`).
 - **Measured** (`dma-timing`, eight copies): `busy`, `r` and `w` equal the RTL's on every line; `done` is 2 to 6 cycles under it, from the core's issue and polling. `dma-timing` fails when the DMA's own timing moves (`read_latency` 6 puts 8 lines off).
 - **Counters.** `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and `DMA_BUSY` come from the iDMA's `busy`, `r_beats` and `w_beats`.
-- **Not verified:** an L1-to-L1 copy, whose read and delayed write reach the crossbar in one cycle where the RTL's `axi_to_mem` takes one a cycle (open item 72); the DMA reading L1 (open item 73).
+- **Not modelled yet:** the way into L1 above. SNAX-GVSoC's TCDM backend reads L1 lines on consecutive cycles as one stream that pays `read_latency` once and writes in the same cycle as it reads, so short bursts inside L1 run at about one a cycle (`t-l1l1 64x1 B p64` 4231 against 10 925) and a long copy inside L1 at one beat a cycle (71 against 129); the rule's four parts go into that backend, the AXI fabric itself stays unmodelled (open items 72, 73). Short bursts into DRAM: open item 146.
 
 ## The crossbar and the sparse interconnect
 

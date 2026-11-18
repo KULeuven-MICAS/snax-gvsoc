@@ -67,15 +67,17 @@ static const dma_case_t cases[] = {
     {L2_TO_L1, 2, 800, 0, 39, 26, 26},
     {L2_TO_L1, 4, 800, 0, 65, 52, 52},
     {L1_TO_L2, 1, 800, 0, 20, 13, 13},
-    {T_L1, 1, 1, 64, 173, 64, 64},           // one int8 column
-    {T_L1, N, 1, 64, 10925, 4096, 4096},     // int8, rows contiguous
-    {T_L1, N, 1, 72, 10925, 4096, 4096},     // int8, rows of 9 words
-    {T_L1, N, 8, 512, 10925, 4096, 4096},    // int64
-    {T_L2, N, 1, 64, 17759, 4096, 4096},     // int8 from DRAM
-    {L1_TO_L1, 1, 4096, 0, UNPINNED, 0, 0},  // one long copy in L1
-    {S_L1L1, 64, 64, 128, UNPINNED, 0, 0},   // rows of one beat
-    {S_L1L1, 64, 8, 64, UNPINNED, 0, 0},     // rows of one word
-    {S_L1L2, 64, 1, 64, UNPINNED, 0, 0},     // one byte a row, into DRAM
+    {T_L1, 1, 1, 64, 173, 64, 64},         // one int8 column
+    {T_L1, N, 1, 64, 10925, 4096, 4096},   // int8, rows contiguous
+    {T_L1, N, 1, 72, 10925, 4096, 4096},   // int8, rows of 9 words
+    {T_L1, N, 8, 512, 10925, 4096, 4096},  // int64
+    {T_L2, N, 1, 64, 17759, 4096, 4096},   // int8 from DRAM
+    {L1_TO_L1, 1, 4096, 0, 129, 64, 64},   // one long copy in L1
+    {S_L1L1, 64, 64, 128, 173, 64, 64},    // rows of one beat
+    {S_L1L1, 64, 8, 64, 173, 64, 64},      // rows of one word
+    // One byte a row, into DRAM: 211, 64, 64 on the RTL, paced by its DRAM
+    // side, which the model does not have yet.
+    {S_L1L2, 64, 1, 64, UNPINNED, 0, 0},
 };
 #define NB_CASES (sizeof(cases) / sizeof(cases[0]))
 
