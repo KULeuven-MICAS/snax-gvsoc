@@ -13,7 +13,7 @@ The words are random with NumPy seed 0, so data.h is the same on every run.
 
 import numpy as np
 
-SRC_BYTES = 8192  # the largest case
+SRC_BYTES = 32768  # an int64 64 x 64 matrix, the largest case
 
 
 def main():

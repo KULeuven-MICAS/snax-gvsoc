@@ -36,14 +36,23 @@ What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC 
   - `busy_o` (`DMA_BUSY`, `dmstati 2`, which `snrt_dma_wait_all` polls) drops before the write response.
   - A 3-deep request FIFO, at most 3 bursts in flight per direction, a 3-beat buffer between reads and writes, and bursts that end at the nearer 4 KiB boundary. The testbench DRAM takes 2 reads and 2 writes in flight.
   - `DMA_BUF_W_STALL` and `DMA_BUF_R_STALL` are never set.
-- **The model** (`DMA_TIMING` in `snax/snax_hjson.py`):
-  - `read_latency` 5 and `hbm_latency` 6, so DRAM is 11 on both sides; DRAM moves 64 B a cycle.
-  - `tcdm_write_latency` 2: a beat is in L1 2 cycles after it leaves the DMA, which is done at the send.
+  - **The way into L1** (the backend `idma_backend_rw_axi`, read from a run's iDMA trace and waveform, `dma-timing`'s short-burst cases). The DMA reaches L1 over AXI even when both ends are in L1, and the rule below sets its cycles:
+    1. A burst is one AXI transaction: AR, R, then AW, W, B.
+    2. At most 3 bursts are in flight; a slot frees at the burst's last W, not at its B: AR(k + 3) = W(k) + 1. B gates nothing.
+    3. The write is coupled to its read (`rw_coupling_avail`): AW(k) in R(k)'s cycle, W(k) one cycle later.
+    4. L1 has one port for the DMA (`axi_to_mem_interleaved` with `NumBanks(1)`, `snitch_cluster.sv`), one read or one write a cycle. A read asks for it 2 cycles after its AR and returns 3 cycles after its grant (the 5 of `L_rd`); a write asks for it 2 cycles after its W. Its arbiter (an `rr_arb_tree` of two inputs) is one priority bit: a side that asks alone is granted and takes the priority; when both ask, the side holding it goes first and the priority passes to the other; at reset the write holds it (61 970 grants of a run predicted, 0 wrong).
+  - One limit is left out of the rule: the RTL's W channel stops taking beats while 3 wait for the port, so a long copy inside L1 ends one cycle later than the rule gives (`l1l1 1x4096`: 129 against 128). `dma-timing` allows that case one cycle.
+  - So a long copy pays the latency once: one beat a cycle from DRAM to L1 or from L1 to DRAM, one every 2 cycles inside L1 (R and W alternate on the port: `l1l1 1x4096` busy 129). Short bursts inside L1 run 3 per 8 cycles, whatever their size of 1 to 64 B (`t-l1l1`, `s-l1l1`: busy 173 for 64 bursts, 10 925 for 4096).
+  - Short bursts from L1 into DRAM are paced by the DRAM side: B returns 2 per 7 cycles and at most 8 writes wait for theirs (`s-l1l2 64x1 B p64` busy 211), the testbench's memory rather than the iDMA (open item 146).
+- **The model** (`DMA_TIMING` and `DMA_L1_PORT` in `snax/snax_hjson.py`):
+  - `read_latency` 5 and `hbm_latency` 6, so DRAM is 11 on both sides; DRAM moves 64 B a cycle. `read_latency` is the sum of the way into L1's two read stages below.
+  - `tcdm_write_latency` 2: a beat asks for L1's port 2 cycles after it leaves the DMA, which is done at the send.
   - `one_cycle_per_stage`: the midend, the backend and the AXI read take a cycle each.
   - A beat reaches L1 16 cycles after its `dmcpyi` on both sides (`l2l1 1x64`).
-- **Measured** (`dma-timing`, eight copies): `busy`, `r` and `w` equal the RTL's on every line; `done` is 2 to 6 cycles under it, from the core's issue and polling. `dma-timing` fails when the DMA's own timing moves (`read_latency` 6 puts 8 lines off).
+  - **The way into L1**, the rule's four parts in the TCDM back-ends (`idma_be_tcdm.cpp`), with no AXI channels: a read burst takes one of `burst_queue_size` slots (the cluster file's `dma_axi_req_fifo_depth`, 3) at its AR, in order and one AR a cycle, from the cycle the backend hands it over, and frees it the cycle after the write side sends its last line. Each of its lines asks for the port `tcdm_read_request_latency` 2 cycles after the AR (and after the previous line's grant); its data comes `tcdm_read_response_latency` 3 cycles after the grant and leaves as the coupled write `coupled_write_latency` 1 cycle later, which asks for the port `tcdm_write_latency` 2 cycles after that. The port (`IDmaTcdmPort`, one per DMA, in `snitch_dma.cpp`) grants one read or one write a cycle by the priority bit, and the crossbar's `dma` line is written at the grant. On the DRAM side the coupled cycle is the AXI read's own stage.
+- **Measured** (`dma-timing`): `busy`, `r` and `w` of its 17 pinned cases equal the RTL's, `l1l1 1x4096` within its one cycle (128); `done` is 2 to 6 cycles under it, from the core's issue and polling. `t-l1l1 1x1 B p64`'s 64 bursts have the RTL's R and W cycles; 19 of them take their AR a cycle after the RTL's, as the next row reaches the read side only when the write side's queue of `burst_queue_size` bursts frees, but the port is busy then and no data moves. `dma-timing` fails when the DMA's own timing moves: a cycle more on either read stage puts 15 cases off, on `coupled_write_latency` 7.
 - **Counters.** `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and `DMA_BUSY` come from the iDMA's `busy`, `r_beats` and `w_beats`.
-- **Not verified:** an L1-to-L1 copy, whose read and delayed write reach the crossbar in one cycle where the RTL's `axi_to_mem` takes one a cycle (open item 72); the DMA reading L1 (open item 73).
+- Short bursts into DRAM stay off, paced by the testbench's memory (`s-l1l2 64x1 B p64`: 155 against 211, open item 146); the AXI fabric itself is not modelled: the four parts above stand for it. A program makes such a copy: `forge/mvt_4_i64_dma_AT_sequential`'s `transpose_A_T`, 4096 bursts of 8 B inside L1.
 
 ## The crossbar and the sparse interconnect
 

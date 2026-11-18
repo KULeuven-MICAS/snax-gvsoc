@@ -28,6 +28,36 @@
 #include "../idma.hpp"
 #include "idma_be.hpp"
 
+class IDmaBeTcdm;
+
+/**
+ * SNAX: the DMA's one port into the local memory, shared by its TCDM back-ends (snax_cluster's
+ * axi_to_mem_interleaved with NumBanks(1)): one read or one write a cycle. Its arbiter is one
+ * priority bit: a side that asks alone is granted and takes it; when both ask, the side holding
+ * it goes first and it passes to the other; the write holds it at reset. A back-end asks from a
+ * later cycle than the current one, so the port's event runs before that cycle's crossbar
+ * arbitration.
+ */
+class IDmaTcdmPort : public vp::Block
+{
+public:
+    IDmaTcdmPort(vp::Component *idma);
+
+    void reset(bool active) override;
+    // A back-end that will ask for the port
+    void attach(IDmaBeTcdm *be);
+    // A back-end asks from this cycle on, a later one than the current
+    void wake(int64_t cycle);
+
+private:
+    static void handler(vp::Block *__this, vp::ClockEvent *event);
+
+    std::vector<IDmaBeTcdm *> backends;
+    vp::ClockEvent event;
+    // The side holding the priority
+    bool write_prio;
+};
+
 /**
  * @brief TCDM back-end
  *
@@ -43,8 +73,11 @@ public:
      * @param idma The top iDMA block.
      * @param itf_name Name of the TCDM interface where the back-end should send requests.
      * @param be The top back-end.
+     * @param port SNAX: the DMA's port into the local memory, used when the properties
+     *     tcdm_read_request_latency and tcdm_read_response_latency are not both 0.
      */
-    IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer *be);
+    IDmaBeTcdm(vp::Component *idma, std::string itf_name, IdmaBeProducer *be,
+        IDmaTcdmPort *port = NULL);
 
     void reset(bool active) override;
 
@@ -57,6 +90,13 @@ public:
     bool can_accept_burst() override;
     bool can_accept_data() override;
     bool is_empty() override;
+
+    // SNAX: the port's side of the back-end. The cycle from which its next read or write
+    // asks for the port (-1 when none), and the grant of that read or write in this cycle.
+    int64_t port_read_ask();
+    int64_t port_write_ask();
+    void port_grant_read();
+    void port_grant_write();
 
 private:
     // FSM handler, called to check if any action should be taken after something was updated
@@ -89,6 +129,8 @@ private:
     void enqueue_burst(uint64_t base, uint64_t size, bool is_write, IdmaTransfer *transfer);
     // SNAX: sends the delayed lines that are due
     static void delayed_write_handler(vp::Block *__this, vp::ClockEvent *event);
+    // SNAX: writes the first delayed line to the TCDM
+    void write_delayed_line();
 
     // Pointer to back-end, used for data synchronization
     IdmaBeProducer *be;
@@ -157,9 +199,9 @@ private:
     int64_t last_line_timestamp;
     // Current transfer for which data to be written are push
     IdmaTransfer *write_current_transfer;
-    // SNAX: cycles the DMA's own read path adds before the first line of a read stream
-    // (property read_latency, 0 when absent). Lines read on consecutive cycles form one
-    // stream and pay it once, as the RTL's read requests run ahead of the data.
+    // SNAX: without the port (below), cycles the DMA's own read path adds before the first
+    // line of a read stream (property read_latency, 0 when absent). Lines read on consecutive
+    // cycles form one stream and pay it once, as the RTL's read requests run ahead of the data.
     uint64_t read_latency;
     // SNAX: cycle in which the last read line was handed to the destination
     int64_t last_read_push_timestamp;
@@ -179,4 +221,47 @@ private:
     std::deque<DelayedLine> delayed_lines;
     vp::IoReq delayed_req;
     vp::ClockEvent delayed_write_event;
+
+    // SNAX: the way into the local memory through the DMA's port (port not NULL). A read burst
+    // takes one of burst_queue_size slots at its AR, in order and one AR a cycle, and frees it
+    // the cycle after the write side sends its last line. Each of its lines asks for the port
+    // tcdm_read_request_latency cycles after the AR and after the previous line's grant; its
+    // data comes tcdm_read_response_latency cycles after the grant, and goes to the write side
+    // coupled_write_latency cycles later. A line to write asks for the port
+    // tcdm_write_latency cycles after it leaves the DMA, as delayed_lines, and is written at
+    // its grant.
+    IDmaTcdmPort *port;
+    uint64_t tcdm_read_request_latency;
+    uint64_t tcdm_read_response_latency;
+    uint64_t coupled_write_latency;
+    struct PortBurst
+    {
+        IdmaTransfer *transfer;
+        int64_t ar;             // its AR, -1 before
+        uint64_t next_base;     // its next line to read
+        uint64_t left;          // its bytes not asked for yet
+        uint64_t lines;         // its lines
+        uint64_t sent;          // its lines the write side has sent
+    };
+    // The read bursts, in order: in flight from the front, then those waiting for their AR
+    std::deque<PortBurst> port_bursts;
+    // Bursts from the front that took their AR, and that asked for all their lines
+    size_t port_ar_bursts;
+    size_t port_asked_bursts;
+    // The earliest cycle of the next AR, and the last read's grant
+    int64_t port_next_ar;
+    int64_t port_last_read_grant;
+    // A read line's data, from the cycle it goes to the write side
+    struct PortLine
+    {
+        int64_t cycle;
+        IdmaTransfer *transfer;
+        uint8_t *data;
+        uint64_t size;
+    };
+    std::deque<PortLine> port_lines;
+    vp::IoReq port_req;
+    // AR of the bursts that may take it, and the lines due to the write side
+    void port_read_fsm();
+    void port_enqueue_read(IdmaTransfer *transfer, uint64_t base, uint64_t size);
 };

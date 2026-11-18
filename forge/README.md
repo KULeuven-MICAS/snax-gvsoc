@@ -31,6 +31,7 @@ Every hjson and C file starts with a comment naming the design point.
 | dot, the six variants | `dot_1` (two accelerators), `dot_1_enc` (one accelerator of two groups), `dot_2` to `dot_6` (one group of linked units) |
 | matvec | `matvec_1` to `matvec_6`, `matvec_seed` and `matvec_seed_serial` (a seeded fold) |
 | shared movers | `dot_1_shared`, `mvt_1_dot2_shared` (W = 8) |
+| a copy in L1, one step at a time | `mvt_4_i64_dma_AT_sequential` (mvt_4 at W = 8 whose half 2 reads `A_T`, A copied transposed by the DMA one element a burst; every start waited on at once) |
 
 ## Refreshing a folder
 
@@ -41,7 +42,7 @@ From a snax-forge checkout next to this one, with the folder cleared first (gen-
     pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
 
 - The design step reads the sandbox's last step, `out/sandbox/<design>/<n>_<transform>.snaxdfg`.
-- `rowsum_2_padded` is `rowsum_2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_1_dot2_shared` is its recipe with `--set W=8` on the sandbox step.
+- `rowsum_2_padded` is `rowsum_2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_1_dot2_shared` is its recipe with `--set W=8` on the sandbox step; `mvt_4_i64_dma_AT_sequential` is `mvt_4_i64_dma_AT` with `--set design.schedule=sequential` on the design step.
 - Commit the folder as written, then bump snax-forge's submodule so its test compares against it.
 - `make regress` runs every folder through the generic app, so a new folder needs nothing else.
 

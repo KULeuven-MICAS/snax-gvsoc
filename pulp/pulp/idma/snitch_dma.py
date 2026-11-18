@@ -51,6 +51,17 @@ class SnitchDma(gvsoc.systree.Component):
         The midend, the backend and the AXI read take work from the cycle after it arrives,
         also when their event is already queued for the cycle it arrives in (SNAX). False
         keeps the model as it was.
+    tcdm_read_request_latency: int
+        Cycles from a read burst's AR to its first line asking for the DMA's one port into the
+        local memory (SNAX). With tcdm_read_response_latency, not both 0, the TCDM back-ends
+        share that port: a read burst takes one of burst_queue_size slots at its AR, freed the
+        cycle after its last line is written out, and a line to write asks for the port
+        tcdm_write_latency cycles after it leaves the DMA. Both 0 keep the model as it was.
+    tcdm_read_response_latency: int
+        Cycles from a read line's grant on that port to its data (SNAX).
+    coupled_write_latency: int
+        Cycles from a read line's data to its write leaving the DMA, the write coupled to the
+        read (SNAX).
     """
 
     def __init__(self, parent: gvsoc.systree.Component, name: str,
@@ -63,7 +74,10 @@ class SnitchDma(gvsoc.systree.Component):
             beat_size: int=64,
             read_latency: int=0,
             tcdm_write_latency: int=0,
-            one_cycle_per_stage: bool=False):
+            one_cycle_per_stage: bool=False,
+            tcdm_read_request_latency: int=0,
+            tcdm_read_response_latency: int=0,
+            coupled_write_latency: int=0):
 
         super().__init__(parent, name)
 
@@ -87,6 +101,9 @@ class SnitchDma(gvsoc.systree.Component):
             "read_latency": read_latency,
             "tcdm_write_latency": tcdm_write_latency,
             "one_cycle_per_stage": one_cycle_per_stage,
+            "tcdm_read_request_latency": tcdm_read_request_latency,
+            "tcdm_read_response_latency": tcdm_read_response_latency,
+            "coupled_write_latency": coupled_write_latency,
         })
 
     # SNAX: the busy wire's VCD signal (idma_fe_xdma.cpp), tagged snax, for gvrun's
