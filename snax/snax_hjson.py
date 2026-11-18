@@ -83,7 +83,19 @@ DEFAULT_HJSON = 'forge/vecadd/snax_forge.hjson'
 # it, the wide crossbar's cut and axi_to_mem_interleaved, and the DMA is done at
 # the send (tcdm_write_latency); the DMA's midend, backend and AXI read each
 # take a cycle, whatever else the DMA is doing (one_cycle_per_stage).
-DMA_TIMING = {'read_latency': 5, 'tcdm_write_latency': 2, 'one_cycle_per_stage': True}
+DMA_TIMING = {'tcdm_write_latency': 2, 'one_cycle_per_stage': True}
+# The DMA's way into L1 (docs/notes/NOTES.md, The DMA): one port, one read or one
+# write a cycle, its read asking 2 cycles after its AR (tcdm_read_request_latency)
+# and answered 3 after its grant (tcdm_read_response_latency), the 5 of read_latency
+# on both sides; the write coupled to its read leaves the DMA one cycle after the
+# read's data (coupled_write_latency) and asks for the port tcdm_write_latency
+# cycles later. Bursts in flight: burst_queue_size. On the DRAM side the coupled
+# cycle is the AXI read's own stage (one_cycle_per_stage).
+DMA_L1_PORT = {'tcdm_read_request_latency': 2, 'tcdm_read_response_latency': 3,
+    'coupled_write_latency': 1}
+DMA_TIMING['read_latency'] = (DMA_L1_PORT['tcdm_read_request_latency']
+    + DMA_L1_PORT['tcdm_read_response_latency'])
+DMA_TIMING.update(DMA_L1_PORT)
 DRAM_LATENCY = 6
 DRAM_WIDTH_LOG2 = 6  # 64 B per cycle
 
