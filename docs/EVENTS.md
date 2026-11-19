@@ -37,7 +37,7 @@ The levels are cumulative, each the one before plus a trace: `off` (`summary`) <
 - a firing is `n`, its index in the run; a result is `n`, its index among the run's results, equal to the writer's `b` it becomes;
 - a DMA beat on L1 is (copy `id`, `i`), `i` its index within the copy.
 
-The id travels with the request: the iDMA's TCDM backend puts the copy's `id`, `i` and `l2` in `IoReq` argument slots for the crossbar's `dma` line, under one of two tags: `SNAX_TAG_DMA`, or `SNAX_TAG_DMA_L1L1` for a beat of a copy with its source and destination both in L1 (the crossbar counts its bank words in `copies`); the streamer puts `b` on its requests, and returns it to the unit with the beat it hands over.
+The id travels with the request: the iDMA's TCDM backend puts the copy's `id`, `i` and `l2` in `IoReq` argument slots for the crossbar's `dma` line, under one of two tags: `SNAX_TAG_DMA`, or `SNAX_TAG_DMA_L1L1` for a beat of a copy with its source and destination both in L1 (the crossbar counts its beats in `copies`); the streamer puts `b` on its requests, and returns it to the unit with the beat it hands over.
 
 ```mermaid
 flowchart LR
@@ -124,8 +124,8 @@ Both arbiters. Counted over the whole simulation, written at its end:
 | Trace | Kind | Fields |
 |---|---|---|
 | `summary` | `input` | `index`, `name` (its owner: `snax_acc<i>.streamer_<set>.<mover>.lane<l>`, `core<i>`, `axi`), `grants`, `stalls` (cycles it requested and was not granted), `stalls_dma` (the part refused or lost on a bank the DMA's superbank took), `whole_run` (1 for the cores and AXI, whose traffic starts at boot) |
-| `summary` | `bank` | `index`, `reads`, `writes` (a SNAX input's grant or a DMA beat's word on the bank), `conflicts` (cycles with two or more of those requests on the bank) |
-| `summary` | `copies` | `copy_reads`, `copy_writes`: the bank words the DMA's beats of copies inside L1 read and write, one per bank word a beat touches (a part of the `bank` lines' `reads` and `writes`) |
+| `summary` | `bank` | `index`, `reads`, `writes` (a SNAX input's grant, or a DMA beat on the bank's superbank: a beat reads or writes every bank of the superbank line it touches, whatever bytes it covers, as the RTL's wide port does), `conflicts` (cycles with two or more of those requests on the bank) |
+| `summary` | `copies` | `copy_reads`, `copy_writes`: the DMA's beats of copies inside L1 that read and write, one per superbank line a beat touches, its access on the superbank port (each also a read or a write on every bank of that line in the `bank` lines) |
 
 The banks count the SNAX inputs and the DMA only; the cores' and AXI's accesses are in their own `input` lines. A copy inside L1 is told by its beats' tag (`SNAX_TAG_DMA_L1L1`), so a beat the iDMA did not tag counts in the banks only.
 

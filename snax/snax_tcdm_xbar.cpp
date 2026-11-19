@@ -182,8 +182,8 @@ private:
     std::vector<int64_t> bank_reads;
     std::vector<int64_t> bank_writes;
     std::vector<int64_t> bank_conflicts;
-    // The bank words of the DMA's copies inside L1, read and written (also in bank_reads and
-    // bank_writes)
+    // The DMA's beats of copies inside L1 on the superbank port, read and written: one per
+    // superbank line a beat touches
     int64_t copy_reads;
     int64_t copy_writes;
 };
@@ -482,6 +482,16 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     _this->trace.msg(vp::Trace::LEVEL_DEBUG, "Superbank %d: grant dma (%s 0x%lx, %ld B)\n",
         superbank, req->get_is_write() ? "write" : "read", addr, size);
 
+    // NB (D184): the wide port raises the request of every bank of its superbank and cuts the
+    // data and byte strobes per bank (snax_cluster's mem_wide_narrow_mux), so each bank of the
+    // line the beat touches reads, or writes its strobed bytes, whatever bytes the beat covers;
+    // a beat never crosses a line (refused above), so it is one access on the superbank port
+    for (int bank = superbank * _this->superbank_banks;
+        bank < (superbank + 1) * _this->superbank_banks; bank++)
+    {
+        (req->get_is_write() ? _this->bank_writes : _this->bank_reads)[bank]++;
+    }
+
     // Each bank word it covers, as upstream's DmaInterleaver splits it: the
     // largest bank latency is the answer's
     uint64_t width = 1ULL << _this->width_bits;
@@ -489,11 +499,14 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     int64_t latency = 0;
     uint64_t beat_addr = addr, beat_size = size;
     // The beat's words for its dma line, only when that line is written. A beat the iDMA's TCDM
-    // backend did not tag has no copy; a beat of a copy inside L1 counts its words as the copy's.
+    // backend did not tag has no copy; a beat of a copy inside L1 counts once as the copy's.
     bool traced = _this->trace_dma && _this->ev.beats.get_active();
     uintptr_t tag = snax_arg_get(req, SNAX_ARG_TAG);
     bool tagged = tag == SNAX_TAG_DMA || tag == SNAX_TAG_DMA_L1L1;
-    bool copy = tag == SNAX_TAG_DMA_L1L1;
+    if (tag == SNAX_TAG_DMA_L1L1)
+    {
+        (req->get_is_write() ? _this->copy_writes : _this->copy_reads)++;
+    }
     std::string values;
     while (size > 0)
     {
@@ -507,11 +520,6 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
         bank_req.set_data(data);
         bank_req.set_is_write(req->get_is_write());
         bank_req.set_opcode(req->get_opcode());
-        (req->get_is_write() ? _this->bank_writes : _this->bank_reads)[bank]++;
-        if (copy)
-        {
-            (req->get_is_write() ? _this->copy_writes : _this->copy_reads)++;
-        }
         vp::IoReqStatus status = _this->banks[bank].req(&bank_req);
         if (status != vp::IO_REQ_OK)
         {
