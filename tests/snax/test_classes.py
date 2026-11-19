@@ -85,6 +85,17 @@ class Parse(unittest.TestCase):
             with self.assertRaises(classes.LineError):
                 classes.parse("\n".join(cut(LOG, 6, at)))
 
+    def test_a_copies_line_needs_both_counts_as_integers(self):
+        xbar = "/chip/soc/cluster_0/tcdm/snax_xbar"
+        good = line(xbar, "summary", 30, "copies copy_reads=64 copy_writes=64")
+        self.assertEqual(classes.parse(good)[0].fields, {"copy_reads": "64", "copy_writes": "64"})
+        with self.assertRaises(classes.LineError) as e:
+            classes.parse(line(xbar, "summary", 30, "copies copy_reads=64"))
+        self.assertIn("a copies line without copy_writes", str(e.exception))
+        with self.assertRaises(classes.LineError) as e:
+            classes.parse(line(xbar, "summary", 30, "copies copy_reads=64 copy_writes=6x"))
+        self.assertIn("copy_writes not an integer", str(e.exception))
+
     def test_any_other_line_fails(self):
         for other in ("forge cycles: 226", "", "12: 12: [x/beats] 12"):
             with self.assertRaises(classes.LineError) as e:

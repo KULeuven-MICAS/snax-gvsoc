@@ -9,7 +9,8 @@ regress.py's check_quiet() and run_mark(). Run from snax-gvsoc:
 The log is a quiet run written by hand in GVSoC's header and docs/EVENTS.md's
 grammar, as forge/dot_3's: a linked group (mul, sum), one reader, a crossbar of
 two inputs and one bank; marks 1 at 100 and 2 at 200 around the group's one run
-(10 to 140) and the streamer's (reader0 ends at 142), the end at 300.
+(10 to 140) and the streamer's (reader0 ends at 142), and a DMA copy inside L1 of
+64 bank words read and written, the end at 300.
 """
 
 import sys
@@ -31,8 +32,9 @@ def line(path, cycle, rest):
     return f"{cycle}00000: {cycle}: [\x1b[34m{path}/summary  \x1b[0m] {cycle} {rest}"
 
 
-def snap(cycle, mark, group, mul, total, reader, inputs, bank):
-    """One snapshot of every component; group, reader, each input and bank their counts."""
+def snap(cycle, mark, group, mul, total, reader, inputs, bank, copies):
+    """One snapshot of every component; group, reader, each input, bank and copies their
+    counts."""
     return [
         line(GROUP, cycle, f"snap mark={mark} busy={group[0]} stall_in={group[1]} "
                            f"stall_out={group[2]} flush={group[3]}"),
@@ -42,14 +44,17 @@ def snap(cycle, mark, group, mul, total, reader, inputs, bank):
           for i, (g, s) in enumerate(inputs)),
         line(XBAR, cycle, f"snap mark={mark} bank=0 reads={bank[0]} writes={bank[1]} "
                           f"conflicts={bank[2]}"),
+        line(XBAR, cycle, f"snap mark={mark} copy_reads={copies[0]} copy_writes={copies[1]}"),
         line(STREAMER, cycle, f"snap mark={mark} mover=reader0 busy={reader[0]} "
                               f"stall_xbar={reader[1]} stall_fifo={reader[2]} idle={reader[3]}"),
     ]
 
 
-ZERO = ((0, 0, 0, 0), (0, 0), (0, 0), (0, 0, 0, 0), [(0, 0), (5, 0)], (0, 0, 0))
-RUN = ((128, 3, 0, 1), (128, 128), (128, 1), (128, 1, 0, 3), [(128, 1), (9, 0)], (128, 0, 1))
-END = ((128, 3, 0, 1), (128, 128), (128, 1), (128, 1, 0, 3), [(128, 1), (12, 0)], (128, 0, 1))
+ZERO = ((0, 0, 0, 0), (0, 0), (0, 0), (0, 0, 0, 0), [(0, 0), (5, 0)], (0, 0, 0), (0, 0))
+RUN = ((128, 3, 0, 1), (128, 128), (128, 1), (128, 1, 0, 3), [(128, 1), (9, 0)], (192, 64, 1),
+       (64, 64))
+END = ((128, 3, 0, 1), (128, 128), (128, 1), (128, 1, 0, 3), [(128, 1), (12, 0)], (192, 64, 1),
+       (64, 64))
 LOG = [
     *snap(100, 1, *ZERO),
     line(GROUP, 140, "run index=0 firings=128 busy=128 stall_in=3 stall_out=0 flush=1"),
@@ -59,7 +64,8 @@ LOG = [
     line(XBAR, 300, "input index=0 name=reader0.lane0 grants=128 stalls=1 stalls_dma=0 "
                     "whole_run=0"),
     line(XBAR, 300, "input index=1 name=core0 grants=12 stalls=0 stalls_dma=0 whole_run=1"),
-    line(XBAR, 300, "bank index=0 reads=128 writes=0 conflicts=1"),
+    line(XBAR, 300, "bank index=0 reads=192 writes=64 conflicts=1"),
+    line(XBAR, 300, "copies copy_reads=64 copy_writes=64"),
     *snap(300, -1, *END),
 ]
 
@@ -77,6 +83,11 @@ class Snapshots(unittest.TestCase):
         self.assertEqual((snaps[STREAMER][2] - snaps[STREAMER][0])[("mover", "reader0")],
                          [128, 1, 0, 3])
 
+    def test_the_copies_line_is_an_item_of_the_crossbar(self):
+        snaps = snapshots.snapshots(parsed())
+        self.assertEqual(snaps[XBAR][2].items[("copies", None)], [64, 64])
+        self.assertEqual((snaps[XBAR][1] - snaps[XBAR][0])[("copies", None)], [64, 64])
+
     def test_the_log_passes_both_checks(self):
         self.assertIsNone(snapshots.check_end(parsed()))
         self.assertIsNone(snapshots.check_window(parsed(), 1))
@@ -86,6 +97,20 @@ class Snapshots(unittest.TestCase):
                for x in LOG]
         self.assertEqual(snapshots.check_end(parsed(log)),
                          f"{XBAR} mark=-1 input=1 (snapshot vs lines): grants 13 vs 12")
+
+    def test_an_end_off_the_copies_line_fails_with_the_numbers(self):
+        log = [x.replace("copy_writes=64", "copy_writes=63") if "mark=-1" in x else x
+               for x in LOG]
+        self.assertEqual(snapshots.check_end(parsed(log)),
+                         f"{XBAR} mark=-1 copies (snapshot vs lines): copy_writes 63 vs 64")
+
+    def test_a_copies_snapshot_without_its_line_fails(self):
+        log = [x for x in LOG if " copies copy_reads" not in x]
+        self.assertEqual(snapshots.check_end(parsed(log)),
+                         f"{XBAR}: snap line for copies but no copies line")
+
+    def test_a_log_without_copies_lines_passes(self):
+        self.assertIsNone(snapshots.check_end(parsed([x for x in LOG if "copy_" not in x])))
 
     def test_an_end_off_the_run_lines_fails(self):
         log = [x.replace("flush=1", "flush=2") if "mark=-1" in x else x for x in LOG]

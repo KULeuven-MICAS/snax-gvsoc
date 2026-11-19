@@ -26,13 +26,15 @@
 
 // SNAX: the argument slots a TCDM beat carries to the SNAX crossbar's dma line, the same as
 // snax/snax_events.hpp's SNAX_ARG_TAG, SNAX_ARG_ID, SNAX_ARG_INDEX, SNAX_ARG_L2 and
-// SNAX_TAG_DMA (docs/EVENTS.md)
+// SNAX_TAG_DMA, SNAX_TAG_DMA_L1L1 (docs/EVENTS.md)
 // Kept equal to snax/snax_events.hpp's by hand: an upstream file includes nothing from snax/
 #define IDMA_SNAX_ARG_TAG (IO_REQ_NB_ARGS - 1)
 #define IDMA_SNAX_ARG_ID (IO_REQ_NB_ARGS - 2)
 #define IDMA_SNAX_ARG_INDEX (IO_REQ_NB_ARGS - 3)
 #define IDMA_SNAX_ARG_L2 (IO_REQ_NB_ARGS - 4)
 #define IDMA_SNAX_TAG_DMA ((uintptr_t)0x534e4432)
+// A beat of a copy inside the local memory (IdmaTransfer::l1_to_l1)
+#define IDMA_SNAX_TAG_DMA_L1L1 ((uintptr_t)0x534e4333)
 
 
 
@@ -82,6 +84,9 @@ public:
     // its data goes)
     uint64_t row_src;
     uint64_t row_dst;
+    // SNAX: a copy with its source and destination both in the local memory (the front end's
+    // transfer only)
+    bool l1_to_l1 = false;
 };
 
 

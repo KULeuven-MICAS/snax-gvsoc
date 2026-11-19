@@ -37,7 +37,7 @@ The levels are cumulative, each the one before plus a trace: `off` (`summary`) <
 - a firing is `n`, its index in the run; a result is `n`, its index among the run's results, equal to the writer's `b` it becomes;
 - a DMA beat on L1 is (copy `id`, `i`), `i` its index within the copy.
 
-The id travels with the request: the iDMA's TCDM backend puts the copy's `id`, `i` and `l2` in `IoReq` argument slots for the crossbar's `dma` line; the streamer puts `b` on its requests, and returns it to the unit with the beat it hands over.
+The id travels with the request: the iDMA's TCDM backend puts the copy's `id`, `i` and `l2` in `IoReq` argument slots for the crossbar's `dma` line, under one of two tags: `SNAX_TAG_DMA`, or `SNAX_TAG_DMA_L1L1` for a beat of a copy with its source and destination both in L1 (the crossbar counts its bank words in `copies`); the streamer puts `b` on its requests, and returns it to the unit with the beat it hands over.
 
 ```mermaid
 flowchart LR
@@ -125,8 +125,9 @@ Both arbiters. Counted over the whole simulation, written at its end:
 |---|---|---|
 | `summary` | `input` | `index`, `name` (its owner: `snax_acc<i>.streamer_<set>.<mover>.lane<l>`, `core<i>`, `axi`), `grants`, `stalls` (cycles it requested and was not granted), `stalls_dma` (the part refused or lost on a bank the DMA's superbank took), `whole_run` (1 for the cores and AXI, whose traffic starts at boot) |
 | `summary` | `bank` | `index`, `reads`, `writes` (a SNAX input's grant or a DMA beat's word on the bank), `conflicts` (cycles with two or more of those requests on the bank) |
+| `summary` | `copies` | `copy_reads`, `copy_writes`: the bank words the DMA's beats of copies inside L1 read and write, one per bank word a beat touches (a part of the `bank` lines' `reads` and `writes`) |
 
-The banks count the SNAX inputs and the DMA only; the cores' and AXI's accesses are in their own `input` lines.
+The banks count the SNAX inputs and the DMA only; the cores' and AXI's accesses are in their own `input` lines. A copy inside L1 is told by its beats' tag (`SNAX_TAG_DMA_L1L1`), so a beat the iDMA did not tag counts in the banks only.
 
 Per access, for the inputs `trace_inputs` names (section Sources):
 
@@ -164,9 +165,9 @@ The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in `pulp/pulp/snitch
 |---|---|---|---|
 | `events` | `issue` | the cycle the core's copy is taken (`enqueue_copy`) | `id`, `src`, `dst`, `size`, `src_stride`, `dst_stride`, `reps` (its rows, 1 for a 1D copy) |
 | `events` | `done` | the cycle the copy completes (`ack_transfer`) | `id` |
-| `summary` | `dma` | the end of the simulation | `transfers`, `busy` (cycles its busy signal is high, what `DMA_BUSY` counts), `r_beats`, `w_beats` (what the beat wires carry), `bytes_to_l1`, `bytes_from_l1` |
+| `summary` | `dma` | the end of the simulation | `transfers`, `busy` (cycles its busy signal is high, what `DMA_BUSY` counts), `r_beats`, `w_beats` (what the beat wires carry), `bytes_l2_to_l1`, `bytes_l1_to_l2`, `bytes_l1_to_l1` |
 
-A copy's bytes are `size` times its rows; they go to L1 when its `dst` is in the iDMA's local area (`loc_base`, `loc_size`: the cluster's L1), and come from L1 when its `src` is.
+A copy's bytes are `size` times its rows. They count in `bytes_l2_to_l1` when only its `dst` is in the iDMA's local area (`loc_base`, `loc_size`: the cluster's L1), in `bytes_l1_to_l2` when only its `src` is, and in `bytes_l1_to_l1` when both are; a copy with neither in L1 is not counted.
 
 The AXI backend (`idma/axi_read`, `idma/axi_write`, `pulp/pulp/idma/be/idma_be_axi.cpp`), the DMA's side outside L1:
 
@@ -199,17 +200,18 @@ The SNAX components count from boot and never reset their counters. A snapshot w
 |---|---|---|
 | crossbar | input, in index order | `mark`, `input` (its index, as in the `input` lines), `grants`, `stalls` |
 | crossbar | bank, in index order | `mark`, `bank` (its index), `reads`, `writes`, `conflicts` |
+| crossbar | its copies, one line | `mark`, `copy_reads`, `copy_writes` |
 | group | group | `mark`, `busy`, `stall_in`, `stall_out`, `flush` (its `run` lines' classes added up over its runs) |
 | group | unit, in `accelerator.json`'s order | `mark`, `unit` (its name in `accelerator.json`), `firings` (once per span, as the rule's `fire`), `pushes` (results given to its link or its outer output) |
 | streamer | mover, in mover order | `mark`, `mover` (`reader<i>`, `writer<j>`), `busy`, `stall_xbar`, `stall_fifo`, `idle` (its `mover` lines' classes added up over its runs) |
 
 A linked group writes every unit's line (`dot_3`: `mul` and `sum`); a group of one unit, that unit's.
 
-**Order.** Within a component the lines come in the table's order: the crossbar's inputs then its banks, a group's own line then its units'. At the end of the simulation the crossbar writes its snapshot after its `input` and `bank` lines; a group or a streamer writes no other line then.
+**Order.** Within a component the lines come in the table's order: the crossbar's inputs, its banks then its copies, a group's own line then its units'. At the end of the simulation the crossbar writes its snapshot after its `input`, `bank` and `copies` lines; a group or a streamer writes no other line then.
 
 **Windows.** Number the snapshots from 1 in the order they are taken, snapshot 0 being boot's (every counter 0). Window k is snapshot k + 1 minus snapshot k, field by field: window 0 runs from boot to the first mark's write (the first snapshot itself), window k from the k-th snapshot's write to the next one's, the last to the end (`mark=-1`).
 
-- Every cycle a component counts lands in exactly one window, so the windows add up to the `mark=-1` snapshot, which equals the whole-run counters: the crossbar's `input` and `bank` lines, the sums of a group's `run` lines and of a mover's `mover` lines.
+- Every cycle a component counts lands in exactly one window, so the windows add up to the `mark=-1` snapshot, which equals the whole-run counters: the crossbar's `input`, `bank` and `copies` lines, the sums of a group's `run` lines and of a mover's `mover` lines.
 - A snapshot counts what the component has counted when the write reaches it: a cycle the component handles after the write, in the write's own cycle, falls in the next window.
 - A streamer classes the cycles it sleeps through in a run only when it wakes; a snapshot taken in between counts the cycles slept so far in the class the mover slept in, as that wake will.
 - `tests/snax/snapshots.py` checks the `mark=-1` snapshot on every forge run of `make regress`, and on the quiet build of every fixture with one accelerator run, that the window from its `run` mark to the next equals that run's `run` and `mover` lines.

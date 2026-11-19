@@ -118,6 +118,8 @@ private:
         uint64_t id;
         uint64_t index;
         uint64_t l2;
+        // SNAX: its copy is inside the local memory (tagged IDMA_SNAX_TAG_DMA_L1L1)
+        bool l1_to_l1;
     };
     BeatIds beat_ids(IdmaTransfer *transfer, uint64_t base, bool is_write);
     static void tag(vp::IoReq *req, const BeatIds &ids);
