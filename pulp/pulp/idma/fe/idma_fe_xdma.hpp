@@ -103,8 +103,9 @@ private:
     // Bytes per AXI beat (64 for the 512-bit DMA)
     uint64_t beat_size;
     // SNAX events (docs/EVENTS.md): the summary, events and beats
-    // traces, and the counts the summary gives at stop. A copy's bytes go to L1 when its
-    // destination is in the local area (loc_base, loc_size), from L1 when its source is.
+    // traces, and the counts the summary gives at stop. A copy's bytes go from L2 to L1 when
+    // only its destination is in the local area (loc_base, loc_size), from L1 to L2 when only
+    // its source is, and from L1 to L1 when both are.
     vp::Component *idma;
     vp::Trace ev_summary;
     vp::Trace ev_events;
@@ -116,7 +117,8 @@ private:
     int64_t busy_since;
     int64_t r_beats_total;
     int64_t w_beats_total;
-    int64_t bytes_to_l1;
-    int64_t bytes_from_l1;
+    int64_t bytes_l2_to_l1;
+    int64_t bytes_l1_to_l2;
+    int64_t bytes_l1_to_l1;
     bool is_local(uint64_t addr);
 };

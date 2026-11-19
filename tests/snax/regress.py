@@ -64,8 +64,8 @@ counts and cover its busy span exactly.
 The snapshot checks (snapshots.py, docs/EVENTS.md's Snapshots): every
 forge/ fixture run and snax-shell also has the crossbar's `summary` trace on
 (XBAR_TRACE); each passes when every component's mark=-1 snapshot equals its
-whole-run lines (the crossbar's `input` and `bank` lines, the sums of a
-group's `run` lines and of each mover's `mover` lines). A quiet build passes
+whole-run lines (the crossbar's `input`, `bank` and `copies` lines, the
+sums of a group's `run` lines and of each mover's `mover` lines). A quiet build passes
 it too and, when its fixture has one accelerator run (one `run` mark in
 obs_marks.json), the window from that mark to the next must equal the run's
 `run` and `mover` lines (check_quiet).
@@ -130,7 +130,7 @@ SHELL_BEATS = 16
 UNIT_TRACES = ("summary", "events", "beats")
 # A streamer per set, snax_acc<i>/streamer_<set>
 CLASS_TRACES = [f"snax_acc[0-9]*/streamer_[^/]*/{t}$" for t in ("summary", "events", "beats")]
-# The crossbar's summary, for the snapshot check (its input and bank lines)
+# The crossbar's summary, for the snapshot check (its input, bank and copies lines)
 XBAR_TRACE = "tcdm/snax_xbar/summary$"
 # A quiet run's traces: every SNAX component's summary (the groups, the streamers and the
 # crossbar; the shells and port muxes have none), for the snapshot checks

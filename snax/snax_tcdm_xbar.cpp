@@ -182,6 +182,10 @@ private:
     std::vector<int64_t> bank_reads;
     std::vector<int64_t> bank_writes;
     std::vector<int64_t> bank_conflicts;
+    // The bank words of the DMA's copies inside L1, read and written (also in bank_reads and
+    // bank_writes)
+    int64_t copy_reads;
+    int64_t copy_writes;
 };
 
 
@@ -317,6 +321,7 @@ void SnaxTcdmXbar::reset(bool active)
         this->bank_reads.assign(this->nb_banks, 0);
         this->bank_writes.assign(this->nb_banks, 0);
         this->bank_conflicts.assign(this->nb_banks, 0);
+        this->copy_reads = this->copy_writes = 0;
     }
 }
 
@@ -339,6 +344,8 @@ void SnaxTcdmXbar::stop()
             (long)this->bank_reads[bank], (long)this->bank_writes[bank],
             (long)this->bank_conflicts[bank]);
     }
+    this->ev.summary.msg(vp::Trace::LEVEL_INFO, "%ld copies copy_reads=%ld copy_writes=%ld\n",
+        cycle, (long)this->copy_reads, (long)this->copy_writes);
     this->snap(-1);
 }
 
@@ -365,6 +372,9 @@ void SnaxTcdmXbar::snap(int64_t mark)
             (long)mark, bank, (long)this->bank_reads[bank], (long)this->bank_writes[bank],
             (long)this->bank_conflicts[bank]);
     }
+    this->ev.summary.msg(vp::Trace::LEVEL_INFO,
+        "%ld snap mark=%ld copy_reads=%ld copy_writes=%ld\n", cycle, (long)mark,
+        (long)this->copy_reads, (long)this->copy_writes);
 }
 
 
@@ -478,8 +488,12 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
     uint8_t *data = req->get_data();
     int64_t latency = 0;
     uint64_t beat_addr = addr, beat_size = size;
-    // The beat's words for its dma line, only when that line is written
+    // The beat's words for its dma line, only when that line is written. A beat the iDMA's TCDM
+    // backend did not tag has no copy; a beat of a copy inside L1 counts its words as the copy's.
     bool traced = _this->trace_dma && _this->ev.beats.get_active();
+    uintptr_t tag = snax_arg_get(req, SNAX_ARG_TAG);
+    bool tagged = tag == SNAX_TAG_DMA || tag == SNAX_TAG_DMA_L1L1;
+    bool copy = tag == SNAX_TAG_DMA_L1L1;
     std::string values;
     while (size > 0)
     {
@@ -494,6 +508,10 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
         bank_req.set_is_write(req->get_is_write());
         bank_req.set_opcode(req->get_opcode());
         (req->get_is_write() ? _this->bank_writes : _this->bank_reads)[bank]++;
+        if (copy)
+        {
+            (req->get_is_write() ? _this->copy_writes : _this->copy_reads)++;
+        }
         vp::IoReqStatus status = _this->banks[bank].req(&bank_req);
         if (status != vp::IO_REQ_OK)
         {
@@ -514,8 +532,7 @@ vp::IoReqStatus SnaxTcdmXbar::dma_req(vp::Block *__this, vp::IoReq *req)
 
     if (traced)
     {
-        // A beat the iDMA's TCDM backend did not tag has no copy: -1
-        bool tagged = snax_arg_get(req, SNAX_ARG_TAG) == SNAX_TAG_DMA;
+        // A beat without a copy: -1
         std::string back = req->get_is_write() ? ""
             : " back=" + std::to_string((long)(cycle + latency));
         _this->ev.beats.msg(vp::Trace::LEVEL_INFO,

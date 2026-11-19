@@ -6,12 +6,12 @@
 Snapshots).
 
 A component's snapshots are its snap lines, running totals since boot, one
-snapshot per mark written (a line per input and bank of the crossbar, a line
-per group and per unit, a line per mover). Window k is snapshot k + 1 minus
+snapshot per mark written (a line per input and bank of the crossbar and one
+for its copies, a line per group and per unit, a line per mover). Window k is snapshot k + 1 minus
 snapshot k. Two checks, each equal or fail, with the numbers:
 
 - check_end(): the last snapshot of every component is mark=-1 and equals its
-  whole-run lines: the crossbar's `input` and `bank` lines, the sum of a
+  whole-run lines: the crossbar's `input`, `bank` and `copies` lines, the sum of a
   group's `run` lines (the classes, and the firings of a group of one unit),
   the sum of each mover's `mover` lines. A component with summary lines and no
   snapshot fails.
@@ -31,15 +31,19 @@ import sys
 
 import classes
 
-# A snap line's item: the field naming it (None for a group's own line), and its counts
+# A snap line's item: the field naming it (None for a group's own line; "copies" for the
+# crossbar's line of the DMA's copies inside L1, which names no item), and its counts
 COUNTS = {"input": ["grants", "stalls"], "bank": ["reads", "writes", "conflicts"],
           "unit": ["firings", "pushes"], "mover": classes.MOVER_CLASSES,
-          None: classes.UNIT_CLASSES}
+          "copies": classes.FIELDS["copies"], None: classes.UNIT_CLASSES}
+# The crossbar's whole-run lines a snap line of the same item must equal
+XBAR_KINDS = ("input", "bank", "copies")
 
 
 class Snapshot:
     """One snapshot of a component: its cycle, its mark, and per item ((field, name),
-    (None, None) for a group's own line) its counts in COUNTS' order."""
+    (None, None) for a group's own line, ("copies", None) for the crossbar's copies) its
+    counts in COUNTS' order."""
 
     def __init__(self, cycle, mark):
         self.cycle = cycle
@@ -61,7 +65,9 @@ def snapshots(parsed):
         if x.kind != "snap":
             continue
         field = next((f for f in ("input", "bank", "unit", "mover") if f in x.fields), None)
-        key = (field, x.fields[field] if field else None)
+        if field is None and "copy_reads" in x.fields:
+            field = "copies"
+        key = (field, x.fields[field] if field in ("input", "bank", "unit", "mover") else None)
         try:
             mark = int(x.fields["mark"])
             counts = [int(x.fields[f]) for f in COUNTS[field]]
@@ -77,15 +83,17 @@ def snapshots(parsed):
 
 
 def whole_run(parsed):
-    """Per component path, what its mark=-1 snapshot must equal, by item: the input and
-    bank lines; the group's run lines' classes added up; each mover's mover lines' classes
-    added up. And per path the group's firings, its run lines' added up."""
+    """Per component path, what its mark=-1 snapshot must equal, by item: the input, bank
+    and copies lines; the group's run lines' classes added up; each mover's mover lines'
+    classes added up. And per path the group's firings, its run lines' added up."""
     want, firings = {}, {}
     for x in parsed:
-        items = want.setdefault(x.path, {}) if x.kind in ("input", "bank", "run",
+        items = want.setdefault(x.path, {}) if x.kind in (*XBAR_KINDS, "run",
                                                           "mover") else None
         if x.kind in ("input", "bank"):
             items[(x.kind, x.fields["index"])] = [int(x.fields[f]) for f in COUNTS[x.kind]]
+        elif x.kind == "copies":
+            items[("copies", None)] = [int(x.fields[f]) for f in COUNTS["copies"]]
         elif x.kind in ("run", "mover"):
             key = (None, None) if x.kind == "run" else ("mover", x.fields["mover"])
             field = None if x.kind == "run" else "mover"
@@ -109,7 +117,9 @@ def differ(path, what, got, want, fields):
 
 
 def name(key):
-    return "group" if key[0] is None else f"{key[0]}={key[1]}"
+    if key[0] is None:
+        return "group"
+    return key[0] if key[1] is None else f"{key[0]}={key[1]}"
 
 
 def check_end(parsed):
@@ -133,7 +143,7 @@ def check_end(parsed):
             if key not in end.items:
                 return f"{path}: no snap line for {name(key)}"
         for key, got in end.items.items():
-            if key[0] in ("input", "bank") and key not in lines:
+            if key[0] in XBAR_KINDS and key not in lines:
                 return f"{path}: snap line for {name(key)} but no {key[0]} line"
             if key[0] == "unit":
                 continue

@@ -66,7 +66,7 @@ IDmaFeXdma::IDmaFeXdma(vp::Component *idma, IdmaTransferConsumer *me)
     this->loc_size = idma->get_js_config()->get_child_int("loc_size");
     this->transfers = this->busy_cycles = this->busy_since = 0;
     this->r_beats_total = this->w_beats_total = 0;
-    this->bytes_to_l1 = this->bytes_from_l1 = 0;
+    this->bytes_l2_to_l1 = this->bytes_l1_to_l2 = this->bytes_l1_to_l1 = 0;
 }
 
 
@@ -172,16 +172,24 @@ uint32_t IDmaFeXdma::enqueue_copy(uint32_t config, uint32_t size, bool &granted)
         transfer_id, transfer->src, transfer->dst, transfer->size, transfer->src_stride,
         transfer->dst_stride, transfer->reps, transfer->config);
 
-    // SNAX events (docs/EVENTS.md): the copy as the core issued it, its rows 1 for a 1D copy
+    // SNAX events (docs/EVENTS.md): the copy as the core issued it, its rows 1 for a 1D copy.
+    // A copy inside L1 is marked on its transfer, for the beats its TCDM backend tags.
     uint64_t rows = (transfer->config >> 1) & 1 ? transfer->reps : 1;
+    bool dst_local = this->is_local(transfer->dst);
+    bool src_local = this->is_local(transfer->src);
     this->transfers++;
-    if (this->is_local(transfer->dst))
+    transfer->l1_to_l1 = dst_local && src_local;
+    if (dst_local && src_local)
     {
-        this->bytes_to_l1 += rows * transfer->size;
+        this->bytes_l1_to_l1 += rows * transfer->size;
     }
-    if (this->is_local(transfer->src))
+    else if (dst_local)
     {
-        this->bytes_from_l1 += rows * transfer->size;
+        this->bytes_l2_to_l1 += rows * transfer->size;
+    }
+    else if (src_local)
+    {
+        this->bytes_l1_to_l2 += rows * transfer->size;
     }
     this->ev_events.msg(vp::Trace::LEVEL_INFO, "%ld issue id=%u src=0x%lx dst=0x%lx size=%lu "
         "src_stride=%lu dst_stride=%lu reps=%lu\n", (long)this->idma->clock.get_cycles(),
@@ -339,7 +347,7 @@ void IDmaFeXdma::stop()
     int64_t cycle = this->idma->clock.get_cycles();
     int64_t busy = this->busy_cycles + (this->busy ? cycle - this->busy_since : 0);
     this->ev_summary.msg(vp::Trace::LEVEL_INFO, "%ld dma transfers=%ld busy=%ld r_beats=%ld "
-        "w_beats=%ld bytes_to_l1=%ld bytes_from_l1=%ld\n", (long)cycle, (long)this->transfers,
-        (long)busy, (long)this->r_beats_total, (long)this->w_beats_total,
-        (long)this->bytes_to_l1, (long)this->bytes_from_l1);
+        "w_beats=%ld bytes_l2_to_l1=%ld bytes_l1_to_l2=%ld bytes_l1_to_l1=%ld\n", (long)cycle,
+        (long)this->transfers, (long)busy, (long)this->r_beats_total, (long)this->w_beats_total,
+        (long)this->bytes_l2_to_l1, (long)this->bytes_l1_to_l2, (long)this->bytes_l1_to_l1);
 }

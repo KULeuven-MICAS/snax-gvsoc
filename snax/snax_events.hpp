@@ -39,15 +39,18 @@
 
 
 // The slots: the tag, then the ids it names. Kept equal to pulp/pulp/idma/idma.hpp's
-// IDMA_SNAX_ARG_* and IDMA_SNAX_TAG_DMA by hand: an upstream file includes nothing from snax/
+// IDMA_SNAX_ARG_*, IDMA_SNAX_TAG_DMA and IDMA_SNAX_TAG_DMA_L1L1 by hand: an upstream file
+// includes nothing from snax/
 #define SNAX_ARG_TAG (IO_REQ_NB_ARGS - 1)
 #define SNAX_ARG_ID (IO_REQ_NB_ARGS - 2)    // a streamer beat's b, a DMA copy's id
 #define SNAX_ARG_INDEX (IO_REQ_NB_ARGS - 3) // a DMA beat's index within its copy
 #define SNAX_ARG_L2 (IO_REQ_NB_ARGS - 4)    // a DMA beat's address on the copy's other side
 
-// The tags: a streamer's beat (b), a DMA beat (id, i, l2)
+// The tags: a streamer's beat (b), a DMA beat (id, i, l2), a DMA beat of a copy inside L1
+// (id, i, l2)
 #define SNAX_TAG_BEAT ((uintptr_t)0x534e4231)
 #define SNAX_TAG_DMA ((uintptr_t)0x534e4432)
+#define SNAX_TAG_DMA_L1L1 ((uintptr_t)0x534e4333)
 
 
 class SnaxEvents

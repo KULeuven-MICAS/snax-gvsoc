@@ -296,21 +296,23 @@ void IDmaBeTcdm::reset(bool active)
 
 
 
-// SNAX: the row as the backend took it gives the other side's address of each beat
+// SNAX: the row as the backend took it gives the other side's address of each beat; the copy
+// says whether it is inside the local memory
 IDmaBeTcdm::BeatIds IDmaBeTcdm::beat_ids(IdmaTransfer *transfer, uint64_t base, bool is_write)
 {
     IdmaTransfer *copy = transfer->parent;
     uint64_t index = is_write ? copy->local_writes++ : copy->local_reads++;
     uint64_t l2 = is_write ? transfer->row_src + (base - transfer->row_dst)
         : transfer->row_dst + (base - transfer->row_src);
-    return {copy->id, index, l2};
+    return {copy->id, index, l2, copy->l1_to_l1};
 }
 
 
 
 void IDmaBeTcdm::tag(vp::IoReq *req, const BeatIds &ids)
 {
-    *req->arg_get(IDMA_SNAX_ARG_TAG) = (void *)IDMA_SNAX_TAG_DMA;
+    *req->arg_get(IDMA_SNAX_ARG_TAG) =
+        (void *)(ids.l1_to_l1 ? IDMA_SNAX_TAG_DMA_L1L1 : IDMA_SNAX_TAG_DMA);
     *req->arg_get(IDMA_SNAX_ARG_ID) = (void *)(uintptr_t)ids.id;
     *req->arg_get(IDMA_SNAX_ARG_INDEX) = (void *)(uintptr_t)ids.index;
     *req->arg_get(IDMA_SNAX_ARG_L2) = (void *)(uintptr_t)ids.l2;
