@@ -116,7 +116,10 @@ its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
 1); an outer output with d_out (D174) fills one word with d_out results, on one
 channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
 word on one channel, d_in pops of its lanes through SnaxGroup's slicer, d_in
-the word's elements / lanes; each set's snax_num_rw_csr and
+the word's elements / lanes; a broadcast input (D186, a lane-wise datapath's:
+SimdLanes, Mac) keeps its unit's lanes, its reader moving one lane a beat, so
+its words per beat and d_in count one lane; a seed has its output's lanes
+(one on a fold that sums its lanes, the unit's on a Mac, D187); each set's snax_num_rw_csr and
 snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
 opType holds its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
@@ -203,6 +206,7 @@ class Datapath:
     needs_op: bool = False      # params.op is given
     only_op: str = None         # the one op it computes
     seedable: bool = False      # it takes a seed port (SEED), its fold's start once per job
+    lanewise: bool = False      # each lane computes on its own: an input may be a broadcast
 
 
 def _accumulates(params: dict) -> bool:
@@ -213,19 +217,20 @@ def _accumulates(params: dict) -> bool:
 # LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
 CATALOGUE = {
     'SimdLanes': Datapath(nb_inputs=lambda p: 1 if 'k' in p else 2, is_fold=lambda p: False,
-                          latency=lambda p: 0, typed=True, needs_op=True),
+                          latency=lambda p: 0, typed=True, needs_op=True, lanewise=True),
     'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1, reduces=True, needs_op=True, only_op='add',
                                seedable=True),
     'Mac': Datapath(nb_inputs=lambda p: 2 if _accumulates(p) else 3, is_fold=_accumulates,
                     latency=lambda p: int(_accumulates(p) or bool(p.get('regOut', False))),
-                    typed=True),
+                    typed=True, seedable=True, lanewise=True),
     'SerialAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                  latency=lambda p: 1, serial=True, reduces=True, seedable=True),
     'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1),
 }
-# A fold's seed port (snax-forge's brm.SEED): one element, read once per job
+# A fold's seed port (snax-forge's brm.SEED): its output's lanes (one on a fold that sums its
+# lanes), read once per job (D163, D187)
 SEED = 'seed'
 # A group's own CSRs: START and JOBS, read-write, first; STATUS and BUSY_COUNTER,
 # read-only, last
@@ -408,7 +413,8 @@ class Csr:
 class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes, its
     direction (in or out) and, on an outer output a packer feeds, d_out (D174), on an outer
-    input a slicer feeds, d_in (D180)."""
+    input a slicer feeds, d_in (D180); ``broadcast`` on an outer input whose reader gives one
+    lane to all of them (D186)."""
 
     port: str
     dtype: str
@@ -416,6 +422,12 @@ class Port:
     dir: str
     d_out: int = 1
     d_in: int = 1
+    broadcast: bool = False
+
+    @property
+    def stream_lanes(self) -> int:
+        """The lanes its reader moves a beat: one for a broadcast (D186), else its lanes."""
+        return 1 if self.broadcast else self.lanes
 
     @property
     def width(self) -> int:
@@ -821,8 +833,13 @@ def _port(node: _Node) -> Port:
     if d_in not in (1, 2, 4, 8) or (d_in > 1 and direction != 'in'):
         raise CfgTypeError(node.file, node.where('d_in'),
             f'{d_in}: an input\'s pops per word, 2, 4 or 8 (absent at 1)')
+    broadcast = node.get('broadcast', bool, False)
+    if broadcast and (direction != 'in' or lanes < 2):
+        raise CfgTypeError(node.file, node.where('broadcast'),
+            'an input of 2 lanes or more takes a broadcast, one lane given to all of them '
+            '(absent when false)')
     return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction, d_out=d_out,
-                d_in=d_in)
+                d_in=d_in, broadcast=broadcast)
 
 
 def _unit(node: _Node) -> Unit:
@@ -912,15 +929,24 @@ def _unit(node: _Node) -> Unit:
     if SEED in unit_ports:
         seed = unit_ports[SEED]
         outs = [x for x in unit_ports.values() if x.dir == 'out']
-        why = (f'{datapath} takes no seed (TreeAccumulate and SerialAccumulate do)'
-               if not facts.seedable else 'an in port' if seed.dir != 'in'
-               else f'{seed.lanes} lanes, a seed is 1' if seed.lanes != 1
+        seed_lanes = 1 if facts.reduces else lanes  # its output's lanes (D187)
+        why = (f'{datapath} takes no seed (TreeAccumulate, SerialAccumulate and Mac do)'
+               if not facts.seedable else f'{datapath} takes a seed only as a fold'
+               if not fold else 'an in port' if seed.dir != 'in'
+               else f'{seed.lanes} lanes, a seed has its output\'s {seed_lanes}'
+               if seed.lanes != seed_lanes
+               else 'a seed is not a broadcast' if seed.broadcast
                else f'{seed.dtype}, a seed is its output\'s {outs[0].dtype}'
                if outs and seed.dtype != outs[0].dtype
                else f'the last in port, after {list(unit_ports)}' if
                [k for k, x in unit_ports.items() if x.dir == 'in'][-1] != SEED else None)
         if why is not None:
             raise CfgTargetError(node.file, f'{node.where("ports")}.{SEED}', f'gen.seed: {why}')
+    for key, p in unit_ports.items():
+        if p.broadcast and not facts.lanewise:
+            raise CfgTargetError(node.file, f'{node.where("ports")}.{key}',
+                f'gen.broadcast: {datapath} sums its lanes; a broadcast feeds a datapath whose '
+                'lanes compute on their own (SimdLanes, Mac)')
     want = (facts.latency(params.value), lanes if facts.serial else 1)
     if (latency, ii, span) != (*want[:1], 1, want[1]):
         raise CfgTargetError(node.file, node.where('timing'),
@@ -1142,6 +1168,9 @@ def _check_links(node: _Node, acc: Accelerator):
                 if p.d_in > 1 or p.d_out > 1:
                     fail('groups', f'{what}: {end} has d_in {p.d_in} and d_out {p.d_out}; a '
                          'linked port has no slicer or packer, so both are 1 (absent)')
+                if p.broadcast:
+                    fail('groups', f'{what}: {end} is a broadcast; a linked port takes its '
+                         'lanes from the link, so it is not one (absent)')
             for end in (k.from_, k.to):
                 if end in linked:
                     fail('groups', f'gen.link_port: group {g.name}\'s link {k.name}: port {end} '
@@ -1396,10 +1425,11 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
                     f'{bits} bits, not one 64-bit word, or {mover} has num_channel {channels}, '
                     'not 1')
         return None
+    lanes = port.stream_lanes  # a broadcast's reader moves one lane (D186)
     if port.d_in > 1:  # sliced (D180): one word gives d_in pops of lanes x width bits
-        if port.lanes * port.width * port.d_in != 64 or channels != 1:
-            return (f'{entry}: d_in {port.d_in} pops of {port.lanes} x {port.width} bits are '
-                    f'{port.lanes * port.width * port.d_in} bits, not one 64-bit word, or '
+        if lanes * port.width * port.d_in != 64 or channels != 1:
+            return (f'{entry}: d_in {port.d_in} pops of {lanes} x {port.width} bits are '
+                    f'{lanes * port.width * port.d_in} bits, not one 64-bit word, or '
                     f'{mover} has num_channel {channels}, not 1')
         return None
     if CATALOGUE[u.datapath].reduces and output:
@@ -1407,12 +1437,12 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
             return (f"{entry}: a fold's output is one 64-bit word per beat, but {mover} has "
                     f'num_channel {channels}')
         return None
-    bits = port.lanes * port.width
+    bits = lanes * port.width
     if bits % 64 != 0:
-        return (f'{entry}: lanes {port.lanes} x {port.width} bits is not a whole number of '
+        return (f'{entry}: lanes {lanes} x {port.width} bits is not a whole number of '
                 '64-bit channel words')
     if bits // 64 != channels:
-        return (f'{entry}: lanes {port.lanes} x {port.width} bits is {bits // 64} 64-bit words '
+        return (f'{entry}: lanes {lanes} x {port.width} bits is {bits // 64} 64-bit words '
                 f'per beat, but {mover} has num_channel {channels}: they must match')
     return None
 

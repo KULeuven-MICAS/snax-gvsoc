@@ -354,8 +354,10 @@ def acc_json(desc: Description) -> dict:
 
     def unit(u):
         d = {"name": u.name, "brm": u.brm, "datapath": u.datapath,
-             "ports": {k: {"port": p.port, "dir": p.dir,
-                           "dtype": p.dtype, "lanes": p.lanes}
+             "ports": {k: {"port": p.port, "dir": p.dir, "dtype": p.dtype, "lanes": p.lanes,
+                           **({"d_out": p.d_out} if p.d_out > 1 else {}),
+                           **({"d_in": p.d_in} if p.d_in > 1 else {}),
+                           **({"broadcast": True} if p.broadcast else {})}
                        for k, p in u.ports.items()}}
         if u.op_type is not None:
             d["opType"] = u.op_type
@@ -857,6 +859,17 @@ def seeded(datapath: str = "TreeAccumulate", seed: Port = Port("seed", "int64", 
 SEEDED_STREAMER = streamer([4, 1], [1])
 
 
+def seeded_mac(lanes: int = 4, dtype: str = "int64", out: str = "int64",
+               b: Port = None) -> Unit:
+    """A Mac (accumulate) of ``lanes`` lanes seeded from its output's container: a, b, then
+    the seed of the output's lanes and dtype (D187)."""
+    return Unit("acc", "mac", "Mac", {"a": Port("a", dtype, lanes, "in"),
+                                      "b": b or Port("b", dtype, lanes, "in"),
+                                      "seed": Port("seed", out, lanes, "in"),
+                                      "out": Port("out", out, lanes, "out")}, out,
+                {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)])
+
+
 class Seed(unittest.TestCase):
     """A fold's seed port: read on TreeAccumulate and
     SerialAccumulate, one lane at the output's dtype, the last in port, from the streamer
@@ -890,7 +903,7 @@ class Seed(unittest.TestCase):
 
     def test_the_seed_port_is_checked(self):
         cases = [
-            (Port("seed", "int64", 2, "in"), "gen.seed: 2 lanes, a seed is 1"),
+            (Port("seed", "int64", 2, "in"), "gen.seed: 2 lanes, a seed has its output's 1"),
             (Port("seed", "int32", 1, "in"), "gen.seed: int32, a seed is its output's int64"),
         ]
         for port, text in cases:
@@ -903,14 +916,34 @@ class Seed(unittest.TestCase):
                                           "out": Port("out", "int64", 4, "out")}, "int64",
                    {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 2, 32)])
         self.refused(acc_json(accelerator("mac_seed", mac, between=1)),
-                     "gen.seed: Mac takes no seed (TreeAccumulate and SerialAccumulate do)",
-                     streamer([4, 4, 1], [4]))
+                     "gen.seed: 1 lanes, a seed has its output's 4", streamer([4, 4, 1], [4]))
+        simd_seed = replace(simd("acc", "add"), ports={**simd("acc", "add").ports,
+                                                        "seed": Port("seed", "int64", 4, "in")})
+        self.refused(acc_json(accelerator("simd_seed", simd_seed)),
+                     "gen.seed: SimdLanes takes no seed (TreeAccumulate, SerialAccumulate and "
+                     "Mac do)", streamer([4, 4, 4], [4]))
         first = acc_json(accelerator("matvec_seed", seeded(), between=1))
         ports = first["accelerators"][0]["groups"][0]["units"][0]["ports"]
         first["accelerators"][0]["groups"][0]["units"][0]["ports"] = {
             "seed": ports["seed"], "a": ports["a"], "out": ports["out"]}
         first["accelerators"][0]["inputs"] = ["acc.seed", "acc.a"]
         self.refused(first, "gen.seed: the last in port", streamer([1, 4], [1]))
+
+    def test_a_seeded_mac(self):
+        """A Mac (accumulate) takes a seed of its output's lanes, 4 here, one word a lane at
+        int64, read once per job; a plain Mac (accumulate false) takes none."""
+        desc = accelerator("mac_seed", seeded_mac(), between=1)
+        got = self.load(acc_json(desc), streamer([4, 4, 4], [4]))
+        self.assertEqual(got, desc)
+        (unit,) = got.groups[0].units
+        self.assertTrue(unit.seeded)
+        self.assertEqual(got.accelerators[0].inputs, ["acc.a", "acc.b", "acc.seed"])
+        plain = seeded_mac()
+        plain = replace(plain, params={"accumulate": False, "regOut": False}, csrs=[],
+                        ports={**plain.ports, "c": Port("c", "int64", 4, "in"),
+                               "seed": plain.ports["seed"]})
+        self.refused(acc_json(accelerator("mac_plain_seed", plain)),
+                     "gen.seed: Mac takes a seed only as a fold", streamer([4, 4, 4, 4], [4]))
 
     def test_a_serial_fold_takes_its_seed_from_the_streamer(self):
         """A SerialAccumulate of span 4 seeded: its a from a link (a Mac's), its seed from the
@@ -927,6 +960,85 @@ class Seed(unittest.TestCase):
                                      between=1))
         self.refused(alone, "gen.span: accelerator acc: unit acc (span 4) reads ['a'] from the "
                      "streamer: a unit with span > 1 reads from a link")
+
+
+class Broadcast(unittest.TestCase):
+    """D186: an input of a lane-wise datapath (SimdLanes, Mac) whose reader moves one lane,
+    given to all of them: the port keeps its unit's lanes, its words per beat and d_in count
+    one lane. mvt's half 2: a Mac of 8 int8 lanes, b (y2) broadcast through a slicer of 8 pops
+    a word, seeded from x2 at int32 (4 channels), the output 4 channels."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        b = Port("b", "int8", 8, "in", d_in=8, broadcast=True)
+        self.desc = accelerator("mac_bcast", seeded_mac(8, "int8", "int32", b), between=1)
+        self.streamer = streamer([1, 1, 4], [4])
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self, acc, rw=3):
+        path = write_design(self.dir, acc, self.streamer, rw, 2)
+        (slot,) = snax_cfg.load(path).cores[0].accelerators
+        return slot.description
+
+    def fails(self, acc, kind, text, rw=3):
+        with self.assertRaises(kind) as ctx:
+            self.load(acc, rw)
+        self.assertIn(text, str(ctx.exception))
+
+    def test_reads(self):
+        got = self.load(acc_json(self.desc))
+        self.assertEqual(got, self.desc)
+        b = got.groups[0].units[0].ports["b"]
+        self.assertEqual((b.lanes, b.stream_lanes, b.d_in, b.broadcast), (8, 1, 8, True))
+
+    def test_counts_one_lane(self):
+        """Without the broadcast, 8 lanes of int8 are one word a beat, not one slicer's eight
+        pops; and b broadcast at int64 without a slicer is one channel."""
+        acc = acc_json(self.desc)
+        del acc["accelerators"][0]["groups"][0]["units"][0]["ports"]["b"]["broadcast"]
+        self.fails(acc, snax_cfg.CfgSlotError, "d_in 8 pops of 8 x 8 bits are 512 bits")
+        b = Port("b", "int64", 4, "in", broadcast=True)
+        self.desc = accelerator("mac_bcast", seeded_mac(b=b), between=1)
+        self.streamer = streamer([4, 1, 4], [4])
+        self.assertTrue(self.load(acc_json(self.desc)).groups[0].units[0].ports["b"].broadcast)
+        self.streamer = streamer([4, 4, 4], [4])
+        self.fails(acc_json(self.desc), snax_cfg.CfgSlotError,
+                   "lanes 1 x 64 bits is 1 64-bit words")
+
+    def test_a_linked_port_is_none(self):
+        """vmul -> vadd (two SimdLanes, 4 lanes of int64): vadd's a on the link is not a
+        broadcast; it takes its lanes from the link (gen.link)."""
+        group = Group("chain", group_csrs(0), [simd("vmul", "mul"), simd("vadd", "add")],
+                      [Link("prod", "vmul.out", "vadd.a", 0)])
+        acc = acc_json(description("chain", Accelerator(
+            "chain", ["vmul.a", "vmul.b", "vadd.b"], ["vadd.out"], [group])))
+        self.streamer = streamer([4, 4, 4], [4])
+        self.load(acc, 2)
+        acc["accelerators"][0]["groups"][0]["units"][1]["ports"]["a"]["broadcast"] = True
+        self.fails(acc, snax_cfg.CfgSlotError, "gen.link: group chain's link prod: vadd.a is a "
+                   "broadcast; a linked port takes its lanes from the link", 2)
+
+    def test_refused(self):
+        """A broadcast on an output, on one lane, on a fold that sums its lanes, or on a
+        seed."""
+        acc = acc_json(self.desc)
+        ports = acc["accelerators"][0]["groups"][0]["units"][0]["ports"]
+        ports["out"]["broadcast"] = True
+        self.fails(acc, snax_cfg.CfgTypeError, "an input of 2 lanes or more takes a broadcast")
+        ports["out"]["broadcast"] = False
+        ports["seed"]["broadcast"] = True
+        self.fails(acc, snax_cfg.CfgTargetError, "gen.seed: a seed is not a broadcast")
+        tree = acc_json(accelerator("vsum_tree", fold("acc", 0, "int64", 4), between=1))
+        tree["accelerators"][0]["groups"][0]["units"][0]["ports"]["a"]["broadcast"] = True
+        self.streamer = streamer([1], [1])
+        self.fails(tree, snax_cfg.CfgTargetError, "gen.broadcast: TreeAccumulate sums its lanes")
+        one = acc_json(accelerator("vecadd", replace(simd("acc", "add"), ports={
+            p: Port(p, "int64", 1, "out" if p == "out" else "in") for p in ("a", "b", "out")})))
+        one["accelerators"][0]["groups"][0]["units"][0]["ports"]["b"]["broadcast"] = True
+        self.fails(one, snax_cfg.CfgTypeError, "an input of 2 lanes or more takes a broadcast")
 
 
 class Dot1(unittest.TestCase):

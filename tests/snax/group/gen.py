@@ -135,7 +135,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
         lines += [f"data {x} " + " ".join(map(str, data[x])) for x in ("a", "b")]
         lines.append("sums " + " ".join(map(str, data["sums"])))
     names = [x for u in units for x in ((["a", "b"][:u[4]] if not (len(u) > 5 and u[5])
-             else [*(["a"] * (u[4] - 1)), f"{u[0]}.seed"]) if u[4] else [])]
+             else [*["a", "b"][:u[4] - 1], f"{u[0]}.seed"]) if u[4] else [])]
     lines += ["", f"# {' '.join(names)} ready | " + " | ".join(f"{u[0]} fire give" for u in units)
               + (" | " + " ".join(f"occ{k}" for k, d in enumerate(depths) if d) if any(depths) else "")
               + (" | " + " ".join(f"took{i}" for i, _ in sliced) if sliced else "")
@@ -187,6 +187,12 @@ def seed_cases():
           [2, 1], valid=lambda c: (1, 1, 0 if c in {1, 2, 3, 4, 7} else 1),
           comment=["sum reads its job's first beat lane by lane only once its seed is there; "
                    "mac holds its result"])
+    write("seed_mac_late", "mac (Mac, T 4, seeded: its seed has the output's lanes, D187) "
+          "alone, JOBS 2, its seed missing in cycles 1 to 3 and 6 to 7",
+          [("mac", "Mac", 1, 1, 3, 1)], [], 2, [4],
+          valid=lambda c: (1, 1, 0 if c in {1, 2, 3, 6, 7} else 1),
+          comment=["a seeded Mac waits for its seed on each job's first beat, as a seeded "
+                   "fold; its other beats do not"])
 
 
 def pack_cases():
@@ -245,6 +251,11 @@ def slice_cases():
           "sum packed 2 to a word", VARIANTS[3][0], [0], 2, [1, 2], d_out=2, d_in=(2, 2),
           comment=["matvec_3 at int8, W = 4: both readers sliced, one cycle later than "
                    "pack_dot3"])
+    write("slice_mac_bcast_d8", "mac (Mac, T 4, seeded), JOBS 2, its b sliced 8 and broadcast "
+          "(D186): mvt's half 2 at int8, a and the seed wired", [("mac", "Mac", 1, 1, 3, 1)],
+          [], 2, [4], valid=lambda c: (1, 1, 1), d_in=(1, 8, 1),
+          comment=["b's one word gives the 8 firings their y2[i], one a firing; the broadcast "
+                   "is wires (each lane gets the pop), so the rule does not see it"])
 
 
 def main():

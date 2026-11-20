@@ -12,7 +12,8 @@ group cases from it and snax-forge can import it from the submodule.
 
 A unit is a dict: ``name``, ``L`` (latency), ``ii``, ``span`` (the cycles it reads one beat in
 place), ``inputs`` (its count of outer inputs, from the streamer) and ``seed`` (optional, false
-by default: its last outer input is a fold's seed, one beat per job). A link is an edge
+by default: its last outer input is a fold's or a Mac's seed, one beat per job). A broadcast
+input (D186) is wires between its slicer or reader and the lanes: the rule does not see it. A link is an edge
 ``{"from", "to", "to_input", "depth"}``: the producer's and the consumer's names, the
 consumer's input it drives (the datapaths use it, the rule does not), and its depth D (0 a
 wire, >= 1 a buffer of D beats). ``output`` names the unit that owns the group's outer output;
