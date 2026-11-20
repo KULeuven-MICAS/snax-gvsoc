@@ -21,8 +21,9 @@
 //                                   feeds (exactly one; a unit of span > 1
 //                                   has no outer one but its seed)
 //                seed               the index in inputs of a fold's seed (the
-//                                   last, an outer port: one element in one
-//                                   word, taken once per job), or -1
+//                                   last, an outer port, taken once per job:
+//                                   one element in one word, a Mac's its
+//                                   output's lanes, D187), or -1
 //                output             the outer output's port name, or ""
 //                                   (linked); exactly one unit has one
 //                in_widths, in_signed, out_width, out_signed, op_width,
@@ -34,6 +35,11 @@
 //                                   per 64-bit word, through a slicer when
 //                                   above 1 (2, 4 or 8, lanes x width x d_in
 //                                   = 64 bits; D180); absent, 1 for each
+//                broadcast          optional, per input: an outer input read
+//                                   as one lane a beat and given to all lanes
+//                                   (snax_group.hpp's snax_broadcast, D186), so
+//                                   its words and d_in count one lane; never
+//                                   a linked input or the seed; absent, false
 //                op                 SimdLanes' op (add ... max, or axpby);
 //                                   a fold's add
 //                k                  SimdLanes' constant at one stream,
@@ -133,7 +139,8 @@ private:
 
     // An outer input: its port, its unit, its words per beat, the beat taken, and whether it
     // is the unit's seed (taken once per job); with d_in above 1 its slicer, the beat its
-    // slice, and the beat id of the word it holds (-1 untagged)
+    // slice, and the beat id of the word it holds (-1 untagged); a broadcast's type, the
+    // unit's lanes and the unit's beat, the beat's lane 0 in each lane
     struct OuterIn
     {
         vp::IoMaster itf;
@@ -143,6 +150,10 @@ private:
         bool seed = false;
         SnaxSlicer slicer;
         long word_id = -1;
+        bool broadcast = false;
+        SnaxType type = {64, true};
+        int lanes = 1;
+        std::vector<uint64_t> wide;
     };
 
     std::vector<OuterIn> in_itf;        // sized once, before any port is registered
@@ -247,6 +258,14 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         {
             this->trace.fatal("Property %s.d_in: one per input (%ld)\n", w.c_str(), ins.size());
         }
+        js::Config *bcasts = u->get("broadcast");
+        std::vector<js::Config *> wired = bcasts ? this->props.as_list(bcasts, w + ".broadcast")
+            : std::vector<js::Config *>();
+        if (bcasts && wired.size() != ins.size())
+        {
+            this->trace.fatal("Property %s.broadcast: one per input (%ld)\n", w.c_str(),
+                ins.size());
+        }
         for (size_t i = 0; i < ins.size(); i++)
         {
             std::string at_i = "[" + std::to_string(i) + "]";
@@ -256,7 +275,15 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             bool is_seed = p.seed && (int)i == seed;
             int d_in = d_ins ? this->props.as_int(slices[i], w + ".d_in[" + std::to_string(i) +
                 "]") : 1;
-            int lanes = is_seed ? 1 : p.lanes;
+            bool broadcast = bcasts && this->props.as_bool(wired[i], w + ".broadcast[" +
+                std::to_string(i) + "]");
+            if (broadcast && (port.empty() || is_seed || p.lanes < 2))
+            {
+                this->trace.fatal("Property %s.broadcast[%ld]: true, but a broadcast is an outer "
+                    "input of 2 lanes or more, not a linked one or the seed\n", w.c_str(), i);
+            }
+            // the lanes its stream moves a beat: one for a broadcast, a seed its output's
+            int lanes = broadcast ? 1 : is_seed ? snax_seed_lanes(datapath, p.lanes) : p.lanes;
             if ((d_in != 1 && d_in != 2 && d_in != 4 && d_in != 8) ||
                 (d_in > 1 && (port.empty() || lanes * p.in_types.back().width * d_in != 64)))
             {
@@ -277,9 +304,13 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             OuterIn &o = this->in_itf[at];
             o.unit = k;
             o.seed = is_seed;
-            o.words = is_seed || d_in > 1 ? 1 : snax_words(p.lanes, p.in_types.back());
+            o.words = d_in > 1 ? 1 : snax_words(lanes, p.in_types.back());
             o.slicer.d_in = d_in;
             o.beat.assign(o.words, 0);
+            o.broadcast = broadcast;
+            o.type = p.in_types.back();
+            o.lanes = p.lanes;
+            o.wide.assign(broadcast ? snax_words(p.lanes, o.type) : 0, 0);
             this->new_master_port(port, &o.itf);
             this->unit_ins.back().push_back(at++);
         }
@@ -504,7 +535,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     {
         for (size_t i : this->unit_ins[k])
         {
-            this->outer[k].push_back(this->in_itf[i].beat.data());
+            OuterIn &o = this->in_itf[i];
+            this->outer[k].push_back(o.broadcast ? o.wide.data() : o.beat.data());
         }
     }
     this->out_beat.assign(this->out_words, 0);
@@ -749,7 +781,8 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
 
         // The beats of each unit that fires, its outer inputs in port order (outer). A sliced
         // input pops on that firing (a seed's on its take), its slice the beat, then takes the
-        // reader's word when its slicer was empty or that was its last pop.
+        // reader's word when its slicer was empty or that was its last pop. A broadcast's beat
+        // goes to all its unit's lanes.
         std::string beats, values;
         bool traced = _this->ev.beats.get_active();
         for (size_t k = 0; k < _this->unit_ins.size(); k++)
@@ -771,6 +804,10 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
                     _this->move(o.itf, false, o.beat.data(), o.words);
                     id = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT
                         ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L;
+                }
+                if (moved && o.broadcast)
+                {
+                    snax_broadcast(o.beat.data(), o.lanes, o.type, o.wide.data());
                 }
                 // the head's firing lists every outer input; a seed not taken in it as -1
                 if (traced && step.units[k].fire && k == _this->rule.topological().front())

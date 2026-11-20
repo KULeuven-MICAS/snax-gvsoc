@@ -3,7 +3,7 @@
 The control model of a group (`snax/snax_group.hpp`'s `SnaxGroupRule`) against shared cases, with g++ only. `make regress` runs it after `datapath`, as `group`. snax-forge's Chisel specs drive a group's `<tag>_<group>_ctrl` and its datapaths through the same files, from the folder `SNAX_GVSOC_GROUP_CASES` names (as `SNAX_GVSOC_UNIT_CASES` for `tests/snax/unit/`), cycle-exact, so the format below is the contract between the two.
 
 - `gen.py` writes `cases/*.txt` from `snax/snax_group_rule.py`, the rule in Python (over the group's edges, written from snax-forge's contract, not from the C++): it steps each case, comments each cycle with what fires, reads, holds and pushes, and checks every dot variant's busy cycles against the formulas before it writes a file (a disagreement stops it). The files are checked in; run `gen.py` again only to change them (Python 3 with numpy, for the W = 1 cases' data).
-- `tb.cpp` steps `SnaxGroupRule` with each case's outer valids and ready and compares, every cycle, each unit's fire and give, each buffer's occupancy and busy, and the run line at the end of the run, whose classes must add up to the case's busy cycles. For a dot case it also runs the group's datapaths with the rule's enables (`SnaxGroupDatapaths`, the component's wiring) on int64 beats and checks each result against its job's sum: the case's own `lanes`, `data` and `sums` when it has them, else 4 lanes of the tb's own beats and their sum of products.
+- `tb.cpp` steps `SnaxGroupRule` with each case's outer valids and ready and compares, every cycle, each unit's fire and give, each buffer's occupancy and busy, and the run line at the end of the run, whose classes must add up to the case's busy cycles. For a dot case it also runs the group's datapaths with the rule's enables (`SnaxGroupDatapaths`, the component's wiring) on int64 beats and checks each result against its job's sum: the case's own `lanes`, `data` and `sums` when it has them, else 4 lanes of the tb's own beats and their sum of products. For a seeded Mac alone (D187) it runs the Mac on 4 lanes of int8 a and b into int32, a seed of 4 int32 lanes per job, and checks each lane of each result against its job's seed plus its products; an input sliced to one lane a pop is a broadcast (D186), its slice given to the 4 lanes by `snax_group.hpp`'s `snax_broadcast`, as `SnaxGroup` does.
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/group`) and runs it on every `cases/*.txt`; exit 1 on any difference.
 
 ## The rule in one paragraph
@@ -83,4 +83,4 @@ Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, 
 
     tests/snax/group/run.sh
 
-It prints `PASS` per case (`, data` where the dot product is checked too) and ends with `48 passed, 0 failed`.
+It prints `PASS` per case (`, data` where the dot product or the seeded Mac's sums are checked too) and ends with `50 passed, 0 failed`.

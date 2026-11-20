@@ -139,7 +139,7 @@ The testbenches need g++ only; each runs against the cases in its folder (its RE
 | Testbench | What it checks | How |
 |---|---|---|
 | `unit` | `SnaxGroupRule` with one unit, cycle by cycle | `tests/snax/unit/run.sh` |
-| `group` | `SnaxGroupRule` over linked units (the dot variants), a fold's seed, the output's packer and the input's slicer | `tests/snax/group/run.sh` |
+| `group` | `SnaxGroupRule` over linked units (the dot variants), a fold's or a Mac's seed, the output's packer, the input's slicer and a broadcast input | `tests/snax/group/run.sh` |
 | `shell` | `SnaxShell` with a one-unit group | `tests/snax/shell/run.sh` |
 | `datapath` | every datapath class against its vectors | `tests/snax/datapath/run.sh` |
 | `sparse_pick` | the crossbar's winner pick, 1 to 128 inputs | `tests/snax/sparse_pick/run.sh` |

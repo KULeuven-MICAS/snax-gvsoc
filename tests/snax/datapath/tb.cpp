@@ -7,7 +7,8 @@
 // the registry by its catalogue name and params, then per step the enables
 // and the inputs; eval's output must be the step's expected lanes, then
 // commit clocks it. Also checks the registry: every catalogue name builds,
-// an unknown one and a Mac of the wrong shape are refused.
+// an unknown one, a Mac of the wrong shape and a seed where none is taken are
+// refused, and a seed has its output's lanes (snax_seed_lanes).
 //
 //   tb VECTORS
 //
@@ -277,7 +278,7 @@ static int check_registry(int *count)
     const SnaxType i64 = {64, true};
     struct Case { const char *name; SnaxDatapathParams p; bool builds; int latency, span; };
     SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k, axpby,
-        axpby_no_k1, add_k1;
+        axpby_no_k1, add_k1, mac_seed, mac_seed_bad, two_seed, plain_seed;
     two.in_types = {i64, i64};
     one.in_types = {i64};
     one_k.in_types = {i64};
@@ -300,6 +301,16 @@ static int check_registry(int *count)
     serial.lanes = 4;
     link.in_types = {i64};
     link.depth = 2;
+    // a seeded Mac: a, b and the seed of out's type; not plain, not without its seed; two
+    // inputs seeded: a lane fold's a and seed, which a Mac, SimdLanes, LaneAccumulate refuse
+    mac_seed.in_types = {i64, i64, i64};
+    mac_seed.seed = true;
+    mac_seed_bad = mac_seed;
+    mac_seed_bad.in_types[2] = {32, true};
+    two_seed = two;
+    two_seed.seed = true;
+    plain_seed = plain;
+    plain_seed.seed = true;
     std::vector<Case> cases = {
         {"SimdLanes", two, true, 0, 1}, {"SimdLanes", one_k, true, 0, 1},
         {"SimdLanes", one, false, 0, 0}, {"SimdLanes", two_k, false, 0, 0},
@@ -307,7 +318,11 @@ static int check_registry(int *count)
         {"SimdLanes", add_k1, false, 0, 0},
         {"TreeAccumulate", one, true, 1, 1},
         {"Mac", two, true, 1, 1}, {"Mac", plain, true, 1, 1}, {"Mac", plain_bad, false, 0, 0},
-        {"Mac", one, false, 0, 0}, {"SerialAccumulate", serial, true, 1, 4},
+        {"Mac", one, false, 0, 0}, {"Mac", mac_seed, true, 1, 1},
+        {"Mac", mac_seed_bad, false, 0, 0}, {"Mac", two_seed, false, 0, 0},
+        {"Mac", plain_seed, false, 0, 0}, {"SimdLanes", two_seed, false, 0, 0},
+        {"LaneAccumulate", two_seed, false, 0, 0}, {"TreeAccumulate", two_seed, true, 1, 1},
+        {"SerialAccumulate", serial, true, 1, 4},
         {"LaneAccumulate", one, true, 1, 1}, {"LaneAccumulate", two, false, 0, 0},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},
     };
@@ -324,6 +339,20 @@ static int check_registry(int *count)
                 dp ? dp->span : 0, c.builds ? "built" : "refused", c.latency, c.span);
             errors++;
         }
+    }
+    // a seed's lanes: the unit's on a Mac, one on a fold that sums its lanes (D187)
+    struct Lanes { const char *name; int lanes, want; };
+    for (const Lanes &c : std::vector<Lanes>{{"Mac", 8, 8}, {"TreeAccumulate", 4, 1},
+             {"SerialAccumulate", 4, 1}, {"FifoBlock", 4, 0}})
+    {
+        int got = snax_seed_lanes(c.name, c.lanes);
+        if (got != c.want)
+        {
+            printf("registry: %s's seed at %d lanes has %d, expected %d\n", c.name, c.lanes, got,
+                c.want);
+            errors++;
+        }
+        (*count)++;
     }
     return errors;
 }
