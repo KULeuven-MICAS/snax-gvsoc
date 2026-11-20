@@ -32,6 +32,7 @@ Every hjson and C file starts with a comment naming the design point.
 | matvec | `matvec_1` to `matvec_6`, `matvec_seed` and `matvec_seed_serial` (a seeded fold) |
 | shared movers | `dot_1_shared`, `mvt_1_dot2_shared` (W = 8) |
 | a copy in L1, one step at a time | `mvt_4_i64_dma_AT_sequential` (mvt_4 at W = 8 whose half 2 reads `A_T`, A copied transposed by the DMA one element a burst; every start waited on at once), `mvt_4_i8_dma_AT_sequential` (the same at int8 in, int32 out: x sliced 2 from a word, its output packed 2 to one) |
+| the column form, no copy | `mvt_4_i8_col_sequential` (mvt_4 at int8 whose half 2 is one seeded `Mac` of 8 lanes on n, y2 broadcast to every lane and x2 its seed, A read a strip of 8 columns at a time; sequential) |
 
 ## Refreshing a folder
 
