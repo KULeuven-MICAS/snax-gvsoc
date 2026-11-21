@@ -65,8 +65,8 @@ class Parse(unittest.TestCase):
         # "... class mover=reader0 mode=id" | "le": the head parses, the tail does not
         text = "\n".join(cut(LOG, CLASS, len(LOG[CLASS]) - 2))
         with self.assertRaises(classes.LineError) as e:
-            classes.parse(text, "work/forge.vecadd/trace.log")
-        self.assertEqual(str(e.exception), "work/forge.vecadd/trace.log line 7: not a trace "
+            classes.parse(text, "work/forge.vecadd_v1/trace.log")
+        self.assertEqual(str(e.exception), "work/forge.vecadd_v1/trace.log line 7: not a trace "
                          "line: 'le'")
         # "... class mover=reader0 mod" | "e=idle": the head does not
         with self.assertRaises(classes.LineError) as e:
@@ -137,7 +137,7 @@ class CheckTraces(unittest.TestCase):
 
 
 class TwoUnits(unittest.TestCase):
-    """An accelerator of two groups (forge/dot_1): each task's counter is
+    """An accelerator of two groups (forge/dot_v1): each task's counter is
     checked against its own unit's runs, from its trace path in the manifest."""
 
     MANIFEST = {"trace": "snax_acc0", "tasks": [

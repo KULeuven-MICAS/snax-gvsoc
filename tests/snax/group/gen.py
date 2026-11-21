@@ -159,7 +159,7 @@ def seed_cases():
     one beat per job; its job's first beat waits for it (fire = a.valid and (not first or
     seed.valid)), the firing takes it. Two folds in a chain, acc (TreeAccumulate, T 2) into sum
     (TreeAccumulate, T 2) by a wire, JOBS 2, unseeded, the first seeded, both seeded: with
-    every seed there from the start the three take the same cycles. A late seed on matvec_seed's
+    every seed there from the start the three take the same cycles. A late seed on matvec_acc_v1's
     sum (TreeAccumulate, T 4, JOBS 2) and on a SerialAccumulate (span 4) after a Mac."""
     def chain(seed_acc, seed_sum):
         return [("acc", "TreeAccumulate", 1, 1, 1 + seed_acc, seed_acc),
@@ -176,7 +176,7 @@ def seed_cases():
                                       "firing; the cycles as unseeded"])
     assert len(set(totals.values())) == 1, totals
     late = {1, 2, 3, 8, 9}
-    write("seed_late", "matvec_seed's sum: TreeAccumulate, T 4, JOBS 2, its seed missing in "
+    write("seed_late", "matvec_acc_v1's sum: TreeAccumulate, T 4, JOBS 2, its seed missing in "
           "cycles 1 to 3 and 8 to 9", [("sum", "TreeAccumulate", 1, 1, 2, 1)], [], 2, [4],
           valid=lambda c: (1, 0 if c in late else 1),
           comment=["each job's first beat waits for the seed (stall_in); its other beats do "
@@ -227,8 +227,8 @@ def slice_cases():
     (TreeAccumulate, T 2) alone, its input sliced 2, 4 and 8 (int32, int16, int8 lanes), JOBS
     3 and 2 (6 pops: whole words at 2, a short last word at 4; 4 pops of one word at 8); the
     reader without a word in cycles 3 to 5; the writer not ready in cycles 4 to 6;
-    matvec_seed's sum with its seed sliced 2; and dot 3 with a and b sliced 2 and the sum
-    packed 2, matvec_3's form at int8, W = 4."""
+    matvec_acc_v1's sum with its seed sliced 2; and dot 3 with a and b sliced 2 and the sum
+    packed 2, matvec_v3's form at int8, W = 4."""
     sum_ = [("sum", "TreeAccumulate", 1, 1, 1)]
     for d, j in ((2, 3), (4, 3), (8, 2)):
         write(f"slice_d{d}_j{j}", f"sum (TreeAccumulate, T 2), JOBS {j}, its input sliced {d} "
@@ -243,13 +243,13 @@ def slice_cases():
           "writer not ready in cycles 4 to 6", sum_, [], 3, [2], valid=lambda c: (1,),
           ready=lambda c: 0 if c in (4, 5, 6) else 1, d_in=(2,),
           comment=["the sum's head held (stall_out): no pop, the slicer keeps its word"])
-    write("slice_seed_d2", "matvec_seed's sum: TreeAccumulate, T 4, JOBS 3, its seed sliced 2",
+    write("slice_seed_d2", "matvec_acc_v1's sum: TreeAccumulate, T 4, JOBS 3, its seed sliced 2",
           [("sum", "TreeAccumulate", 1, 1, 2, 1)], [], 3, [4], valid=lambda c: (1, 1),
           d_in=(1, 2), comment=["a seed popped on each job's first firing: a seed word "
                                 "serves two jobs"])
     write("slice_dot3_d2_j2", "dot 3 at N = 8, W = 4 (T = 2), JOBS 2, a and b sliced 2, the "
           "sum packed 2 to a word", VARIANTS[3][0], [0], 2, [1, 2], d_out=2, d_in=(2, 2),
-          comment=["matvec_3 at int8, W = 4: both readers sliced, one cycle later than "
+          comment=["matvec_v3 at int8, W = 4: both readers sliced, one cycle later than "
                    "pack_dot3"])
     write("slice_mac_bcast_d8", "mac (Mac, T 4, seeded), JOBS 2, its b sliced 8 and broadcast "
           "(D186): mvt's half 2 at int8, a and the seed wired", [("mac", "Mac", 1, 1, 3, 1)],

@@ -58,14 +58,14 @@ The rule is stepped only in busy cycles, each unit's outer valids ANDed, a seed'
 | `dot5_w1_j2`, `dot6_w1_j2` | dot 5 and dot 6 at W = 1, T = 4, JOBS 2: SerialAccumulate at span 1, which reads (and fires) once per beat; random int64 data (numpy, seeded) and each job's sum from numpy |
 | `dot4_jobs0` | dot 4 with JOBS 0: the empty run, ignored, busy never rises |
 | `seed_none`, `seed_first`, `seed_both` | the fold's seed: acc (TreeAccumulate, T 2) -> wire -> sum (TreeAccumulate, T 2), JOBS 2, neither, the first or both seeded, every seed there from the start: the same cycles all three (gen.py checks it) |
-| `seed_late` | matvec_seed's sum alone (TreeAccumulate, T 4, JOBS 2), its seed missing in cycles 1 to 3 and 8 to 9: each job's first beat waits for it (stall_in), the job's other beats do not |
+| `seed_late` | matvec_acc_v1's sum alone (TreeAccumulate, T 4, JOBS 2), its seed missing in cycles 1 to 3 and 8 to 9: each job's first beat waits for it (stall_in), the job's other beats do not |
 | `pack_d<D>_j<J>` | sum (TreeAccumulate, T 2) alone, its result packed D = 2, 4, 8 to a word (int32, int16, int8 results), JOBS 1 (one short word), 9 (a short last word) and 10 (whole words at D 2) |
 | `pack_d2_backpressure` | the same at D 2, JOBS 4, the writer not ready in cycles 3 to 5: the filling push goes ahead, the sending one waits (stall_out) |
 | `pack_dot3_d2_j3` | dot 3 (T 2) at D 2, JOBS 3: one whole word, then a short one on the last push; the dot product checked as the other dot cases |
 | `slice_d<D>_j<J>` | sum (TreeAccumulate, T 2) alone, its input sliced D = 2, 4, 8 (int32, int16, int8 lanes), JOBS 3 (whole words at D 2, a short last word at D 4) and 2 (four pops of one word at D 8): the first pop a cycle after the take, then no gap |
 | `slice_d2_reader_gap`, `slice_d2_backpressure` | the same at D 2, JOBS 3: the reader without a word in cycles 3 to 5 (stall_in), or the writer not ready in cycles 4 to 6 (stall_out, the slicer keeps its word) |
-| `slice_seed_d2` | matvec_seed's sum (TreeAccumulate, T 4, JOBS 3), its seed sliced 2: one seed word serves two jobs |
-| `slice_dot3_d2_j2` | dot 3 (T 2), JOBS 2, a and b sliced 2 and the sum packed 2: matvec_3's form at int8, W = 4, one cycle after `pack_dot3` |
+| `slice_seed_d2` | matvec_acc_v1's sum (TreeAccumulate, T 4, JOBS 3), its seed sliced 2: one seed word serves two jobs |
+| `slice_dot3_d2_j2` | dot 3 (T 2), JOBS 2, a and b sliced 2 and the sum packed 2: matvec_v3's form at int8, W = 4, one cycle after `pack_dot3` |
 | `seed_serial_late` | Mac (T 2) -> wire -> SerialAccumulate (span 4, seeded, T 1), JOBS 2, the seed missing in cycles 1 to 4 and 7: the sum reads its job's first beat lane by lane only while its seed is there, the Mac holds its result |
 | `seed_mac_late` | a seeded Mac alone (T 4, JOBS 2; D187, its seed of its output's lanes), the seed missing in cycles 1 to 3 and 6 to 7: each job's first beat waits for it, its other beats do not |
 | `slice_mac_bcast_d8` | a seeded Mac alone (T 4, JOBS 2), its b sliced 8 and broadcast (D186): mvt's half 2 at int8; the broadcast is wires, so the rule sees the slicer only |

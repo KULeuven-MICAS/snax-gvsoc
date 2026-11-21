@@ -205,7 +205,7 @@ The SNAX components count from boot and never reset their counters. A snapshot w
 | group | unit, in `accelerator.json`'s order | `mark`, `unit` (its name in `accelerator.json`), `firings` (once per span, as the rule's `fire`), `pushes` (results given to its link or its outer output) |
 | streamer | mover, in mover order | `mark`, `mover` (`reader<i>`, `writer<j>`), `busy`, `stall_xbar`, `stall_fifo`, `idle` (its `mover` lines' classes added up over its runs) |
 
-A linked group writes every unit's line (`dot_3`: `mul` and `sum`); a group of one unit, that unit's.
+A linked group writes every unit's line (`dot_v3`: `mul` and `sum`); a group of one unit, that unit's.
 
 **Order.** Within a component the lines come in the table's order: the crossbar's inputs, its banks then its copies, a group's own line then its units'. At the end of the simulation the crossbar writes its snapshot after its `input`, `bank` and `copies` lines; a group or a streamer writes no other line then.
 

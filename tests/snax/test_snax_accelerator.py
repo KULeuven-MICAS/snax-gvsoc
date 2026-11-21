@@ -2,8 +2,8 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests of snax/snax_accelerator.py: the sets' CSR layout and the slot's CSR limit,
-and the composite built from accelerator.json: one group (forge/vecadd/), dot 1's two
-accelerators in two streamer sets (test_snax_cfg's DOT1), dot_1_enc's two groups in one
+and the composite built from accelerator.json: one group (forge/vecadd_v1/), dot 1's two
+accelerators in two streamer sets (test_snax_cfg's DOT1), dot_v1_1's two groups in one
 (test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED), a
 linked group (dot 4, DOT4) and a seeded Mac with a broadcast input (mvt's half 2).
 Run from snax-gvsoc after `make build` (the composite imports GVSoC's Python from
@@ -147,7 +147,7 @@ class Built(unittest.TestCase):
     def test_axpy_k1_from_its_csr(self):
         """axpy: the shell's R/W CSRs START, JOBS, K1 (32 bits), sent with each start; the unit
         at op axpby, k1 read from its CSR (one word), nothing baked."""
-        acc = self.build(CLUSTER.parent.parent / "axpy" / "snax_forge.hjson")
+        acc = self.build(CLUSTER.parent.parent / "axpy_v1" / "snax_forge.hjson")
         shell = acc.components["shell"].properties
         self.assertEqual((shell["csrs"], shell["widths"]), (["START", "JOBS", "K1"], [1, 32, 32]))
         (unit,) = acc.components["unit"].properties["units"]
@@ -155,14 +155,14 @@ class Built(unittest.TestCase):
                           unit["k2"], unit["scalars"], unit["in_widths"], unit["op_width"]),
                          ("SimdLanes", ["acc_a", "acc_b"], "axpby", "", "", "", [["k1", 1]],
                           [32, 32], 32))
-        baked = self.build(CLUSTER.parent.parent / "axpy_baked" / "snax_forge.hjson")
+        baked = self.build(CLUSTER.parent.parent / "axpy_v1_1" / "snax_forge.hjson")
         (unit,) = baked.components["unit"].properties["units"]
         self.assertEqual((unit["k1"], unit["scalars"]), ("3", []))
         self.assertEqual(baked.components["shell"].properties["csrs"], ["START", "JOBS"])
 
     def test_relu_one_stream(self):
         """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
-        acc = self.build(CLUSTER.parent.parent / "relu" / "snax_forge.hjson")
+        acc = self.build(CLUSTER.parent.parent / "relu_v1" / "snax_forge.hjson")
         (unit,) = acc.components["unit"].properties["units"]
         self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"], unit["k"],
                           unit["in_widths"], unit["op_width"], unit["lanes"]),
@@ -195,7 +195,7 @@ class Built(unittest.TestCase):
                          ("TreeAccumulate", ["vsum_a"], "vsum_out", 0))
 
     def test_dot_1_enc_one_set(self):
-        """dot_1_enc: one streamer, a shell per group at its window, a group per unit, named
+        """dot_v1_1: one streamer, a shell per group at its window, a group per unit, named
         after them."""
         with tempfile.TemporaryDirectory() as tmp:
             path = dot_cluster(Path(tmp))
@@ -296,9 +296,9 @@ class Built(unittest.TestCase):
         self.assertEqual(len(DOT4.csrs), 5)
 
     def test_a_seeded_fold(self):
-        """matvec_seed's sum: its inputs a and its seed, both outer, the seed's
+        """matvec_acc_v1's sum: its inputs a and its seed, both outer, the seed's
         index 1 (SnaxGroup's seed: the last input, one element in one word)."""
-        desc = accelerator("matvec_seed", seeded(), between=1)
+        desc = accelerator("matvec_acc_v1", seeded(), between=1)
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, SEEDED_STREAMER), 131072)
         acc = cls(None, "snax_acc0")
         (unit,) = acc.components["unit"].properties["units"]

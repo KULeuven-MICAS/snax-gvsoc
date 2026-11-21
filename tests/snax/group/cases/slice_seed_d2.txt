@@ -1,4 +1,4 @@
-# matvec_seed's sum: TreeAccumulate, T 4, JOBS 3, its seed sliced 2
+# matvec_acc_v1's sum: TreeAccumulate, T 4, JOBS 3, its seed sliced 2
 # a seed popped on each job's first firing: a seed word serves two jobs
 
 unit sum TreeAccumulate latency 1 ii 1 span 1 t 4 inputs 2 seed 1
