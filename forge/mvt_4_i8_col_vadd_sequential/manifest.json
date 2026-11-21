@@ -1,0 +1,41 @@
+{
+ "design": "mvt_4_i8_col_vadd",
+ "design_point": "out/design/mvt_4_i8_col_vadd_sequential/design_point.json",
+ "symbols": {"M": 64, "N": 64},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_mvt_4_i8_col_vadd_streamer_mvt.hjson", "snax_forge_mvt_4_i8_col_vadd_streamer_mvt_x2.hjson", "accelerator.json", "include/streamer_mvt_csr_addr_map.h", "include/mvt_csr.h", "include/streamer_mvt_x2_csr_addr_map.h", "include/mvt_x2_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0",
+ "csrs": {
+  "streamers": [
+   {"name": "mvt", "first": 960, "last": 986, "trace": "snax_acc0/streamer_mvt"},
+   {"name": "mvt_x2", "first": 992, "last": 1018, "trace": "snax_acc0/streamer_mvt_x2"}
+  ],
+  "accelerator": {
+   "MVT_RW_START": 987,
+   "MVT_RW_JOBS": 988,
+   "MVT_RW_VSUM_X1_JOB_BEATS": 989,
+   "MVT_RO_STATUS": 990,
+   "MVT_RO_BUSY_COUNTER": 991,
+   "MVT_X2_RW_START": 1019,
+   "MVT_X2_RW_JOBS": 1020,
+   "MVT_X2_RW_MAC_X2_JOB_BEATS": 1021,
+   "MVT_X2_RO_STATUS": 1022,
+   "MVT_X2_RO_BUSY_COUNTER": 1023
+  }
+ },
+ "tasks": [
+  {
+   "name": "tmp1_mult_mvt",
+   "beats": 512,
+   "csrs": {"JOBS": 64, "VSUM_X1_JOB_BEATS": 8},
+   "trace": "snax_acc0/group_mvt"
+  },
+  {
+   "name": "tmp4_mult_mvt_x2",
+   "beats": 512,
+   "csrs": {"JOBS": 8, "MAC_X2_JOB_BEATS": 64},
+   "trace": "snax_acc0/group_mvt_x2"
+  }
+ ]
+}
