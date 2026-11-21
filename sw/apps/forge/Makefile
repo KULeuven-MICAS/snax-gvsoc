@@ -15,7 +15,7 @@
 # for it, so its ELF never shares a path with a fixture's.
 
 APP      = forge
-DESIGN  ?= vecadd
+DESIGN  ?= vecadd_v1
 FORGE   ?= $(abspath $(CURDIR)/../../../forge/$(DESIGN))
 ifeq ($(wildcard $(FORGE)/main.c),)
 $(error no main.c in $(FORGE): refresh the fixture from snax-forge (forge/README.md))

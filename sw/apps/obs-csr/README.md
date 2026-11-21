@@ -15,7 +15,7 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from `sw/` fi
     make -C sw/apps/obs-csr
     source sourceme.sh
     gvrun --target snax_hjson --work-dir build/work/obs-csr \
-        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+        --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/obs-csr/obs-csr.elf run
 
 ## Expected output

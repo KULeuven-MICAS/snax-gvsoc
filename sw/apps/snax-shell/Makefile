@@ -1,12 +1,12 @@
-# Builds the shell program, with forge/vecadd/include/'s headers (the
+# Builds the shell program, with forge/vecadd_v1/include/'s headers (the
 # streamer's and the shell's CSRs), from sw/ (../../common.mk) into
 # build/sw/apps/snax-shell/. It runs on snax_hjson with
-# forge/vecadd/snax_forge.hjson. data.h is data/datagen.py at DATA_LEN 192,
+# forge/vecadd_v1/snax_forge.hjson. data.h is data/datagen.py at DATA_LEN 192,
 # seed 0: the data snax_cluster's snax-alu datagen.py gives for an add.
 
 APP      = snax-shell
 DATA_LEN = 192
-FORGE    = $(abspath $(CURDIR)/../../../forge/vecadd)
+FORGE    = $(abspath $(CURDIR)/../../../forge/vecadd_v1)
 INCDIRS  = $(BUILDDIR)
 INCDIRS += $(FORGE)/include
 include ../../common.mk

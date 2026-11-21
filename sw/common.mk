@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # What the programs in apps/ share: built for snax_forge (snax-forge's
-# vecadd fixture's cluster) against the runtime and math library of sw/,
+# vecadd_v1 fixture's cluster) against the runtime and math library of sw/,
 # with the include dirs, libraries, linker script and link flags of
 # snax_cluster's sw/apps/common.mk at the pin; the cluster's generated
 # headers come first. An app sets APP and, before including this file, its

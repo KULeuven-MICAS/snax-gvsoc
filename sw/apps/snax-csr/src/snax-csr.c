@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Checks core 0's SNAX CSRs on snax_hjson with forge/vecadd/'s
+// Checks core 0's SNAX CSRs on snax_hjson with forge/vecadd_v1/'s
 // cluster file (the streamer and the shell): every read-write CSR reads
 // back what was written, through each kind of CSR instruction, the forms that
 // must not write (csrrc with x0, csrrsi / csrrci with 0) leave a read-only CSR

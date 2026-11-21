@@ -1,6 +1,6 @@
 # dma-timing
 
-The DMA timing program, on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL; the DMA's values do not depend on the cluster's accelerator.
+The DMA timing program, on SNAX-GVSoC on `snax_hjson` with `forge/vecadd_v1/snax_forge.hjson`. The same ELF ran on snax_cluster's RTL; the DMA's values do not depend on the cluster's accelerator.
 
 The DMA core copies between DRAM (L2) and L1, and transposes a 64 × 64 matrix A into T in L1 by 2-D transfers of one element per burst: for each column k of A, `snrt_dma_start_2d(T + p·k, A + b·k, b, b, p_A, 64)`, b the element's bytes, p the row pitch. For a transpose, A is first loaded into L1 at the pitch (not measured). For each case it:
 
@@ -60,10 +60,10 @@ The ELF is `build/sw/apps/dma-timing/dma-timing.elf`. `data/data.h` is generated
 On SNAX-GVSoC, from snax-gvsoc, after `make build TARGETS=snax_hjson` and `source sourceme.sh`:
 
     gvrun --target snax_hjson --work-dir build/work/dma-timing \
-        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+        --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/dma-timing/dma-timing.elf run
 
-On the RTL built from snax-forge's vecadd bundle (README, "Comparing with the RTL"), from snax_cluster:
+On the RTL built from snax-forge's vecadd_v1 bundle (README, "Comparing with the RTL"), from snax_cluster:
 
     make -C target/snitch_cluster snax-forge-run SIM=vlt CFG_OVERRIDE=<bundle>/snax_forge.hjson \
         ELF=<snax-gvsoc>/build/sw/apps/dma-timing/dma-timing.elf
