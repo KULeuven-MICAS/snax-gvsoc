@@ -81,14 +81,14 @@ For a linked group:
 
 An output packed d_out results to a word (D174) still has one `push` line per result; its writer writes one word every d_out pushes, and on the run's last push, so the writer's `b` counts words, not results: the writer's grant of word w follows the push of result (w + 1) · d_out − 1, or the last one.
 
-An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word.
+An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word. A broadcast input (D186) moves one lane a beat, given to all the unit's lanes by wires: its `value` is that one lane, as its reader or slicer gave it.
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
 | `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS; a linked group's head's), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |
 | `events` | `done` | the run's last busy cycle `E` (idle from `E + 1`) | `firings`; `first` and `last`, the cycles of its first and last firing |
 | `summary` | `run` | `E` | `index` (from 0), `firings`, `busy`, `stall_in`, `stall_out`, `flush` (they add up to `E - s`) |
-| `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order; a fold's seed, taken on its job's first firing only, -1 on the others), `value` (each input port's beat words, port order, flat; a seed not taken, its last) |
+| `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order; a fold's or a Mac's seed, taken on its job's first firing only, -1 on the others), `value` (each input port's beat words, port order, flat; a seed not taken, its last) |
 | `beats` | `push` | the push | `n` (its index among the run's results), `first`, `last` (the firings it folds; equal at rate 1), `value` (the output beat's words) |
 | `beats` | `class` | the first cycle of a run of one class, from `s + 1` to `E` | `mode` (`busy`, `stall_in`, `stall_out`, `flush`: the class the `run` line counts the cycle in) |
 
@@ -205,7 +205,7 @@ The SNAX components count from boot and never reset their counters. A snapshot w
 | group | unit, in `accelerator.json`'s order | `mark`, `unit` (its name in `accelerator.json`), `firings` (once per span, as the rule's `fire`), `pushes` (results given to its link or its outer output) |
 | streamer | mover, in mover order | `mark`, `mover` (`reader<i>`, `writer<j>`), `busy`, `stall_xbar`, `stall_fifo`, `idle` (its `mover` lines' classes added up over its runs) |
 
-A linked group writes every unit's line (`dot_3`: `mul` and `sum`); a group of one unit, that unit's.
+A linked group writes every unit's line (`dot_v3`: `mul` and `sum`); a group of one unit, that unit's.
 
 **Order.** Within a component the lines come in the table's order: the crossbar's inputs, its banks then its copies, a group's own line then its units'. At the end of the simulation the crossbar writes its snapshot after its `input`, `bank` and `copies` lines; a group or a streamer writes no other line then.
 

@@ -66,7 +66,7 @@ jobs:
 
       # SnaxUnit's rule on its cases, then sw/ and the programs built, each
       # run to exit 0 (14 cluster tests and snax-shell on snax_hjson with
-      # forge/vecadd/'s cluster file, every folder of forge/ with its program
+      # forge/vecadd_v1/'s cluster file, every folder of forge/ with its program
       # and its quiet build, 17 plain).
       - name: Regress
         run: make regress

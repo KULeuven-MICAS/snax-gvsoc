@@ -164,6 +164,24 @@ def mac_plain(name, t_in, op_t, out_t, lanes, reg_out, steps=6):
     return t
 
 
+def mac_seed(name, t_in, out_t, lanes, beats, firings=12):
+    """A seeded Mac (accumulate) at out_t: its third input the seed, its output's lanes (D187),
+    a random one each step; a job's first firing starts from it, s <- seed + a * b."""
+    t = Test(name, "Mac", [t_in, t_in, out_t], out_t, out_t, lanes, accumulate=True,
+             regOut=False, seed=True)
+    s, d = np.zeros(lanes, NP[out_t]), 0
+    for _ in range(firings):
+        fire = RNG.random() < 0.8
+        a, b, q = rand(t_in, lanes), rand(t_in, lanes), rand(out_t, lanes)
+        first = d == 0
+        t.step(en(fire=fire, first=first), [a, b, q], s)
+        if fire:
+            p = a.astype(NP[out_t]) * b.astype(NP[out_t])
+            s = wrap((q if first else s) + p, out_t)
+            d = (d + 1) % beats
+    return t
+
+
 def serial(name, t_in, t_out, lanes, beats, words=4):
     t = Test(name, "SerialAccumulate", [t_in], t_out, t_out, lanes)
     acc, d = NP[t_out](0), 0
@@ -392,6 +410,13 @@ def main():
     t.step(en(fire=1, first=0), [[0, 4], [7]], [6])
     t.step(EN0, [[0, 0], [0]], [10])
     tests.append(t)
+    # the seeded Mac (D187, mvt's column form): int8 x int8 into int32 and int64 at W 4 and 8,
+    # random seeds (drawn last, so the tests above stay as they were)
+    with np.errstate(over="ignore"):
+        for out_t in ("int32", "int64"):
+            for lanes in (4, 8):
+                tests.append(mac_seed(f"mac_seed_int8_to_{out_t}_w{lanes}", "int8", out_t, lanes,
+                                      3))
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

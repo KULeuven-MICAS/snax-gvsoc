@@ -2,10 +2,10 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests of snax/snax_accelerator.py: the sets' CSR layout and the slot's CSR limit,
-and the composite built from accelerator.json: one group (forge/vecadd/), dot 1's two
-accelerators in two streamer sets (test_snax_cfg's DOT1), dot_1_enc's two groups in one
-(test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED) and a
-linked group (dot 4, DOT4).
+and the composite built from accelerator.json: one group (forge/vecadd_v1/), dot 1's two
+accelerators in two streamer sets (test_snax_cfg's DOT1), dot_v1_1's two groups in one
+(test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED), a
+linked group (dot 4, DOT4) and a seeded Mac with a broadcast input (mvt's half 2).
 Run from snax-gvsoc after `make build` (the composite imports GVSoC's Python from
 install/):
 
@@ -35,8 +35,9 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
 from test_snax_cfg import (CLUSTER, DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER,  # noqa: E402
-                           STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, accelerator,
-                           dot1_cluster, dot_cluster, dot_shared_cluster, seeded)
+                           STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
+                           dot1_cluster, dot_cluster, dot_shared_cluster, seeded, seeded_mac,
+                           streamer)
 
 
 def slot_of(description, *streamers):
@@ -146,7 +147,7 @@ class Built(unittest.TestCase):
     def test_axpy_k1_from_its_csr(self):
         """axpy: the shell's R/W CSRs START, JOBS, K1 (32 bits), sent with each start; the unit
         at op axpby, k1 read from its CSR (one word), nothing baked."""
-        acc = self.build(CLUSTER.parent.parent / "axpy" / "snax_forge.hjson")
+        acc = self.build(CLUSTER.parent.parent / "axpy_v1" / "snax_forge.hjson")
         shell = acc.components["shell"].properties
         self.assertEqual((shell["csrs"], shell["widths"]), (["START", "JOBS", "K1"], [1, 32, 32]))
         (unit,) = acc.components["unit"].properties["units"]
@@ -154,14 +155,14 @@ class Built(unittest.TestCase):
                           unit["k2"], unit["scalars"], unit["in_widths"], unit["op_width"]),
                          ("SimdLanes", ["acc_a", "acc_b"], "axpby", "", "", "", [["k1", 1]],
                           [32, 32], 32))
-        baked = self.build(CLUSTER.parent.parent / "axpy_baked" / "snax_forge.hjson")
+        baked = self.build(CLUSTER.parent.parent / "axpy_v1_1" / "snax_forge.hjson")
         (unit,) = baked.components["unit"].properties["units"]
         self.assertEqual((unit["k1"], unit["scalars"]), ("3", []))
         self.assertEqual(baked.components["shell"].properties["csrs"], ["START", "JOBS"])
 
     def test_relu_one_stream(self):
         """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
-        acc = self.build(CLUSTER.parent.parent / "relu" / "snax_forge.hjson")
+        acc = self.build(CLUSTER.parent.parent / "relu_v1" / "snax_forge.hjson")
         (unit,) = acc.components["unit"].properties["units"]
         self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"], unit["k"],
                           unit["in_widths"], unit["op_width"], unit["lanes"]),
@@ -194,7 +195,7 @@ class Built(unittest.TestCase):
                          ("TreeAccumulate", ["vsum_a"], "vsum_out", 0))
 
     def test_dot_1_enc_one_set(self):
-        """dot_1_enc: one streamer, a shell per group at its window, a group per unit, named
+        """dot_v1_1: one streamer, a shell per group at its window, a group per unit, named
         after them."""
         with tempfile.TemporaryDirectory() as tmp:
             path = dot_cluster(Path(tmp))
@@ -295,15 +296,29 @@ class Built(unittest.TestCase):
         self.assertEqual(len(DOT4.csrs), 5)
 
     def test_a_seeded_fold(self):
-        """matvec_seed's sum: its inputs a and its seed, both outer, the seed's
+        """matvec_acc_v1's sum: its inputs a and its seed, both outer, the seed's
         index 1 (SnaxGroup's seed: the last input, one element in one word)."""
-        desc = accelerator("matvec_seed", seeded(), between=1)
+        desc = accelerator("matvec_acc_v1", seeded(), between=1)
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, SEEDED_STREAMER), 131072)
         acc = cls(None, "snax_acc0")
         (unit,) = acc.components["unit"].properties["units"]
         self.assertEqual((unit["datapath"], unit["inputs"], unit["seed"], unit["in_widths"],
                           unit["lanes"], unit["output"]),
                          ("TreeAccumulate", ["acc_a", "acc_seed"], 1, [64, 64], 4, "acc_out"))
+
+    def test_a_seeded_mac_with_a_broadcast(self):
+        """mvt's half 2: a Mac of 8 int8 lanes, b broadcast (D186) through a slicer of 8 pops,
+        its seed of the output's 8 int32 lanes the last input (D187)."""
+        b = Port("b", "int8", 8, "in", d_in=8, broadcast=True)
+        desc = accelerator("mac_bcast", seeded_mac(8, "int8", "int32", b), between=1)
+        cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, streamer([1, 1, 4], [4])),
+                                                        131072)
+        acc = cls(None, "snax_acc0")
+        (unit,) = acc.components["unit"].properties["units"]
+        self.assertEqual((unit["datapath"], unit["inputs"], unit["seed"], unit["in_widths"],
+                          unit["lanes"], unit["d_in"], unit["broadcast"]),
+                         ("Mac", ["acc_a", "acc_b", "acc_seed"], 2, [8, 8, 32], 8, [1, 8, 1],
+                          [False, True, False]))
 
 
 if __name__ == "__main__":

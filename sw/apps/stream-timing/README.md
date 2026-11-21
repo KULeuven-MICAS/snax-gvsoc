@@ -2,7 +2,7 @@
 
 The streamer's timing on its own: core 0 sets up the streamer's two readers, leaves the writer's temporal bound at 0, starts the streamer, polls its busy CSR (976) and prints the streamer's counter (977). The counter is the value to compare.
 
-- It runs on SNAX-GVSoC on `snax_hjson` with `forge/vecadd/snax_forge.hjson`.
+- It runs on SNAX-GVSoC on `snax_hjson` with `forge/vecadd_v1/snax_forge.hjson`.
 - The same ELFs ran on snax_cluster's RTL with the sparse interconnect (`cfg/snax_alu_cluster.hjson`, which snax-forge's base cluster copies).
 
 The accelerator is never started, so nothing takes the readers' beats:
@@ -35,7 +35,7 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from `sw/` fi
     source sourceme.sh
     for c in zero_bound a_alone ab_other_banks ab_same_banks a_stride0 prio_queued idle_restart; do
       gvrun --target snax_hjson --work-dir build/work/st-$c \
-        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+        --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/stream-timing/stream-timing-$c.elf run
     done
 

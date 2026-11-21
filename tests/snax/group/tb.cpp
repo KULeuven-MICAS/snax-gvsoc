@@ -24,7 +24,11 @@
 // A case with din I D slices outer input I D to a word (snax_group.hpp's
 // SnaxSlicer): its V column is its reader's valid, the rule sees the slicer's
 // full, each cycle's word taken is compared, and the slices popped from each
-// whole word, put back low first, must give that word.
+// whole word, put back low first, must give that word. A seeded Mac alone
+// (D187) runs its datapath too: 4 lanes of int8 a and b into int32, its seed
+// of 4 int32 lanes, each job's result seed + its products; a or b sliced to one
+// lane a pop is a broadcast (D186), each slice given to the 4 lanes by
+// snax_broadcast, as SnaxGroup does.
 //
 //   tb CASE...
 //
@@ -348,6 +352,44 @@ static std::unique_ptr<SnaxGroupDatapaths> dot_datapaths(const Case &c, const Sn
     return g;
 }
 
+// The seeded Mac's check: lanes of int8 a and b, its seed and its output int32, a seed per job
+static const SnaxType MAC_IN = {8, true}, MAC_OUT = {32, true};
+
+static int64_t seed_of(int i) { return (i * 37) % 101 - 50; }
+
+// A seeded Mac alone, a its first input, b its second, the seed its third: its datapath;
+// nullptr when the case is not one, or slices its seed or an input to more than one lane (a
+// sliced a or b is a broadcast)
+static std::unique_ptr<SnaxGroupDatapaths> mac_datapaths(const Case &c, const SnaxGroupRule &rule)
+{
+    if (c.units.size() != 1 || c.units[0].datapath != "Mac" || !c.units[0].seed ||
+        c.units[0].inputs != 3 || !c.links.empty() || c.lanes)
+    {
+        return nullptr;
+    }
+    for (const std::pair<int, int> &x : c.din)
+    {
+        if (x.first == 2 || 64 / x.second != MAC_IN.width)
+        {
+            return nullptr;
+        }
+    }
+    SnaxDatapathParams p;
+    p.in_types = {MAC_IN, MAC_IN, MAC_OUT};
+    p.op_type = p.out_type = MAC_OUT;
+    p.lanes = LANES;
+    p.seed = true;
+    std::string why;
+    auto g = std::unique_ptr<SnaxGroupDatapaths>(new SnaxGroupDatapaths());
+    g->units.push_back(snax_datapath_new("Mac", p, &why));
+    if (!g->units.back())
+    {
+        return nullptr;
+    }
+    g->wire(rule);
+    return g;
+}
+
 // The rule of the case's group; "" or why it refuses the graph
 static std::string configure(const Case &c, SnaxGroupRule &rule)
 {
@@ -379,6 +421,10 @@ static int run(const Case &c)
     size_t next_expect = 0;
     long run_busy = 0;
     std::unique_ptr<SnaxGroupDatapaths> data = dot_datapaths(c, rule);
+    std::unique_ptr<SnaxGroupDatapaths> mac = mac_datapaths(c, rule);
+    // the seeded Mac's: per lane its job's sum so far, and each job's sums when done
+    std::vector<int64_t> job_sum(LANES, 0);
+    std::vector<std::vector<int64_t>> job_sums;
     int head_fired = 0, pushed = 0;
     // Each job's sum: the head fires n / JOBS beats a job
     uint32_t per_job = c.jobs && ts.size() > 1 ? ts[0] * ts[1] : 0;
@@ -388,7 +434,7 @@ static int run(const Case &c)
     uint32_t results = 0, packed = 0;   // the run's results and the pushes into the packer
     std::vector<uint64_t> words;
     // Per sliced input: its unit, whether it is the unit's seed, its slicer, the words taken
-    // from its reader, and the slices popped from the word it holds, put back
+    // from its reader, the slices popped from the word it holds, put back, and the last slice
     struct Sliced
     {
         size_t unit;
@@ -396,6 +442,7 @@ static int run(const Case &c)
         SnaxSlicer slicer;
         uint32_t taken = 0;
         uint64_t popped = 0;
+        uint64_t slice = 0;
     };
     std::vector<Sliced> sliced;
     for (const std::pair<int, int> &x : c.din)
@@ -485,7 +532,8 @@ static int run(const Case &c)
                 if (pop)
                 {
                     int bits = 64 / s.slicer.d_in, at = s.slicer.count;
-                    s.popped = (at ? s.popped : 0) | s.slicer.pop() << (bits * at);
+                    s.slice = s.slicer.pop();
+                    s.popped = (at ? s.popped : 0) | s.slice << (bits * at);
                     if (at == s.slicer.d_in - 1 && s.popped != reader_word(s.taken - 1))
                     {
                         fail("input " + std::to_string(c.din[j].first) + ": its slices give " +
@@ -557,6 +605,68 @@ static int run(const Case &c)
                     pushed++;
                 }
             }
+            if (mac)
+            {
+                // a and b of firing head_fired, the seed of its job; a broadcast input's beat
+                // is its slice (one lane), given to all lanes as SnaxGroup does
+                uint32_t job = head_fired / ts[0];
+                std::vector<uint64_t> ab[2] = {{0}, {0}}, wide[2] = {{0}, {0}};
+                std::vector<uint64_t> seed(snax_words(LANES, MAC_OUT), 0);
+                for (int lane = 0; lane < LANES; lane++)
+                {
+                    int i = head_fired * LANES + lane;
+                    snax_lane_set(ab[0].data(), MAC_IN.width, lane, a_of(i));
+                    snax_lane_set(ab[1].data(), MAC_IN.width, lane, b_of(i));
+                    snax_lane_set(seed.data(), MAC_OUT.width, lane, seed_of(job * LANES + lane));
+                }
+                std::vector<const uint64_t *> outer = {ab[0].data(), ab[1].data(), seed.data()};
+                const uint64_t *one[2] = {nullptr, nullptr};     // a broadcast's slice
+                for (size_t j = 0; j < sliced.size(); j++)
+                {
+                    int x = c.din[j].first;
+                    snax_broadcast(&sliced[j].slice, LANES, MAC_IN, wide[x].data());
+                    outer[x] = wide[x].data();
+                    one[x] = &sliced[j].slice;
+                }
+                const std::vector<uint64_t> &out = mac->cycle(step, {outer});
+                if (step.units[0].push)
+                {
+                    for (int lane = 0; lane < LANES; lane++)
+                    {
+                        int64_t got = (int64_t)snax_lane_cast(snax_lane_get(out.data(),
+                            MAC_OUT.width, lane), MAC_OUT, {64, true});
+                        int64_t sum = (size_t)pushed < job_sums.size() ? job_sums[pushed][lane]
+                            : 0;
+                        if (got != sum)
+                        {
+                            fail("result " + std::to_string(pushed) + " lane " +
+                                std::to_string(lane) + " is " + std::to_string(got) +
+                                ", its job's seed + products " + std::to_string(sum));
+                        }
+                    }
+                    pushed++;
+                }
+                // the sum the tb works out itself: from the seed on a job's first firing
+                if (step.units[0].fire)
+                {
+                    for (int lane = 0; lane < LANES; lane++)
+                    {
+                        int i = head_fired * LANES + lane;
+                        int64_t v[2] = {a_of(i), b_of(i)};
+                        for (int x = 0; x < 2; x++)
+                        {
+                            v[x] = one[x] ? (int8_t)(*one[x] & 0xff) : v[x];
+                        }
+                        job_sum[lane] = (head_fired % ts[0] ? job_sum[lane]
+                            : seed_of(job * LANES + lane)) + v[0] * v[1];
+                    }
+                    if (head_fired % ts[0] == ts[0] - 1)
+                    {
+                        job_sums.push_back(job_sum);
+                    }
+                    head_fired++;
+                }
+            }
         }
         if (!c.din.empty() && took != l.took)
         {
@@ -615,6 +725,11 @@ static int run(const Case &c)
             next_expect++;
         }
     }
+    if (mac && pushed != (int)c.jobs)
+    {
+        printf("%s: %d result(s) pushed, %u jobs\n", c.name.c_str(), pushed, c.jobs);
+        errors++;
+    }
     if (data && c.lanes && (size_t)pushed != c.sums.size())
     {
         printf("%s: %d result(s) pushed, %zu sums in the case\n", c.name.c_str(), pushed,
@@ -644,7 +759,8 @@ int main(int argc, char **argv)
 {
     return tb_main<Case>(argc, argv, parse, run, [](const Case &c) {
         SnaxGroupRule rule;
-        bool data = configure(c, rule).empty() && dot_datapaths(c, rule);
+        bool data = configure(c, rule).empty() && (dot_datapaths(c, rule) ||
+            mac_datapaths(c, rule));
         printf("%s: %zu units, %zu cycles, %zu run(s)%s\n", c.name.c_str(), c.units.size(),
             c.cycles.size(), c.expects.size(), data ? ", data" : "");
     });

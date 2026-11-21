@@ -1,6 +1,6 @@
 # snax-csr
 
-Checks core 0's SNAX CSRs on `snax_hjson` with `forge/vecadd/snax_forge.hjson` (the streamer and the shell, named by `forge/vecadd/include/`'s headers): every read-write CSR reads back what was written, through each kind of CSR instruction, the forms that must not write leave a read-only CSR alone, and the read-only CSRs read 0, as nothing is started. Only core 0 runs it; it returns the number of errors.
+Checks core 0's SNAX CSRs on `snax_hjson` with `forge/vecadd_v1/snax_forge.hjson` (the streamer and the shell, named by `forge/vecadd_v1/include/`'s headers): every read-write CSR reads back what was written, through each kind of CSR instruction, the forms that must not write leave a read-only CSR alone, and the read-only CSRs read 0, as nothing is started. Only core 0 runs it; it returns the number of errors.
 
 The two start CSRs, the streamer's (975) and the group's START (978), are left out: every pattern has bit 0 set, which starts the block behind it.
 
@@ -26,7 +26,7 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from `sw/` fi
     make -C sw/apps/snax-csr
     source sourceme.sh
     gvrun --target snax_hjson --work-dir build/work/sa_csr \
-        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+        --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/snax-csr/snax-csr.elf run
 
 Adding `--trace=snax_acc0` prints every access the streamer and the shell receive.

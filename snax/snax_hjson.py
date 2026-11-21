@@ -12,11 +12,11 @@
 
 (or --target snax_hjson:hjson=<cluster.hjson>). A relative path is taken
 from gvrun's working directory. Without it, the build's default:
-forge/vecadd/snax_forge.hjson, snax-forge's vecadd fixture's cluster (with
+forge/vecadd_v1/snax_forge.hjson, snax-forge's vecadd fixture's cluster (with
 its streamer set's file and accelerator.json), installed beside this module as
-cfg/forge/vecadd/ (snax/CMakeLists.txt); snax_cluster's synced copy in
+cfg/forge/vecadd_v1/ (snax/CMakeLists.txt); snax_cluster's synced copy in
 sw/cfg/snax_forge/ is never read. The build's platform tree holds the default file's
-components and bindings: a file with the same ones (forge/vecadd/'s) uses it, its properties coming through the JSON
+components and bindings: a file with the same ones (forge/vecadd_v1/'s) uses it, its properties coming through the JSON
 config as always; one with others (another accelerator) does not match, so
 gvrun warns and runs it on the JSON config (runner_gvrun2.py).
 
@@ -69,10 +69,10 @@ if os.environ.get('USE_GVRUN') is None:
 
 HERE = Path(__file__).resolve().parent
 # Where a target's cluster file is found by name: cfg/ beside this module in
-# the install (snax/CMakeLists.txt copies sw/cfg/ and forge/vecadd/ there),
+# the install (snax/CMakeLists.txt copies sw/cfg/ and forge/vecadd_v1/ there),
 # the repo's sw/cfg/ and its root when the build reads the sources
 CFG_DIRS = (HERE / 'cfg', HERE.parent / 'sw' / 'cfg', HERE.parent)
-DEFAULT_HJSON = 'forge/vecadd/snax_forge.hjson'
+DEFAULT_HJSON = 'forge/vecadd_v1/snax_forge.hjson'
 
 # The DMA and DRAM measured on the RTL (docs/notes/NOTES.md), with the hjson's
 # snax_alu cluster: one beat of dma_data_width per cycle into L1, the DMA's

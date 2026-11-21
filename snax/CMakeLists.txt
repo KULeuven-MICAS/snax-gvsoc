@@ -8,7 +8,7 @@ install(DIRECTORY . DESTINATION ${CMAKE_INSTALL_PREFIX}/generators
 install(DIRECTORY ../sw/cfg/ DESTINATION ${CMAKE_INSTALL_PREFIX}/generators/cfg
     FILES_MATCHING PATTERN "*.hjson")
 
-# The snax_hjson target's default (snax_hjson.py's DEFAULT_HJSON): forge/vecadd/'s
+# The snax_hjson target's default (snax_hjson.py's DEFAULT_HJSON): forge/vecadd_v1/'s
 # cluster, streamer file and accelerator.json, snax-forge's vecadd fixture
-install(DIRECTORY ../forge/vecadd/ DESTINATION ${CMAKE_INSTALL_PREFIX}/generators/cfg/forge/vecadd
+install(DIRECTORY ../forge/vecadd_v1/ DESTINATION ${CMAKE_INSTALL_PREFIX}/generators/cfg/forge/vecadd_v1
     FILES_MATCHING PATTERN "*.hjson" PATTERN "accelerator.json")

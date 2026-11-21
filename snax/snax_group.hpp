@@ -36,8 +36,8 @@
 // outer inputs all have a beat and whether its outer output has room (true for
 // a unit without one).
 //
-// NB (D163): a seeded fold (TreeAccumulate, SerialAccumulate) has one more outer
-// input, its seed, one beat per job: its input has a beat when its other
+// NB (D163): a seeded fold (TreeAccumulate, SerialAccumulate, or a Mac, D187) has
+// one more outer input, its seed, one beat per job: its input has a beat when its other
 // inputs have one and, on its job's first beat (d = 0), its seed has one
 // (fire = a.valid and (not first or seed.valid)); the seed is taken with the
 // job's first firing (seed.ready = fire and first, UnitStep::seed). A seed
@@ -110,6 +110,13 @@
 // or on its last pop, judged on its state before the cycle's pop, and only in
 // busy cycles, so the word shows the cycle after (the RTL's registered
 // output). A run's start drops what it holds.
+//
+// snax_broadcast: a broadcast input's wires (D186), on an input of a datapath
+// whose lanes compute on their own (SimdLanes, Mac): its reader, or its slicer
+// sized by one lane (d_in = 64 / width), gives one lane a beat, and each of the
+// unit's W lanes takes that lane, in the unit's words of its type. No register
+// and no cycle of its own, so the rule does not see it; a linked port is never
+// one.
 
 #pragma once
 
@@ -733,6 +740,19 @@ struct SnaxPacker
         return false;
     }
 };
+
+
+// NB (D186): the RTL's <unit>_<port>_bcast, wires: lane 0 of beat, given to each of lanes
+// lanes of type t in out (snax_words(lanes, t) words), within the cycle (module doc)
+inline void snax_broadcast(const uint64_t *beat, int lanes, SnaxType t, uint64_t *out)
+{
+    const uint64_t x = snax_lane_get(beat, t.width, 0);
+    std::fill(out, out + snax_words(lanes, t), 0);     // snax_lane_set ORs into a word
+    for (int l = 0; l < lanes; l++)
+    {
+        snax_lane_set(out, t.width, l, x);
+    }
+}
 
 
 // NB (D180): the Chisel's FifoSlicer, cycle for cycle (module doc)

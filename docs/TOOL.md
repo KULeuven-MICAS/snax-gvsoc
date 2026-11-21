@@ -1,6 +1,6 @@
 # SNAX-GVSoC commands
 
-This file lists the commands for running this repository by hand, each with the lines to check. The usual path is snax-forge's flow instead: with this repository as its submodule, `pixi run flow recipes/elementwise/vecadd.json --platform platforms/snax_forge.json` generates a design point, builds GVSoC and the program, runs it on `snax_hjson` and checks it.
+This file lists the commands for running this repository by hand, each with the lines to check. The usual path is snax-forge's flow instead: with this repository as its submodule, `pixi run flow recipes/elementwise/vecadd_v1.json --platform platforms/snax_forge.json` generates a design point, builds GVSoC and the program, runs it on `snax_hjson` and checks it.
 
 ## Setup
 
@@ -38,7 +38,7 @@ Everything runs in snax-forge's image. From the folder that holds this repositor
 
 ## Run a cluster test
 
-The programs in `sw/apps/` run on `snax_hjson` with `forge/vecadd/`'s cluster file. It has one core, which drives both the accelerator and the DMA; each test takes its roles by core index (the accelerator's core 0, the DMA's the last), so it also runs on a cluster of more cores.
+The programs in `sw/apps/` run on `snax_hjson` with `forge/vecadd_v1/`'s cluster file. It has one core, which drives both the accelerator and the DMA; each test takes its roles by core index (the accelerator's core 0, the DMA's the last), so it also runs on a cluster of more cores.
 
 | App | What it checks |
 |---|---|
@@ -54,7 +54,7 @@ The programs in `sw/apps/` run on `snax_hjson` with `forge/vecadd/`'s cluster fi
 Each app's README has its own lines. For example, `snax-csr`:
 
     make -C sw/apps/snax-csr
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --work-dir build/work/snax-csr \
         --param chip/soc/binary=$PWD/build/sw/apps/snax-csr/snax-csr.elf run
 
@@ -69,10 +69,10 @@ It exits 0.
 
 `forge/<design>/` is a design point snax-forge generated (`forge/README.md`). The `forge` app builds its `main.c`; `snax_hjson` puts the accelerator of the cluster file given by `--param hjson=` in its slot.
 
-    make -C sw/apps/forge DESIGN=vecadd
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
-        --work-dir build/work/forge-vecadd --trace=snax_acc0/unit \
-        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
+    make -C sw/apps/forge DESIGN=vecadd_v1
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
+        --work-dir build/work/forge-vecadd_v1 --trace=snax_acc0/unit \
+        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd_v1/forge.elf run
 
     forge cycles: 214
     forge data: 0 errors (64 words)
@@ -90,20 +90,20 @@ It exits 0. What the lines mean:
 Things to know:
 
 - GVSoC buffers its stdout, so a trace line can cut a program's line in two; trace to a file to keep them apart.
-- `vecadd/` runs on the build's platform tree (it is `snax_hjson`'s default file). Another fixture runs on its JSON config, with gvrun's warning that the platform tree does not match; that warning is expected.
+- `vecadd_v1/` runs on the build's platform tree (it is `snax_hjson`'s default file). Another fixture runs on its JSON config, with gvrun's warning that the platform tree does not match; that warning is expected.
 - The cycle numbers above change with any change to the program or the model; the errors must stay 0.
 
 ## Traces and a VCD
 
 The trace levels are trace names (`docs/EVENTS.md`), each a `--trace` pattern, here into one file:
 
-    mkdir -p build/work/forge-vecadd-stall
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
-        --work-dir build/work/forge-vecadd-stall \
-        --trace="/beats\$:$PWD/build/work/forge-vecadd-stall/events.log" \
-        --trace="/stalls\$:$PWD/build/work/forge-vecadd-stall/events.log" \
-        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd/forge.elf run
-    grep -m1 ' fire ' build/work/forge-vecadd-stall/events.log | sed 's/.*\] //'
+    mkdir -p build/work/forge-vecadd_v1-stall
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
+        --work-dir build/work/forge-vecadd_v1-stall \
+        --trace="/beats\$:$PWD/build/work/forge-vecadd_v1-stall/events.log" \
+        --trace="/stalls\$:$PWD/build/work/forge-vecadd_v1-stall/events.log" \
+        --param chip/soc/binary=$PWD/build/sw/apps/forge/vecadd_v1/forge.elf run
+    grep -m1 ' fire ' build/work/forge-vecadd_v1-stall/events.log | sed 's/.*\] //'
 
     2947 fire n=0 b=0,0 value=0x2bd,0x111,0x16,0xfffffffffffffe33,0x2ee,0xfffffffffffffd26,0x9d,0x1ba
 
@@ -115,7 +115,7 @@ The trace levels are trace names (`docs/EVENTS.md`), each a `--trace` pattern, h
 
 `make regress` runs the six g++ testbenches, builds `sw/` and every program, then runs the cluster tests, `snax-shell` and every `forge/` folder on `snax_hjson` (their counters checked against their units' run lines, their snapshots against their summary lines) and each fixture's quiet build (its snapshots and, with one accelerator run, that run's window, `docs/EVENTS.md`'s Snapshots), and the plain tests on `snitch`. `tests/snax/regress.py` says what each checks. It ends:
 
-    forge/'s accelerators: forge.dot_1, forge.dot_2, ...
+    forge/'s accelerators: forge.dot_v1, forge.dot_v2, ...
       29 run
     plain tests on snitch (build/sw/tests)
       17 run
@@ -139,7 +139,7 @@ The testbenches need g++ only; each runs against the cases in its folder (its RE
 | Testbench | What it checks | How |
 |---|---|---|
 | `unit` | `SnaxGroupRule` with one unit, cycle by cycle | `tests/snax/unit/run.sh` |
-| `group` | `SnaxGroupRule` over linked units (the dot variants), a fold's seed, the output's packer and the input's slicer | `tests/snax/group/run.sh` |
+| `group` | `SnaxGroupRule` over linked units (the dot variants), a fold's or a Mac's seed, the output's packer, the input's slicer and a broadcast input | `tests/snax/group/run.sh` |
 | `shell` | `SnaxShell` with a one-unit group | `tests/snax/shell/run.sh` |
 | `datapath` | every datapath class against its vectors | `tests/snax/datapath/run.sh` |
 | `sparse_pick` | the crossbar's winner pick, 1 to 128 inputs | `tests/snax/sparse_pick/run.sh` |

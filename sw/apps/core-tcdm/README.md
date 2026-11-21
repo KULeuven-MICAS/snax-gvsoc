@@ -3,7 +3,7 @@
 The cores' TCDM accesses through the interconnect: core 0's sub-word accesses, AMO and LR/SC on L1, and its loads against the streamer's readers on the same banks.
 
 - One ELF per case, as in `stream-timing`.
-- The same ELFs run on SNAX-GVSoC (`snax_hjson` with `forge/vecadd/snax_forge.hjson`) and on snax_cluster's RTL with the sparse interconnect (`cfg/snax_alu_cluster.hjson`, which snax-forge's base cluster copies).
+- The same ELFs run on SNAX-GVSoC (`snax_hjson` with `forge/vecadd_v1/snax_forge.hjson`) and on snax_cluster's RTL with the sparse interconnect (`cfg/snax_alu_cluster.hjson`, which snax-forge's base cluster copies).
 - Each case prints the value it compares, chosen not to depend on the core's timing.
 - `core_vs_reader` runs twice, so its measured run does not depend on the core's instruction fetch (below).
 
@@ -32,7 +32,7 @@ In the container, from snax-gvsoc (the Makefile builds the runtime from `sw/` fi
     source sourceme.sh
     for c in subword core_vs_reader after_stores; do
       gvrun --target snax_hjson --work-dir build/work/ct-$c \
-        --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+        --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --param chip/soc/binary=$PWD/build/sw/apps/core-tcdm/core-tcdm-$c.elf run
     done
 

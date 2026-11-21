@@ -2,11 +2,11 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// The shell program, on snax_hjson with forge/vecadd/snax_forge.hjson: SnaxShell
+// The shell program, on snax_hjson with forge/vecadd_v1/snax_forge.hjson: SnaxShell
 // and a SnaxGroup of one unit (SimdLanes add, L = 0, II 1, 4 lanes of 64
 // bit) behind the streamer (snax/snax_accelerator.py). snax_cluster's snax-alu DMA and
 // streamer setup; the streamer's and the group's CSRs (START, JOBS, STATUS,
-// BUSY_COUNTER) from forge/vecadd/include/. One streamer run of
+// BUSY_COUNTER) from forge/vecadd_v1/include/. One streamer run of
 // LOOP_ITER beats feeds three unit runs of RUN_BEATS jobs each:
 //   - start 1, alone: once STATUS bit 0 (busy) is 0, the counter is run 1's
 //     busy cycles, printed (`snax-shell counter: <n>`); regress.py checks it

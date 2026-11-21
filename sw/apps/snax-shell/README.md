@@ -1,10 +1,10 @@
 # snax-shell
 
-`SnaxShell` and a `SnaxGroup` of one unit (an SimdLanes add at L = 0, II 1, 4 lanes of 64 bit behind the streamer), driven by hand on `snax_hjson` with `forge/vecadd/snax_forge.hjson`.
+`SnaxShell` and a `SnaxGroup` of one unit (an SimdLanes add at L = 0, II 1, 4 lanes of 64 bit behind the streamer), driven by hand on `snax_hjson` with `forge/vecadd_v1/snax_forge.hjson`.
 
-- The DMA and streamer setup is written out with the CSRs of `forge/vecadd/include/` (`streamer_acc_csr_addr_map.h`, its macros prefixed `ACC_`, and `acc_csr.h`): `ACC_RW_START` 978, `ACC_RW_JOBS` 979, `ACC_RO_STATUS` 980 (bit 0 busy, bit 1 done), `ACC_RO_BUSY_COUNTER` 981.
+- The DMA and streamer setup is written out with the CSRs of `forge/vecadd_v1/include/` (`streamer_acc_csr_addr_map.h`, its macros prefixed `ACC_`, and `acc_csr.h`): `ACC_RW_START` 978, `ACC_RW_JOBS` 979, `ACC_RO_STATUS` 980 (bit 0 busy, bit 1 done), `ACC_RO_BUSY_COUNTER` 981.
 - `data.h` is `data/datagen.py` at 192 words, seed 0: the data snax_cluster's ALU `datagen.py` gives for an add.
-- snax_cluster builds this accelerator from snax-forge's vecadd bundle, but this program has not been run on that RTL.
+- snax_cluster builds this accelerator from snax-forge's vecadd_v1 bundle, but this program has not been run on that RTL.
 
 One streamer run of 48 beats feeds three unit runs of 16 beats (`RUN_BEATS`). It checks only what does not depend on code layout, and returns the number of checks failed plus the data errors:
 
@@ -23,7 +23,7 @@ In the container, from snax-gvsoc, with GVSoC built for `snax_hjson`:
 
     make -C sw/apps/snax-shell
     source sourceme.sh
-    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd/snax_forge.hjson \
+    gvrun --target snax_hjson --param hjson=$PWD/forge/vecadd_v1/snax_forge.hjson \
         --work-dir build/work/snax-shell --trace=snax_acc0/unit \
         --param chip/soc/binary=$PWD/build/sw/apps/snax-shell/snax-shell.elf run
 

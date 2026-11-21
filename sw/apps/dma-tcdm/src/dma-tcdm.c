@@ -7,7 +7,7 @@
 // CASE_<name>; each prints the counter it compares, chosen not to depend on
 // the cores' timing.
 //
-//   dma_vs_reader   A, B and O of the accelerator of forge/vecadd/ (add, 256
+//   dma_vs_reader   A, B and O of the accelerator of forge/vecadd_v1/ (add, 256
 //                   beats) each on its own
 //                   four banks, every beat in the next 256 B row: A on banks
 //                   0 to 3 (superbank 0), B on 8 to 11, O on 16 to 19. While

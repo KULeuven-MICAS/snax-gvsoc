@@ -24,25 +24,26 @@ Every hjson and C file starts with a comment naming the design point.
 
 | Kind | Folders |
 |---|---|
-| element-wise, int64 | `vecadd`, `vecmul`, `vecadd_n7` (a padded tail) |
-| element-wise, narrow types | `vecadd_i32`, `vecmul_i32`, `vecmul_i32_i64`, `vecadd_i8`, `matadd` (int32, the first 2-D bind), `vecadd_i32_w1` (one lane: inputs sliced 2 from a word, the output packed 2 to one) |
-| one stream and scalars | `relu`, `axpy` (a CSR scalar), `axpy_baked` (the scalar baked in) |
-| reductions | `vsum`, `vsum_tree`, `vsum_tree_i32`, `vsum_tree_i8`, `vsum_tree_n21`, `rowsum`, `rowsum_serial`, `rowsum_3x7`, `rowsum_2`, `rowsum_2_padded` (`padded_rows` layout) |
-| dot, the six variants | `dot_1` (two accelerators), `dot_1_enc` (one accelerator of two groups), `dot_2` to `dot_6` (one group of linked units) |
-| matvec | `matvec_1` to `matvec_6`, `matvec_seed` and `matvec_seed_serial` (a seeded fold) |
-| shared movers | `dot_1_shared`, `mvt_1_dot2_shared` (W = 8) |
-| a copy in L1, one step at a time | `mvt_4_i64_dma_AT_sequential` (mvt_4 at W = 8 whose half 2 reads `A_T`, A copied transposed by the DMA one element a burst; every start waited on at once), `mvt_4_i8_dma_AT_sequential` (the same at int8 in, int32 out: x sliced 2 from a word, its output packed 2 to one) |
+| element-wise, int64 | `vecadd_v1`, `vecmul_v1`, `vecadd_v1_3` (a padded tail) |
+| element-wise, narrow types | `vecadd_v1_1`, `vecmul_v1_1`, `vecmul_v1_1_1`, `vecadd_v1_2`, `matadd_v1` (int32, the first 2-D bind), `vecadd_v1_1_w1` (one lane: inputs sliced 2 from a word, the output packed 2 to one) |
+| one stream and scalars | `relu_v1`, `axpy_v1` (a CSR scalar), `axpy_v1_1` (the scalar baked in) |
+| reductions | `vsum_v1`, `vsum_v1_1`, `vsum_v1_1_1`, `vsum_v1_1_2`, `vsum_v1_1_3`, `rowsum_v1`, `rowsum_v3`, `rowsum_v1_1`, `rowsum_v2`, `rowsum_v2_padded` (`padded_rows` layout) |
+| dot, the six variants | `dot_v1` (two accelerators), `dot_v1_1` (one accelerator of two groups), `dot_v2` to `dot_v6` (one group of linked units) |
+| matvec | `matvec_v1` to `matvec_v6`, `matvec_acc_v1` and `matvec_acc_v2` (a seeded fold) |
+| shared movers | `dot_v1_2`, `mvt_v1_2_2` (W = 8) |
+| a copy in L1, one step at a time | `mvt_v4_1_sequential` (mvt_v4 at W = 8 whose half 2 reads `A_T`, A copied transposed by the DMA one element a burst; every start waited on at once), `mvt_v4_1_1_sequential` (the same at int8 in, int32 out: x sliced 2 from a word, its output packed 2 to one) |
+| the column form, no copy | `mvt_v5_sequential` (mvt_v4 at int8 whose half 2 is one seeded `Mac` of 8 lanes on n, y2 broadcast to every lane and x2 its seed, A read a strip of 8 columns at a time; sequential), `mvt_v5_2_sequential` (the same with an unseeded `Mac` whose 8 sums go through the link `tmp2` into a `SimdLanes` `vadd_x2` adding x2; one group, sequential) |
 
 ## Refreshing a folder
 
 From a snax-forge checkout next to this one, with the folder cleared first (gen-gvsoc leaves a file it no longer writes in place):
 
-    pixi run sandbox recipes/elementwise/vecadd.json
-    pixi run design out/sandbox/vecadd/2_bind.snaxdfg --platform platforms/snax_forge.json
-    pixi run gen-gvsoc out/design/vecadd/design_point.json --out ../snax-gvsoc/forge/vecadd
+    pixi run sandbox recipes/elementwise/vecadd_v1.json
+    pixi run design out/sandbox/vecadd_v1/2_bind.snaxdfg --platform platforms/snax_forge.json
+    pixi run gen-gvsoc out/design/vecadd_v1/design_point.json --out ../snax-gvsoc/forge/vecadd_v1
 
 - The design step reads the sandbox's last step, `out/sandbox/<design>/<n>_<transform>.snaxdfg`.
-- `rowsum_2_padded` is `rowsum_2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_1_dot2_shared` is its recipe with `--set W=8` on the sandbox step; `mvt_4_i64_dma_AT_sequential` is `mvt_4_i64_dma_AT` with `--set design.schedule=sequential` on the design step.
+- `rowsum_v2_padded` is `rowsum_v2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_v1_2_2` is its recipe with `--set W=8` on the sandbox step; `mvt_v4_1_sequential` is `mvt_v4_1` with `--set design.schedule=sequential` on the design step.
 - Commit the folder as written, then bump snax-forge's submodule so its test compares against it.
 - `make regress` runs every folder through the generic app, so a new folder needs nothing else.
 
@@ -53,4 +54,4 @@ From a snax-forge checkout next to this one, with the folder cleared first (gen-
 - `forge.<design>`: the generic app builds `main.c` (`make -C sw/apps/forge DESIGN=<design>`), `snax_hjson` runs it on the folder's cluster file with the traces `manifest.json` names, and each `forge counter` line must equal its unit's run line.
 - `forge_quiet.<design>`: the quiet build, `forge_quiet.elf`, a plain run that must exit 0.
 
-No model is compiled for a design point: `vecadd` runs on the build's platform tree, the others on their JSON config, with gvrun's warning that the platform tree does not match.
+No model is compiled for a design point: `vecadd_v1` runs on the build's platform tree, the others on their JSON config, with gvrun's warning that the platform tree does not match.

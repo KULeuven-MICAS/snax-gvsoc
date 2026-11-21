@@ -15,16 +15,16 @@ rule (tests/snax/port_mux/run.sh; `port_mux`). Then
 builds sw/ (`make -C sw`: the runtime per cluster, the math library and
 snax_cluster's plain tests, from the pinned copy) and the programs of
 sw/apps/, then runs the cluster tests on `snax_hjson` with
-forge/vecadd/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
+forge/vecadd_v1/'s cluster file (CLUSTER_DESIGN), named <program>.snax_hjson:
 `dma-timing`, `snax-csr`, `obs-csr`, the seven `stream-timing` cases, the three
 `core-tcdm` cases and the `dma-tcdm` case, each a plain run (exit code
-only); then `snax-shell` on `snax_hjson` with forge/vecadd/'s cluster file
+only); then `snax-shell` on `snax_hjson` with forge/vecadd_v1/'s cluster file
 (SHELL_DESIGN: SnaxShell and SnaxGroup, an SimdLanes add), with the unit's
 trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
 (snax-forge's generated main.c and data.h), named forge.<design>: the
 fixture's manifest.json gives its cluster file, the unit's trace path and
-each accelerator task's beats and, with several groups (forge/dot_1), its
+each accelerator task's beats and, with several groups (forge/dot_v1), its
 unit's own trace path (each unit's `summary`, `events` and `beats` traces
 under its trace path are on); it runs on `snax_hjson` with
 `--param hjson=<cluster file>` (but for vecadd's, its components are not
@@ -116,12 +116,12 @@ FORGE_TARGET = "snax_hjson"
 FORGE_APP = "forge"
 # The cluster tests run on this fixture's cluster file (its manifest's), whose
 # streamer and shell they are written for
-CLUSTER_DESIGN = "vecadd"
+CLUSTER_DESIGN = "vecadd_v1"
 CLUSTER_TESTS = ["dma-timing", "snax-csr", "obs-csr"]
 # snax-shell runs on this fixture's cluster file, whose CSRs and datapath it is
 # written for, with the counter check; the beats of its first run are its
 # RUN_BEATS, DATA_LEN 192 / 4 lanes / 3 runs
-SHELL_DESIGN = "vecadd"
+SHELL_DESIGN = "vecadd_v1"
 SHELL_BEATS = 16
 # The unit's traces a forge/ run writes below its manifest's trace path, and
 # the streamers' for the class check, one --trace each (GVSoC compiles them as
