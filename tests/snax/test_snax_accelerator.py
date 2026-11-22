@@ -5,7 +5,8 @@
 and the composite built from accelerator.json: one group (forge/vecadd_v1/), dot 1's two
 accelerators in two streamer sets (test_snax_cfg's DOT1), dot_v1_1's two groups in one
 (test_snax_cfg.dot_cluster), the two sharing its movers (DOT_SHARED), a
-linked group (dot 4, DOT4) and a seeded Mac with a broadcast input (mvt's half 2).
+linked group (dot 4, DOT4), a seeded Mac with a broadcast input (mvt's half 2) and a group of
+two chains on a forked input (bicg_v3, BICG3).
 Run from snax-gvsoc after `make build` (the composite imports GVSoC's Python from
 install/):
 
@@ -34,8 +35,8 @@ except ImportError:
     snax_accelerator = None
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
-from test_snax_cfg import (CLUSTER, DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER,  # noqa: E402
-                           STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
+from test_snax_cfg import (BICG3, BICG3_STREAMER, CLUSTER, DOT1, DOT4,  # noqa: E402
+                           DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
                            dot1_cluster, dot_cluster, dot_shared_cluster, seeded, seeded_mac,
                            streamer)
 
@@ -319,6 +320,29 @@ class Built(unittest.TestCase):
                           unit["lanes"], unit["d_in"], unit["broadcast"]),
                          ("Mac", ["acc_a", "acc_b", "acc_seed"], 2, [8, 8, 32], 8, [1, 8, 1],
                           [False, True, False]))
+
+    def test_a_forked_input(self):
+        """bicg_v3 (D189): A's reader, the streamer's reader 0, on mul_a, which mac's a takes
+        too; r's on mac_b, p's on mul_b; each sink its own output; the shell's JOBS_SUM and
+        JOBS_MAC after START."""
+        cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG3, BICG3_STREAMER), 131072)
+        acc = cls(None, "snax_acc0")
+        self.assertEqual(sorted(acc.components), ["csr_mux", "group_bicg_types",
+                                                  "shell_bicg_types", "streamer_bicg_types"])
+        first = SNAX_CSR_FIRST + nb_csrs(BICG3_STREAMER)
+        self.assertEqual(acc.components["shell_bicg_types"].properties,
+                         {"csr_base": first, "csrs": ["START", "JOBS_SUM", "JOBS_MAC",
+                                                      "JOB_BEATS", "JOB_BEATS"],
+                          "widths": [1, 32, 32, 32, 32], "busy_counter_width": 32})
+        group = acc.components["group_bicg_types"].properties
+        mul, total, mac = group["units"]
+        self.assertEqual([(u["inputs"], u["output"]) for u in (mul, total, mac)],
+                         [(["mul_a", "mul_b"], ""), ([""], "sum_out"),
+                          (["mul_a", "mac_b"], "mac_out")])
+        self.assertEqual((mac["d_in"], mac["broadcast"], total["d_out"]),
+                         ([1, 8], [False, True], 2))
+        self.assertEqual(group["links"], [{"from": "mul", "to": "sum", "to_input": 0,
+                                           "depth": 1}])
 
 
 if __name__ == "__main__":

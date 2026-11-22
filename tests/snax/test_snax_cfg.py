@@ -10,8 +10,9 @@ of forge/vecadd_v1/'s cluster (its streamer file and accelerator.json inlined,
 written as JSON into a temporary folder), broken accelerator.json files
 beside it, hand-written dot 1 designs: two
 accelerators vmul and vsum in two streamer sets, and dot_v1_1, the two as
-one accelerator dot of two groups; then the sets' refusals and the slot form
-before sets (snax_streamer_cfg), read as one set. snax_cluster's copy in
+one accelerator dot of two groups; bicg_v3's one group of two chains on a
+forked input (D189); then the sets' refusals and the slot form before sets
+(snax_streamer_cfg), read as one set. snax_cluster's copy in
 sw/cfg/snax_forge/ is never read.
 """
 
@@ -372,7 +373,9 @@ def acc_json(desc: Description) -> dict:
         return {"name": k.name, "from": k.from_, "to": k.to, "depth": k.depth}
 
     def acc(a):
-        d = {"name": a.name, "inputs": list(a.inputs), "outputs": list(a.outputs),
+        d = {"name": a.name,
+             "inputs": [x if isinstance(x, str) else list(x) for x in a.inputs],
+             "outputs": list(a.outputs),
              "groups": [{"name": g.name, "csrs": [csr(c) for c in g.csrs],
                          "units": [unit(u) for u in g.units],
                          "links": [link(k) for k in g.links]}
@@ -834,7 +837,7 @@ class LinkedGroup(unittest.TestCase):
         self.acc["accelerators"][0]["groups"][0]["units"].reverse()
         self.fails(snax_cfg.CfgTargetError,
                    "gen.chain: accelerator dot: group dot's links [('mac', 'sum')] over its units "
-                   "['sum', 'mac']: a group is one chain (no fork or join)")
+                   "['sum', 'mac']: a group is a chain, or chains a fork joins (fork_read)")
 
     def test_a_datapath_is_the_registrys(self):
         self.acc["accelerators"][0]["groups"][0]["units"][0]["datapath"] = "LinkBuffer"
@@ -1039,6 +1042,147 @@ class Broadcast(unittest.TestCase):
             p: Port(p, "int64", 1, "out" if p == "out" else "in") for p in ("a", "b", "out")})))
         one["accelerators"][0]["groups"][0]["units"][0]["ports"]["b"]["broadcast"] = True
         self.fails(one, snax_cfg.CfgTypeError, "an input of 2 lanes or more takes a broadcast")
+
+
+# bicg_v3, one pass over A (D189): one group of two chains, mul -> buffer of depth 1 -> sum
+# (q) and mac (s), A's reader forked to mul.a and mac.a, r broadcast to the Mac's 32 int8 lanes
+# through a slicer of 8 pops, q packed two int32 results to a word; CSRs START 0, JOBS_SUM 1,
+# JOBS_MAC 2, sum's JOB_BEATS 3, mac's 4, STATUS 5, BUSY_COUNTER 6 (snax-forge's generator's)
+BICG3 = description("bicg_v3", Accelerator(
+    "bicg_types", [["mul.a", "mac.a"], "mul.b", "mac.b"], ["sum.out", "mac.out"],
+    [Group("bicg_types", [Csr("START", "rw", 0, 1), Csr("JOBS_SUM", "rw", 1, 32),
+                          Csr("JOBS_MAC", "rw", 2, 32), Csr("STATUS", "ro", 5, 2),
+                          Csr("BUSY_COUNTER", "ro", 6, 32)], [
+        Unit("mul", "simd", "SimdLanes", {"a": Port("a", "int8", 32, "in"),
+                                          "b": Port("b", "int8", 32, "in"),
+                                          "out": Port("out", "int32", 32, "out")}, "int32",
+             {"op": "mul"}, 0, 1, []),
+        Unit("sum", "accumulate", "TreeAccumulate",
+             {"a": Port("in", "int32", 32, "in"), "out": Port("out", "int32", 1, "out", d_out=2)},
+             None, {"op": "add"}, 1, 1, [Csr("JOB_BEATS", "rw", 3, 32)]),
+        Unit("mac", "mac", "Mac", {"a": Port("a", "int8", 32, "in"),
+                                   "b": Port("b", "int8", 32, "in", d_in=8, broadcast=True),
+                                   "out": Port("out", "int32", 32, "out")}, "int32",
+             {"accumulate": True, "regOut": False}, 1, 1, [Csr("JOB_BEATS", "rw", 4, 32)]),
+    ], [Link("q_prod", "mul.out", "sum.a", 1)])]))
+BICG3_STREAMER = streamer([4, 4, 1], [1, 16])
+
+
+class Fork(unittest.TestCase):
+    """bicg_v3 (D189): a forked input is one entry of inputs, a list whose first port takes the
+    reader; a JOBS_<SINK> per chain; each of snax-forge's fork checks (gen.fork, gen.group,
+    gen.outer, gen.chain, gen.share) refuses its case in its words."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.acc = acc_json(BICG3)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self, rw=5):
+        path = write_design(self.dir, self.acc, BICG3_STREAMER, rw, 2)
+        (slot,) = snax_cfg.load(path).cores[0].accelerators
+        return slot.description
+
+    def fails(self, kind, text, rw=5):
+        with self.assertRaises(kind) as ctx:
+            self.load(rw)
+        self.assertIn(text, ctx.exception.why)
+        return ctx.exception
+
+    def group(self):
+        return self.acc["accelerators"][0]["groups"][0]
+
+    def test_bicg_v3_reads(self):
+        desc = self.load()
+        self.assertEqual(desc, BICG3)
+        (acc,) = desc.accelerators
+        (group,) = acc.groups
+        self.assertEqual(acc.readers, ["mul.a", "mul.b", "mac.b"])
+        self.assertEqual(acc.forks, [["mul.a", "mac.a"]])
+        self.assertEqual(acc.input_ports, ["mul.a", "mac.a", "mul.b", "mac.b"])
+        self.assertEqual(acc.ports_of("mac", acc.inputs), [(0, "a"), (2, "b")])
+        self.assertEqual(group.chains(), [["mul", "sum"], ["mac"]])
+        self.assertEqual(group.jobs, ["JOBS_SUM", "JOBS_MAC"])
+        self.assertEqual(group.rw, ["START", "JOBS_SUM", "JOBS_MAC", "JOB_BEATS", "JOB_BEATS"])
+        self.assertEqual([c.offset for c in group.window], list(range(7)))
+        self.assertEqual(snax_cfg.jobs_names(["sum"]), ["JOBS"])
+
+    def test_an_entry_is_a_port_or_a_list_of_ports(self):
+        self.acc["accelerators"][0]["inputs"][0] = ["mul.a", 3]
+        self.fails(snax_cfg.CfgTypeError, "each a string or a fork's list of strings")
+        self.acc["accelerators"][0]["inputs"][0] = ["mul.a", "mac.x"]
+        self.fails(snax_cfg.CfgSlotError, "'mac.x' names no port of accelerator bicg_types")
+        self.acc["accelerators"][0]["inputs"][0] = ["mul.a", "mul.a"]
+        self.fails(snax_cfg.CfgSlotError, "'mul.a' twice")
+
+    def test_gen_fork(self):
+        """Ports unlike (A's int8 lanes and r's broadcast), and a fork of one port."""
+        self.acc["accelerators"][0]["inputs"] = [["mul.a", "mac.b"], "mul.b", "mac.a"]
+        self.fails(snax_cfg.CfgSlotError, "gen.fork: accelerator bicg_types: the fork ['mul.a', "
+                   "'mac.b']: its ports differ in dtype, lanes, d_in or broadcast; one reader's "
+                   "beat is the same for all")
+        self.acc["accelerators"][0]["inputs"] = [["mul.a"], "mul.b", "mac.a", "mac.b"]
+        self.fails(snax_cfg.CfgSlotError, "gen.fork: accelerator bicg_types: the fork ['mul.a']: "
+                   "a fork gives one reader to two or more outer input ports of its units")
+        self.acc["accelerators"][0]["inputs"] = [["mul.a", "mac.a", "sum.a"], "mul.b", "mac.b"]
+        self.fails(snax_cfg.CfgSlotError, "two or more outer input ports of its units (['mul.a', "
+                   "'mul.b', 'mac.a', 'mac.b'])")
+
+    def test_gen_group_without_the_fork(self):
+        """Without its fork the group's two chains are not connected."""
+        self.acc["accelerators"][0]["inputs"] = ["mul.a", "mul.b", "mac.a", "mac.b"]
+        self.fails(snax_cfg.CfgSlotError, "gen.group: group bicg_types's units ['mul', 'sum', "
+                   "'mac'] are not connected by its links")
+
+    def test_gen_outer_at_the_readers_place(self):
+        self.acc["accelerators"][0]["inputs"] = ["mul.b", ["mul.a", "mac.a"], "mac.b"]
+        self.fails(snax_cfg.CfgSlotError, "gen.outer: ['mul.b', ['mul.a', 'mac.a'], 'mac.b']; the "
+                   "unlinked ports are [['mul.a', 'mac.a'], 'mul.b', 'mac.b']")
+
+    def test_gen_chain(self):
+        """sum before mul: a chain that goes back in unit order."""
+        units = self.group()["units"]
+        units[:2] = [units[1], units[0]]
+        self.fails(snax_cfg.CfgTargetError, "gen.chain: accelerator bicg_types: group "
+                   "bicg_types's links [('mul', 'sum')] over its units ['sum', 'mul', 'mac']: a "
+                   "group is a chain, or chains a fork joins (fork_read)")
+
+    def test_a_jobs_per_chain(self):
+        """JOBS_<SINK> per chain in its sinks' order; one JOBS for two chains, or JOBS_<SINK>
+        for one, refused."""
+        csrs = self.group()["csrs"]
+        csrs[1]["name"], csrs[2]["name"] = "JOBS_MAC", "JOBS_SUM"
+        self.fails(snax_cfg.CfgSlotError, "group bicg_types's JOBS CSRs ['JOBS_MAC', 'JOBS_SUM']: "
+                   "its chains [['mul', 'sum'], ['mac']] take ['JOBS_SUM', 'JOBS_MAC'], one per "
+                   "chain in the order of their sinks")
+        self.acc = acc_json(BICG3)
+        csrs = self.group()["csrs"]
+        del csrs[2]
+        csrs[1]["name"] = "JOBS"
+        for c in [*csrs[2:], *(x for u in self.group()["units"] for x in u["csrs"])]:
+            c["offset"] -= 1
+        self.fails(snax_cfg.CfgSlotError, "take ['JOBS_SUM', 'JOBS_MAC']", rw=4)
+        dot4 = acc_json(DOT4)
+        dot4["accelerators"][0]["groups"][0]["csrs"][1]["name"] = "JOBS_SUM"
+        self.acc = dot4
+        with self.assertRaises(snax_cfg.CfgSlotError) as ctx:
+            snax_cfg.load(write_design(self.dir, self.acc, DOT4_STREAMER, 3, 2))
+        self.assertIn("a group's own CSRs are START, JOBS (rw), STATUS, BUSY_COUNTER (ro), in "
+                      "that order, with several chains a JOBS_<SINK> per chain in place of JOBS",
+                      ctx.exception.why)
+
+    def test_gen_share(self):
+        """A fork and shared movers in one accelerator."""
+        acc = self.acc["accelerators"][0]
+        acc["movers"] = []
+        acc["port_mux"] = {"groups": ["bicg_types"],
+                           "csr": {"name": "PORT_MUX_SEL", "access": "rw", "offset": 7,
+                                   "width": 1}}
+        self.fails(snax_cfg.CfgSlotError, "gen.share: accelerator bicg_types: a fork and shared "
+                   "movers in one accelerator; share_ports or fork_read, not both", rw=6)
 
 
 class Dot1(unittest.TestCase):

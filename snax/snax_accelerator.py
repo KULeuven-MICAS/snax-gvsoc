@@ -15,7 +15,9 @@ The slot (snax_cfg.AccSlot) gives its streamer sets and the description
 cluster its TCDM size. Set k's streamer is `streamer_<set>`; each entry of
 its accelerator's inputs ("<unit>.<port>") takes that streamer's reader of
 its index, each entry of its outputs the writer of its index; a port on a
-link is the group's own and meets no streamer.
+link is the group's own and meets no streamer. A forked input (D189), an
+entry listing several ports, is its first port's: that port takes the reader,
+and the group names every port of the fork after it, so its units share it.
 
 A shared set (accelerator.json's movers and port_mux) has its
 groups share its streamer's movers: its outer ports bind to `port_mux_<set>`
@@ -30,7 +32,7 @@ template) from b_k, then its accelerator's c_k from b_k + s_k; b_0 is
 SNAX_CSR_FIRST (960) and b_{k+1} = b_k + s_k + c_k. accelerator.json's
 offsets run over all the accelerators from 0 (the shell's view): an
 accelerator's CSR at offset o is at b_k + s_k + o - o_k, o_k its first
-offset. Each group's window (START, JOBS, its units' R/W CSRs, STATUS,
+offset. Each group's window (START, its JOBS, its units' R/W CSRs, STATUS,
 BUSY_COUNTER) goes to its shell, and a shared set's PORT_MUX_SEL to its mux. The
 last CSR must be at most SNAX_ACC_CSR_LAST.
 
@@ -46,7 +48,7 @@ groups of one unit each, `shell_<group>` and `unit_<unit>`; a linked group
 
 Each SnaxGroup gets its units in the group's order (group_units): per unit
 its datapath, its inputs in BRM port order (an outer one named
-`<unit>_<port>`, a linked one ""), seed (the index of a fold's or a Mac's seed
+`<unit>_<port>`, a forked one after its fork's first port, a linked one ""), seed (the index of a fold's or a Mac's seed
 among them, the last, or -1), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
 JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
@@ -142,6 +144,8 @@ def group_units(accelerator, group) -> tuple:
     """SnaxGroup's units and links properties for group (module doc)."""
     to = {link.to: link for link in group.links}
     frm = {link.from_: link for link in group.links}
+    # a forked port is its fork's first (its reader's), named once for every member (D189)
+    first = {p: f[0] for f in accelerator.forks for p in f}
     units, ins_of = [], {}
     for u in group.units:
         dirs = dirs_of(u)
@@ -155,7 +159,9 @@ def group_units(accelerator, group) -> tuple:
         t = u.params['T'] if 'T' in u.params else 0 if facts.is_fold(u.params) else 1
         units.append({
             'name': u.name, 'datapath': u.datapath,
-            'inputs': ['' if f'{u.name}.{p}' in to else f'{u.name}_{p}' for p in ins],
+            'inputs': ['' if f'{u.name}.{p}' in to
+                       else first.get(f'{u.name}.{p}', f'{u.name}.{p}').replace('.', '_', 1)
+                       for p in ins],
             'seed': ins.index(SEED) if SEED in ins else -1,
             'output': '' if f'{u.name}.{out}' in frm else f'{u.name}_{out}',
             'lanes': in_ports[0].lanes,
@@ -293,7 +299,7 @@ class SnaxAccelerator(gvsoc.systree.Component):
             else:
                 # The beats: the set's readers into its outer inputs, its outer outputs into
                 # its writers
-                for i, entry in enumerate(acc.inputs):
+                for i, entry in enumerate(acc.readers):
                     unit, port_name = entry.split('.', 1)
                     owner[unit].o_PORT(f'{unit}_{port_name}', streamer.i_READER(i))
                 for j, entry in enumerate(acc.outputs):
