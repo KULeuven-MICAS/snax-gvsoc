@@ -33,6 +33,7 @@ Every hjson and C file starts with a comment naming the design point.
 | shared movers | `dot_v1_2`, `mvt_v1_2_2` (W = 8) |
 | a copy in L1, one step at a time | `mvt_v4_1_sequential` (mvt_v4 at W = 8 whose half 2 reads `A_T`, A copied transposed by the DMA one element a burst; every start waited on at once), `mvt_v4_1_1_sequential` (the same at int8 in, int32 out: x sliced 2 from a word, its output packed 2 to one) |
 | the column form, no copy | `mvt_v5_sequential` (mvt_v4 at int8 whose half 2 is one seeded `Mac` of 8 lanes on n, y2 broadcast to every lane and x2 its seed, A read a strip of 8 columns at a time; sequential), `mvt_v5_2_sequential` (the same with an unseeded `Mac` whose 8 sums go through the link `tmp2` into a `SimdLanes` `vadd_x2` adding x2; one group, sequential) |
+| bicg | `bicg_v2_1_sequential` (bicg at int8 in, int32 out: q in the row form on `matvec`, s in the column form, one unseeded `Mac` of 8 lanes on its own accelerator with r broadcast to every lane, A read a strip of 8 columns at a time; sequential) |
 
 ## Refreshing a folder
 
@@ -43,7 +44,7 @@ From a snax-forge checkout next to this one, with the folder cleared first (gen-
     pixi run gen-gvsoc out/design/vecadd_v1/design_point.json --out ../snax-gvsoc/forge/vecadd_v1
 
 - The design step reads the sandbox's last step, `out/sandbox/<design>/<n>_<transform>.snaxdfg`.
-- `rowsum_v2_padded` is `rowsum_v2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_v1_2_2` is its recipe with `--set W=8` on the sandbox step; `mvt_v4_1_sequential` is `mvt_v4_1` with `--set design.schedule=sequential` on the design step.
+- `rowsum_v2_padded` is `rowsum_v2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_v1_2_2` is its recipe with `--set W=8` on the sandbox step; `mvt_v4_1_sequential` is `mvt_v4_1` with `--set design.schedule=sequential` on the design step, and each `_sequential` folder likewise.
 - Commit the folder as written, then bump snax-forge's submodule so its test compares against it.
 - `make regress` runs every folder through the generic app, so a new folder needs nothing else.
 
