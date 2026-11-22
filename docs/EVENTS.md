@@ -94,9 +94,9 @@ An input sliced d_in to a word (D180) gives one slice per firing (a seed input: 
 
 A linked group's run line (`SnaxGroupRule` in `snax/snax_group.hpp`) gives each busy cycle the first class that holds, in this order:
 
-1. `stall_out`: the last unit has a result and no room;
+1. `stall_out`: the last unit of a chain (an output's unit) has a result and no room;
 2. `busy`: any unit fires, reads a lane in place, or is in its II gap;
-3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat;
+3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat (a forked input's member waiting for its fork counts through the member without its beat, D189);
 4. `flush`: otherwise (results in flight, beats in a buffer).
 
 For one unit these are the unit's own classes. Per-unit events of a linked group are not written yet (snax-forge open item 96).

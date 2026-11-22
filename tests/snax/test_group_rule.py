@@ -79,12 +79,96 @@ class Refused(unittest.TestCase):
             GroupRule([unit("a"), unit("b")], [link("a", "b"), link("b", "a")])
 
     def test_two_chains(self):
-        with self.assertRaisesRegex(GroupError, "units a, b have no out-edge"):
+        with self.assertRaisesRegex(GroupError, "the chains ending at a and at b: no fork joins them"):
             GroupRule([unit("a"), unit("b")], [])
 
     def test_an_unknown_unit(self):
         with self.assertRaisesRegex(GroupError, "no unit c"):
             GroupRule([unit("a"), unit("b")], [link("a", "c")])
+
+
+class Fork(unittest.TestCase):
+    """Two chains on one reader (D189): bicg's one pass at N = W, q by vmul -> sum, s by mac."""
+
+    def group(self, depth=1, **kw):
+        us = [unit("vmul"), unit("sum", L=1, inputs=0), unit("mac", L=1)]
+        return GroupRule(us, [link("vmul", "sum", depth)], forks=[[("vmul", 0), ("mac", 0)]],
+                         **kw)
+
+    def test_with_every_input_there_the_run_is_the_longer_chains(self):
+        for depth in (0, 1):
+            rows, end = self.group(depth).run([4, 1], [1, 1, 4], lambda c: (1, 1, 1),
+                                              lambda c: (1, 1), 32)
+            q = GroupRule([unit("vmul"), unit("sum", L=1, inputs=0)], [link("vmul", "sum", depth)])
+            mac = GroupRule([unit("mac", L=1)], [])
+            alone = [q.run(4, [1, 1], lambda c: (1, 1), lambda c: 1, 32)[1],
+                     mac.run(1, [4], lambda c: (1, 1), lambda c: 1, 32)[1]]
+            with self.subTest(depth=depth):
+                self.assertEqual(end, max(alone))
+
+    def test_the_members_fire_together(self):
+        gaps = {2, 3, 7}
+        rule = self.group()
+        rows, end = rule.run([4, 1], [1, 1, 4], lambda c: (1, 1, 0 if c in gaps else 1),
+                             lambda c: (1, 1), 32)
+        self.assertIsNotNone(end)
+        self.assertEqual([r[2][0][0] for r in rows], [r[2][2][0] for r in rows])
+        self.assertEqual(rule.firings_per_run([4, 1], [1, 1, 4]), [4, 4, 4])
+
+    def test_a_valid_names_a_forked_input_once(self):
+        rule = self.group()
+        self.assertEqual(rule.place, [[0, 1], [], [0, 2]])
+        self.assertEqual(rule.n_valid, 3)
+        self.assertEqual([rule.units[k]["name"] for k in rule.outputs], ["sum", "mac"])
+
+    def test_unequal_firings_never_end(self):
+        # NB (D189): LOWER refuses this; the group waits for mac's partner for ever
+        _, end = self.group().run([4, 2], [1, 1, 4], lambda c: (1, 1, 1), lambda c: (1, 1), 64)
+        self.assertIsNone(end)
+
+    def test_outputs_in_the_order_given(self):
+        rule = self.group(output=["mac", "sum"])
+        self.assertEqual(rule.firings_per_run([1, 4], [1, 1, 4]), [4, 4, 4])
+
+    def test_several_chains_take_jobs_and_ready_per_output(self):
+        with self.assertRaisesRegex(GroupError, "jobs 4: a group of 2 chains takes one per"):
+            self.group().firings_per_run(4, [1, 1, 4])
+        with self.assertRaisesRegex(GroupError, r"ready \[1\]: one per output, 2"):
+            self.group().run([4, 1], [1, 1, 4], lambda c: (1, 1, 1), lambda c: [1], 4)
+
+
+class ForkRefused(unittest.TestCase):
+    def test_chains_no_fork_joins(self):
+        with self.assertRaisesRegex(GroupError, "ending at a, c and at b: no fork joins them"):
+            GroupRule([unit("a"), unit("b"), unit("c")], [], forks=[[("a", 0), ("c", 0)]])
+
+    def test_a_member_fed_by_a_link(self):
+        with self.assertRaisesRegex(GroupError, "sum is fed by a link; a fork feeds chains' heads"):
+            GroupRule([unit("mul"), unit("sum", inputs=1), unit("mac")], [link("mul", "sum")],
+                      forks=[[("sum", 0), ("mac", 0)]])
+
+    def test_a_seed(self):
+        with self.assertRaisesRegex(GroupError, "mac has no outer input 1 that is not its seed"):
+            GroupRule([unit("a"), dict(unit("mac"), seed=True)], [],
+                      forks=[[("a", 0), ("mac", 1)]])
+
+    def test_a_span(self):
+        with self.assertRaisesRegex(GroupError, "b has span 4"):
+            GroupRule([unit("a"), unit("b", span=4)], [], forks=[[("a", 0), ("b", 0)]])
+
+    def test_one_member(self):
+        with self.assertRaisesRegex(GroupError, "gives one input to two or more units"):
+            GroupRule([unit("a")], [], forks=[[("a", 0)]])
+
+    def test_an_input_in_two_forks(self):
+        with self.assertRaisesRegex(GroupError, "a.0 is in another fork too"):
+            GroupRule([unit("a"), unit("b"), unit("c")], [],
+                      forks=[[("a", 0), ("b", 0)], [("a", 0), ("c", 0)]])
+
+    def test_outputs_that_are_not_the_sinks(self):
+        with self.assertRaisesRegex(GroupError, r"outputs \['mul', 'mac'\]: each chain's sink"):
+            GroupRule([unit("mul"), unit("sum", inputs=0), unit("mac")], [link("mul", "sum")],
+                      output=["mul", "mac"], forks=[[("mul", 0), ("mac", 0)]])
 
 
 def unit_case(path):
@@ -121,7 +205,7 @@ class OneUnit(unittest.TestCase):
             n_in = int(head.get("inputs", [["2"]])[0][0])
             _, jobs, t, _ = head["start"][0]
             rule = GroupRule([unit("u", L=int(head.get("latency", [["0"]])[0][0]),
-                                   ii=int(head.get("ii", [["1"]])[0][0]))], [])
+                                   ii=int(head.get("ii", [["1"]])[0][0]), inputs=n_in)], [])
             rows, end = rule.run(int(jobs), [int(t)], lambda c: cycles[c][:n_in],
                                  lambda c: cycles[c][n_in], len(cycles))
             with self.subTest(case=path.stem):

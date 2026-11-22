@@ -8,13 +8,14 @@ The control model of a group (`snax/snax_group.hpp`'s `SnaxGroupRule`) against s
 
 ## The rule in one paragraph
 
-A group is a graph of units whose links are edges, each a wire (depth 0) or a buffer of D beats. It is one chain: a fork or a join is refused. The rule:
+A group is a graph of units whose links are edges, each a wire (depth 0) or a buffer of D beats. It is one or more chains, each from a head to a sink that owns one outer output; a fork or a join of links is refused, and chains meet only at a forked outer input (D189). The rule:
 
 - **Firings.** A start carries JOBS and each unit's T. Unit k fires JOBS · ∏ T_v times over itself and the units after it, gives a result on every T-th firing and pushes it L cycles later; its pipeline stalls as a whole when its head has no room.
 - **Giving.** A unit gives into a wire only when the next unit takes in that cycle, into a buffer when it has room or the next unit takes.
 - **Reading.** A unit reads its input in every cycle it wants to, has a beat and is not frozen. At span S (SerialAccumulate) it reads lane l in place, one a cycle, and takes the beat on lane S − 1, so a wire's producer holds its result until the last lane. At span 1 the read is its firing.
 - **Seed.** A seeded unit's (a fold's, or a Mac's, D187) job's first beat waits for its seed too (fire = a.valid and (not first or seed.valid)), and its firing takes the seed (seed.ready = fire and first).
-- **Busy.** The group is busy from the cycle after the start to the push of the last unit's last result; its classes are judged at its boundary (`docs/EVENTS.md`).
+- **Fork** (D189). One reader gives an input to the heads of several chains; its beat is taken only when every member fires, so a member that would fire waits while another cannot (`waits for its fork` in the comments). Each chain has its own JOBS and its sink its own output; a unit fires its chain's JOBS times the T over itself and the units after it.
+- **Busy.** The group is busy from the cycle after the start to the push of the last unit's last result (every chain's); its classes are judged at its boundary (`docs/EVENTS.md`), stall_out when any output's unit is frozen.
 - **Slicer** (D180, `snax_group.hpp`'s `SnaxSlicer`, snax-forge's `FifoSlicer`). With d_in pops to a word, the unit sees the held word, not the reader's valid; a firing (a seed's take) pops a slice and the d_in-th empties it; the slicer takes the reader's word when empty or on that last pop, only while busy, so the word shows the cycle after. The start drops what it holds.
 - **Packer** (D174, `snax_group.hpp`'s `SnaxPacker`, snax-forge's `FifoPacker`). With d_out results to a word, the slice pointer clears at the start; a push puts the result's low 64 / d_out bits at the slice; the word goes to the writer when the slice is d_out − 1 or the push is the run's last result (counted, pushes = results − 1, not this cycle's push), the slices above zero. The outer output's room is the writer's ready only on such a sending push; a filling push needs none, so no cycle is added.
 
@@ -26,7 +27,9 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 |---|---|
 | `unit NAME DATAPATH latency L ii N span S t T inputs I [seed 1]` | a unit, head first: its catalogue datapath, timing, T (a result every T-th firing) and number of outer inputs; `seed 1`, the last of them a fold's seed (one beat per job: its job's first beat waits for it, its first firing takes it) |
 | `link FROM TO depth D` | an edge from unit FROM's output to unit TO's input after its outer ones (a chain: one fewer than the units): 0 a wire, >= 1 a buffer; the occupancy columns follow the links' order |
-| `jobs J` | the start's JOBS |
+| `fork U.I U.I ...` | optional: outer input I (0-based among unit U's own) of each unit listed is one reader's, its `V` column once, at the first member's place (D189) |
+| `outputs U...` | with several chains: their sinks, in the order of the `jobs` values and the `R` columns |
+| `jobs J...` | the start's JOBS, one per output (`JOBS_<sink>` with several chains) |
 | `start CYCLE taken\|ignored\|refused` | the start, offered in that cycle, and its expected answer |
 | `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the run line expected at the end of run I (`firings` the head's) |
 | `lanes L` | optional, with the next two: the lanes of the case's own data |
@@ -39,7 +42,7 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, then `c
 
 A cycle line is `V... R | F G | F G ... | O... | B`:
 
-- `V... R`: the outer inputs' valid, unit by unit in port order (a seeded unit's seed last among its own), then the outer output's ready;
+- `V... R...`: the outer inputs' valid, unit by unit in port order (a seeded unit's seed last among its own, a forked input once), then each outer output's ready;
 - `F G` per unit: whether it fires (takes its input beat) and gives (pushes a result into its link or the outer output);
 - `O...`: per buffer its occupancy after the cycle (absent when every link is a wire);
 - `T...`, with `din`: per sliced input, whether its slicer took a word from the reader;
@@ -68,6 +71,10 @@ The rule is stepped only in busy cycles, each unit's outer valids ANDed, a seed'
 | `slice_dot3_d2_j2` | dot 3 (T 2), JOBS 2, a and b sliced 2 and the sum packed 2: matvec_v3's form at int8, W = 4, one cycle after `pack_dot3` |
 | `seed_serial_late` | Mac (T 2) -> wire -> SerialAccumulate (span 4, seeded, T 1), JOBS 2, the seed missing in cycles 1 to 4 and 7: the sum reads its job's first beat lane by lane only while its seed is there, the Mac holds its result |
 | `seed_mac_late` | a seeded Mac alone (T 4, JOBS 2; D187, its seed of its output's lanes), the seed missing in cycles 1 to 3 and 6 to 7: each job's first beat waits for it, its other beats do not |
+| `fork_d1_m4`, `fork_d0_m4` | bicg's one pass at N = W, M = 4: vmul (SimdLanes) -> a buffer of depth 1 or a wire -> sum (TreeAccumulate, T 1, JOBS 4) gives q, mac (Mac, T 4, JOBS 1) gives s, A forked to vmul.a and mac.a: with every input there, the longer chain's cycles alone |
+| `fork_r_late`, `fork_p_late`, `fork_a_late` | the same at depth 1 with r (mac.b) missing in cycles 2 and 3, p in cycle 3, or A in cycles 2 and 3: the member with its input waits for its fork (stall_in) |
+| `fork_q_backpressure`, `fork_s_backpressure` | q's writer not ready in cycles 2 to 4 (sum holds, the buffer fills, mac waits for its fork) or s's in cycles 5 to 7 (mac holds its one result, q's chain drains) |
+| `fork_seeded` | mvt's one pass: sum seeded per row (D163), mac seeded once (D187), mac's seed missing in cycles 1 and 2: vmul waits for its fork |
 | `slice_mac_bcast_d8` | a seeded Mac alone (T 4, JOBS 2), its b sliced 8 and broadcast (D186): mvt's half 2 at int8; the broadcast is wires, so the rule sees the slicer only |
 
 Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, and the formulas C2 = JT + 2, C3 = JT + 1, C4 = JT + 2, C5 = J(T + W - 1) + 2, C6 = (J - 1) max(T, W) + T + W + 2):
@@ -83,4 +90,4 @@ Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, 
 
     tests/snax/group/run.sh
 
-It prints `PASS` per case (`, data` where the dot product or the seeded Mac's sums are checked too) and ends with `50 passed, 0 failed`.
+It prints `PASS` per case (`, data` where the dot product or the seeded Mac's sums are checked too) and ends with `58 passed, 0 failed`.

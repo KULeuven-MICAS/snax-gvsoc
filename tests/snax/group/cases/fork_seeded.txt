@@ -1,0 +1,27 @@
+# mvt's one pass at M = 4, depth 1: sum seeded per row (x1, D163), mac seeded once (x2, D187), x2 missing in cycles 1 to 2
+# mac's first beat waits for its seed, so vmul waits for its fork; sum's seeds are there
+
+unit vmul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 1 inputs 1 seed 1
+unit mac Mac latency 1 ii 1 span 1 t 4 inputs 3 seed 1
+link vmul sum depth 1
+fork vmul.0 mac.0
+outputs sum mac
+jobs 4 1
+start 0 taken
+expect run index=0 firings=4 busy=5 stall_in=2 stall_out=0 flush=1
+# E - s = 8
+
+# vmul.a vmul.b sum.seed mac.b mac.seed sum.ready mac.ready | vmul fire give | sum fire give | mac fire give | occ0 | busy
+cycles
+1 1 1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 0: idle
+1 1 1 1 0 1 1 | 0 0 | 0 0 | 0 0 | 0 | 1    # 1: vmul waits for its fork
+1 1 1 1 0 1 1 | 0 0 | 0 0 | 0 0 | 0 | 1    # 2: vmul waits for its fork
+1 1 1 1 1 1 1 | 1 1 | 0 0 | 1 0 | 1 | 1    # 3: vmul pushes; vmul fires 0 (gives); mac fires 0, takes its seed
+1 1 1 1 1 1 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 4: vmul pushes; vmul fires 1 (gives); mac fires 1; sum fires 0 (gives), takes its seed
+1 1 1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 5: vmul pushes; vmul fires 2 (gives); mac fires 2; sum pushes; sum fires 1 (gives), takes its seed
+1 1 1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 6: vmul pushes; vmul fires 3 (gives); mac fires 3 (gives); sum pushes; sum fires 2 (gives), takes its seed
+1 1 1 1 1 1 1 | 0 0 | 1 1 | 0 1 | 0 | 1    # 7: mac pushes; sum pushes; sum fires 3 (gives), takes its seed
+1 1 1 1 1 1 1 | 0 0 | 0 1 | 0 0 | 0 | 1    # 8: sum pushes
+1 1 1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 9: idle
+1 1 1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 10: idle

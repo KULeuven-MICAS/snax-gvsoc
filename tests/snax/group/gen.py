@@ -74,12 +74,18 @@ def packed_words(sent_at, pushes_at, d_out):
 
 
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
-          formula_total=None, comment=(), data=None, d_out=1, d_in=()):
-    # A chain: link k joins unit k to unit k + 1's only input
-    links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
-             for k, d in enumerate(depths)]
+          formula_total=None, comment=(), data=None, d_out=1, d_in=(), links=None, forks=()):
+    # A chain: link k joins unit k to unit k + 1's only input; or ``links`` as (from, to,
+    # depth) with ``forks`` for a group of several chains (D189)
+    if links is None:
+        links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
+                 for k, d in enumerate(depths)]
+    else:
+        links = [{"from": a, "to": b, "to_input": 0, "depth": d} for a, b, d in links]
+        depths = [e["depth"] for e in links]
     m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4],
-                        seed=len(u) > 5 and u[5]) for u in units], links)
+                        seed=len(u) > 5 and u[5]) for u in units], links, forks=forks)
+    several = len(m.outputs) > 1
     sliced = [(i, d) for i, d in enumerate(d_in) if d > 1]
     if sliced:  # a sliced input's reader has ceil(pops / d_in) words, then no more
         fired = m.firings_per_run(jobs, ts)
@@ -97,7 +103,7 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
             return tuple(v)
     rows, end = m.run(jobs, ts, valid, ready, 64, d_out, d_in)
     if end is None:
-        empty = jobs == 0 or 0 in ts
+        empty = 0 in (jobs if several else [jobs]) or 0 in ts
         assert empty, name
         last = 3
     else:
@@ -114,11 +120,15 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
                      f"inputs {u[4]}" + (" seed 1" if len(u) > 5 and u[5] else ""))
     for e in links:
         lines.append(f"link {e['from']} {e['to']} depth {e['depth']}")
-    lines.append(f"jobs {jobs}")
+    for f in forks:
+        lines.append("fork " + " ".join(f"{u}.{j}" for u, j in f))
+    if several:
+        lines.append("outputs " + " ".join(units[k][0] for k in m.outputs))
+    lines.append("jobs " + (" ".join(map(str, jobs)) if several else str(jobs)))
     if d_out > 1:
         lines.append(f"dout {d_out}")
     lines += [f"din {i} {d}" for i, d in sliced]
-    result = "ignored" if (jobs == 0 or 0 in ts) else "taken"
+    result = "ignored" if (0 in (jobs if several else [jobs]) or 0 in ts) else "taken"
     lines.append(f"start 0 {result}")
     if end is not None:
         heads = sum(r[2][0][0] for r in rows)
@@ -128,27 +138,38 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
         lines.append(f"# E - s = {total}" + (f", the rule's formula" if formula_total else ""))
     if d_out > 1:
         pushes_at = [r[2][m.output][1] for r in rows]
-        words = packed_words(m.sent[: len(rows)], pushes_at, d_out)
+        words = packed_words([x[0] for x in m.sent[: len(rows)]], pushes_at, d_out)
         lines.append("words " + " ".join(f"0x{w:016x}" for w in words))
     if data is not None:
         lines.append(f"lanes {data['lanes']}")
         lines += [f"data {x} " + " ".join(map(str, data[x])) for x in ("a", "b")]
         lines.append("sums " + " ".join(map(str, data["sums"])))
-    names = [x for u in units for x in ((["a", "b"][:u[4]] if not (len(u) > 5 and u[5])
-             else [*["a", "b"][:u[4] - 1], f"{u[0]}.seed"]) if u[4] else [])]
-    lines += ["", f"# {' '.join(names)} ready | " + " | ".join(f"{u[0]} fire give" for u in units)
+    if forks:  # each place in valid(c) once, named unit.port
+        ports = ["a", "b"]
+        names = [None] * m.n_valid
+        for u, places in zip(units, m.place):
+            for j, i in enumerate(places):
+                seed = len(u) > 5 and u[5] and j == u[4] - 1
+                names[i] = names[i] or f"{u[0]}.{'seed' if seed else ports[j]}"
+    else:
+        names = [x for u in units for x in ((["a", "b"][:u[4]] if not (len(u) > 5 and u[5])
+                 else [*["a", "b"][:u[4] - 1], f"{u[0]}.seed"]) if u[4] else [])]
+    readies = " ".join(f"{units[k][0]}.ready" for k in m.outputs) if several else "ready"
+    lines += ["", f"# {' '.join(names)} {readies} | "
+              + " | ".join(f"{u[0]} fire give" for u in units)
               + (" | " + " ".join(f"occ{k}" for k, d in enumerate(depths) if d) if any(depths) else "")
               + (" | " + " ".join(f"took{i}" for i, _ in sliced) if sliced else "")
               + (" | sent" if d_out > 1 else "") + " | busy", "cycles"]
     for c, (v, r, out, occ, busy, cls, note) in enumerate(rows):
-        cols = " ".join(map(str, v)) + f" {r} | " + " | ".join(f"{f} {g}" for f, g in out)
+        rs = " ".join(map(str, r)) if several else str(r)
+        cols = " ".join(map(str, v)) + f" {rs} | " + " | ".join(f"{f} {g}" for f, g in out)
         if any(depths):
             cols += " | " + " ".join(str(occ[k]) for k, d in enumerate(depths) if d)
         if sliced:
             cols += " | " + " ".join(map(str, m.took[c]))
         if d_out > 1:
-            cols += f" | {m.sent[c]}"
-            note += " (word sent)" if m.sent[c] else ""
+            cols += f" | {m.sent[c][0]}"
+            note += " (word sent)" if m.sent[c][0] else ""
         lines.append(f"{cols} | {busy}    # {c}: {note}")
     (HERE / "cases" / f"{name}.txt").write_text("\n".join(lines) + "\n")
     return total
@@ -258,6 +279,52 @@ def slice_cases():
                    "is wires (each lane gets the pop), so the rule does not see it"])
 
 
+def fork_cases():
+    """Two chains on one reader (D189), bicg's one pass at N = W: vmul (SimdLanes) -> a link ->
+    sum (TreeAccumulate, T 1) gives q, one a row; mac (Mac, T = M) gives s once. A is forked to
+    vmul.a and mac.a: its beat is taken only when both fire. vmul.b is p, mac.b r (broadcast in
+    the datapath, D186, so one lane to the rule). M = 4: JOBS 4 for q, 1 for s."""
+    units = [("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 0),
+             ("mac", "Mac", 1, 1, 2)]
+    fork = [[("vmul", 0), ("mac", 0)]]
+    m, ts, jobs = 4, [1, 1, 4], [4, 1]
+    for depth, form in ((1, "dot 2's buffer of depth 1"), (0, "dot 3's wire")):
+        write(f"fork_d{depth}_m{m}", f"vmul -> {form} -> sum (q, JOBS {m}) and mac (s, T {m}, "
+              f"JOBS 1), A forked to vmul.a and mac.a, M = {m}", units, None, jobs, ts,
+              valid=lambda c: (1, 1, 1), ready=lambda c: (1, 1),
+              links=[("vmul", "sum", depth)], forks=fork,
+              comment=["with every input there both chains fire every cycle: the run is the "
+                       "longer chain's alone"])
+    both = dict(links=[("vmul", "sum", 1)], forks=fork)
+    write("fork_r_late", f"the fork at M = {m}, depth 1, r (mac.b) missing in cycles 2 and 3",
+          units, None, jobs, ts, valid=lambda c: (1, 1, 0 if c in (2, 3) else 1),
+          ready=lambda c: (1, 1), comment=["mac cannot fire, so vmul waits for its fork too: A's "
+                                           "beat stays with the reader (stall_in)"], **both)
+    write("fork_p_late", f"the fork at M = {m}, depth 1, p (vmul.b) missing in cycle 3", units,
+          None, jobs, ts, valid=lambda c: (1, 0 if c == 3 else 1, 1), ready=lambda c: (1, 1),
+          comment=["vmul cannot fire, so mac waits for its fork"], **both)
+    write("fork_a_late", f"the fork at M = {m}, depth 1, A missing in cycles 2 to 3", units,
+          None, jobs, ts, valid=lambda c: (0 if c in (2, 3) else 1, 1, 1), ready=lambda c: (1, 1),
+          comment=["neither fires (stall_in)"], **both)
+    write("fork_q_backpressure", f"the fork at M = {m}, depth 1, q's writer not ready in cycles "
+          "2 to 4", units, None, jobs, ts, valid=lambda c: (1, 1, 1),
+          ready=lambda c: (0 if c in (2, 3, 4) else 1, 1),
+          comment=["sum holds (stall_out), the buffer fills, vmul cannot give, so mac waits "
+                   "for its fork"], **both)
+    write("fork_s_backpressure", f"the fork at M = {m}, depth 1, s's writer not ready in cycles "
+          "5 to 7", units, None, jobs, ts, valid=lambda c: (1, 1, 1),
+          ready=lambda c: (1, 0 if c in (5, 6, 7) else 1),
+          comment=["mac holds its one result (stall_out) after both chains have fired; q's "
+                   "chain drains meanwhile"], **both)
+    seeded = [("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 1, 1),
+              ("mac", "Mac", 1, 1, 3, 1)]
+    write("fork_seeded", f"mvt's one pass at M = {m}, depth 1: sum seeded per row (x1, D163), "
+          "mac seeded once (x2, D187), x2 missing in cycles 1 to 2", seeded, None, jobs, ts,
+          valid=lambda c: (1, 1, 1, 1, 0 if c in (1, 2) else 1), ready=lambda c: (1, 1),
+          comment=["mac's first beat waits for its seed, so vmul waits for its fork; sum's "
+                   "seeds are there"], **both)
+
+
 def main():
     table = {}
     for v, (units, depth, fold) in VARIANTS.items():
@@ -294,6 +361,7 @@ def main():
     seed_cases()
     pack_cases()
     slice_cases()
+    fork_cases()
     print("T, J | " + " | ".join(f"dot {v}" for v in VARIANTS))
     for t in (2, 4):
         for j in (1, 2):
