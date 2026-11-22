@@ -79,6 +79,8 @@ For a linked group:
 - `push` lines are the last unit's results, `first` and `last` the head's firings each one folds;
 - `count` and `firings` are the head's, and `rate` is the head's firings per result of the last unit.
 
+A group of several chains on a forked input (D189) has an output per chain, each its sink's: its `push` lines carry `unit`, the sink's name, and `n` counts that output's results; `rate` is a list, one per output in unit order (the order of the group's `JOBS_<SINK>` CSRs). Its `fire` lines are the head's, the first unit, whose outer inputs include the forked one, read once for all its units. A group of one output writes neither.
+
 An output packed d_out results to a word (D174) still has one `push` line per result; its writer writes one word every d_out pushes, and on the run's last push, so the writer's `b` counts words, not results: the writer's grant of word w follows the push of result (w + 1) · d_out − 1, or the last one.
 
 An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word. A broadcast input (D186) moves one lane a beat, given to all the unit's lanes by wires: its `value` is that one lane, as its reader or slicer gave it.

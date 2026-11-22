@@ -13,18 +13,19 @@
 //
 // Properties (a missing or bad one is a fatal error naming it):
 //   csr_base   the group's first CSR (its START), for the trace
-//   csrs       its read-write CSRs' names in CSR order: START, JOBS, then the
-//              units' (JOB_BEATS, each fold's without a fixed T, then its
-//              scalars', in unit order); STATUS and BUSY_COUNTER follow
+//   csrs       its read-write CSRs' names in CSR order: START, JOBS (with
+//              several chains a JOBS_<SINK> per chain, D189), then the units'
+//              (JOB_BEATS, each fold's without a fixed T, then its scalars',
+//              in unit order); STATUS and BUSY_COUNTER follow
 //   widths     each read-write CSR's width, in the order of csrs, 1 to 32
 //              (accelerator.json's: START 1, JOBS and JOB_BEATS
 //              job_width); a write keeps its low bits
 //   busy_counter_width  BUSY_COUNTER's width, 1 to 32: it saturates at
 //              2^w - 1
-// An accepted start, but the empty run (JOBS or a JOB_BEATS 0), goes to the
-// group's ctrl as a write of 32-bit words: JOBS, then every JOB_BEATS in unit
-// order (JOBS and 1 without one), then every unit's scalar CSR (any other
-// name after JOBS: K1, K1_LO, K1_HI) in CSR order.
+// An accepted start, but the empty run (a JOBS or a JOB_BEATS 0), goes to the
+// group's ctrl as a write of 32-bit words: every JOBS, then every JOB_BEATS in
+// unit order (the JOBS and 1 without one), then every unit's scalar CSR (any
+// other name after the JOBS: K1, K1_LO, K1_HI) in CSR order.
 
 #include <string>
 #include <vector>
@@ -78,10 +79,18 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     {
         names.push_back(props.as_str(name, "csrs[" + std::to_string(names.size()) + "]"));
     }
-    if (names.size() < 2 || names[0] != "START" || names[1] != "JOBS")
+    // JOBS, or with several chains a JOBS_<SINK> each (D189)
+    int nb_jobs = 0;
+    while (1 + nb_jobs < (int)names.size() && names[1 + nb_jobs].rfind("JOBS_", 0) == 0)
     {
-        this->trace.fatal("Property csrs: must start with START, JOBS\n");
+        nb_jobs++;
     }
+    if (names.size() < 2 || names[0] != "START" || (names[1] != "JOBS" && nb_jobs < 2))
+    {
+        this->trace.fatal("Property csrs: must start with START, then JOBS or a JOBS_<SINK> per "
+            "chain (two or more)\n");
+    }
+    nb_jobs = names[1] == "JOBS" ? 1 : nb_jobs;
     std::vector<int> job_beats, scalars;
     for (size_t i = 0; i < names.size(); i++)
     {
@@ -93,7 +102,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
         {
             job_beats.push_back(i);
         }
-        else if (i >= 2)    // a unit's scalar (K1, K1_LO, K1_HI), sent after the JOB_BEATS
+        else if ((int)i > nb_jobs)  // a unit's scalar (K1, K1_LO, K1_HI), sent after the JOB_BEATS
         {
             scalars.push_back(i);
         }
@@ -121,7 +130,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     }
 
     this->nb_rw = names.size();
-    this->rule.configure(this->nb_rw, job_beats, widths, busy_counter_width, scalars);
+    this->rule.configure(this->nb_rw, job_beats, widths, busy_counter_width, scalars, nb_jobs);
     this->csrs.configure(&this->trace, csr_base, this->nb_rw, 2);
 
     this->csr_itf.set_req_meth(&SnaxShell::csr_req);
@@ -156,16 +165,17 @@ void SnaxShell::reset(bool active)
 void SnaxShell::send(int64_t cycle, bool empty)
 {
     this->config_words = this->rule.words();
-    // The JOB_BEATS and scalar words, for the debug lines below
-    std::string text;
+    // The JOBS, then the JOB_BEATS and scalar words, for the debug lines below
+    std::string jobs = std::to_string(this->config_words[0]), text;
+    int nb_jobs = this->rule.jobs_count();
     for (size_t i = 1; this->trace.get_active() && i < this->config_words.size(); i++)
     {
-        text += " " + std::to_string(this->config_words[i]);
+        ((int)i < nb_jobs ? jobs : text) += " " + std::to_string(this->config_words[i]);
     }
     if (empty)
     {
-        this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %u, "
-            "JOB_BEATS%s, the empty run, done\n", cycle, this->rule.jobs(), text.c_str());
+        this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %s, "
+            "JOB_BEATS%s, the empty run, done\n", cycle, jobs.c_str(), text.c_str());
         return;
     }
     this->ctrl_req.init();
@@ -176,8 +186,8 @@ void SnaxShell::send(int64_t cycle, bool empty)
     {
         this->trace.fatal("Start refused by the group at cycle %ld while idle\n", cycle);
     }
-    this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %u, JOB_BEATS%s\n",
-        cycle, this->rule.jobs(), text.c_str());
+    this->trace.msg(vp::Trace::LEVEL_DEBUG, "Start accepted at cycle %ld: JOBS %s, JOB_BEATS%s\n",
+        cycle, jobs.c_str(), text.c_str());
 }
 
 

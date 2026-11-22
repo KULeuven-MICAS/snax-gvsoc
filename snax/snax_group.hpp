@@ -19,18 +19,23 @@
 // its II, its span (the cycles it reads one input beat in place,
 // SerialAccumulate's lanes) and, per run, its T: a result every T-th firing
 // (a fold's JOB_BEATS or params.T; 1 for a unit without a fold). Each unit's
-// outer inputs, if any, come from the streamer; one unit owns the group's
-// outer output (by default the sink, the unit without an out-edge). A
-// group is one chain: configure() refuses a unit with two out-edges
-// (a fork) or two in-edges (a join), a cycle, and units no link joins.
+// outer inputs, if any, come from the streamer. A group is one or more
+// chains, each a path of links from a head to a sink, the unit without an
+// out-edge, which owns one outer output: configure() refuses a unit with two
+// out-edges or two in-edges (a fork or a join of links), a cycle, and chains
+// no fork joins. NB (D189): chains meet only at a forked outer input, one
+// reader's for the heads of several chains (each of span 1): its beat is
+// taken only when every one of them fires, so a head that would fire waits
+// while another cannot (step() decides the cycle again with it blocked, as
+// snax_group_rule.py does).
 //
-// A run: a start offered in cycle s carries JOBS and each unit's T; unit k
-// fires n_k times, JOBS * T for the sink, n_succ * T_k for a unit before it
-// (each firing of its consumer takes one of its results): over a chain, JOBS *
-// prod T_v over k and every unit after it. It is taken only
-// when the group is idle in s and no number is 0 (JOBS 0 or any T 0 is the
-// empty run, which the shell ends without the group: here it is ignored, busy
-// stays 0); a start while busy is refused. The group is busy from s + 1 to the
+// A run: a start offered in cycle s carries a JOBS per output (each chain's)
+// and each unit's T; unit k fires n_k times, JOBS * T for a sink, n_succ * T_k
+// for a unit before it (each firing of its consumer takes one of its
+// results): over a chain, its JOBS * prod T_v over k and every unit after
+// it. It is taken only when the group is idle in s and no number is 0 (a
+// JOBS 0 or any T 0 is the empty run, which the shell ends without the
+// group: here it is ignored, busy stays 0); a start while busy is refused. The group is busy from s + 1 to the
 // run's last cycle E, when every unit has fired its n and nothing is in
 // flight. step() is called once per busy cycle with, per unit, whether its
 // outer inputs all have a beat and whether its outer output has room (true for
@@ -79,13 +84,14 @@
 // each buffer's occupancy: + 1 on a load (its producer's push), - 1 on a take
 // (its consumer's firing), its write and read slots a ring.
 //
-// Each busy cycle is one class, judged at the unit owning the outer output,
-// in this order: stall_out (it has a result and no room: it is frozen) >
+// Each busy cycle is one class, judged at the units owning the outer
+// outputs, in this order: stall_out (one has a result and no room: it is frozen) >
 // busy (any unit fires or reads, or is in its II gap) > stall_in (a unit with
 // outer inputs wants to fire and one of them has no beat) > flush (results in
 // flight, beats in a buffer: accel.py's idle). busy + stall_in + stall_out +
-// flush is the run's busy cycles, E - s; the run line's firings are the
-// head's (the first unit in the topological order).
+// flush is the run's busy cycles, E - s, E the cycle the last chain ends;
+// the run line's firings are the head's (the first unit in the topological
+// order).
 //
 // SnaxPacker: the outer output's packer, when its d_out results fill one 64-bit
 // word (a one-lane int32 fold at d_out 2, int16 at 4, int8 at 8; D174), placed
@@ -192,10 +198,12 @@ public:
         bool end = false;       // the run's last cycle: idle from the next one
     };
 
-    // The units, the links between them, and the unit owning the outer output (-1: the
-    // sink). Returns why the graph is refused, or "" (then the rule is configured).
+    // The units, the links between them, the units owning the outer outputs (the chains'
+    // sinks, in the order of the start's JOBS and their room; empty: the sinks in unit
+    // order) and the forks, each the units an outer input's one reader feeds (D189).
+    // Returns why the graph is refused, or "" (then the rule is configured).
     std::string configure(const std::vector<UnitCfg> &units, const std::vector<Link> &links,
-        int output = -1)
+        const std::vector<int> &outputs = {}, const std::vector<std::vector<int>> &forks = {})
     {
         size_t n = units.size();
         std::vector<std::vector<int>> ins(n), outs(n);
@@ -217,7 +225,7 @@ public:
                 return "unit " + std::to_string(k) + " has " +
                     std::to_string(fork ? outs[k].size() : ins[k].size()) +
                     (fork ? " out-edges (a fork)" : " in-edges (a join)") +
-                    ": a group is one chain";
+                    ": a chain has neither";
             }
         }
         // Kahn's order, the lowest index first among the units ready
@@ -247,36 +255,87 @@ public:
         {
             return "the links form a cycle";
         }
-        size_t sinks = 0, sink = 0;
+        std::vector<int> sinks;
         for (size_t k = 0; k < n; k++)
         {
             if (outs[k].empty())
             {
-                sinks++;
-                sink = k;
+                sinks.push_back(k);
             }
         }
-        if (sinks != 1)
+        std::vector<int> mine = outputs.empty() ? sinks : outputs;
+        std::vector<int> sorted = mine;
+        std::sort(sorted.begin(), sorted.end());
+        if (sorted != sinks)
         {
-            return std::to_string(sinks) + " units have no out-edge: a group is "
-                "one chain";
+            return "the outer outputs' units: each chain's sink owns one, and only it";
         }
-        if (output >= (int)n)
+        // Each unit's chain: the output its path of links ends at
+        std::vector<int> chain(n, 0);
+        for (size_t o = 0; o < mine.size(); o++)
         {
-            return "the outer output's unit " + std::to_string(output) + ": no such unit";
+            for (int k = mine[o];; k = links[ins[k][0]].from)
+            {
+                chain[k] = o;
+                if (ins[k].empty())
+                {
+                    break;
+                }
+            }
+        }
+        // The forks: two or more heads of span 1 each; their chains joined
+        std::vector<int> joined(mine.size());
+        for (size_t o = 0; o < joined.size(); o++)
+        {
+            joined[o] = o;
+        }
+        auto root = [&](int o) {
+            while (joined[o] != o)
+            {
+                o = joined[o];
+            }
+            return o;
+        };
+        for (const std::vector<int> &f : forks)
+        {
+            std::vector<int> members = f;
+            std::sort(members.begin(), members.end());
+            if (f.size() < 2 || std::unique(members.begin(), members.end()) != members.end())
+            {
+                return "a fork gives one input to two or more units";
+            }
+            for (int k : f)
+            {
+                if (k < 0 || k >= (int)n || !ins[k].empty() || units[k].span != 1)
+                {
+                    return "fork: unit " + std::to_string(k) + " is not a chain's head of span 1";
+                }
+                joined[root(chain[k])] = root(chain[f[0]]);
+            }
+        }
+        for (size_t o = 1; o < mine.size(); o++)
+        {
+            if (root(o) != root(0))
+            {
+                return "the chains ending at units " + std::to_string(mine[0]) + " and " +
+                    std::to_string(mine[o]) + ": no fork joins them; a group's chains share an "
+                    "input";
+            }
         }
         this->cfg = units;
         this->links = links;
         this->ins = ins;
         this->outs = outs;
         this->order = order;
-        this->output = output < 0 ? sink : output;
+        this->outputs = mine;
+        this->chain = chain;
+        this->forks = forks;
         this->u.assign(n, UnitState());
         this->l.assign(links.size(), LinkState());
         this->stepped.units.assign(n, UnitStep());
         this->stepped.links.assign(links.size(), LinkStep());
         for (std::vector<bool> *v : {&this->avail, &this->wants, &this->would_fire, &this->gives,
-            &this->head, &this->offer, &this->outer_ok})
+            &this->head, &this->offer, &this->outer_ok, &this->blocked})
         {
             v->assign(n, false);
         }
@@ -287,7 +346,7 @@ public:
     void reset()
     {
         this->span.reset();
-        this->jobs = 0;
+        this->jobs.assign(this->outputs.size(), 0);
         this->job_beats.assign(this->cfg.size(), 1);
         this->firings_per_run.assign(this->cfg.size(), 0);
         for (size_t k = 0; k < this->u.size(); k++)
@@ -308,9 +367,12 @@ public:
 
     size_t nb_units() const { return this->cfg.size(); }
 
-    // The units in topological order, the head first; the unit owning the outer output
+    // The units in topological order, the head first; the units owning the outer outputs, in
+    // the start's order (the first: output_unit); each unit's output (its chain's index there)
     const std::vector<size_t> &topological() const { return this->order; }
-    size_t output_unit() const { return this->output; }
+    const std::vector<int> &output_units() const { return this->outputs; }
+    size_t output_unit() const { return this->outputs[0]; }
+    const std::vector<int> &chains() const { return this->chain; }
     const std::vector<Link> &edges() const { return this->links; }
 
     // Idle in cycle: no run, or the last one ended before it
@@ -319,15 +381,37 @@ public:
     // Busy in cycle: from the cycle after the start to the run's last cycle
     bool busy(int64_t cycle) const { return this->span.busy(cycle); }
 
-    // A start of jobs, unit k a result every job_beats[k] firings, offered in cycle;
-    // the caller keeps every n_k within 32 bits
-    Start start(int64_t cycle, uint32_t jobs, const std::vector<uint32_t> &job_beats)
+    // Each unit's firings in a run of jobs (one per output), unit k a result every
+    // job_beats[k] firings: from each sink back, each firing of a consumer takes one result
+    // of its producer
+    std::vector<uint64_t> firings_for(const std::vector<uint32_t> &jobs,
+        const std::vector<uint32_t> &job_beats) const
+    {
+        std::vector<uint64_t> n(this->cfg.size(), 0);
+        for (size_t r = this->order.size(); r-- > 0;)
+        {
+            size_t k = this->order[r];
+            uint64_t next = this->outs[k].empty() ? jobs[this->chain[k]]
+                : n[this->links[this->outs[k][0]].to];
+            n[k] = next * job_beats[k];
+        }
+        return n;
+    }
+
+    // A start of jobs (one per output, in output_units' order), unit k a result every
+    // job_beats[k] firings, offered in cycle; the caller keeps every n_k within 32 bits
+    Start start(int64_t cycle, const std::vector<uint32_t> &jobs,
+        const std::vector<uint32_t> &job_beats)
     {
         if (!this->idle(cycle))
         {
             return REFUSED;
         }
-        bool empty = jobs == 0;
+        bool empty = false;
+        for (uint32_t x : jobs)
+        {
+            empty = empty || x == 0;
+        }
         for (uint32_t x : job_beats)
         {
             empty = empty || x == 0;
@@ -339,16 +423,10 @@ public:
         this->span.start(cycle);
         this->jobs = jobs;
         this->job_beats = job_beats;
-        // From the sink back: each firing of a consumer takes one result of its producer
-        for (size_t r = this->order.size(); r-- > 0;)
+        std::vector<uint64_t> n = this->firings_for(jobs, job_beats);
+        for (size_t k = 0; k < n.size(); k++)
         {
-            size_t k = this->order[r];
-            uint32_t n = this->outs[k].empty() ? jobs
-                : this->firings_per_run[this->links[this->outs[k][0]].to];
-            this->firings_per_run[k] = n * job_beats[k];
-        }
-        for (size_t k = 0; k < this->u.size(); k++)
-        {
+            this->firings_per_run[k] = (uint32_t)n[k];
             this->u[k].firings = 0;
             this->u[k].lane = 0;
         }
@@ -359,11 +437,17 @@ public:
         return TAKEN;
     }
 
+    // A start of one chain's jobs
+    Start start(int64_t cycle, uint32_t jobs, const std::vector<uint32_t> &job_beats)
+    {
+        return this->start(cycle, std::vector<uint32_t>(this->outputs.size(), jobs), job_beats);
+    }
+
     // One busy cycle: inputs[k], every outer input of unit k but its seed has
-    // a beat (true for a unit without one); outer_room[k], unit k's outer
-    // output has room (true for a unit without one); seeds[k], a seeded unit's
-    // seed has a beat (any value for one not seeded). The step is valid until
-    // the next call.
+    // a beat (true for a unit without one; a forked input's for each of its
+    // units); outer_room[k], unit k's outer output has room (true for a unit
+    // without one); seeds[k], a seeded unit's seed has a beat (any value for
+    // one not seeded). The step is valid until the next call.
     const Step &step(int64_t cycle, const std::vector<bool> &inputs,
         const std::vector<bool> &outer_room)
     {
@@ -376,61 +460,44 @@ public:
     {
         size_t n = this->cfg.size();
         Step &s = this->stepped;
-        std::fill(s.units.begin(), s.units.end(), UnitStep());
-        std::fill(s.links.begin(), s.links.end(), LinkStep());
-        s.cls = FLUSH;
-        s.end = false;
-        std::vector<bool> &avail = this->avail, &wants = this->wants,
-            &would_fire = this->would_fire, &gives = this->gives, &head = this->head,
-            &offer = this->offer;
-
-        // Forward: what each unit offers whatever its room
-        for (size_t k : this->order)
+        bool busy = false, waits = false;
+        // NB (D189): a forked input's units fire together; one that would fire waits while
+        // another cannot, so the cycle is decided again with it blocked
+        std::fill(this->blocked.begin(), this->blocked.end(), false);
+        while (true)
         {
-            const UnitCfg &c = this->cfg[k];
-            UnitState &us = this->u[k];
-            bool linked = true;
-            for (int i : this->ins[k])
+            this->decide(cycle, inputs, seeds, outer_room, &busy, &waits);
+            bool held = false;
+            for (const std::vector<int> &f : this->forks)
             {
-                const Link &e = this->links[i];
-                linked = linked && (e.depth == 0 ? offer[e.from] : this->l[i].occupancy > 0);
+                bool all = true;
+                for (int k : f)
+                {
+                    all = all && s.units[k].fire;
+                }
+                for (int k : f)
+                {
+                    if (!all && s.units[k].fire)
+                    {
+                        this->blocked[k] = true;
+                        held = true;
+                    }
+                }
             }
-            // a seeded unit's job's first beat waits for its seed too
-            bool first = us.firings % this->job_beats[k] == 0;
-            this->outer_ok[k] = inputs[k] && (!c.seeded || !first || seeds[k]);
-            avail[k] = this->outer_ok[k] && linked;
-            bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
-            wants[k] = us.firings < this->firings_per_run[k] && ii_ok;
-            would_fire[k] = wants[k] && avail[k] && (c.span == 1 || us.lane == c.span - 1);
-            gives[k] = would_fire[k] && (us.firings + 1) % this->job_beats[k] == 0;
-            head[k] = c.latency > 0 && us.slots[c.latency - 1];
-            offer[k] = c.latency > 0 ? head[k] : gives[k];
+            if (!held)
+            {
+                break;
+            }
         }
 
-        // Backward: room, frozen, fire, read, push; an out-edge takes on its consumer's firing
-        bool busy = false, waits = false;
-        for (size_t r = n; r-- > 0;)
+        // The units' state: the pipeline advances unless frozen, a firing counts
+        for (size_t k = 0; k < n; k++)
         {
-            size_t k = this->order[r];
             const UnitCfg &c = this->cfg[k];
             UnitState &us = this->u[k];
-            UnitStep &st = s.units[k];
-            bool room = outer_room[k];
-            for (int i : this->outs[k])
-            {
-                const Link &e = this->links[i];
-                bool take = s.units[e.to].fire;
-                room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
-            }
-            st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
-            st.first = us.firings % this->job_beats[k] == 0;
+            const UnitStep &st = s.units[k];
             if (!st.frozen)
             {
-                st.fire = would_fire[k];
-                st.gives = gives[k];
-                st.push = c.latency > 0 ? head[k] : gives[k];
-                st.read = wants[k] && avail[k];
-                st.lane = us.lane;
                 for (int i = c.latency - 1; i > 0; i--)
                 {
                     us.slots[i] = us.slots[i - 1];
@@ -439,11 +506,7 @@ public:
                 {
                     us.slots[0] = st.gives;
                 }
-                bool in_gap = us.has_fired && cycle < us.last_fire + c.ii;
-                busy = busy || st.fire || st.read || in_gap;
-                waits = waits || (wants[k] && !this->outer_ok[k]);
             }
-            st.seed = st.fire && st.first && c.seeded;
             if (st.fire)
             {
                 us.has_fired = true;
@@ -483,7 +546,12 @@ public:
             ls.occupancy = state.occupancy;
         }
 
-        s.cls = s.units[this->output].frozen ? STALL_OUT : busy ? BUSY : waits ? STALL_IN : FLUSH;
+        bool frozen = false;
+        for (int k : this->outputs)
+        {
+            frozen = frozen || s.units[k].frozen;
+        }
+        s.cls = frozen ? STALL_OUT : busy ? BUSY : waits ? STALL_IN : FLUSH;
         this->classes[s.cls]++;
         if (this->finished())
         {
@@ -511,10 +579,10 @@ public:
         return line;
     }
 
-    // The current or last run: its start s and last cycle E, its jobs, each
+    // The current or last run: its start s and last cycle E, its jobs (per output), each
     // unit's T and n, and its cycles per class; runs ended so far
     SnaxRunSpan span;
-    uint32_t jobs;
+    std::vector<uint32_t> jobs;
     std::vector<uint32_t> job_beats;        // per unit, its T: a result every T-th firing
     std::vector<uint32_t> firings_per_run;  // per unit, its n
     int64_t classes[NB_CLASSES];
@@ -536,6 +604,76 @@ private:
         int wptr = 0;
         int rptr = 0;
     };
+
+    // One cycle's choices into stepped.units, changing no state, the units blocked not
+    // firing: forward, what each unit offers whatever its room; backward, in reverse order,
+    // room, frozen, fire, read, push (an out-edge takes on its consumer's firing); *busy and
+    // *waits for the cycle's class
+    void decide(int64_t cycle, const std::vector<bool> &inputs, const std::vector<bool> &seeds,
+        const std::vector<bool> &outer_room, bool *busy, bool *waits)
+    {
+        size_t n = this->cfg.size();
+        Step &s = this->stepped;
+        std::fill(s.units.begin(), s.units.end(), UnitStep());
+        std::fill(s.links.begin(), s.links.end(), LinkStep());
+        s.cls = FLUSH;
+        s.end = false;
+        std::vector<bool> &avail = this->avail, &wants = this->wants,
+            &would_fire = this->would_fire, &gives = this->gives, &head = this->head,
+            &offer = this->offer;
+
+        for (size_t k : this->order)
+        {
+            const UnitCfg &c = this->cfg[k];
+            const UnitState &us = this->u[k];
+            bool linked = true;
+            for (int i : this->ins[k])
+            {
+                const Link &e = this->links[i];
+                linked = linked && (e.depth == 0 ? offer[e.from] : this->l[i].occupancy > 0);
+            }
+            // a seeded unit's job's first beat waits for its seed too
+            bool first = us.firings % this->job_beats[k] == 0;
+            this->outer_ok[k] = inputs[k] && (!c.seeded || !first || seeds[k]);
+            avail[k] = this->outer_ok[k] && linked;
+            bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
+            wants[k] = us.firings < this->firings_per_run[k] && ii_ok && !this->blocked[k];
+            would_fire[k] = wants[k] && avail[k] && (c.span == 1 || us.lane == c.span - 1);
+            gives[k] = would_fire[k] && (us.firings + 1) % this->job_beats[k] == 0;
+            head[k] = c.latency > 0 && us.slots[c.latency - 1];
+            offer[k] = c.latency > 0 ? head[k] : gives[k];
+        }
+
+        *busy = *waits = false;
+        for (size_t r = n; r-- > 0;)
+        {
+            size_t k = this->order[r];
+            const UnitCfg &c = this->cfg[k];
+            const UnitState &us = this->u[k];
+            UnitStep &st = s.units[k];
+            bool room = outer_room[k];
+            for (int i : this->outs[k])
+            {
+                const Link &e = this->links[i];
+                bool take = s.units[e.to].fire;
+                room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
+            }
+            st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
+            st.first = us.firings % this->job_beats[k] == 0;
+            if (!st.frozen)
+            {
+                st.fire = would_fire[k];
+                st.gives = gives[k];
+                st.push = c.latency > 0 ? head[k] : gives[k];
+                st.read = wants[k] && avail[k];
+                st.lane = us.lane;
+                bool in_gap = us.has_fired && cycle < us.last_fire + c.ii;
+                *busy = *busy || st.fire || st.read || in_gap;
+                *waits = *waits || (wants[k] && !this->outer_ok[k]);
+            }
+            st.seed = st.fire && st.first && c.seeded;
+        }
+    }
 
     // Every unit has fired its n, nothing in flight, every buffer empty
     bool finished() const
@@ -568,12 +706,14 @@ private:
     std::vector<Link> links;
     std::vector<std::vector<int>> ins, outs;    // per unit, its in- and out-edges (link indices)
     std::vector<size_t> order;                  // the units in topological order
-    size_t output = 0;                          // the unit owning the outer output
+    std::vector<int> outputs;                   // the units owning the outer outputs
+    std::vector<int> chain;                     // per unit, its chain's output (an index there)
+    std::vector<std::vector<int>> forks;        // per fork, its units
     std::vector<UnitState> u;
     std::vector<LinkState> l;
     // step()'s, sized at configure: its result and its passes' per-unit values
     Step stepped;
-    std::vector<bool> avail, wants, would_fire, gives, head, offer, outer_ok;
+    std::vector<bool> avail, wants, would_fire, gives, head, offer, outer_ok, blocked;
     std::vector<bool> no_seeds;     // the three-argument step's seeds, all there
 };
 
@@ -589,16 +729,17 @@ private:
 // An input's source is an outer port (the streamer's beat, moved when the
 // unit fires), a wire (the producer's output from its eval this cycle) or a
 // buffer (its slot rslot, written in an earlier cycle). A unit takes each
-// in-edge on that edge's to_input; its other inputs are outer, in port order.
-// wire() takes the edges and the order from the configured rule.
+// in-edge on that edge's to_input; its other inputs are outer, in port order
+// (a forked input's beat given to each of its units). wire() takes the edges
+// and the order from the configured rule.
 class SnaxGroupDatapaths
 {
 public:
     std::vector<std::unique_ptr<SnaxDatapath>> units;
     std::vector<std::unique_ptr<SnaxDatapath>> buffers;     // per link; null for a wire
 
-    // The rule's links, its topological order and the unit owning the outer output; per
-    // unit and input, the link feeding it (-1: an outer input)
+    // The rule's links, its topological order and the unit owning the first outer output;
+    // per unit and input, the link feeding it (-1: an outer input)
     void wire(const SnaxGroupRule &rule)
     {
         this->links = rule.edges();
@@ -621,8 +762,8 @@ public:
     }
 
     // One cycle with the rule's step; outer[k], unit k's outer inputs' beats in port order
-    // (any words when it does not fire). The outer output's unit's output, valid when it
-    // pushes.
+    // (any words when it does not fire). The first outer output's unit's output, valid when
+    // it pushes; any unit's is out(k).
     const std::vector<uint64_t> &cycle(const SnaxGroupRule::Step &step,
         const std::vector<std::vector<const uint64_t *>> &outer)
     {
@@ -683,6 +824,9 @@ public:
         }
         return this->units[this->output]->out();
     }
+
+    // Unit k's output after the last cycle()
+    const std::vector<uint64_t> &out(size_t k) const { return this->units[k]->out(); }
 
 private:
     std::vector<SnaxGroupRule::Link> links;

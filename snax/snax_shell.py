@@ -11,14 +11,15 @@ import gvsoc.systree
 
 
 class SnaxShell(gvsoc.systree.Component):
-    """START, JOBS and the units' CSRs, read-write; STATUS and BUSY_COUNTER, read-only.
+    """START, JOBS (or a JOBS_<SINK> per chain) and the units' CSRs, read-write; STATUS and
+    BUSY_COUNTER, read-only.
 
     START is a strobe that reads 0; every other CSR keeps its width (a write its low
     bits) and BUSY_COUNTER saturates at its own (accelerator.json's widths).
 
-    A start goes to the group's ctrl as JOBS and every JOB_BEATS (JOBS and 1
-    without one), then every scalar CSR (K1, or K1_LO and K1_HI), when the
-    group is idle; JOBS or a JOB_BEATS 0 is the empty run, ended by the shell,
+    A start goes to the group's ctrl as every JOBS and every JOB_BEATS (the JOBS
+    and 1 without one), then every scalar CSR (K1, or K1_LO and K1_HI), when the
+    group is idle; a JOBS or a JOB_BEATS 0 is the empty run, ended by the shell,
     as snax_shell.hpp says. While the group is busy a write to any of its
     read-write CSRs, START or a setting, is held (the core stalls) until the
     cycle after its run ends, so the settings stay constant through a run;
@@ -29,9 +30,9 @@ class SnaxShell(gvsoc.systree.Component):
     csr_base : int
         Number of the group's first CSR (its START), for the trace.
     csrs : list[str]
-        The group's read-write CSRs in CSR order: START, JOBS, then the
-        units' (JOB_BEATS for each fold without a fixed T, then its scalars',
-        in unit order).
+        The group's read-write CSRs in CSR order: START, JOBS (with several
+        chains a JOBS_<SINK> per chain, D189), then the units' (JOB_BEATS for
+        each fold without a fixed T, then its scalars', in unit order).
         STATUS and BUSY_COUNTER follow them.
     widths : list[int]
         Each read-write CSR's width, in the order of csrs (START 1).
@@ -43,7 +44,7 @@ class SnaxShell(gvsoc.systree.Component):
     input : io slave
         CSR accesses, offsets from the group's first CSR.
     ctrl : io master
-        To the group's ctrl: a start, JOBS, every JOB_BEATS and every scalar CSR.
+        To the group's ctrl: a start, every JOBS, every JOB_BEATS and every scalar CSR.
     busy : wire<bool> slave
         The group's busy.
     """
