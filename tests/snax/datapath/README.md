@@ -15,13 +15,13 @@ The datapaths of `snax/snax_datapath.hpp`, one plain C++ class per entry of snax
     out int64                    the output's type (a LinkBuffer's dtype)
     lanes 4
     accumulate 1                 Mac only; also regOut, depth (LinkBuffer), op, k (a one-stream SimdLanes' constant)
-    rows 4                       Mac only: a bank of rows (D191); its steps carry a ninth enable, row
+    rows 4                       Mac only: a bank of rows (D191); its steps carry two more enables, row and drain
     seed 1                       a seeded fold (TreeAccumulate, SerialAccumulate: its last input the seed, one element; Mac: its output's lanes)
     k1 3                         axpby's (op axpby) k1, baked, or `k1 csr` (from its CSR); k2 likewise; `kcsr`: a one-stream k from its CSR
     set k1 7                     a CSR slot's value, given to the datapath (set_scalar) before the next step
     step F FI R L E LD WS RS : IN0 ; IN1 ... => OUT
 
-A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEnables`), and row in a test with `rows`, then each input's lanes, `;` between inputs, then the output lanes eval must give: its registers before the step's clock edge for a registered datapath, the combinational result for SimdLanes and a plain Mac without regOut. A fold's or SerialAccumulate's output is one value.
+A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEnables`), and row and drain in a test with `rows` (the row a firing adds into and the row the output shows, the RTL's pins; the C++ class keeps the row its last firing wrote, the same row, and does not read drain), then each input's lanes, `;` between inputs, then the output lanes eval must give: its registers before the step's clock edge for a registered datapath, the combinational result for SimdLanes and a plain Mac without regOut. A fold's or SerialAccumulate's output is one value.
 
 ## What it covers
 

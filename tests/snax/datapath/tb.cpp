@@ -165,18 +165,20 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         }
         else if (key == "step")
         {
-            // step FIRE FIRST READ LANE EN LOAD WSLOT RSLOT [ROW] : IN0 ; IN1 ... => OUT
+            // step FIRE FIRST READ LANE EN LOAD WSLOT RSLOT [ROW DRAIN] : IN0 ; IN1 ... => OUT;
+            // DRAIN, the row a bank's output shows, is the Chisel's pin: the class keeps the row
+            // its last firing wrote, the same row, so it is read and not given
             Step s;
             size_t colon = line.find(':'), arrow = line.find("=>");
             ok = colon != std::string::npos && arrow != std::string::npos;
             std::vector<int64_t> e = ok ? numbers(line.substr(4, colon - 4))
                 : std::vector<int64_t>();
-            ok = ok && (e.size() == 8 || e.size() == 9);
+            ok = ok && (e.size() == 8 || e.size() == 10);
             if (ok)
             {
                 s.en.fire = e[0], s.en.first = e[1], s.en.read = e[2], s.en.lane = e[3];
                 s.en.en = e[4], s.en.load = e[5], s.en.wslot = e[6], s.en.rslot = e[7];
-                s.en.row = e.size() == 9 ? e[8] : 0;
+                s.en.row = e.size() == 10 ? e[8] : 0;
             }
             if (ok)
             {
