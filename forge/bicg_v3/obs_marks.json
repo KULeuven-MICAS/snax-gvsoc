@@ -1,0 +1,47 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "dma_in",
+  "label": "dma load_p"
+ },
+ {
+  "mark": 3,
+  "kind": "dma_in",
+  "label": "dma load_r"
+ },
+ {
+  "mark": 4,
+  "kind": "streamer_config",
+  "label": "streamer config bicg_types"
+ },
+ {
+  "mark": 5,
+  "kind": "acc_config",
+  "label": "acc config bicg_types"
+ },
+ {
+  "mark": 6,
+  "kind": "run",
+  "label": "run bicg_types"
+ },
+ {
+  "mark": 7,
+  "kind": "dma_out",
+  "label": "dma store_q"
+ },
+ {
+  "mark": 8,
+  "kind": "dma_out",
+  "label": "dma store_s"
+ },
+ {
+  "mark": 9,
+  "kind": "check",
+  "label": "check"
+ }
+]

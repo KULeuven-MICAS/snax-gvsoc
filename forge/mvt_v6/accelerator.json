@@ -1,0 +1,79 @@
+{
+ "design_point": "out/design/mvt_v6/design_point.json",
+ "tag": "snax_forge_mvt_v6",
+ "accelerators": [
+  {
+   "name": "mvt",
+   "inputs": [["vmul_x1.a", "mac_x2.a"], "vmul_x1.b", "vsum_x1.seed", "mac_x2.b", "mac_x2.seed"],
+   "outputs": ["vsum_x1.out", "mac_x2.out"],
+   "groups": [
+    {
+     "name": "mvt",
+     "csrs": [
+      {"name": "START", "access": "rw", "offset": 0, "width": 1},
+      {"name": "JOBS_VSUM_X1", "access": "rw", "offset": 1, "width": 32},
+      {"name": "JOBS_MAC_X2", "access": "rw", "offset": 2, "width": 32},
+      {"name": "STATUS", "access": "ro", "offset": 6, "width": 2},
+      {"name": "BUSY_COUNTER", "access": "ro", "offset": 7, "width": 32}
+     ],
+     "units": [
+      {
+       "name": "vmul_x1",
+       "brm": "simd",
+       "datapath": "SimdLanes",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int8", "lanes": 8},
+        "b": {"port": "b", "dir": "in", "dtype": "int8", "lanes": 8},
+        "out": {"port": "out", "dir": "out", "dtype": "int32", "lanes": 8}
+       },
+       "opType": "int32",
+       "params": {"op": "mul"},
+       "timing": {"latency": 0, "ii": 1, "span": 1},
+       "csrs": []
+      },
+      {
+       "name": "vsum_x1",
+       "brm": "accumulate",
+       "datapath": "TreeAccumulate",
+       "ports": {
+        "a": {"port": "in", "dir": "in", "dtype": "int32", "lanes": 8},
+        "seed": {"port": "seed", "dir": "in", "dtype": "int32", "lanes": 1, "d_in": 2},
+        "out": {"port": "out", "dir": "out", "dtype": "int32", "lanes": 1, "d_out": 2}
+       },
+       "params": {"op": "add"},
+       "timing": {"latency": 1, "ii": 1, "span": 1},
+       "csrs": [{"name": "JOB_BEATS", "access": "rw", "offset": 3, "width": 32}]
+      },
+      {
+       "name": "mac_x2",
+       "brm": "mac",
+       "datapath": "Mac",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int8", "lanes": 8},
+        "b": {
+         "port": "b",
+         "dir": "in",
+         "dtype": "int8",
+         "lanes": 8,
+         "d_in": 8,
+         "broadcast": true,
+         "hold": true
+        },
+        "seed": {"port": "seed", "dir": "in", "dtype": "int32", "lanes": 8},
+        "out": {"port": "out", "dir": "out", "dtype": "int32", "lanes": 8}
+       },
+       "opType": "int32",
+       "params": {"accumulate": true, "regOut": false, "rows": 8},
+       "timing": {"latency": 1, "ii": 1, "span": 1},
+       "csrs": [
+        {"name": "JOB_BEATS", "access": "rw", "offset": 4, "width": 32},
+        {"name": "ROWS", "access": "rw", "offset": 5, "width": 4}
+       ]
+      }
+     ],
+     "links": [{"name": "tmp1_prod", "from": "vmul_x1.out", "to": "vsum_x1.a", "depth": 1}]
+    }
+   ]
+  }
+ ]
+}

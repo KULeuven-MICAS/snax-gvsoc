@@ -79,24 +79,26 @@ For a linked group:
 - `push` lines are the last unit's results, `first` and `last` the head's firings each one folds;
 - `count` and `firings` are the head's, and `rate` is the head's firings per result of the last unit.
 
+A group of several chains on a forked input (D189) has an output per chain, each its sink's: its `push` lines carry `unit`, the sink's name, and `n` counts that output's results; `rate` is a list, one per output in unit order (the order of the group's `JOBS_<SINK>` CSRs). Its `fire` lines are the head's, the first unit, whose outer inputs include the forked one, read once for all its units. A group of one output writes neither.
+
 An output packed d_out results to a word (D174) still has one `push` line per result; its writer writes one word every d_out pushes, and on the run's last push, so the writer's `b` counts words, not results: the writer's grant of word w follows the push of result (w + 1) · d_out − 1, or the last one.
 
-An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word. A broadcast input (D186) moves one lane a beat, given to all the unit's lanes by wires: its `value` is that one lane, as its reader or slicer gave it.
+An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word. A broadcast input (D186) moves one lane a beat, given to all the unit's lanes by wires: its `value` is that one lane, as its reader or slicer gave it. A held input (D190) moves its beat on a bank row's first firing only, as a seed on its job's first: its `b` is -1 on the row's other firings, its `value` the beat it keeps. A bank (D191) gives ROWS results a job, so its output's `rate` and a `push`'s `first` and `last` divide the head's firings evenly among the results; they are not the firings a bank row folds. A carried seed (D192) is taken every job; its `value` is the beat as read, the datapath given 0 in its place while the job is below CARRY.
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
 | `events` | `start` | the cycle `s` a start is taken (busy from `s + 1`) | `count` (the run's firings, JOBS * JOB_BEATS; a linked group's head's), `rate` (its JOB_BEATS: a result every `rate`-th firing; 1 without one) |
 | `events` | `done` | the run's last busy cycle `E` (idle from `E + 1`) | `firings`; `first` and `last`, the cycles of its first and last firing |
 | `summary` | `run` | `E` | `index` (from 0), `firings`, `busy`, `stall_in`, `stall_out`, `flush` (they add up to `E - s`) |
-| `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order; a fold's or a Mac's seed, taken on its job's first firing only, -1 on the others), `value` (each input port's beat words, port order, flat; a seed not taken, its last) |
+| `beats` | `fire` | the firing | `n` (its index in the run), `b` (the beat taken from each input port, port order; a fold's or a Mac's seed, taken on its job's first firing only (a seeded bank's on its job's first ROWS, a beat a row, D194), -1 on the others), `value` (each input port's beat words, port order, flat; a seed not taken, its last) |
 | `beats` | `push` | the push | `n` (its index among the run's results), `first`, `last` (the firings it folds; equal at rate 1), `value` (the output beat's words) |
 | `beats` | `class` | the first cycle of a run of one class, from `s + 1` to `E` | `mode` (`busy`, `stall_in`, `stall_out`, `flush`: the class the `run` line counts the cycle in) |
 
 A linked group's run line (`SnaxGroupRule` in `snax/snax_group.hpp`) gives each busy cycle the first class that holds, in this order:
 
-1. `stall_out`: the last unit has a result and no room;
+1. `stall_out`: the last unit of a chain (an output's unit) has a result and no room;
 2. `busy`: any unit fires, reads a lane in place, or is in its II gap;
-3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat;
+3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat (a forked input's member waiting for its fork counts through the member without its beat, D189);
 4. `flush`: otherwise (results in flight, beats in a buffer).
 
 For one unit these are the unit's own classes. Per-unit events of a linked group are not written yet (snax-forge open item 96).

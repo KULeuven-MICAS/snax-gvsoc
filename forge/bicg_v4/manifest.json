@@ -1,0 +1,37 @@
+{
+ "design": "bicg_v4",
+ "design_point": "out/design/bicg_v4/design_point.json",
+ "symbols": {"M": 64, "N": 64},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_bicg_v4_streamer_bicg_types.hjson", "accelerator.json", "include/streamer_bicg_types_csr_addr_map.h", "include/bicg_types_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0/group_bicg_types",
+ "csrs": {
+  "streamers": [
+   {"name": "bicg_types", "first": 960, "last": 995, "trace": "snax_acc0/streamer_bicg_types"}
+  ],
+  "accelerator": {
+   "BICG_TYPES_RW_START": 996,
+   "BICG_TYPES_RW_JOBS_SUM": 997,
+   "BICG_TYPES_RW_JOBS_MAC": 998,
+   "BICG_TYPES_RW_SUM_JOB_BEATS": 999,
+   "BICG_TYPES_RW_MAC_JOB_BEATS": 1000,
+   "BICG_TYPES_RW_MAC_ROWS": 1001,
+   "BICG_TYPES_RO_STATUS": 1002,
+   "BICG_TYPES_RO_BUSY_COUNTER": 1003
+  }
+ },
+ "tasks": [
+  {
+   "name": "q_mult_bicg_types",
+   "beats": 1024,
+   "csrs": {
+    "JOBS_SUM": 64,
+    "JOBS_MAC": 1,
+    "SUM_JOB_BEATS": 16,
+    "MAC_JOB_BEATS": 1024,
+    "MAC_ROWS": 16
+   }
+  }
+ ]
+}

@@ -1,0 +1,57 @@
+[
+ {
+  "mark": 1,
+  "kind": "dma_in",
+  "label": "dma load_A"
+ },
+ {
+  "mark": 2,
+  "kind": "dma_in",
+  "label": "dma load_y1"
+ },
+ {
+  "mark": 3,
+  "kind": "dma_in",
+  "label": "dma load_x1"
+ },
+ {
+  "mark": 4,
+  "kind": "dma_in",
+  "label": "dma load_y2"
+ },
+ {
+  "mark": 5,
+  "kind": "dma_in",
+  "label": "dma load_x2"
+ },
+ {
+  "mark": 6,
+  "kind": "streamer_config",
+  "label": "streamer config mvt"
+ },
+ {
+  "mark": 7,
+  "kind": "acc_config",
+  "label": "acc config mvt"
+ },
+ {
+  "mark": 8,
+  "kind": "run",
+  "label": "run mvt"
+ },
+ {
+  "mark": 9,
+  "kind": "dma_out",
+  "label": "dma store_x1"
+ },
+ {
+  "mark": 10,
+  "kind": "dma_out",
+  "label": "dma store_x2"
+ },
+ {
+  "mark": 11,
+  "kind": "check",
+  "label": "check"
+ }
+]

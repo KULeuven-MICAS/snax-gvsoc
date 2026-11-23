@@ -61,9 +61,13 @@ accelerator.json, what the standard composite
                               sets' order:
       name                    Accelerator.name (the header's <ACC>, the set's)
       inputs, outputs         the outer ports, "<unit>.<port>", in its set's
-                              streamer's reader and writer order
+                              streamer's reader and writer order; a forked
+                              input (D189) one entry of inputs, the list of
+                              the ports its reader feeds, the reader's first
       groups[]                Group: name, csrs (START, JOBS, STATUS,
-                              BUSY_COUNTER), units, links
+                              BUSY_COUNTER; with several chains a
+                              JOBS_<SINK> per chain in place of JOBS, in the
+                              order of their sinks), units, links
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
                               snax_datapath.hpp's registry: SimdLanes,
                               TreeAccumulate, Mac, SerialAccumulate,
@@ -79,13 +83,16 @@ accelerator.json, what the standard composite
                               inputs, k1 * a + k2 * b; k: SimdLanes' constant at
                               one stream, its one input, an int of its opType;
                               k1, k2: axpby's baked; accumulate, regOut: Mac's;
-                              T: a fold's rate fixed at design time), scalars
+                              rows: a Mac's bank, absent at 1, D191; T: a
+                              fold's rate fixed at design time), scalars
                               (SimdLanes' slots read from CSRs, k at one
                               stream, k1, k2, each at its opType, none baked),
                               timing (latency, ii, span: 1 when missing), csrs
-                              (its R/W ones: JOB_BEATS, a fold's without T, then
-                              per scalar K1, or K1_LO and K1_HI at 64 bits, its
-                              pin the slot, its width the type's bits, 32 a word)
+                              (its R/W ones: JOB_BEATS, a fold's without T, ROWS,
+                              a bank's, of the bits of rows, CARRY, a carried
+                              seed's, of JOBS' width, then per scalar K1, or
+                              K1_LO and K1_HI at 64 bits, its pin the slot, its
+                              width the type's bits, 32 a word)
     groups[].links[]          Link: name, from (an out port, "<unit>.<port>"),
                               to (an in port), depth (0 a wire, >= 1 a buffer)
     a CSR                     Csr: name, access (rw, ro), offset (from the
@@ -93,8 +100,8 @@ accelerator.json, what the standard composite
                               CSR: START 1, JOBS and JOB_BEATS job_width, STATUS
                               2, BUSY_COUNTER busy_counter_width), pin
 
-Per group the CSRs in CSR order are START, JOBS, its units' R/W CSRs, STATUS,
-BUSY_COUNTER, and the offsets over all groups of all accelerators in that order
+Per group the CSRs in CSR order are START, JOBS (or each JOBS_<SINK>), its units'
+R/W CSRs, STATUS, BUSY_COUNTER, and the offsets over all groups of all accelerators in that order
 are contiguous from 0 (the shell's view): they are read, never computed
 (a group's window starts at its START). Unit, group and accelerator names
 are each the file's once.
@@ -107,14 +114,18 @@ accelerator.json, the sets' names and order are the accelerators' (a slot of
 one snax_streamer_cfg takes one accelerator, whatever its name); each
 accelerator's inputs and outputs are its set's readers and writers in number;
 they are exactly the ports on no link, group by group, unit by unit in port
-order (gen.outer), each link goes from an out port to an in port of its
+order, a fork's at its reader's place (gen.outer), each link goes from an out port to an in port of its
 group's units with the same dtype and lanes, neither end sliced nor packed
-(gen.link), no port is on two links (gen.link_port) and a group's links
-connect its units (gen.group), the
+(gen.link), no port is on two links (gen.link_port), a group's links and
+forks connect its units (gen.group), and a fork gives one reader to two or more
+outer inputs of one group's chain heads, alike in dtype, lanes, d_in and
+broadcast (gen.fork; never beside shared movers, gen.share), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
-1); an outer output with d_out (D174) fills one word with d_out results, on one
-channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
+1); a held input (``hold``, D190) is a broadcast outer input of a bank, read
+once a row, and a carried seed (``carry``, D192) a seed, 0 before CARRY jobs
+(gen.args, gen.hold, gen.seed); an outer output with d_out (D174) fills one
+word with d_out results, on one channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
 word on one channel, d_in pops of its lanes through SnaxGroup's slicer, d_in
 the word's elements / lanes; a broadcast input (D186, a lane-wise datapath's:
 SimdLanes, Mac) keeps its unit's lanes, its reader moving one lane a beat, so
@@ -134,7 +145,9 @@ target refuses what it cannot model with CfgTargetError (a datapath not in
 the registry, a TreeAccumulate op other than add, a unit CSR other than a
 fold's JOB_BEATS, a latency or span other than its datapath's, and SnaxGroup's
 shape with snax-forge's codes and wording: gen.chain, a group whose links are
-not a chain in unit order with the last unit's output the only outer one;
+not a chain in unit order with the last unit's output the only outer one, or
+with a fork the chains it joins, each forward in unit order with only its
+sink's output outer (and then its JOBS_<SINK>, one per chain, CfgSlotError);
 gen.span, a unit of span > 1 fed by the streamer, but for its seed; gen.seed, a
 seed on another datapath, of more than 1 lane, another dtype than its
 output's, or on a link). The datapath block before accelerator.json
@@ -232,12 +245,18 @@ CATALOGUE = {
 # A fold's seed port (snax-forge's brm.SEED): its output's lanes (one on a fold that sums its
 # lanes), read once per job (D163, D187)
 SEED = 'seed'
-# A group's own CSRs: START and JOBS, read-write, first; STATUS and BUSY_COUNTER,
-# read-only, last
-GROUP_RW = ('START', 'JOBS')
+# A group's own CSRs: START and JOBS (with several chains a JOBS_<SINK> per chain, D189,
+# jobs_names), read-write, first; STATUS and BUSY_COUNTER, read-only, last
 GROUP_RO = ('STATUS', 'BUSY_COUNTER')
-# The unit CSRs modelled: a fold's JOB_BEATS, then its scalars' (scalar_csrs)
-UNIT_RW = ('JOB_BEATS',)
+
+
+def jobs_names(sinks: list) -> list:
+    """A group's JOBS CSRs for its chains' sinks, in their order: JOBS for one chain,
+    JOBS_<SINK> for each of several (snax-forge's design/streamers.py's jobs_csr)."""
+    return ['JOBS'] if len(sinks) == 1 else [f'JOBS_{s.upper()}' for s in sinks]
+# The unit CSRs modelled: a fold's JOB_BEATS, a bank's ROWS (D191), a carried seed's CARRY
+# (D192), then its scalars' (scalar_csrs)
+UNIT_RW = ('JOB_BEATS', 'ROWS', 'CARRY')
 # The op names (snax_types.hpp's snax_op_names), and SimdLanes' axpby
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
 AXPBY = 'axpby'
@@ -414,7 +433,8 @@ class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes, its
     direction (in or out) and, on an outer output a packer feeds, d_out (D174), on an outer
     input a slicer feeds, d_in (D180); ``broadcast`` on an outer input whose reader gives one
-    lane to all of them (D186)."""
+    lane to all of them (D186); ``hold`` on one read once a bank row and kept (D190); ``carry``
+    on a seed that is its unit's own output, 0 before CARRY jobs (D192)."""
 
     port: str
     dtype: str
@@ -423,6 +443,8 @@ class Port:
     d_out: int = 1
     d_in: int = 1
     broadcast: bool = False
+    hold: bool = False
+    carry: bool = False
 
     @property
     def stream_lanes(self) -> int:
@@ -480,7 +502,8 @@ class Link:
 
 @dataclass(frozen=True)
 class Group:
-    """A group: its own CSRs (START, JOBS, STATUS, BUSY_COUNTER), its units and links."""
+    """A group: its own CSRs (START, JOBS or a JOBS_<SINK> per chain, STATUS,
+    BUSY_COUNTER), its units and links."""
 
     name: str
     csrs: list
@@ -489,14 +512,34 @@ class Group:
 
     @property
     def window(self) -> list:
-        """Its CSRs in CSR order: START, JOBS, its units' R/W CSRs, STATUS, BUSY_COUNTER."""
-        own = {c.name: c for c in self.csrs}
-        return ([own[n] for n in GROUP_RW] + [c for u in self.units for c in u.csrs]
-                + [own[n] for n in GROUP_RO])
+        """Its CSRs in CSR order: START, its JOBS, its units' R/W CSRs, STATUS, BUSY_COUNTER."""
+        own = [c for c in self.csrs if c.access == 'rw']
+        return (own + [c for u in self.units for c in u.csrs]
+                + [c for c in self.csrs if c.access == 'ro'])
+
+    @property
+    def jobs(self) -> list:
+        """Its JOBS CSRs' names: JOBS, or a JOBS_<SINK> per chain in its sinks' order."""
+        return [c.name for c in self.csrs if c.access == 'rw' and c.name != 'START']
+
+    def chains(self) -> list:
+        """Its chains, each its units' names from head to sink along its links, in the order
+        of their sinks among its units (one for a group no fork joins, D189)."""
+        nxt = {k.from_.split('.')[0]: k.to.split('.')[0] for k in self.links}
+        prev = {b: a for a, b in nxt.items()}
+        out = []
+        for u in self.units:
+            if u.name in nxt:
+                continue
+            chain = [u.name]
+            while chain[0] in prev:
+                chain.insert(0, prev[chain[0]])
+            out.append(chain)
+        return out
 
     @property
     def rw(self) -> list:
-        """Its read-write CSRs' names in CSR order: START, JOBS, the units'."""
+        """Its read-write CSRs' names in CSR order: START, its JOBS, the units'."""
         return [c.name for c in self.window if c.access == 'rw']
 
     @property
@@ -552,11 +595,27 @@ class Accelerator:
     port_mux which group is connected; its outer ports are then in no mover order."""
 
     name: str
-    inputs: list
+    inputs: list    # a fork's ports (D189) as one entry, a list, the reader's first
     outputs: list
     groups: list
     movers: list = field(default_factory=list)
     port_mux: PortMux = None
+
+    @property
+    def readers(self) -> list:
+        """Its input ports with a reader of their own, in reader order: a fork's by its
+        first port."""
+        return [x if isinstance(x, str) else x[0] for x in self.inputs]
+
+    @property
+    def forks(self) -> list:
+        """Its forked inputs (D189), each the ports one reader feeds, the reader's first."""
+        return [list(x) for x in self.inputs if not isinstance(x, str)]
+
+    @property
+    def input_ports(self) -> list:
+        """Every outer input port, a fork's each, in inputs' order."""
+        return [p for x in self.inputs for p in ([x] if isinstance(x, str) else x)]
 
     @property
     def csrs(self) -> list:
@@ -576,9 +635,11 @@ class Accelerator:
         return next(u for g in self.groups for u in g.units if u.name == name)
 
     def ports_of(self, unit: str, outer: list) -> list:
-        """The (index, BRM port) of each of outer's entries ("<unit>.<port>") that name unit."""
-        return [(i, entry.split('.', 1)[1]) for i, entry in enumerate(outer)
-                if entry.split('.', 1)[0] == unit]
+        """The (index, BRM port) of each of outer's entries ("<unit>.<port>", or a fork's
+        list of them) that name unit."""
+        return [(i, p.split('.', 1)[1]) for i, entry in enumerate(outer)
+                for p in ([entry] if isinstance(entry, str) else entry)
+                if p.split('.', 1)[0] == unit]
 
 
 @dataclass(frozen=True)
@@ -771,6 +832,17 @@ def _names(node: _Node, key, default=...) -> list:
     return values
 
 
+def _inputs(node: _Node) -> list:
+    """An accelerator's inputs: each a port, or a fork's list of two or more ports (D189)."""
+    values = node.get('inputs', list)
+    for v in values:
+        if not (isinstance(v, str) or (isinstance(v, list) and v
+                                       and all(isinstance(x, str) for x in v))):
+            raise CfgTypeError(node.file, node.where('inputs'), 'must be a list of ports, each a '
+                               f'string or a fork\'s list of strings, got {values!r}')
+    return [v if isinstance(v, str) else list(v) for v in values]
+
+
 def type_name(width: int, signed: bool) -> str:
     """NumPy's name of an integer type: int32, uint8, ..."""
     return f'{"int" if signed else "uint"}{width}'
@@ -838,8 +910,12 @@ def _port(node: _Node) -> Port:
         raise CfgTypeError(node.file, node.where('broadcast'),
             'an input of 2 lanes or more takes a broadcast, one lane given to all of them '
             '(absent when false)')
+    hold, carry = node.get('hold', bool, False), node.get('carry', bool, False)
+    if (hold or carry) and direction != 'in':
+        raise CfgTypeError(node.file, node.where('hold' if hold else 'carry'),
+            'an input is held or carried (absent when false)')
     return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction, d_out=d_out,
-                d_in=d_in, broadcast=broadcast)
+                d_in=d_in, broadcast=broadcast, hold=hold, carry=carry)
 
 
 def _unit(node: _Node) -> Unit:
@@ -872,6 +948,10 @@ def _unit(node: _Node) -> Unit:
             f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
     for key in ('accumulate', 'regOut'):
         params.get(key, bool, None)
+    rows = params.get('rows', int, 1)
+    if rows < 1:
+        raise CfgTargetError(node.file, params.where('rows'),
+            f'gen.args: rows {rows}; a bank has one row or more')
     k = params.get('k', int, None)
     if k is not None and datapath != 'SimdLanes':
         raise CfgTypeError(node.file, params.where('k'), f'a {datapath} unit has no constant k')
@@ -925,6 +1005,28 @@ def _unit(node: _Node) -> Unit:
             f'{[c.name for c in csrs]}: a fold without params.T has JOB_BEATS, any other unit '
             'none')
     unit_ports = {key: _port(ports.node(key)) for key in ports.value}
+    carried = [k for k, x in unit_ports.items() if x.carry]
+    mine = (['JOB_BEATS'] if fold and t is None else []) + (['ROWS'] if rows > 1 else []) + (
+        ['CARRY'] if carried else [])
+    if [c.name for c in own] != mine:
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'{[c.name for c in csrs]}: a unit\'s own CSRs are {mine} (JOB_BEATS, a fold\'s '
+            'without params.T; ROWS, a bank\'s; CARRY, a carried seed\'s), then its scalars\'')
+    if rows > 1 and own[mine.index('ROWS')].width != rows.bit_length():
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'ROWS: width {own[mine.index("ROWS")].width}; a bank of {rows} rows has ROWS of '
+            f'{rows.bit_length()} bits')
+    if rows > 1 and (datapath != 'Mac' or not fold):
+        raise CfgTargetError(node.file, params.where('rows'),
+            f'gen.args: rows {rows}; a bank (D191) is an accumulating Mac\'s')
+    if [k for k in carried if k != SEED]:
+        raise CfgTargetError(node.file, f'{node.where("ports")}.{carried[0]}',
+            'gen.seed: a carried port is a fold\'s seed, its unit\'s own output (D192)')
+    for key, x in unit_ports.items():
+        if x.hold and (rows == 1 or not x.broadcast or key == SEED):
+            raise CfgTargetError(node.file, f'{node.where("ports")}.{key}',
+                f'gen.hold: port {key} is held for a bank row but is not a broadcast input of a '
+                'bank; a held input is one lane for all for now')
     lanes = next(iter(unit_ports.values())).lanes
     if SEED in unit_ports:
         seed = unit_ports[SEED]
@@ -973,11 +1075,21 @@ def _group(node: _Node) -> Group:
         raise CfgTypeError(node.file, node.where('units'), 'no unit')
     csrs = [_csr(c) for c in node.nodes('csrs')]
     own = [(c.name, c.access) for c in csrs]
-    want = [(n, 'rw') for n in GROUP_RW] + [(n, 'ro') for n in GROUP_RO]
+    jobs = [n for n, _ in own[1:-2]]
+    many = len(jobs) > 1 and all(re.fullmatch(r'JOBS_\w+', n) for n in jobs)
+    want = ([('START', 'rw')] + [(n, 'rw') for n in (jobs if many else ['JOBS'])]
+            + [(n, 'ro') for n in GROUP_RO])
     if own != want:
         raise CfgSlotError(node.file, node.where('csrs'),
             f'{[c.name for c in csrs]}: a group\'s own CSRs are START, JOBS (rw), STATUS, '
-            'BUSY_COUNTER (ro), in that order')
+            'BUSY_COUNTER (ro), in that order, with several chains a JOBS_<SINK> per chain in '
+            'place of JOBS')
+    jobs_width = next(c.width for c in csrs if c.access == 'rw' and c.name != 'START')
+    for k, u in enumerate(units):
+        for c in u.csrs:
+            if c.name == 'CARRY' and c.width != jobs_width:
+                raise CfgSlotError(node.file, f'{node.where("units")}[{k}].csrs',
+                    f'CARRY: width {c.width}; it counts jobs, as JOBS ({jobs_width} bits)')
     return Group(name=node.get('name', str), csrs=csrs, units=units, links=links)
 
 
@@ -1002,7 +1114,7 @@ def _accelerator(node: _Node) -> Accelerator:
     mux = node.node('port_mux', None)
     acc = Accelerator(
         name=node.get('name', str),
-        inputs=_names(node, 'inputs'),
+        inputs=_inputs(node),
         outputs=_names(node, 'outputs'),
         groups=[_group(g) for g in node.nodes('groups')],
         movers=[] if movers is None else [_mover(m) for m in movers],
@@ -1024,6 +1136,9 @@ def _check_shared(at: _Node, acc: Accelerator):
     def fail(key, why):
         raise CfgSlotError(at.file, at.where(key), why)
 
+    if acc.forks:
+        fail('inputs', f'gen.share: accelerator {acc.name}: a fork and shared movers in one '
+             'accelerator; share_ports or fork_read, not both')
     groups = [g.name for g in acc.groups]
     mux = acc.port_mux
     if sorted(mux.groups) != sorted(groups):
@@ -1056,7 +1171,7 @@ def _check_shared(at: _Node, acc: Accelerator):
             if user.port in placed:
                 fail(where, f'{user.port} is on {placed[user.port]} already')
             placed[user.port] = m.name
-    for entry in [*acc.inputs, *acc.outputs]:
+    for entry in [*acc.input_ports, *acc.outputs]:
         if entry not in placed:
             fail('movers', f'{entry} is on no mover')
 
@@ -1115,15 +1230,16 @@ def _description(node: _Node) -> Description:
         own = {u.name: u for g in acc.groups for u in g.units}
         seen = set()
         for key in ('inputs', 'outputs'):
-            for i, entry in enumerate(getattr(acc, key)):
-                unit, _, port = entry.partition('.')
-                if unit not in own or port not in own[unit].ports:
-                    raise CfgSlotError(node.file, f'{at.where(key)}[{i}]',
-                        f'{entry!r} names no port of accelerator {acc.name}\'s units '
-                        f'({", ".join(own)})')
-                if entry in seen:
-                    raise CfgSlotError(node.file, f'{at.where(key)}[{i}]', f'{entry!r} twice')
-                seen.add(entry)
+            for i, item in enumerate(getattr(acc, key)):
+                for entry in [item] if isinstance(item, str) else item:
+                    unit, _, port = entry.partition('.')
+                    if unit not in own or port not in own[unit].ports:
+                        raise CfgSlotError(node.file, f'{at.where(key)}[{i}]',
+                            f'{entry!r} names no port of accelerator {acc.name}\'s units '
+                            f'({", ".join(own)})')
+                    if entry in seen:
+                        raise CfgSlotError(node.file, f'{at.where(key)}[{i}]', f'{entry!r} twice')
+                    seen.add(entry)
         _check_links(at, acc)
         for u in own.values():
             _check_shape(at, acc, u)
@@ -1145,6 +1261,10 @@ def _check_links(node: _Node, acc: Accelerator):
 
     linked = set()
     outer = {'in': [], 'out': []}
+    for f in acc.forks:
+        if len(f) < 2 or len(set(f)) != len(f):
+            fail('inputs', f'gen.fork: accelerator {acc.name}: the fork {f}: a fork gives one '
+                 'reader to two or more outer input ports of its units')
     for g in acc.groups:
         ports = {f'{u.name}.{k}': (p, dirs_of(u)[k]) for u in g.units
                  for k, p in u.ports.items()}
@@ -1177,32 +1297,57 @@ def _check_links(node: _Node, acc: Accelerator):
                          'is on another link too')
                 linked.add(end)
             parent[root(k.from_.split('.')[0])] = root(k.to.split('.')[0])
+        for f in acc.forks:
+            mine = [x.split('.')[0] for x in f if x.split('.')[0] in parent]
+            for u in mine[1:]:
+                parent[root(u)] = root(mine[0])
         if len({root(u.name) for u in g.units}) > 1:
             fail('groups', f'gen.group: group {g.name}\'s units {[u.name for u in g.units]} are '
                  'not connected by its links')
         for name, (_, direction) in ports.items():
             if name not in linked:
                 outer[direction].append(name)
-    for key, direction in (('inputs', 'in'), ('outputs', 'out')):
-        if list(getattr(acc, key)) != outer[direction]:
+    want_in = list(outer['in'])
+    for f in acc.forks:
+        _check_fork(node, acc, f, outer['in'])
+        want_in = [list(f) if x == f[0] else x for x in want_in if x not in f[1:]]
+    for key, want in (('inputs', want_in), ('outputs', outer['out'])):
+        if list(getattr(acc, key)) != want:
             fail(key, f'gen.outer: {list(getattr(acc, key))}; the unlinked ports are '
-                 f'{outer[direction]}, in group, unit and port order')
+                 f'{want}, in group, unit and port order')
 
     # SnaxGroup's shape, with snax-forge's codes and wording (its gen/accelerator.py's
-    # _check_chain): gen.chain, a chain in unit order whose last unit's output alone is outer;
-    # gen.span, a unit of span > 1 reads from a link
+    # _check_chain): gen.chain, a chain in unit order whose last unit's output alone is outer,
+    # or with a fork (D189) the chains it joins, each forward in unit order with its sink's
+    # output outer; gen.span, a unit of span > 1 reads from a link
     for g in acc.groups:
         names = [u.name for u in g.units]
         hops = [(k.from_.split('.')[0], k.to.split('.')[0]) for k in g.links]
-        chain = sorted(hops) == sorted(zip(names, names[1:]))
-        for k, u in enumerate(g.units):
-            outer_out = [p for p, d in dirs_of(u).items()
-                         if d == 'out' and f'{u.name}.{p}' not in linked]
-            chain = chain and bool(outer_out) == (k == len(g.units) - 1)
+        outs = {u.name: [f'{u.name}.{p}' for p, d in dirs_of(u).items() if d == 'out']
+                for u in g.units}
+        forked = [{x.split('.')[0] for x in f} & set(names) for f in acc.forks]
+        if not any(len(f) > 1 for f in forked):
+            chain = sorted(hops) == sorted(zip(names, names[1:]))
+            for k, u in enumerate(g.units):
+                outer_out = [p for p in outs[u.name] if p not in linked]
+                chain = chain and bool(outer_out) == (k == len(g.units) - 1)
+        else:
+            at = {u: k for k, u in enumerate(names)}
+            froms, tos = [a for a, _ in hops], [b for _, b in hops]
+            chain = (len(set(froms)) == len(froms) and len(set(tos)) == len(tos)
+                     and all(at[a] < at[b] for a, b in hops))
+            for u in names:
+                outer_out = [p for p in outs[u] if p not in linked]
+                chain = chain and bool(outer_out) == (u not in froms)
         if not chain:
             raise CfgTargetError(node.file, node.where('groups'),
                 f"gen.chain: accelerator {acc.name}: group {g.name}'s links {hops} over its "
-                f'units {names}: a group is one chain (no fork or join)')
+                f'units {names}: a group is a chain, or chains a fork joins (fork_read)')
+        want = jobs_names([c[-1] for c in g.chains()])
+        if g.jobs != want:
+            raise CfgSlotError(node.file, node.where('groups'),
+                f"group {g.name}'s JOBS CSRs {g.jobs}: its chains {g.chains()} take {want}, "
+                'one per chain in the order of their sinks')
         for u in g.units:
             if u.seeded and f'{u.name}.{SEED}' in linked:
                 raise CfgTargetError(node.file, node.where('groups'),
@@ -1214,6 +1359,31 @@ def _check_links(node: _Node, acc: Accelerator):
                 raise CfgTargetError(node.file, node.where('inputs'),
                     f'gen.span: accelerator {acc.name}: unit {u.name} (span {u.span}) reads '
                     f'{outer_in} from the streamer: a unit with span > 1 reads from a link')
+
+
+def _check_fork(node: _Node, acc: Accelerator, f: list, outer: list):
+    """gen.fork, snax-forge's in its wording: a forked input's ports (D189), two or more outer
+    inputs of one group's chain heads, alike in dtype, lanes, slicing and broadcast."""
+    def fail(why):
+        raise CfgSlotError(node.file, node.where('inputs'), f'gen.fork: {what}: {why}')
+
+    what = f'accelerator {acc.name}: the fork {f}'
+    group_of = {u.name: g for g in acc.groups for u in g.units}
+    port = {f'{u.name}.{k}': p for g in acc.groups for u in g.units for k, p in u.ports.items()}
+    if len(f) < 2 or len(set(f)) != len(f) or any(x not in outer for x in f):
+        fail(f'a fork gives one reader to two or more outer input ports of its units ({outer})')
+    if len({group_of[x.split('.')[0]].name for x in f}) > 1:
+        fail('its ports are in several groups; a fork feeds the chains of one group')
+    fed = {k.to.split('.')[0] for g in acc.groups for k in g.links}
+    for x in f:
+        if x.split('.')[0] in fed:
+            fail(f"{x}'s unit is fed by a link; a fork feeds the heads of chains")
+    kinds = {(port[x].dtype, port[x].lanes, port[x].d_in, port[x].broadcast) for x in f}
+    if len(kinds) > 1:
+        fail("its ports differ in dtype, lanes, d_in or broadcast; one reader's beat is the "
+             'same for all')
+    if any(port[x].hold for x in f):
+        fail('a port is held for a bank row; a held input is read by its own reader')
 
 
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):
@@ -1391,7 +1561,8 @@ def _check_description(acc: _Node, slot: AccSlot):
             _check_shared_set(acc, at, s, accelerator)
         else:
             for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
-                ports = getattr(accelerator, key)
+                # a fork's ports (D189) share their reader, the first's
+                ports = accelerator.readers if key == 'inputs' else accelerator.outputs
                 channels = s.streamer.get(mover, {}).get('num_channel', [])
                 if len(ports) != len(channels):
                     fail(f'{at}.{key}', f'{ports}, but set {s.name}\'s streamer has '

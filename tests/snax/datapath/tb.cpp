@@ -109,6 +109,7 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         else if (key == "accumulate") { int v; ok = (bool)(ss >> v); tests.back().p.accumulate = v; }
         else if (key == "regOut") { int v; ok = (bool)(ss >> v); tests.back().p.reg_out = v; }
         else if (key == "seed") { int v; ok = (bool)(ss >> v); tests.back().p.seed = v; }
+        else if (key == "rows") { ok = (bool)(ss >> tests.back().p.rows); }
         else if (key == "k")
         {
             // a one-stream SimdLanes' constant, decimal, kept as its 64-bit two's complement
@@ -164,15 +165,21 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         }
         else if (key == "step")
         {
-            // step FIRE FIRST READ LANE EN LOAD WSLOT RSLOT : IN0 ; IN1 ... => OUT
+            // step FIRE FIRST READ LANE EN LOAD WSLOT RSLOT [ROW DRAIN] : IN0 ; IN1 ... => OUT;
+            // DRAIN, the row a bank's output shows, is the Chisel's pin: the class keeps the row
+            // its last firing wrote, the same row, so it is read and not given
             Step s;
-            int fire, first, read, en, load;
-            ok = (bool)(ss >> fire >> first >> read >> s.en.lane >> en >> load >> s.en.wslot
-                >> s.en.rslot);
-            s.en.fire = fire, s.en.first = first, s.en.read = read, s.en.en = en,
-                s.en.load = load;
             size_t colon = line.find(':'), arrow = line.find("=>");
-            ok = ok && colon != std::string::npos && arrow != std::string::npos;
+            ok = colon != std::string::npos && arrow != std::string::npos;
+            std::vector<int64_t> e = ok ? numbers(line.substr(4, colon - 4))
+                : std::vector<int64_t>();
+            ok = ok && (e.size() == 8 || e.size() == 10);
+            if (ok)
+            {
+                s.en.fire = e[0], s.en.first = e[1], s.en.read = e[2], s.en.lane = e[3];
+                s.en.en = e[4], s.en.load = e[5], s.en.wslot = e[6], s.en.rslot = e[7];
+                s.en.row = e.size() == 10 ? e[8] : 0;
+            }
             if (ok)
             {
                 std::string ins = line.substr(colon + 1, arrow - colon - 1);
@@ -278,7 +285,8 @@ static int check_registry(int *count)
     const SnaxType i64 = {64, true};
     struct Case { const char *name; SnaxDatapathParams p; bool builds; int latency, span; };
     SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k, axpby,
-        axpby_no_k1, add_k1, mac_seed, mac_seed_bad, two_seed, plain_seed;
+        axpby_no_k1, add_k1, mac_seed, mac_seed_bad, two_seed, plain_seed, bank, bank_seed,
+        bank_plain, bank_none;
     two.in_types = {i64, i64};
     one.in_types = {i64};
     one_k.in_types = {i64};
@@ -311,6 +319,15 @@ static int check_registry(int *count)
     two_seed.seed = true;
     plain_seed = plain;
     plain_seed.seed = true;
+    // a bank (D191): an accumulating Mac's, seeded or not (D194); none at rows 0
+    bank = two;
+    bank.rows = 4;
+    bank_seed = mac_seed;
+    bank_seed.rows = 2;
+    bank_plain = plain;
+    bank_plain.rows = 2;
+    bank_none = two;
+    bank_none.rows = 0;
     std::vector<Case> cases = {
         {"SimdLanes", two, true, 0, 1}, {"SimdLanes", one_k, true, 0, 1},
         {"SimdLanes", one, false, 0, 0}, {"SimdLanes", two_k, false, 0, 0},
@@ -321,6 +338,8 @@ static int check_registry(int *count)
         {"Mac", one, false, 0, 0}, {"Mac", mac_seed, true, 1, 1},
         {"Mac", mac_seed_bad, false, 0, 0}, {"Mac", two_seed, false, 0, 0},
         {"Mac", plain_seed, false, 0, 0}, {"SimdLanes", two_seed, false, 0, 0},
+        {"Mac", bank, true, 1, 1}, {"Mac", bank_seed, true, 1, 1},
+        {"Mac", bank_plain, false, 0, 0}, {"Mac", bank_none, false, 0, 0},
         {"LaneAccumulate", two_seed, false, 0, 0}, {"TreeAccumulate", two_seed, true, 1, 1},
         {"SerialAccumulate", serial, true, 1, 4},
         {"LaneAccumulate", one, true, 1, 1}, {"LaneAccumulate", two, false, 0, 0},

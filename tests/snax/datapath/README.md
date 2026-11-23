@@ -15,12 +15,13 @@ The datapaths of `snax/snax_datapath.hpp`, one plain C++ class per entry of snax
     out int64                    the output's type (a LinkBuffer's dtype)
     lanes 4
     accumulate 1                 Mac only; also regOut, depth (LinkBuffer), op, k (a one-stream SimdLanes' constant)
+    rows 4                       Mac only: a bank of rows (D191); its steps carry two more enables, row and drain
     seed 1                       a seeded fold (TreeAccumulate, SerialAccumulate: its last input the seed, one element; Mac: its output's lanes)
     k1 3                         axpby's (op axpby) k1, baked, or `k1 csr` (from its CSR); k2 likewise; `kcsr`: a one-stream k from its CSR
     set k1 7                     a CSR slot's value, given to the datapath (set_scalar) before the next step
     step F FI R L E LD WS RS : IN0 ; IN1 ... => OUT
 
-A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEnables`), then each input's lanes, `;` between inputs, then the output lanes eval must give: its registers before the step's clock edge for a registered datapath, the combinational result for SimdLanes and a plain Mac without regOut. A fold's or SerialAccumulate's output is one value.
+A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEnables`), and row and drain in a test with `rows` (the row a firing adds into and the row the output shows, the RTL's pins; the C++ class keeps the row its last firing wrote, the same row, and does not read drain), then each input's lanes, `;` between inputs, then the output lanes eval must give: its registers before the step's clock edge for a registered datapath, the combinational result for SimdLanes and a plain Mac without regOut. A fold's or SerialAccumulate's output is one value.
 
 ## What it covers
 
@@ -35,6 +36,8 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 - SerialAccumulate over the beat (-13, 6): -13 after lane 0, -7 after lane 1.
 - The fold's seed: TreeAccumulate and SerialAccumulate seeded at int64 (1, 2 and 4 lanes) and int32 into int64 (2 and 4), random beats, seeds and enables: a job's first firing starts from its seed (TreeAccumulate), or adds it on the first beat's last lane (SerialAccumulate); and matvec_acc's worked example on TreeAccumulate at W = 2, rows (1, 2, 3, 4) against p = (1, 2, 0, 1) from q = 1: 6 after the first beat, 10 after the second.
 - The seeded Mac (D187, mvt's column form): int8 x int8 into int32 and int64 at W = 4 and 8, random beats, seeds and enables: a job's first firing starts from its seed, s <- seed + a * b, lane by lane.
+- A Mac's bank (D191, bicg's s): rows 2 and 4, int8 into int32 at W = 4 and int64 at W = 2, two jobs and more of 2R beats, random beats and enables: firing f adds into row f mod R, the job's first R firings starting their rows, and the output is the row the last firing wrote; the registry builds it at L 1, seeded too, and refuses it plain or at rows 0.
+- A seeded bank (D194, mvt's x2): rows 2 and 4, int8 into int32 at W = 4 and 8, random beats, seeds and enables: a row's first firing in its job starts from the seed it takes, s[row] <- seed + a * b.
 - LaneAccumulate (rowsum 2's): its worked example at W = 2, J = 2, T = 3, A's rows (1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12) a column a beat, giving (6, 15) then (24, 33); random beats and enables at int64 (1, 4 and 8 lanes), int32 (4 and 8) and int32 into int64 (4 and 8); the registry builds it at L 1, span 1, and refuses it with two inputs.
 - `snax/snax_types.hpp`'s arithmetic, which the classes run, on fixed vectors worked by hand in `tb.cpp`, for the edges the NumPy vectors do not reach: `ops`, the op table (wrapping at 8 to 64 bits, signed and unsigned min and max); `tree`, a fold's tree over a beat's lanes (`snax_op_tree`: halves first, wrapping); `types`, NumPy's result types (`snax_op_result_type`: int64 with uint64 refused); `beats`, whole beats (`snax_op_elementwise` and `snax_op_fold` on 64-bit channel words, lane 0 lowest, with int8, uint8, int16, int32 and int64 ports).
 
@@ -42,4 +45,4 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 
     tests/snax/datapath/run.sh
 
-It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `173 passed, 0 failed`.
+It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `177 passed, 0 failed`.

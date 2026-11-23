@@ -1,0 +1,23 @@
+# mac with a seeded bank of 4 rows, b held, M = 2: T = 8, JOBS 1
+# each job's first 4 firings take a seed beat, one a row; the cycles as unseeded
+
+unit mac Mac latency 1 ii 1 span 1 t 8 inputs 3 seed 1 rows 4 hold 1
+jobs 1
+start 0 taken
+expect run index=0 firings=8 busy=8 stall_in=0 stall_out=0 flush=1
+# E - s = 9
+
+# a b mac.seed ready | mac fire give | busy
+cycles
+1 1 1 1 | 0 0 | 0    # 0: idle
+1 1 1 1 | 1 0 | 1    # 1: mac fires 0, takes its seed
+1 1 1 1 | 1 0 | 1    # 2: mac fires 1, takes its seed
+1 1 1 1 | 1 0 | 1    # 3: mac fires 2, takes its seed
+1 1 1 1 | 1 0 | 1    # 4: mac fires 3, takes its seed
+1 1 1 1 | 1 0 | 1    # 5: mac fires 4 (gives)
+1 1 1 1 | 1 1 | 1    # 6: mac pushes; mac fires 5 (gives)
+1 1 1 1 | 1 1 | 1    # 7: mac pushes; mac fires 6 (gives)
+1 1 1 1 | 1 1 | 1    # 8: mac pushes; mac fires 7 (gives)
+1 1 1 1 | 0 1 | 1    # 9: mac pushes
+1 1 1 1 | 0 0 | 0    # 10: idle
+1 1 1 1 | 0 0 | 0    # 11: idle

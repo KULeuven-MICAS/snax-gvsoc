@@ -1,0 +1,27 @@
+# the fork at M = 4, depth 1, q's writer not ready in cycles 2 to 4
+# sum holds (stall_out), the buffer fills, vmul cannot give, so mac waits for its fork
+
+unit vmul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 1 inputs 0
+unit mac Mac latency 1 ii 1 span 1 t 4 inputs 2
+link vmul sum depth 1
+fork vmul.0 mac.0
+outputs sum mac
+jobs 4 1
+start 0 taken
+expect run index=0 firings=4 busy=5 stall_in=0 stall_out=2 flush=1
+# E - s = 8
+
+# vmul.a vmul.b mac.b sum.ready mac.ready | vmul fire give | sum fire give | mac fire give | occ0 | busy
+cycles
+1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 0: idle
+1 1 1 1 1 | 1 1 | 0 0 | 1 0 | 1 | 1    # 1: vmul pushes; vmul fires 0 (gives); mac fires 0
+1 1 1 0 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 2: vmul pushes; vmul fires 1 (gives); mac fires 1; sum fires 0 (gives)
+1 1 1 0 1 | 0 0 | 0 0 | 0 0 | 1 | 1    # 3: vmul holds; mac waits for its fork; sum holds
+1 1 1 0 1 | 0 0 | 0 0 | 0 0 | 1 | 1    # 4: vmul holds; mac waits for its fork; sum holds
+1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 5: vmul pushes; vmul fires 2 (gives); mac fires 2; sum pushes; sum fires 1 (gives)
+1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 6: vmul pushes; vmul fires 3 (gives); mac fires 3 (gives); sum pushes; sum fires 2 (gives)
+1 1 1 1 1 | 0 0 | 1 1 | 0 1 | 0 | 1    # 7: mac pushes; sum pushes; sum fires 3 (gives)
+1 1 1 1 1 | 0 0 | 0 1 | 0 0 | 0 | 1    # 8: sum pushes
+1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 9: idle
+1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 10: idle
