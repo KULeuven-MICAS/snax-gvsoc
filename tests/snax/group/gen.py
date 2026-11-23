@@ -357,6 +357,37 @@ def bank_cases():
           ready=lambda c: (1, 1), links=[("vmul", "sum", 1)], forks=[[("vmul", 0), ("mac", 0)]],
           comment=["the heads fire alike, K·M·ROWS = 12 times; each strip's s comes on its "
                    "last row, q's partial each row"])
+    seeded_bank_cases()
+
+
+def seeded_bank_cases():
+    """A seeded bank (D194): the Mac's seed moves a beat a row, needed and taken on each of a
+    job's first ROWS firings (first = d < ROWS), so row ρ starts from seed beat ρ; y2 held a row
+    (D190). Alone at R = 2 and 4, with a late seed, and as mvt's one pass (the fork, D189)."""
+    for rows, m, jobs in ((2, 3, 2), (4, 2, 1)):
+        mac = ("mac", "Mac", 1, 1, 3, True, {"rows": rows, "hold": [1]})
+        write(f"bank_seed_r{rows}", f"mac with a seeded bank of {rows} rows, b held, M = {m}: "
+              f"T = {m * rows}, JOBS {jobs}", [mac], [], jobs, [m * rows],
+              valid=lambda c: (1, 1, 1),
+              comment=[f"each job's first {rows} firings take a seed beat, one a row; with "
+                       "every seed there none waits"])
+    rows, m = 4, 2
+    mac = ("mac", "Mac", 1, 1, 3, True, {"rows": rows, "hold": [1]})
+    write(f"bank_seed_r{rows}_late", f"the seeded bank of {rows} rows, M = {m}, JOBS 2, its seed "
+          "missing in cycles 2 to 3, 7 and 10 to 11", [mac], [], 2, [m * rows],
+          valid=lambda c: (1, 1, 0 if c in (2, 3, 7, 10, 11) else 1),
+          comment=["a job's first ROWS firings wait for their seed beat (stall_in); a later "
+                   "firing (cycle 7, row 1's second pass) does not"])
+    units = [("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 1, True),
+             ("mac", "Mac", 1, 1, 3, True, {"rows": 2, "hold": [1]})]
+    m, rows = 3, 2
+    write("bank_fork_seeded", f"mvt's one pass at M = {m}, ROWS = {rows}: x1's sum T {rows} "
+          f"seeded per row (JOBS {m}), x2's seeded bank T {m * rows} (JOBS 1), y2 held, A "
+          "forked, x2's seed missing in cycle 2", units, None, [m, 1], [1, rows, m * rows],
+          valid=lambda c: (1, 1, 1, 1, 0 if c == 2 else 1), ready=lambda c: (1, 1),
+          links=[("vmul", "sum", 1)], forks=[[("vmul", 0), ("mac", 0)]],
+          comment=["the bank's second first firing waits for its seed beat, so vmul waits for "
+                   "its fork; x2's rows come on the job's last 2 firings"])
 
 
 def main():

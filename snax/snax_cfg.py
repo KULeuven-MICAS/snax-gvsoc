@@ -1016,9 +1016,9 @@ def _unit(node: _Node) -> Unit:
         raise CfgSlotError(node.file, node.where('csrs'),
             f'ROWS: width {own[mine.index("ROWS")].width}; a bank of {rows} rows has ROWS of '
             f'{rows.bit_length()} bits')
-    if rows > 1 and (datapath != 'Mac' or not fold or SEED in unit_ports):
+    if rows > 1 and (datapath != 'Mac' or not fold):
         raise CfgTargetError(node.file, params.where('rows'),
-            f'gen.args: rows {rows}; a bank (D191) is an unseeded accumulating Mac\'s')
+            f'gen.args: rows {rows}; a bank (D191) is an accumulating Mac\'s')
     if [k for k in carried if k != SEED]:
         raise CfgTargetError(node.file, f'{node.where("ports")}.{carried[0]}',
             'gen.seed: a carried port is a fold\'s seed, its unit\'s own output (D192)')

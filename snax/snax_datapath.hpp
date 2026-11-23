@@ -47,9 +47,10 @@
 //       read once per job), the first firing starts from it: s <- seed + p;
 //       plain, a * b + c at outType (c of out's type and lanes): L 0, or with
 //       regOut L 1, pin en, the output its register. A bank (rows R > 1, D191,
-//       accumulating and unseeded) keeps R rows of s, pin row: a firing adds
-//       into row `row`, first starting it, and the output is the row the last
-//       firing wrote, so a result pushed L after its firing is that row
+//       accumulating) keeps R rows of s, pin row: a firing adds into row `row`,
+//       first starting it (seeded, from the seed's beat it takes then, D194),
+//       and the output is the row the last firing wrote, so a result pushed L
+//       after its firing is that row
 //   LaneAccumulate(inType, outType, lanes)   L 1, pins fire, first: per lane
 //       x = cast_out(a); on fire s <- first ? x : s + x at outType, the output
 //       s (Mac's accumulating form without the product; rowsum 2's W rows on
@@ -308,7 +309,8 @@ public:
             uint64_t v;
             if (p.accumulate)
             {
-                // seeded, the job's first firing starts from the seed's lane l
+                // seeded, the job's first firing (a bank row's, D194) starts from the
+                // seed's lane l
                 v = en.first && !p.seed ? q : snax_op_compute(SNAX_OP_ADD, p.out_type,
                     snax_lane_get(en.first ? in[2] : row.data(), w, l), q);
             }
@@ -542,10 +544,10 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
         }}},
         {"Mac", {true, true, false, [](const SnaxDatapathParams &p, std::string *why) {
             size_t n = p.accumulate && !p.seed ? 2 : 3;
-            if (p.rows < 1 || (p.rows > 1 && (!p.accumulate || p.seed)))
+            if (p.rows < 1 || (p.rows > 1 && !p.accumulate))
             {
-                *why = "rows " + std::to_string(p.rows) + "; a bank (D191) is an unseeded "
-                    "accumulating Mac's";
+                *why = "rows " + std::to_string(p.rows) + "; a bank (D191) is an accumulating "
+                    "Mac's";
                 return std::unique_ptr<SnaxDatapath>();
             }
             if (p.in_types.size() != n || (p.accumulate && p.reg_out) ||

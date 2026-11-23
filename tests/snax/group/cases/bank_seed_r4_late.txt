@@ -1,0 +1,34 @@
+# the seeded bank of 4 rows, M = 2, JOBS 2, its seed missing in cycles 2 to 3, 7 and 10 to 11
+# a job's first ROWS firings wait for their seed beat (stall_in); a later firing (cycle 7, row 1's second pass) does not
+
+unit mac Mac latency 1 ii 1 span 1 t 8 inputs 3 seed 1 rows 4 hold 1
+jobs 2
+start 0 taken
+expect run index=0 firings=16 busy=16 stall_in=3 stall_out=0 flush=1
+# E - s = 20
+
+# a b mac.seed ready | mac fire give | busy
+cycles
+1 1 1 1 | 0 0 | 0    # 0: idle
+1 1 1 1 | 1 0 | 1    # 1: mac fires 0, takes its seed
+1 1 0 1 | 0 0 | 1    # 2: stall_in
+1 1 0 1 | 0 0 | 1    # 3: stall_in
+1 1 1 1 | 1 0 | 1    # 4: mac fires 1, takes its seed
+1 1 1 1 | 1 0 | 1    # 5: mac fires 2, takes its seed
+1 1 1 1 | 1 0 | 1    # 6: mac fires 3, takes its seed
+1 1 0 1 | 1 0 | 1    # 7: mac fires 4 (gives)
+1 1 1 1 | 1 1 | 1    # 8: mac pushes; mac fires 5 (gives)
+1 1 1 1 | 1 1 | 1    # 9: mac pushes; mac fires 6 (gives)
+1 1 0 1 | 1 1 | 1    # 10: mac pushes; mac fires 7 (gives)
+1 1 0 1 | 0 1 | 1    # 11: mac pushes
+1 1 1 1 | 1 0 | 1    # 12: mac fires 8, takes its seed
+1 1 1 1 | 1 0 | 1    # 13: mac fires 9, takes its seed
+1 1 1 1 | 1 0 | 1    # 14: mac fires 10, takes its seed
+1 1 1 1 | 1 0 | 1    # 15: mac fires 11, takes its seed
+1 1 1 1 | 1 0 | 1    # 16: mac fires 12 (gives)
+1 1 1 1 | 1 1 | 1    # 17: mac pushes; mac fires 13 (gives)
+1 1 1 1 | 1 1 | 1    # 18: mac pushes; mac fires 14 (gives)
+1 1 1 1 | 1 1 | 1    # 19: mac pushes; mac fires 15 (gives)
+1 1 1 1 | 0 1 | 1    # 20: mac pushes
+1 1 1 1 | 0 0 | 0    # 21: idle
+1 1 1 1 | 0 0 | 0    # 22: idle

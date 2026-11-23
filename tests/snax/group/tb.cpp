@@ -34,7 +34,9 @@
 // seed added when seeded) and s = A^T r from the Mac, r_i given to every
 // lane (its seed added when seeded). A bank (rows R, D191) with its b held
 // (D190), alone or as the fork's Mac, runs its datapath on r held a row: each
-// result is the bank row its giving firing wrote, its sums worked out here.
+// result is the bank row its giving firing wrote, its sums worked out here;
+// seeded (D194), each row of a job starts from the seed beat its first firing
+// took, int32 lanes seed_of(n * 4 + l) for the n-th beat taken.
 //
 //   tb CASE...
 //
@@ -472,7 +474,7 @@ static int64_t seed_of(int i) { return (i * 37) % 101 - 50; }
 static std::unique_ptr<SnaxGroupDatapaths> mac_datapaths(const Case &c, const SnaxGroupRule &rule)
 {
     if (c.units.size() != 1 || c.units[0].datapath != "Mac" || !c.units[0].seed ||
-        c.units[0].inputs != 3 || !c.links.empty() || c.lanes)
+        c.units[0].inputs != 3 || c.units[0].cfg.rows > 1 || !c.links.empty() || c.lanes)
     {
         return nullptr;
     }
@@ -556,17 +558,31 @@ static std::unique_ptr<SnaxGroupDatapaths> fork_datapaths(const Case &c, const S
 
 // NB (D191): a bank's sums as the tb works them out, R rows of LANES int32 lanes, and its
 // held r (D190), r_of(n) for the n-th row taken: a firing adds a * r into row fired mod R,
-// starting it on its job's first R firings; a result is the row the last firing wrote
+// starting it on its job's first R firings (seeded, D194, from the seed beat taken then:
+// seed_of(n * LANES + l) for the n-th); a result is the row the last firing wrote
 struct BankModel
 {
     int rows = 1;
     uint32_t t = 1;
-    uint32_t fired = 0, taken = 0;
+    bool seeded = false;
+    uint32_t fired = 0, taken = 0, seeds = 0;
     int last = 0;
     int64_t r = 0;
     std::vector<std::vector<int64_t>> s;
 
-    BankModel(int rows, uint32_t t) : rows(rows), t(t), s(rows, std::vector<int64_t>(LANES, 0)) {}
+    BankModel(int rows, uint32_t t, bool seeded) : rows(rows), t(t), seeded(seeded),
+        s(rows, std::vector<int64_t>(LANES, 0)) {}
+
+    // the seed beat the next seeded firing takes, its int32 lanes
+    std::vector<uint64_t> seed_beat() const
+    {
+        std::vector<uint64_t> w(snax_words(LANES, {32, true}), 0);
+        for (int lane = 0; lane < LANES; lane++)
+        {
+            snax_lane_set(w.data(), 32, lane, seed_of(this->seeds * LANES + lane));
+        }
+        return w;
+    }
 
     // r for this cycle: taken anew on a row's first firing
     int64_t held(bool take)
@@ -584,19 +600,22 @@ struct BankModel
         bool first = this->fired % this->t < (uint32_t)this->rows;
         for (int lane = 0; lane < LANES; lane++)
         {
-            this->s[row][lane] = (first ? 0 : this->s[row][lane]) + a[lane] * this->r;
+            int64_t from = !first ? this->s[row][lane] : this->seeded
+                ? seed_of(this->seeds * LANES + lane) : 0;
+            this->s[row][lane] = from + a[lane] * this->r;
         }
+        this->seeds += first && this->seeded;
         this->last = row;
         this->fired++;
     }
 };
 
-// A banked Mac alone (rows above 1, unseeded, b held, nothing sliced): its datapath; nullptr
-// when the case is not one
+// A banked Mac alone (rows above 1, b held, seeded or not, nothing sliced): its datapath;
+// nullptr when the case is not one
 static std::unique_ptr<SnaxGroupDatapaths> bank_datapaths(const Case &c, const SnaxGroupRule &rule)
 {
-    if (c.units.size() != 1 || c.units[0].datapath != "Mac" || c.units[0].seed ||
-        c.units[0].cfg.rows < 2 || c.units[0].inputs != 2 || c.units[0].hold != std::vector<int>{1} ||
+    if (c.units.size() != 1 || c.units[0].datapath != "Mac" || c.units[0].cfg.rows < 2 ||
+        c.units[0].inputs != 2 + (int)c.units[0].seed || c.units[0].hold != std::vector<int>{1} ||
         !c.links.empty() || c.lanes || !c.din.empty() || c.dout != 1)
     {
         return nullptr;
@@ -606,6 +625,11 @@ static std::unique_ptr<SnaxGroupDatapaths> bank_datapaths(const Case &c, const S
     p.op_type = p.out_type = I32;
     p.lanes = LANES;
     p.rows = c.units[0].cfg.rows;
+    p.seed = c.units[0].seed;
+    if (p.seed)
+    {
+        p.in_types.push_back(I32);
+    }
     std::string why;
     auto g = std::unique_ptr<SnaxGroupDatapaths>(new SnaxGroupDatapaths());
     g->units.push_back(snax_datapath_new("Mac", p, &why));
@@ -685,7 +709,7 @@ static int run(const Case &c)
     std::vector<int64_t> s_sum(LANES, 0);
     // a bank's (the Mac alone's, or the fork's Mac's): its sums and held r
     const UnitLine &bank_unit = c.units.back();
-    BankModel bank(bank_unit.cfg.rows, bank_unit.t);
+    BankModel bank(bank_unit.cfg.rows, bank_unit.t, bank_unit.seed);
     int bank_pushed = 0;
     // the seeded Mac's: per lane its job's sum so far, and each job's sums when done
     std::vector<int64_t> job_sum(LANES, 0);
@@ -958,7 +982,13 @@ static int run(const Case &c)
                 snax_lane_set(A.data(), I8.width, lane, a[lane]);
                 snax_lane_set(R.data(), I8.width, lane, r);
             }
-            banked->cycle(step, {{A.data(), R.data()}});
+            std::vector<uint64_t> seed = bank.seed_beat();
+            std::vector<const uint64_t *> outer = {A.data(), R.data()};
+            if (bank.seeded)
+            {
+                outer.push_back(seed.data());
+            }
+            banked->cycle(step, {outer});
             std::string why;
             if (step.units[0].push && !bank_result(bank, banked->out(0), &why))
             {
@@ -990,9 +1020,10 @@ static int run(const Case &c)
             {
                 outer[1].push_back(q_seed.data());
             }
+            std::vector<uint64_t> bank_seed = bank.seed_beat();
             if (c.units[2].seed)
             {
-                outer[2].push_back(s_seed.data());
+                outer[2].push_back(bank.rows > 1 ? bank_seed.data() : s_seed.data());
             }
             forked->cycle(step, outer);
             if (step.units[0].fire != step.units[2].fire)

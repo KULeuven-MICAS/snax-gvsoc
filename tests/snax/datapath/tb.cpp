@@ -319,7 +319,7 @@ static int check_registry(int *count)
     two_seed.seed = true;
     plain_seed = plain;
     plain_seed.seed = true;
-    // a bank (D191): an unseeded accumulating Mac's; none at rows 0
+    // a bank (D191): an accumulating Mac's, seeded or not (D194); none at rows 0
     bank = two;
     bank.rows = 4;
     bank_seed = mac_seed;
@@ -338,7 +338,7 @@ static int check_registry(int *count)
         {"Mac", one, false, 0, 0}, {"Mac", mac_seed, true, 1, 1},
         {"Mac", mac_seed_bad, false, 0, 0}, {"Mac", two_seed, false, 0, 0},
         {"Mac", plain_seed, false, 0, 0}, {"SimdLanes", two_seed, false, 0, 0},
-        {"Mac", bank, true, 1, 1}, {"Mac", bank_seed, false, 0, 0},
+        {"Mac", bank, true, 1, 1}, {"Mac", bank_seed, true, 1, 1},
         {"Mac", bank_plain, false, 0, 0}, {"Mac", bank_none, false, 0, 0},
         {"LaneAccumulate", two_seed, false, 0, 0}, {"TreeAccumulate", two_seed, true, 1, 1},
         {"SerialAccumulate", serial, true, 1, 4},
