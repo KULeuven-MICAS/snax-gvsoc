@@ -35,8 +35,8 @@ except ImportError:
     snax_accelerator = None
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
-from test_snax_cfg import (BICG3, BICG3_STREAMER, CLUSTER, DOT1, DOT4,  # noqa: E402
-                           DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
+from test_snax_cfg import (BICG3, BICG3_STREAMER, BICG4, BICG4_STREAMER, CLUSTER,  # noqa: E402
+                           DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
                            dot1_cluster, dot_cluster, dot_shared_cluster, seeded, seeded_mac,
                            streamer)
 
@@ -343,6 +343,21 @@ class Built(unittest.TestCase):
                          ([1, 8], [False, True], 2))
         self.assertEqual(group["links"], [{"from": "mul", "to": "sum", "to_input": 0,
                                            "depth": 1}])
+
+    def test_a_bank_a_hold_and_a_carry(self):
+        """bicg_v4_1: the Mac's rows and r held (D190, D191), the sum's seed carried (D192);
+        the shell's CARRY, JOB_BEATS and ROWS after the JOBS, in CSR order."""
+        cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG4, BICG4_STREAMER), 131072)
+        acc = cls(None, "snax_acc0")
+        shell = acc.components["shell_bicg_types"].properties
+        self.assertEqual((shell["csrs"], shell["widths"]),
+                         (["START", "JOBS_SUM", "JOBS_MAC", "CARRY", "JOB_BEATS", "ROWS"],
+                          [1, 32, 32, 32, 32, 4]))
+        mul, total, mac = acc.components["group_bicg_types"].properties["units"]
+        self.assertEqual([(u["rows"], u["hold"], u["carry"]) for u in (mul, total, mac)],
+                         [(1, [False, False], False), (1, [False, False], True),
+                          (8, [False, True], False)])
+        self.assertEqual((total["inputs"], total["seed"], total["t"]), (["", "sum_seed"], 1, 8))
 
 
 if __name__ == "__main__":

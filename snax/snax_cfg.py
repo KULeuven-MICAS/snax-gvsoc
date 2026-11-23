@@ -83,13 +83,16 @@ accelerator.json, what the standard composite
                               inputs, k1 * a + k2 * b; k: SimdLanes' constant at
                               one stream, its one input, an int of its opType;
                               k1, k2: axpby's baked; accumulate, regOut: Mac's;
-                              T: a fold's rate fixed at design time), scalars
+                              rows: a Mac's bank, absent at 1, D191; T: a
+                              fold's rate fixed at design time), scalars
                               (SimdLanes' slots read from CSRs, k at one
                               stream, k1, k2, each at its opType, none baked),
                               timing (latency, ii, span: 1 when missing), csrs
-                              (its R/W ones: JOB_BEATS, a fold's without T, then
-                              per scalar K1, or K1_LO and K1_HI at 64 bits, its
-                              pin the slot, its width the type's bits, 32 a word)
+                              (its R/W ones: JOB_BEATS, a fold's without T, ROWS,
+                              a bank's, of the bits of rows, CARRY, a carried
+                              seed's, of JOBS' width, then per scalar K1, or
+                              K1_LO and K1_HI at 64 bits, its pin the slot, its
+                              width the type's bits, 32 a word)
     groups[].links[]          Link: name, from (an out port, "<unit>.<port>"),
                               to (an in port), depth (0 a wire, >= 1 a buffer)
     a CSR                     Csr: name, access (rw, ro), offset (from the
@@ -119,8 +122,10 @@ outer inputs of one group's chain heads, alike in dtype, lanes, d_in and
 broadcast (gen.fork; never beside shared movers, gen.share), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
-1); an outer output with d_out (D174) fills one word with d_out results, on one
-channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
+1); a held input (``hold``, D190) is a broadcast outer input of a bank, read
+once a row, and a carried seed (``carry``, D192) a seed, 0 before CARRY jobs
+(gen.args, gen.hold, gen.seed); an outer output with d_out (D174) fills one
+word with d_out results, on one channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
 word on one channel, d_in pops of its lanes through SnaxGroup's slicer, d_in
 the word's elements / lanes; a broadcast input (D186, a lane-wise datapath's:
 SimdLanes, Mac) keeps its unit's lanes, its reader moving one lane a beat, so
@@ -249,8 +254,9 @@ def jobs_names(sinks: list) -> list:
     """A group's JOBS CSRs for its chains' sinks, in their order: JOBS for one chain,
     JOBS_<SINK> for each of several (snax-forge's design/streamers.py's jobs_csr)."""
     return ['JOBS'] if len(sinks) == 1 else [f'JOBS_{s.upper()}' for s in sinks]
-# The unit CSRs modelled: a fold's JOB_BEATS, then its scalars' (scalar_csrs)
-UNIT_RW = ('JOB_BEATS',)
+# The unit CSRs modelled: a fold's JOB_BEATS, a bank's ROWS (D191), a carried seed's CARRY
+# (D192), then its scalars' (scalar_csrs)
+UNIT_RW = ('JOB_BEATS', 'ROWS', 'CARRY')
 # The op names (snax_types.hpp's snax_op_names), and SimdLanes' axpby
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
 AXPBY = 'axpby'
@@ -427,7 +433,8 @@ class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes, its
     direction (in or out) and, on an outer output a packer feeds, d_out (D174), on an outer
     input a slicer feeds, d_in (D180); ``broadcast`` on an outer input whose reader gives one
-    lane to all of them (D186)."""
+    lane to all of them (D186); ``hold`` on one read once a bank row and kept (D190); ``carry``
+    on a seed that is its unit's own output, 0 before CARRY jobs (D192)."""
 
     port: str
     dtype: str
@@ -436,6 +443,8 @@ class Port:
     d_out: int = 1
     d_in: int = 1
     broadcast: bool = False
+    hold: bool = False
+    carry: bool = False
 
     @property
     def stream_lanes(self) -> int:
@@ -901,8 +910,12 @@ def _port(node: _Node) -> Port:
         raise CfgTypeError(node.file, node.where('broadcast'),
             'an input of 2 lanes or more takes a broadcast, one lane given to all of them '
             '(absent when false)')
+    hold, carry = node.get('hold', bool, False), node.get('carry', bool, False)
+    if (hold or carry) and direction != 'in':
+        raise CfgTypeError(node.file, node.where('hold' if hold else 'carry'),
+            'an input is held or carried (absent when false)')
     return Port(port=node.get('port', str), dtype=dtype, lanes=lanes, dir=direction, d_out=d_out,
-                d_in=d_in, broadcast=broadcast)
+                d_in=d_in, broadcast=broadcast, hold=hold, carry=carry)
 
 
 def _unit(node: _Node) -> Unit:
@@ -935,6 +948,10 @@ def _unit(node: _Node) -> Unit:
             f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
     for key in ('accumulate', 'regOut'):
         params.get(key, bool, None)
+    rows = params.get('rows', int, 1)
+    if rows < 1:
+        raise CfgTargetError(node.file, params.where('rows'),
+            f'gen.args: rows {rows}; a bank has one row or more')
     k = params.get('k', int, None)
     if k is not None and datapath != 'SimdLanes':
         raise CfgTypeError(node.file, params.where('k'), f'a {datapath} unit has no constant k')
@@ -988,6 +1005,28 @@ def _unit(node: _Node) -> Unit:
             f'{[c.name for c in csrs]}: a fold without params.T has JOB_BEATS, any other unit '
             'none')
     unit_ports = {key: _port(ports.node(key)) for key in ports.value}
+    carried = [k for k, x in unit_ports.items() if x.carry]
+    mine = (['JOB_BEATS'] if fold and t is None else []) + (['ROWS'] if rows > 1 else []) + (
+        ['CARRY'] if carried else [])
+    if [c.name for c in own] != mine:
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'{[c.name for c in csrs]}: a unit\'s own CSRs are {mine} (JOB_BEATS, a fold\'s '
+            'without params.T; ROWS, a bank\'s; CARRY, a carried seed\'s), then its scalars\'')
+    if rows > 1 and own[mine.index('ROWS')].width != rows.bit_length():
+        raise CfgSlotError(node.file, node.where('csrs'),
+            f'ROWS: width {own[mine.index("ROWS")].width}; a bank of {rows} rows has ROWS of '
+            f'{rows.bit_length()} bits')
+    if rows > 1 and (datapath != 'Mac' or not fold or SEED in unit_ports):
+        raise CfgTargetError(node.file, params.where('rows'),
+            f'gen.args: rows {rows}; a bank (D191) is an unseeded accumulating Mac\'s')
+    if [k for k in carried if k != SEED]:
+        raise CfgTargetError(node.file, f'{node.where("ports")}.{carried[0]}',
+            'gen.seed: a carried port is a fold\'s seed, its unit\'s own output (D192)')
+    for key, x in unit_ports.items():
+        if x.hold and (rows == 1 or not x.broadcast or key == SEED):
+            raise CfgTargetError(node.file, f'{node.where("ports")}.{key}',
+                f'gen.hold: port {key} is held for a bank row but is not a broadcast input of a '
+                'bank; a held input is one lane for all for now')
     lanes = next(iter(unit_ports.values())).lanes
     if SEED in unit_ports:
         seed = unit_ports[SEED]
@@ -1045,6 +1084,12 @@ def _group(node: _Node) -> Group:
             f'{[c.name for c in csrs]}: a group\'s own CSRs are START, JOBS (rw), STATUS, '
             'BUSY_COUNTER (ro), in that order, with several chains a JOBS_<SINK> per chain in '
             'place of JOBS')
+    jobs_width = next(c.width for c in csrs if c.access == 'rw' and c.name != 'START')
+    for k, u in enumerate(units):
+        for c in u.csrs:
+            if c.name == 'CARRY' and c.width != jobs_width:
+                raise CfgSlotError(node.file, f'{node.where("units")}[{k}].csrs',
+                    f'CARRY: width {c.width}; it counts jobs, as JOBS ({jobs_width} bits)')
     return Group(name=node.get('name', str), csrs=csrs, units=units, links=links)
 
 
@@ -1337,6 +1382,8 @@ def _check_fork(node: _Node, acc: Accelerator, f: list, outer: list):
     if len(kinds) > 1:
         fail("its ports differ in dtype, lanes, d_in or broadcast; one reader's beat is the "
              'same for all')
+    if any(port[x].hold for x in f):
+        fail('a port is held for a bank row; a held input is read by its own reader')
 
 
 def _check_shape(node: _Node, acc: Accelerator, u: Unit):

@@ -41,12 +41,13 @@ class Test:
         self.lines += [f"{k} {int(v) if isinstance(v, bool) else v}" for k, v in kw.items()]
         self.ins, self.op_t, self.out_t, self.lanes = ins, op_t, out_t, lanes
 
-    def step(self, en, values, out):
+    def step(self, en, values, out, row=None):
         fire, first, read, lane, eon, load, ws, rs = en
         ins = " ; ".join(" ".join(str(int(x)) for x in v) for v in values)
         o = " ".join(str(int(x)) for x in np.atleast_1d(out))
+        r = "" if row is None else f" {row}"  # a bank's row (D191), its ninth enable
         self.lines.append(f"step {int(fire)} {int(first)} {int(read)} {lane} {int(eon)} {int(load)} "
-                          f"{ws} {rs} : {ins} => {o}")
+                          f"{ws} {rs}{r} : {ins} => {o}")
 
     def text(self):
         return "\n".join(self.lines) + "\n"
@@ -179,6 +180,25 @@ def mac_seed(name, t_in, out_t, lanes, beats, firings=12):
             p = a.astype(NP[out_t]) * b.astype(NP[out_t])
             s = wrap((q if first else s) + p, out_t)
             d = (d + 1) % beats
+    return t
+
+
+def mac_bank(name, t_in, out_t, lanes, rows, beats, firings=24):
+    """A Mac with a bank (D191) of rows R at out_t: firing f adds a * b into row f mod R, its
+    job's first R firings starting their rows (first); the output is the row the last firing
+    wrote. T = beats firings a job, a multiple of R."""
+    t = Test(name, "Mac", [t_in, t_in], out_t, out_t, lanes, accumulate=True, regOut=False,
+             rows=rows)
+    bank, last, d = np.zeros((rows, lanes), NP[out_t]), 0, 0
+    for _ in range(firings):
+        fire = RNG.random() < 0.8
+        a, b = rand(t_in, lanes), rand(t_in, lanes)
+        row, first = d % rows, d < rows
+        t.step(en(fire=fire, first=first), [a, b], bank[last], row)
+        if fire:
+            p = a.astype(NP[out_t]) * b.astype(NP[out_t])
+            bank[row] = wrap(p if first else bank[row] + p, out_t)
+            last, d = row, (d + 1) % beats
     return t
 
 
@@ -417,6 +437,14 @@ def main():
             for lanes in (4, 8):
                 tests.append(mac_seed(f"mac_seed_int8_to_{out_t}_w{lanes}", "int8", out_t, lanes,
                                       3))
+    # a Mac's bank (D191): rows 2 and 4, int8 into int32 at W 4 and int64 at W 2, two jobs and
+    # more of 2R beats (drawn last, so the tests above stay as they were)
+    with np.errstate(over="ignore"):
+        for rows in (2, 4):
+            tests.append(mac_bank(f"mac_bank_r{rows}_int8_to_int32_w4", "int8", "int32", 4, rows,
+                                  2 * rows))
+            tests.append(mac_bank(f"mac_bank_r{rows}_int64_w2", "int64", "int64", 2, rows,
+                                  2 * rows))
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

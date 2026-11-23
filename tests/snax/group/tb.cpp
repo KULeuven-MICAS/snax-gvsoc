@@ -32,12 +32,15 @@
 // vmul -> sum and mac, A forked to vmul.a and mac.a) runs its datapaths on 4
 // lanes of int8 A, p and r into int32: each row's q = A p from the sum (its
 // seed added when seeded) and s = A^T r from the Mac, r_i given to every
-// lane (its seed added when seeded).
+// lane (its seed added when seeded). A bank (rows R, D191) with its b held
+// (D190), alone or as the fork's Mac, runs its datapath on r held a row: each
+// result is the bank row its giving firing wrote, its sums worked out here.
 //
 //   tb CASE...
 //
 // Exit 1 on any difference.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -58,6 +61,7 @@ struct UnitLine
     uint32_t t = 1;
     int inputs = 0;     // outer inputs
     bool seed = false;  // the last of them is a fold's seed, one beat per job
+    std::vector<int> hold;  // the held ones among them (D190)
 };
 
 struct CycleLine
@@ -234,20 +238,45 @@ static bool parse(const std::string &path, Case &c)
         }
         else if (key == "unit")
         {
-            // unit NAME DATAPATH latency L ii N span S t T inputs I [seed 1]
+            // unit NAME DATAPATH latency L ii N span S t T inputs I [seed 1] [rows R] [hold J]...
             UnitLine u;
             std::string k1, k2, k3, k4, k5, k6;
             ok = (bool)(ss >> u.name >> u.datapath >> k1 >> u.cfg.latency >> k2 >> u.cfg.ii >> k3
                 >> u.cfg.span >> k4 >> u.t >> k5 >> u.inputs) && k1 == "latency" && k2 == "ii" &&
                 k3 == "span" && k4 == "t" && k5 == "inputs" && snax_datapaths().count(u.datapath);
             int seeded = 0;
-            if (ok && ss >> k6)
+            while (ok && ss >> k6)
             {
-                ok = k6 == "seed" && (bool)(ss >> seeded) && (seeded == 0 || seeded == 1) &&
-                    (!seeded || u.inputs >= 1);
+                int x = 0;
+                ok = (bool)(ss >> x);
+                if (k6 == "seed")
+                {
+                    seeded = x;
+                    ok = ok && (seeded == 0 || seeded == 1) && (!seeded || u.inputs >= 1);
+                }
+                else if (k6 == "rows")
+                {
+                    u.cfg.rows = x;
+                    ok = ok && x >= 1;
+                }
+                else if (k6 == "hold")
+                {
+                    u.hold.push_back(x);
+                    ok = ok && x >= 0 && x < u.inputs;
+                }
+                else
+                {
+                    ok = false;
+                }
             }
             u.seed = seeded;
             u.cfg.seeded = seeded;
+            u.cfg.held = !u.hold.empty();
+            ok = ok && (u.hold.empty() || u.cfg.rows > 1);
+            for (int j : u.hold)
+            {
+                ok = ok && !(u.seed && j == u.inputs - 1);
+            }
             c.units.push_back(u);
         }
         else if (key == "link")
@@ -502,6 +531,7 @@ static std::unique_ptr<SnaxGroupDatapaths> fork_datapaths(const Case &c, const S
         p[k].lanes = LANES;
         p[k].op_type = p[k].out_type = I32;
         p[k].seed = c.units[k].seed;
+        p[k].rows = c.units[k].cfg.rows;
         if (p[k].seed)
         {
             p[k].in_types.push_back(I32);
@@ -522,6 +552,86 @@ static std::unique_ptr<SnaxGroupDatapaths> fork_datapaths(const Case &c, const S
     g->buffers.push_back(b.depth ? snax_datapath_new("LinkBuffer", b, &why) : nullptr);
     g->wire(rule);
     return g;
+}
+
+// NB (D191): a bank's sums as the tb works them out, R rows of LANES int32 lanes, and its
+// held r (D190), r_of(n) for the n-th row taken: a firing adds a * r into row fired mod R,
+// starting it on its job's first R firings; a result is the row the last firing wrote
+struct BankModel
+{
+    int rows = 1;
+    uint32_t t = 1;
+    uint32_t fired = 0, taken = 0;
+    int last = 0;
+    int64_t r = 0;
+    std::vector<std::vector<int64_t>> s;
+
+    BankModel(int rows, uint32_t t) : rows(rows), t(t), s(rows, std::vector<int64_t>(LANES, 0)) {}
+
+    // r for this cycle: taken anew on a row's first firing
+    int64_t held(bool take)
+    {
+        return take ? r_of(this->taken) : this->r;
+    }
+
+    void fire(bool take, const std::vector<int64_t> &a)
+    {
+        if (take)
+        {
+            this->r = r_of(this->taken++);
+        }
+        int row = this->fired % this->rows;
+        bool first = this->fired % this->t < (uint32_t)this->rows;
+        for (int lane = 0; lane < LANES; lane++)
+        {
+            this->s[row][lane] = (first ? 0 : this->s[row][lane]) + a[lane] * this->r;
+        }
+        this->last = row;
+        this->fired++;
+    }
+};
+
+// A banked Mac alone (rows above 1, unseeded, b held, nothing sliced): its datapath; nullptr
+// when the case is not one
+static std::unique_ptr<SnaxGroupDatapaths> bank_datapaths(const Case &c, const SnaxGroupRule &rule)
+{
+    if (c.units.size() != 1 || c.units[0].datapath != "Mac" || c.units[0].seed ||
+        c.units[0].cfg.rows < 2 || c.units[0].inputs != 2 || c.units[0].hold != std::vector<int>{1} ||
+        !c.links.empty() || c.lanes || !c.din.empty() || c.dout != 1)
+    {
+        return nullptr;
+    }
+    SnaxDatapathParams p;
+    p.in_types = {I8, I8};
+    p.op_type = p.out_type = I32;
+    p.lanes = LANES;
+    p.rows = c.units[0].cfg.rows;
+    std::string why;
+    auto g = std::unique_ptr<SnaxGroupDatapaths>(new SnaxGroupDatapaths());
+    g->units.push_back(snax_datapath_new("Mac", p, &why));
+    if (!g->units.back())
+    {
+        return nullptr;
+    }
+    g->wire(rule);
+    return g;
+}
+
+// A bank's result against the model: false, with why, on a lane that differs
+static bool bank_result(const BankModel &m, const std::vector<uint64_t> &out, std::string *why)
+{
+    for (int lane = 0; lane < LANES; lane++)
+    {
+        int64_t got = (int64_t)snax_lane_cast(snax_lane_get(out.data(), I32.width, lane), I32,
+            {64, true});
+        if (got != m.s[m.last][lane])
+        {
+            *why = "row " + std::to_string(m.last) + " lane " + std::to_string(lane) + " is " +
+                std::to_string(got) + ", the bank's sum " + std::to_string(m.s[m.last][lane]);
+            return false;
+        }
+    }
+    return true;
 }
 
 // The rule of the case's group; "" or why it refuses the graph
@@ -547,10 +657,11 @@ static std::string configure(const Case &c, SnaxGroupRule &rule)
 static int run(const Case &c)
 {
     SnaxGroupRule rule;
-    std::vector<uint32_t> ts;
+    std::vector<uint32_t> ts, rows_of;
     for (const UnitLine &u : c.units)
     {
         ts.push_back(u.t);
+        rows_of.push_back(u.cfg.rows);
     }
     std::string refused = configure(c, rule);
     if (!refused.empty())
@@ -568,9 +679,14 @@ static int run(const Case &c)
     std::unique_ptr<SnaxGroupDatapaths> data = dot_datapaths(c, rule);
     std::unique_ptr<SnaxGroupDatapaths> mac = mac_datapaths(c, rule);
     std::unique_ptr<SnaxGroupDatapaths> forked = fork_datapaths(c, rule);
+    std::unique_ptr<SnaxGroupDatapaths> banked = bank_datapaths(c, rule);
     // the fork's: the rows fired, the sum's seeds taken, the Mac's sums so far and its pushes
     int rows = 0, q_pushed = 0, s_pushed = 0, q_seeded = 0;
     std::vector<int64_t> s_sum(LANES, 0);
+    // a bank's (the Mac alone's, or the fork's Mac's): its sums and held r
+    const UnitLine &bank_unit = c.units.back();
+    BankModel bank(bank_unit.cfg.rows, bank_unit.t);
+    int bank_pushed = 0;
     // the seeded Mac's: per lane its job's sum so far, and each job's sums when done
     std::vector<int64_t> job_sum(LANES, 0);
     std::vector<std::vector<int64_t>> job_sums;
@@ -588,6 +704,7 @@ static int run(const Case &c)
     {
         size_t unit;
         bool seed;
+        bool hold;
         SnaxSlicer slicer;
         uint32_t taken = 0;
         uint64_t popped = 0;
@@ -606,6 +723,8 @@ static int run(const Case &c)
                 {
                     s.unit = k;
                     s.seed = c.units[k].seed && i == c.units[k].inputs - 1;
+                    s.hold = std::find(c.units[k].hold.begin(), c.units[k].hold.end(), i) !=
+                        c.units[k].hold.end();
                     found = true;
                 }
             }
@@ -626,11 +745,12 @@ static int run(const Case &c)
         };
         if (cycle == c.start_cycle)
         {
-            SnaxGroupRule::Start answer = rule.start(cycle, c.jobs, ts);
+            SnaxGroupRule::Start answer = rule.start(cycle, c.jobs, ts, rows_of);
             if (answer == SnaxGroupRule::TAKEN)
             {
                 run_busy = 0;
-                results = rule.firings_per_run[output] / rule.job_beats[output];
+                results = rule.firings_per_run[output] / rule.job_beats[output] *
+                    rule.rows[output];
                 packed = 0;
                 packer.clear();
                 for (Sliced &s : sliced)
@@ -657,17 +777,19 @@ static int run(const Case &c)
             {
                 seen[c.din[j].first] = sliced[j].slicer.full;
             }
-            std::vector<bool> inputs, seeds;
+            std::vector<bool> inputs, seeds, holds;
             for (size_t k = 0; k < c.units.size(); k++)
             {
                 const UnitLine &u = c.units[k];
-                bool all = true;
+                bool all = true, kept = true;
                 for (int i = 0; i < u.inputs - (int)u.seed; i++)
                 {
-                    all = all && seen[c.place[k][i]];
+                    bool held = std::find(u.hold.begin(), u.hold.end(), i) != u.hold.end();
+                    (held ? kept : all) = (held ? kept : all) && seen[c.place[k][i]];
                 }
                 inputs.push_back(all);
                 seeds.push_back(u.seed ? (bool)seen[c.place[k][u.inputs - 1]] : true);
+                holds.push_back(kept);
             }
             std::vector<bool> room(c.units.size(), true);
             bool last = packed + 1 == results;
@@ -676,13 +798,14 @@ static int run(const Case &c)
                 room[outputs[o]] = l.ready[o];
             }
             room[output] = packer.room(l.ready[0], last);
-            step = rule.step(cycle, inputs, seeds, room);
+            step = rule.step(cycle, inputs, seeds, holds, room);
             // NB (D180): pop on the unit's firing (a seed's take), then take the reader's word
             // when the slicer was empty or that was its last pop
             for (size_t j = 0; j < sliced.size(); j++)
             {
                 Sliced &s = sliced[j];
-                bool pop = s.seed ? step.units[s.unit].seed : step.units[s.unit].fire;
+                bool pop = s.seed ? step.units[s.unit].seed : s.hold ? step.units[s.unit].take
+                    : step.units[s.unit].fire;
                 bool open = s.slicer.open(pop);
                 if (pop)
                 {
@@ -823,6 +946,30 @@ static int run(const Case &c)
                 }
             }
         }
+        if (busy && banked)
+        {
+            // row f / ROWS of A on a (a_of), r held a row on every lane of b
+            std::vector<uint64_t> A(1, 0), R(1, 0);
+            std::vector<int64_t> a(LANES);
+            int64_t r = bank.held(step.units[0].take);
+            for (int lane = 0; lane < LANES; lane++)
+            {
+                a[lane] = a_of(bank.fired * LANES + lane);
+                snax_lane_set(A.data(), I8.width, lane, a[lane]);
+                snax_lane_set(R.data(), I8.width, lane, r);
+            }
+            banked->cycle(step, {{A.data(), R.data()}});
+            std::string why;
+            if (step.units[0].push && !bank_result(bank, banked->out(0), &why))
+            {
+                fail(why);
+            }
+            bank_pushed += step.units[0].push;
+            if (step.units[0].fire)
+            {
+                bank.fire(step.units[0].take, a);
+            }
+        }
         if (busy && forked)
         {
             // row i of A on vmul.a and mac.a, p on vmul.b, r_i on every lane of mac.b
@@ -832,7 +979,8 @@ static int run(const Case &c)
             {
                 snax_lane_set(A.data(), I8.width, lane, a_of(rows * LANES + lane));
                 snax_lane_set(P.data(), I8.width, lane, p_of(lane));
-                snax_lane_set(R.data(), I8.width, lane, r_of(rows));
+                snax_lane_set(R.data(), I8.width, lane, bank.rows > 1
+                    ? bank.held(step.units[2].take) : r_of(rows));
                 snax_lane_set(s_seed.data(), I32.width, lane, seed_of(lane));
             }
             snax_lane_set(q_seed.data(), I32.width, 0, seed_of(100 + q_seeded));
@@ -854,10 +1002,14 @@ static int run(const Case &c)
             q_seeded += step.units[1].seed;
             if (step.units[1].push)
             {
+                // q's partial over its T rows of A
                 int64_t want = c.units[1].seed ? seed_of(100 + q_pushed) : 0;
-                for (int lane = 0; lane < LANES; lane++)
+                for (uint32_t f = q_pushed * ts[1]; f < (q_pushed + 1) * ts[1]; f++)
                 {
-                    want += a_of(q_pushed * LANES + lane) * p_of(lane);
+                    for (int lane = 0; lane < LANES; lane++)
+                    {
+                        want += a_of(f * LANES + lane) * p_of(lane);
+                    }
                 }
                 int64_t got = (int64_t)snax_lane_cast(snax_lane_get(forked->out(1).data(),
                     I32.width, 0), I32, {64, true});
@@ -868,7 +1020,25 @@ static int run(const Case &c)
                 }
                 q_pushed++;
             }
-            if (step.units[2].push)
+            std::string why;
+            if (step.units[2].push && bank.rows > 1 && !bank_result(bank, forked->out(2), &why))
+            {
+                fail("s: " + why);
+            }
+            if (step.units[2].push && bank.rows > 1)
+            {
+                s_pushed++;
+            }
+            if (step.units[2].fire && bank.rows > 1)
+            {
+                std::vector<int64_t> a(LANES);
+                for (int lane = 0; lane < LANES; lane++)
+                {
+                    a[lane] = a_of(rows * LANES + lane);
+                }
+                bank.fire(step.units[2].take, a);
+            }
+            if (step.units[2].push && bank.rows == 1)
             {
                 for (int lane = 0; lane < LANES; lane++)
                 {
@@ -883,7 +1053,7 @@ static int run(const Case &c)
                 }
                 s_pushed++;
             }
-            if (step.units[2].fire)
+            if (step.units[2].fire && bank.rows == 1)
             {
                 for (int lane = 0; lane < LANES; lane++)
                 {
@@ -955,7 +1125,13 @@ static int run(const Case &c)
         printf("%s: %d result(s) pushed, %u jobs\n", c.name.c_str(), pushed, jobs);
         errors++;
     }
-    if (forked && (q_pushed != (int)c.jobs[0] || s_pushed != (int)c.jobs[1]))
+    if (banked && bank_pushed != (int)(jobs * bank.rows))
+    {
+        printf("%s: %d result(s) pushed, %u jobs of %d rows\n", c.name.c_str(), bank_pushed,
+            jobs, bank.rows);
+        errors++;
+    }
+    if (forked && (q_pushed != (int)c.jobs[0] || s_pushed != (int)c.jobs[1] * bank.rows))
     {
         printf("%s: %d q and %d s result(s) pushed, jobs %u and %u\n", c.name.c_str(), q_pushed,
             s_pushed, c.jobs[0], c.jobs[1]);
@@ -991,7 +1167,7 @@ int main(int argc, char **argv)
     return tb_main<Case>(argc, argv, parse, run, [](const Case &c) {
         SnaxGroupRule rule;
         bool data = configure(c, rule).empty() && (dot_datapaths(c, rule) ||
-            mac_datapaths(c, rule) || fork_datapaths(c, rule));
+            mac_datapaths(c, rule) || fork_datapaths(c, rule) || bank_datapaths(c, rule));
         printf("%s: %zu units, %zu cycles, %zu run(s)%s\n", c.name.c_str(), c.units.size(),
             c.cycles.size(), c.expects.size(), data ? ", data" : "");
     });

@@ -54,8 +54,10 @@ types, timing and t: params.T when the unit has one, 0 for a fold's
 JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
 from its CSRs (scalars, each [slot, words]); d_out, its outer output's results per 64-bit
 word (1 unless packed, D174); d_in, per input its pops per 64-bit word (1 unless sliced,
-D180); broadcast, per input whether its reader's one lane goes to all lanes (D186); and its
-links as edges, each {from, to, to_input, depth}:
+D180); broadcast, per input whether its reader's one lane goes to all lanes (D186); hold,
+per input whether it is read once a bank row and kept (D190); rows, a Mac's bank rows (1
+without, D191); carry, whether its seed is carried (D192); and its links as edges, each
+{from, to, to_input, depth}:
 the producer's and the consumer's names and the consumer's input it feeds,
 its index in that unit's inputs.
 """
@@ -178,6 +180,8 @@ def group_units(accelerator, group) -> tuple:
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
             'd_out': out_port.d_out, 'd_in': [p.d_in for p in in_ports],
             'broadcast': [p.broadcast for p in in_ports],
+            'hold': [p.hold for p in in_ports], 'rows': u.params.get('rows', 1),
+            'carry': any(p.carry for p in in_ports),
         })
     links = []
     for x in group.links:

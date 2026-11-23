@@ -15,8 +15,8 @@
 //
 // CSRs, offsets from the group's first CSR (the CSR mux removes it): START,
 // JOBS (with several chains a JOBS_<SINK> per chain, D189), then the units' read-write CSRs (JOB_BEATS for each fold without a
-// fixed T, then its scalars', K1, or K1_LO and K1_HI at 64 bits, in unit
-// order), each kept at its width (accelerator.json's:
+// fixed T, ROWS for a bank, CARRY for a carried seed, then its scalars', K1,
+// or K1_LO and K1_HI at 64 bits, in unit order), each kept at its width (accelerator.json's:
 // a write keeps the low bits, a read gives them with the upper bits 0);
 // then STATUS and BUSY_COUNTER, read-only. START is a strobe: no register,
 // it reads 0.
@@ -36,8 +36,9 @@
 //     could change under it;
 //   - an accepted start a goes to the group's ctrl as every JOBS and every
 //     JOB_BEATS in unit order, as they stand (the JOBS and 1 for a group
-//     without one: a start is two words at least), then every scalar CSR in
-//     CSR order (any value, 0 too), unless a JOBS or a JOB_BEATS is 0: the empty run,
+//     without one: a start is two words at least), then every other unit CSR
+//     (ROWS, CARRY, the scalars') in CSR order (any value, 0 too), unless a
+//     JOBS or a JOB_BEATS is 0: the empty run,
 //     which the shell ends in its own cycle (E = a) without the group, so busy
 //     never rises;
 //   - STATUS: bit 0 busy, the unit's busy in c (from a + 1 to E); bit 1 done,

@@ -15,8 +15,9 @@
 //   csr_base   the group's first CSR (its START), for the trace
 //   csrs       its read-write CSRs' names in CSR order: START, JOBS (with
 //              several chains a JOBS_<SINK> per chain, D189), then the units'
-//              (JOB_BEATS, each fold's without a fixed T, then its scalars',
-//              in unit order); STATUS and BUSY_COUNTER follow
+//              (JOB_BEATS, each fold's without a fixed T, ROWS, a bank's,
+//              CARRY, a carried seed's, then its scalars', in unit order);
+//              STATUS and BUSY_COUNTER follow
 //   widths     each read-write CSR's width, in the order of csrs, 1 to 32
 //              (accelerator.json's: START 1, JOBS and JOB_BEATS
 //              job_width); a write keeps its low bits
@@ -24,8 +25,8 @@
 //              2^w - 1
 // An accepted start, but the empty run (a JOBS or a JOB_BEATS 0), goes to the
 // group's ctrl as a write of 32-bit words: every JOBS, then every JOB_BEATS in
-// unit order (the JOBS and 1 without one), then every unit's scalar CSR (any
-// other name after the JOBS: K1, K1_LO, K1_HI) in CSR order.
+// unit order (the JOBS and 1 without one), then every other unit CSR (any
+// other name after the JOBS: ROWS, CARRY, K1, K1_LO, K1_HI) in CSR order.
 
 #include <string>
 #include <vector>
@@ -102,7 +103,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
         {
             job_beats.push_back(i);
         }
-        else if ((int)i > nb_jobs)  // a unit's scalar (K1, K1_LO, K1_HI), sent after the JOB_BEATS
+        else if ((int)i > nb_jobs)  // ROWS, CARRY, a scalar (K1, K1_LO, K1_HI): after the JOB_BEATS
         {
             scalars.push_back(i);
         }

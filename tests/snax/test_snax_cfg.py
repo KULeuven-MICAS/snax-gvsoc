@@ -358,7 +358,9 @@ def acc_json(desc: Description) -> dict:
              "ports": {k: {"port": p.port, "dir": p.dir, "dtype": p.dtype, "lanes": p.lanes,
                            **({"d_out": p.d_out} if p.d_out > 1 else {}),
                            **({"d_in": p.d_in} if p.d_in > 1 else {}),
-                           **({"broadcast": True} if p.broadcast else {})}
+                           **({"broadcast": True} if p.broadcast else {}),
+                           **({"hold": True} if p.hold else {}),
+                           **({"carry": True} if p.carry else {})}
                        for k, p in u.ports.items()}}
         if u.op_type is not None:
             d["opType"] = u.op_type
@@ -1183,6 +1185,154 @@ class Fork(unittest.TestCase):
                                    "width": 1}}
         self.fails(snax_cfg.CfgSlotError, "gen.share: accelerator bicg_types: a fork and shared "
                    "movers in one accelerator; share_ports or fork_read, not both", rw=6)
+
+
+# bicg_v4_1 (D190, D191, D192), snax-forge's generator's at 64 x 64, W 4, R 8 in two strips: q's
+# sum (T 8) seeded from q, carried (CARRY), s's Mac a bank of 8 rows (ROWS 4 bits) with r held
+# and broadcast through a slicer of 8 pops; CSRs START 0, JOBS_SUM 1, JOBS_MAC 2, CARRY 3, the
+# Mac's JOB_BEATS 4 and ROWS 5, STATUS 6, BUSY_COUNTER 7
+BICG4 = description("bicg_v4_1", Accelerator(
+    "bicg_types", [["mul.a", "mac.a"], "mul.b", "sum.seed", "mac.b"], ["sum.out", "mac.out"],
+    [Group("bicg_types", [Csr("START", "rw", 0, 1), Csr("JOBS_SUM", "rw", 1, 32),
+                          Csr("JOBS_MAC", "rw", 2, 32), Csr("STATUS", "ro", 6, 2),
+                          Csr("BUSY_COUNTER", "ro", 7, 32)], [
+        Unit("mul", "simd", "SimdLanes", {"a": Port("a", "int8", 4, "in", d_in=2),
+                                          "b": Port("b", "int8", 4, "in", d_in=2),
+                                          "out": Port("out", "int32", 4, "out")}, "int32",
+             {"op": "mul"}, 0, 1, []),
+        Unit("sum", "accumulate", "TreeAccumulate",
+             {"a": Port("in", "int32", 4, "in"),
+              "seed": Port("seed", "int32", 1, "in", d_in=2, carry=True),
+              "out": Port("out", "int32", 1, "out", d_out=2)},
+             None, {"op": "add", "T": 8}, 1, 1, [Csr("CARRY", "rw", 3, 32)]),
+        Unit("mac", "mac", "Mac", {"a": Port("a", "int8", 4, "in", d_in=2),
+                                   "b": Port("b", "int8", 4, "in", d_in=8, broadcast=True,
+                                             hold=True),
+                                   "out": Port("out", "int32", 4, "out")}, "int32",
+             {"accumulate": True, "regOut": False, "rows": 8}, 1, 1,
+             [Csr("JOB_BEATS", "rw", 4, 32), Csr("ROWS", "rw", 5, 4)]),
+    ], [Link("q_prod", "mul.out", "sum.a", 1)])]))
+BICG4_STREAMER = streamer([1, 1, 1, 1], [1, 2])
+
+
+class Bank(unittest.TestCase):
+    """bicg_v4_1: a Mac's bank (rows, ROWS, D191), its held input (hold, D190) and a carried
+    seed (carry, CARRY, D192); each refused case in snax-forge's words (gen.args, gen.hold,
+    gen.seed) or as a slot that disagrees (the CSRs)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.acc = acc_json(BICG4)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self, rw=6):
+        path = write_design(self.dir, self.acc, BICG4_STREAMER, rw, 2)
+        (slot,) = snax_cfg.load(path).cores[0].accelerators
+        return slot.description
+
+    def fails(self, kind, text, rw=6):
+        with self.assertRaises(kind) as ctx:
+            self.load(rw)
+        self.assertIn(text, ctx.exception.why)
+
+    def unit(self, name):
+        units = self.acc["accelerators"][0]["groups"][0]["units"]
+        return next(u for u in units if u["name"] == name)
+
+    def test_reads(self):
+        desc = self.load()
+        self.assertEqual(desc, BICG4)
+        (group,) = desc.groups
+        self.assertEqual(group.rw, ["START", "JOBS_SUM", "JOBS_MAC", "CARRY", "JOB_BEATS",
+                                    "ROWS"])
+        self.assertEqual([c.offset for c in group.window], list(range(8)))
+        mac = group.units[2]
+        self.assertEqual((mac.params["rows"], mac.ports["b"].hold, mac.ports["b"].stream_lanes),
+                         (8, True, 1))
+        self.assertTrue(group.units[1].ports["seed"].carry)
+
+    def test_gen_args(self):
+        """rows on a fold that is not a Mac (a seeded one too), below 1."""
+        self.unit("sum")["params"]["rows"] = 2
+        self.unit("sum")["csrs"].append({"name": "ROWS", "access": "rw", "offset": 4, "width": 2})
+        self.fails(snax_cfg.CfgSlotError, "a unit's own CSRs are ['ROWS', 'CARRY']")
+        self.acc = acc_json(BICG4)
+        self.unit("sum")["params"]["rows"] = 2
+        self.unit("sum")["csrs"].insert(0, {"name": "ROWS", "access": "rw", "offset": 3,
+                                            "width": 2})
+        self.unit("sum")["csrs"][1]["offset"] = 4
+        for u in ("mac",):
+            for c in self.unit(u)["csrs"]:
+                c["offset"] += 1
+        self.acc["accelerators"][0]["groups"][0]["csrs"][3]["offset"] = 7
+        self.acc["accelerators"][0]["groups"][0]["csrs"][4]["offset"] = 8
+        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; a bank (D191) is an unseeded "
+                   "accumulating Mac's", rw=7)
+        self.acc = acc_json(BICG4)
+        self.unit("mac")["params"]["rows"] = 0
+        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 0; a bank has one row or more")
+
+    def test_rows_csr(self):
+        """ROWS is there exactly with a bank, after JOB_BEATS, of the bits of rows."""
+        self.unit("mac")["csrs"][1]["width"] = 3
+        self.fails(snax_cfg.CfgSlotError, "ROWS: width 3; a bank of 8 rows has ROWS of 4 bits")
+        self.acc = acc_json(BICG4)
+        csrs = self.unit("mac")["csrs"]
+        csrs[0]["name"], csrs[1]["name"] = "ROWS", "JOB_BEATS"
+        self.fails(snax_cfg.CfgSlotError, "a unit's own CSRs are ['JOB_BEATS', 'ROWS']")
+        self.acc = acc_json(BICG4)
+        del self.unit("mac")["params"]["rows"]
+        del self.unit("mac")["ports"]["b"]["hold"]
+        self.fails(snax_cfg.CfgSlotError, "a unit's own CSRs are ['JOB_BEATS']")
+
+    def test_gen_hold(self):
+        """A hold on a unit without a bank, on an input that is not a broadcast, on an
+        output."""
+        self.unit("mul")["ports"]["b"]["hold"] = True
+        self.fails(snax_cfg.CfgTargetError, "gen.hold: port b is held for a bank row but is not "
+                   "a broadcast input of a bank")
+        self.acc = acc_json(BICG4)
+        self.unit("mac")["ports"]["a"]["hold"] = True
+        self.fails(snax_cfg.CfgTargetError, "gen.hold: port a is held")
+        self.acc = acc_json(BICG4)
+        self.unit("mac")["ports"]["out"]["hold"] = True
+        self.fails(snax_cfg.CfgTypeError, "an input is held or carried")
+
+    def test_carry(self):
+        """A carry on a port that is not a seed; CARRY as wide as JOBS, there exactly with a
+        carried seed."""
+        self.unit("mul")["ports"]["b"]["carry"] = True
+        self.fails(snax_cfg.CfgSlotError, "a unit's own CSRs are ['CARRY']")
+        self.acc = acc_json(BICG4)
+        self.unit("sum")["csrs"][0]["width"] = 16
+        self.fails(snax_cfg.CfgSlotError, "CARRY: width 16; it counts jobs, as JOBS (32 bits)")
+        self.acc = acc_json(BICG4)
+        del self.unit("sum")["ports"]["seed"]["carry"]
+        self.fails(snax_cfg.CfgSlotError, "a unit's own CSRs are []")
+
+    def test_carry_not_a_seed(self):
+        """A carried port that is not the seed, its unit given CARRY: gen.seed."""
+        self.unit("mul")["ports"]["b"]["carry"] = True
+        self.unit("mul")["csrs"] = [{"name": "CARRY", "access": "rw", "offset": 3, "width": 32}]
+        self.unit("sum")["csrs"] = [{"name": "CARRY", "access": "rw", "offset": 4, "width": 32}]
+        for c in self.unit("mac")["csrs"]:
+            c["offset"] += 1
+        group = self.acc["accelerators"][0]["groups"][0]
+        group["csrs"][3]["offset"], group["csrs"][4]["offset"] = 7, 8
+        self.fails(snax_cfg.CfgTargetError, "gen.seed: a carried port is a fold's seed, its "
+                   "unit's own output (D192)", rw=7)
+
+    def test_a_held_port_is_not_forked(self):
+        """mac.a held and forked with mul.a, both one lane for all: gen.fork (a held input
+        has a reader of its own)."""
+        self.unit("mac")["ports"]["a"].update({"d_in": 8, "broadcast": True, "hold": True})
+        self.unit("mul")["ports"]["a"].update({"d_in": 8, "broadcast": True})
+        self.fails(snax_cfg.CfgSlotError, "gen.fork: accelerator bicg_types: the fork ['mul.a', "
+                   "'mac.a']: a port is held for a bank row; a held input is read by its own "
+                   "reader")
 
 
 class Dot1(unittest.TestCase):

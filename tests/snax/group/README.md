@@ -93,4 +93,4 @@ Their busy cycles E - s, as snax-forge's contract gives them (its Cycles table, 
 
     tests/snax/group/run.sh
 
-It prints `PASS` per case (`, data` where the dot product, the seeded Mac's sums or a fork case's q and s are checked too) and ends with `62 passed, 0 failed`.
+It prints `PASS` per case (`, data` where the dot product, the seeded Mac's sums, a fork case's q and s or a bank's rows, r held a row, are checked too) and ends with `62 passed, 0 failed`.

@@ -24,8 +24,9 @@
 // the low bits. The enables (SnaxEnables) come from the control model per cycle:
 // fire (a beat taken from every input), first (the job's first beat, d = 0),
 // read and lane (a SerialAccumulate reading lane `lane` in place), en (a
-// plain Mac's output register, regOut), load, wslot and rslot (a LinkBuffer's
-// write enable and its ring's write and read slots).
+// plain Mac's output register, regOut), row (a banked Mac's row, D191), load,
+// wslot and rslot (a LinkBuffer's write enable and its ring's write and read
+// slots).
 //
 //   SimdLanes(inTypes, opType, outType, lanes, op[, k])   L 0: per lane
 //       a op b at opType, cast to outType (snax_op_elementwise_at); with one
@@ -45,7 +46,10 @@
 //       s; seeded (a third input, the seed: its output's lanes, of out's type,
 //       read once per job), the first firing starts from it: s <- seed + p;
 //       plain, a * b + c at outType (c of out's type and lanes): L 0, or with
-//       regOut L 1, pin en, the output its register
+//       regOut L 1, pin en, the output its register. A bank (rows R > 1, D191,
+//       accumulating and unseeded) keeps R rows of s, pin row: a firing adds
+//       into row `row`, first starting it, and the output is the row the last
+//       firing wrote, so a result pushed L after its firing is that row
 //   LaneAccumulate(inType, outType, lanes)   L 1, pins fire, first: per lane
 //       x = cast_out(a); on fire s <- first ? x : s + x at outType, the output
 //       s (Mac's accumulating form without the product; rowsum 2's W rows on
@@ -83,6 +87,7 @@ struct SnaxEnables
     bool first = false;
     bool read = false;
     int lane = 0;
+    int row = 0;
     bool en = false;
     bool load = false;
     int wslot = 0;
@@ -99,6 +104,7 @@ struct SnaxDatapathParams
     SnaxType op_type = {64, true};
     SnaxType out_type = {64, true};
     int lanes = 1;
+    int rows = 1;           // a Mac's bank rows (D191)
     int op = SNAX_OP_ADD;
     bool accumulate = true;
     bool reg_out = false;
@@ -273,7 +279,7 @@ public:
         this->out_words = snax_words(p.lanes, p.out_type);
         this->latency = p.accumulate || p.reg_out ? 1 : 0;
         this->out_.assign(this->out_words, 0);
-        this->reg.assign(this->out_words, 0);
+        this->bank.assign(p.rows, std::vector<uint64_t>(this->out_words, 0));
         this->next.assign(this->out_words, 0);
     }
 
@@ -293,6 +299,7 @@ public:
     {
         const SnaxDatapathParams &p = this->p;
         int w = p.out_type.width;
+        const std::vector<uint64_t> &row = this->bank[en.row];  // s, row 0 without a bank
         std::fill(this->next.begin(), this->next.end(), 0);
         bool computes = p.accumulate ? en.fire : true;
         for (int l = 0; computes && l < p.lanes; l++)
@@ -303,7 +310,7 @@ public:
             {
                 // seeded, the job's first firing starts from the seed's lane l
                 v = en.first && !p.seed ? q : snax_op_compute(SNAX_OP_ADD, p.out_type,
-                    snax_lane_get(en.first ? in[2] : this->reg.data(), w, l), q);
+                    snax_lane_get(en.first ? in[2] : row.data(), w, l), q);
             }
             else
             {
@@ -313,7 +320,8 @@ public:
             }
             snax_lane_set(this->next.data(), w, l, v);
         }
-        const std::vector<uint64_t> &out = p.accumulate || p.reg_out ? this->reg : this->next;
+        const std::vector<uint64_t> &out = p.accumulate || p.reg_out ? this->bank[this->last]
+            : this->next;
         std::copy(out.begin(), out.end(), this->out_.begin());
     }
 
@@ -321,13 +329,17 @@ public:
     {
         if ((this->p.accumulate && en.fire) || (!this->p.accumulate && this->p.reg_out && en.en))
         {
-            std::copy(this->next.begin(), this->next.end(), this->reg.begin());
+            std::copy(this->next.begin(), this->next.end(), this->bank[en.row].begin());
+            this->last = en.row;
         }
     }
 
 private:
     SnaxDatapathParams p;
-    std::vector<uint64_t> reg;      // s with accumulate, the output register with regOut
+    // s with accumulate, a row per bank row (one without a bank), the output register with
+    // regOut; the row the last firing wrote, the output
+    std::vector<std::vector<uint64_t>> bank;
+    int last = 0;
     std::vector<uint64_t> next;
 };
 
@@ -530,6 +542,12 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
         }}},
         {"Mac", {true, true, false, [](const SnaxDatapathParams &p, std::string *why) {
             size_t n = p.accumulate && !p.seed ? 2 : 3;
+            if (p.rows < 1 || (p.rows > 1 && (!p.accumulate || p.seed)))
+            {
+                *why = "rows " + std::to_string(p.rows) + "; a bank (D191) is an unseeded "
+                    "accumulating Mac's";
+                return std::unique_ptr<SnaxDatapath>();
+            }
             if (p.in_types.size() != n || (p.accumulate && p.reg_out) ||
                 (p.seed && !p.accumulate) || (n == 3 && (p.in_types[2].width != p.out_type.width ||
                     p.in_types[2].is_signed != p.out_type.is_signed)))

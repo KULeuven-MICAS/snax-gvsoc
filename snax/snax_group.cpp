@@ -43,6 +43,18 @@
 //                                   (snax_group.hpp's snax_broadcast, D186), so
 //                                   its words and d_in count one lane; never
 //                                   a linked input or the seed; absent, false
+//                hold               optional, per input: a broadcast outer input
+//                                   of a bank, read once a row and kept (D190):
+//                                   its beat moved only on a row's first firing
+//                                   (the rule's take), the unit using the beat
+//                                   it holds on the others; never linked, the
+//                                   seed or forked; absent, false
+//                rows               optional: a Mac's bank rows R (D191), its
+//                                   ROWS from the start; absent, 1
+//                carry              optional: its seed is carried (D192), the
+//                                   unit's own output: taken every job, its
+//                                   value given as 0 while the job is below
+//                                   CARRY, from the start; absent, false
 //                op                 SimdLanes' op (add ... max, or axpby);
 //                                   a fold's add
 //                k                  SimdLanes' constant at one stream,
@@ -79,8 +91,10 @@
 //   ctrl           io slave: a start, a JOBS per output (each chain's, in the
 //                  outputs' unit order) then the T of each unit with t 0, in
 //                  unit order, 32-bit words (a group without one: the JOBS and a
-//                  word 1, as SnaxShell sends it), then each unit's scalars'
-//                  words in unit and CSR order, which set their slots; refused (DENIED, after a
+//                  word 1, as SnaxShell sends it), then per unit in unit order
+//                  its ROWS (a bank's: 1 to rows, dividing its T), its CARRY (a
+//                  carried seed's) and its scalars' words, in CSR order, the
+//                  scalars setting their slots; refused (DENIED, after a
 //                  warning) while busy. A JOBS or any T 0 (the empty run, which
 //                  the shell never sends) is answered and ignored; a firing
 //                  count past 32 bits is a fatal error
@@ -159,6 +173,7 @@ private:
         SnaxSlicer slicer;
         long word_id = -1;
         bool broadcast = false;
+        bool hold = false;      // held for a bank row (D190): moved on the rule's take
         SnaxType type = {64, true};
         int lanes = 1;
         std::vector<uint64_t> wide;
@@ -186,9 +201,12 @@ private:
     std::vector<std::vector<size_t>> unit_ins;   // per unit, its outer inputs (in_itf indices)
     // cycle_handler's, sized once: per unit whether its outer inputs have a beat and its outer
     // output room, its outer inputs' beats
-    std::vector<bool> inputs, seeds, room;
+    std::vector<bool> inputs, seeds, holds, room;
     std::vector<std::vector<const uint64_t *>> outer;
     std::vector<uint32_t> fixed_t;      // per unit: its t, 0 from the start
+    std::vector<int> bank_rows;         // per unit: its bank's rows R (D191), 1 without
+    std::vector<bool> carried;          // per unit: its seed is carried (D192)
+    std::vector<uint32_t> carry_jobs;   // per unit: its CARRY, from the start
     // per unit, its slots read from CSRs, each (slot, words), in CSR order
     std::vector<std::vector<std::pair<std::string, int>>> scalars;
     size_t scalar_words = 0;            // their words, summed: a start's last ones
@@ -294,6 +312,30 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             this->trace.fatal("Property %s.broadcast: one per input (%ld)\n", w.c_str(),
                 ins.size());
         }
+        js::Config *holds = u->get("hold");
+        std::vector<js::Config *> kept = holds ? this->props.as_list(holds, w + ".hold")
+            : std::vector<js::Config *>();
+        if (holds && kept.size() != ins.size())
+        {
+            this->trace.fatal("Property %s.hold: one per input (%ld)\n", w.c_str(), ins.size());
+        }
+        js::Config *rows_prop = u->get("rows");
+        p.rows = rows_prop ? this->props.as_int(rows_prop, w + ".rows") : 1;
+        if (p.rows < 1)
+        {
+            this->trace.fatal("Property %s.rows: %d; a bank has one row or more\n", w.c_str(),
+                p.rows);
+        }
+        js::Config *carry_prop = u->get("carry");
+        bool carry = carry_prop && this->props.as_bool(carry_prop, w + ".carry");
+        if (carry && seed == -1)
+        {
+            this->trace.fatal("Property %s.carry: true, but the unit has no seed; a carried "
+                "port is a fold's seed (D192)\n", w.c_str());
+        }
+        this->bank_rows.push_back(p.rows);
+        this->carried.push_back(carry);
+        bool held = false;
         for (size_t i = 0; i < ins.size(); i++)
         {
             std::string at_i = "[" + std::to_string(i) + "]";
@@ -305,6 +347,15 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 "]") : 1;
             bool broadcast = bcasts && this->props.as_bool(wired[i], w + ".broadcast[" +
                 std::to_string(i) + "]");
+            bool hold = holds && this->props.as_bool(kept[i], w + ".hold[" + std::to_string(i) +
+                "]");
+            if (hold && (port.empty() || is_seed || !broadcast || p.rows < 2))
+            {
+                this->trace.fatal("Property %s.hold[%ld]: true, but a held input is a broadcast "
+                    "outer input of a bank (rows above 1), not a linked one or the seed\n",
+                    w.c_str(), i);
+            }
+            held = held || hold;
             if (broadcast && (port.empty() || is_seed || p.lanes < 2))
             {
                 this->trace.fatal("Property %s.broadcast[%ld]: true, but a broadcast is an outer "
@@ -336,14 +387,15 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 // NB (D189): a forked input, alike on each of its units, none's seed
                 OuterIn &o = this->in_itf[x];
                 const SnaxType &t = p.in_types.back();
-                if (is_seed || o.seed || o.words != words || o.slicer.d_in != d_in ||
-                    o.broadcast != broadcast || o.type.width != t.width ||
+                if (is_seed || o.seed || hold || o.hold || o.words != words ||
+                    o.slicer.d_in != d_in || o.broadcast != broadcast || o.type.width != t.width ||
                     o.type.is_signed != t.is_signed || o.lanes != p.lanes ||
                     std::find(o.units.begin(), o.units.end(), k) != o.units.end())
                 {
                     this->trace.fatal("Property %s.inputs[%ld]: \"%s\", an input of another "
                         "unit too, so a forked one, but not alike on both (type, lanes, d_in, "
-                        "broadcast), a seed, or twice on one unit\n", w.c_str(), i, port.c_str());
+                        "broadcast), a seed or held, or twice on one unit\n", w.c_str(), i,
+                        port.c_str());
                 }
                 o.units.push_back(k);
                 this->unit_ins.back().push_back(x);
@@ -357,6 +409,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             o.slicer.d_in = d_in;
             o.beat.assign(o.words, 0);
             o.broadcast = broadcast;
+            o.hold = hold;
             o.type = p.in_types.back();
             o.lanes = p.lanes;
             o.wide.assign(broadcast ? snax_words(p.lanes, o.type) : 0, 0);
@@ -441,6 +494,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         c.ii = this->props.int_prop(u, "ii", w);
         c.span = this->props.int_prop(u, "span", w);
         c.seeded = p.seed;
+        c.rows = p.rows;
+        c.held = held;
         if (c.latency != dp->latency || c.ii != 1 || c.span != dp->span)
         {
             this->trace.fatal("Property %s.latency, ii, span: %d, %d, %d; %s is %d, 1, %d\n",
@@ -588,6 +643,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     this->data.wire(this->rule);
     this->inputs.assign(units.size(), true);
     this->seeds.assign(units.size(), true);
+    this->holds.assign(units.size(), true);
+    this->carry_jobs.assign(units.size(), 0);
     this->room.assign(units.size(), true);
     this->outer.assign(units.size(), {});
     for (size_t k = 0; k < units.size(); k++)
@@ -694,12 +751,18 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
         open += t == 0;
     }
     size_t nb_jobs = _this->out_itf.size();
-    size_t words = nb_jobs + (open ? open : 1) + _this->scalar_words;
+    size_t unit_words = _this->scalar_words;    // ROWS, CARRY and the scalars, per unit
+    for (size_t k = 0; k < _this->fixed_t.size(); k++)
+    {
+        unit_words += (_this->bank_rows[k] > 1) + _this->carried[k];
+    }
+    size_t words = nb_jobs + (open ? open : 1) + unit_words;
     if (!req->get_is_write() || req->get_size() != 4 * words)
     {
         _this->trace.force_warning("Unexpected access on ctrl (size: %ld, is_write: %d): a "
             "start is a write of %ld words, a JOBS per output and each fold's JOB_BEATS (or "
-            "1), then the scalars'\n", req->get_size(), req->get_is_write(), words);
+            "1), then each unit's ROWS, CARRY and scalars'\n", req->get_size(),
+            req->get_is_write(), words);
         return vp::IO_REQ_INVALID;
     }
     uint32_t *w = (uint32_t *)req->get_data();
@@ -716,8 +779,26 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
             "(1)\n", cycle, w[nb_jobs]);
     }
     next = nb_jobs + (open ? open : 1);
+    std::vector<uint32_t> rows(_this->fixed_t.size(), 1);
     for (size_t k = 0; k < _this->scalars.size(); k++)
     {
+        // NB (D191): a bank's ROWS, the rows a run uses
+        if (_this->bank_rows[k] > 1)
+        {
+            rows[k] = w[next++];
+            if (rows[k] < 1 || (int64_t)rows[k] > _this->bank_rows[k] ||
+                (ts[k] && ts[k] % rows[k]))
+            {
+                _this->trace.fatal("Start at cycle %ld: unit %ld's ROWS %u; a bank of %d rows "
+                    "uses 1 to %d, dividing its T %u\n", cycle, k, rows[k], _this->bank_rows[k],
+                    _this->bank_rows[k], ts[k]);
+            }
+        }
+        // NB (D192): the jobs a carried seed is given as 0
+        if (_this->carried[k])
+        {
+            _this->carry_jobs[k] = w[next++];
+        }
         for (const std::pair<std::string, int> &slot : _this->scalars[k])
         {
             uint64_t bits = w[next] | (slot.second == 2 ? (uint64_t)w[next + 1] << 32 : 0);
@@ -736,7 +817,7 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
         }
     }
 
-    switch (_this->rule.start(cycle, jobs, ts))
+    switch (_this->rule.start(cycle, jobs, ts, rows))
     {
         case SnaxGroupRule::REFUSED:
             _this->trace.force_warning("Start (shell CSRs from %d) refused at cycle %ld: busy\n",
@@ -754,7 +835,8 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
             std::string rates;
             for (OuterOut &o : _this->out_itf)
             {
-                o.results = _this->rule.firings_per_run[o.unit] / _this->rule.job_beats[o.unit];
+                o.results = _this->rule.firings_per_run[o.unit] / _this->rule.job_beats[o.unit] *
+                    _this->rule.rows[o.unit];
                 o.rate = _this->rule.count() / o.results;
                 o.pushes = 0;
                 o.packer.clear();
@@ -815,14 +897,15 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
 
     if (_this->rule.busy(cycle))
     {
-        std::vector<bool> &inputs = _this->inputs, &seeds = _this->seeds;
+        std::vector<bool> &inputs = _this->inputs, &seeds = _this->seeds, &holds = _this->holds;
         std::fill(inputs.begin(), inputs.end(), true);
         std::fill(seeds.begin(), seeds.end(), true);
+        std::fill(holds.begin(), holds.end(), true);
         // a sliced input's beat is its slicer's word, not the reader's; a forked one's is each
         // of its units'
         for (OuterIn &o : _this->in_itf)
         {
-            std::vector<bool> &has = o.seed ? seeds : inputs;
+            std::vector<bool> &has = o.seed ? seeds : o.hold ? holds : inputs;
             bool there = o.slicer.d_in > 1 ? o.slicer.full : _this->probe(o.itf, false);
             for (size_t k : o.units)
             {
@@ -836,7 +919,8 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
             _this->room[o.unit] = !o.packer.sending(last) || _this->probe(o.itf, true);
         }
 
-        const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, seeds, _this->room);
+        const SnaxGroupRule::Step &step = _this->rule.step(cycle, inputs, seeds, holds,
+            _this->room);
         _this->total_classes[step.cls]++;
         for (size_t k = 0; k < step.units.size(); k++)
         {
@@ -859,15 +943,17 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
 
         // The beats of each unit that fires, its outer inputs in port order (outer); a forked
         // input's once, when its units fire (together, D189). A sliced input pops on that
-        // firing (a seed's on its take), its slice the beat, then takes the reader's word when
-        // its slicer was empty or that was its last pop. A broadcast's beat goes to all its
-        // unit's lanes.
+        // firing (a seed's on its take, a held input's on its row's first firing), its slice
+        // the beat, then takes the reader's word when its slicer was empty or that was its last
+        // pop. A broadcast's beat goes to all its unit's lanes. A held input's beat stays until
+        // its next take: the register of its element's width that keeps it for the row (D190).
         std::string beats, values;
         bool traced = _this->ev.beats.get_active();
         for (OuterIn &o : _this->in_itf)
         {
             size_t k = o.units[0];
-            bool moved = o.seed ? step.units[k].seed : step.units[k].fire;
+            bool moved = o.seed ? step.units[k].seed : o.hold ? step.units[k].take
+                : step.units[k].fire;
             bool sliced = o.slicer.d_in > 1;
             bool open = sliced && o.slicer.open(moved);
             o.id = -1;
@@ -881,6 +967,11 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
                 _this->move(o.itf, false, o.beat.data(), o.words);
                 o.id = snax_arg_get(&_this->beat_req, SNAX_ARG_TAG) == SNAX_TAG_BEAT
                     ? (long)snax_arg_get(&_this->beat_req, SNAX_ARG_ID) : -1L;
+            }
+            // NB (D192): a carried seed's beat is taken every job, its value 0 before CARRY
+            if (moved && o.seed && _this->carried[k] && step.units[k].job < _this->carry_jobs[k])
+            {
+                std::fill(o.beat.begin(), o.beat.end(), 0);
             }
             if (moved && o.broadcast)
             {

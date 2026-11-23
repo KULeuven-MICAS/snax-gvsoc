@@ -28,7 +28,9 @@ class SnaxGroup(gvsoc.systree.Component):
         fold's seed in inputs, the last, or -1), output (the outer port's
         name, or "" when linked; each chain's sink has one), lanes,
         in_widths, in_signed, out_width, out_signed, op_width, op_signed, op,
-        accumulate, reg_out, k (SimdLanes' constant at one stream, decimal;
+        accumulate, reg_out, rows (a Mac's bank rows, D191; 1 without), hold
+        (per input, read once a bank row and kept, D190), carry (its seed
+        carried, D192), k (SimdLanes' constant at one stream, decimal;
         "" at two), k1 and k2 (axpby's baked, decimal; "" when not baked),
         scalars (the slots read from CSRs, each [slot, words], in CSR order:
         their words follow a start's JOB_BEATS), latency, ii, span, and t (a
@@ -48,7 +50,8 @@ class SnaxGroup(gvsoc.systree.Component):
         The streamer's reader_<i> and writer_<j> ports, one per outer port (a
         forked input's once).
     ctrl : io slave
-        A start: a JOBS per output, then each fold's JOB_BEATS without a fixed t.
+        A start: a JOBS per output, then each fold's JOB_BEATS without a fixed t, then
+        per unit its ROWS (a bank's), CARRY (a carried seed's) and scalars.
     busy : wire<bool> master
         Busy from the next cycle on, driven on every change.
     mark : wire<uint32_t> slave

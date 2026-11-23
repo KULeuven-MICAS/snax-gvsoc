@@ -48,6 +48,17 @@
 // job's first firing (seed.ready = fire and first, UnitStep::seed). A seed
 // missing when wanted is stall_in, as a missing outer beat.
 //
+// NB (D191): a bank, a unit of rows R > 1 (a Mac's, a chain's sink), keeps R
+// rows of sums, one a firing in turn: its row is d mod ROWS, ROWS (at most R,
+// from its CSR at the start) the rows a run uses, T a multiple of it. first =
+// [d < ROWS] (a seed taken on each), and it gives on its job's last ROWS
+// firings (d >= T - ROWS), so a job gives ROWS results. NB (D190): its held
+// inputs (a broadcast read once a row and kept) count only on a row's first
+// firing (d mod ROWS = 0): outer_ok also needs holds[k] there, and the firing
+// takes them (UnitStep::take); on its other firings the unit uses the beat it
+// kept. A carried seed (D192) is any seed to the rule; the component gives its
+// datapath 0 in its place while the job (UnitStep::job) is below CARRY.
+//
 // Per unit: its job_beats_counter d (its firings mod T, here derived
 // from its firings; first = [d = 0], it gives a result on firings with d =
 // T - 1; the Chisel keeps it as a counter, and counts each unit's results in
@@ -153,6 +164,8 @@ public:
         int ii = 1;
         int span = 1;
         bool seeded = false;    // one more outer input, its seed, taken once per job
+        int rows = 1;           // a bank's rows R (D191): ROWS at most R per run
+        bool held = false;      // it has held inputs (D190), taken on a row's first firing
     };
 
     // An edge: unit from's output into input to_input of unit to (its index among the
@@ -178,6 +191,9 @@ public:
         bool first = false;     // the beat fired or read is its job's first (d = 0)
         bool frozen = false;    // its head (or, L = 0, a giving firing) had no room
         bool seed = false;      // its seed taken (a seeded unit's fire on its job's first beat)
+        bool take = false;      // its held inputs taken (a firing on a row's first beat, D190)
+        int row = 0;            // a bank's row of the beat fired or read: d mod ROWS (D191)
+        uint32_t job = 0;       // the job of the beat fired or read in this run: firings / T
     };
 
     // What one buffer does: its LinkBuffer's load, wslot, rslot (a wire's stays all 0)
@@ -219,6 +235,13 @@ public:
         }
         for (size_t k = 0; k < n; k++)
         {
+            if (units[k].rows < 1 || (units[k].rows > 1 && !outs[k].empty()) ||
+                (units[k].held && units[k].rows == 1))
+            {
+                return "unit " + std::to_string(k) + ": rows " + std::to_string(units[k].rows) +
+                    (units[k].held ? ", held inputs" : "") + "; a bank has one row or more, is a "
+                    "chain's sink, and a hold counts its rows";
+            }
             if (outs[k].size() > 1 || ins[k].size() > 1)
             {
                 bool fork = outs[k].size() > 1;
@@ -348,6 +371,7 @@ public:
         this->span.reset();
         this->jobs.assign(this->outputs.size(), 0);
         this->job_beats.assign(this->cfg.size(), 1);
+        this->rows.assign(this->cfg.size(), 1);
         this->firings_per_run.assign(this->cfg.size(), 0);
         for (size_t k = 0; k < this->u.size(); k++)
         {
@@ -399,9 +423,10 @@ public:
     }
 
     // A start of jobs (one per output, in output_units' order), unit k a result every
-    // job_beats[k] firings, offered in cycle; the caller keeps every n_k within 32 bits
+    // job_beats[k] firings, its bank's ROWS rows[k] (empty: 1 each), offered in cycle; the
+    // caller keeps every n_k within 32 bits and each ROWS from 1 to its rows, dividing its T
     Start start(int64_t cycle, const std::vector<uint32_t> &jobs,
-        const std::vector<uint32_t> &job_beats)
+        const std::vector<uint32_t> &job_beats, const std::vector<uint32_t> &rows = {})
     {
         if (!this->idle(cycle))
         {
@@ -423,6 +448,7 @@ public:
         this->span.start(cycle);
         this->jobs = jobs;
         this->job_beats = job_beats;
+        this->rows = rows.empty() ? std::vector<uint32_t>(this->cfg.size(), 1) : rows;
         std::vector<uint64_t> n = this->firings_for(jobs, job_beats);
         for (size_t k = 0; k < n.size(); k++)
         {
@@ -458,6 +484,16 @@ public:
     const Step &step(int64_t cycle, const std::vector<bool> &inputs,
         const std::vector<bool> &seeds, const std::vector<bool> &outer_room)
     {
+        this->no_holds.assign(this->cfg.size(), true);
+        return this->step(cycle, inputs, seeds, this->no_holds, outer_room);
+    }
+
+    // holds[k], a unit's held inputs have a beat (any value for one without, D190); its other
+    // outer inputs are in inputs[k]
+    const Step &step(int64_t cycle, const std::vector<bool> &inputs,
+        const std::vector<bool> &seeds, const std::vector<bool> &holds,
+        const std::vector<bool> &outer_room)
+    {
         size_t n = this->cfg.size();
         Step &s = this->stepped;
         bool busy = false, waits = false;
@@ -466,7 +502,7 @@ public:
         std::fill(this->blocked.begin(), this->blocked.end(), false);
         while (true)
         {
-            this->decide(cycle, inputs, seeds, outer_room, &busy, &waits);
+            this->decide(cycle, inputs, seeds, holds, outer_room, &busy, &waits);
             bool held = false;
             for (const std::vector<int> &f : this->forks)
             {
@@ -584,6 +620,7 @@ public:
     SnaxRunSpan span;
     std::vector<uint32_t> jobs;
     std::vector<uint32_t> job_beats;        // per unit, its T: a result every T-th firing
+    std::vector<uint32_t> rows;             // per unit, its ROWS: the bank's rows used (D191)
     std::vector<uint32_t> firings_per_run;  // per unit, its n
     int64_t classes[NB_CLASSES];
     int runs;
@@ -610,7 +647,8 @@ private:
     // room, frozen, fire, read, push (an out-edge takes on its consumer's firing); *busy and
     // *waits for the cycle's class
     void decide(int64_t cycle, const std::vector<bool> &inputs, const std::vector<bool> &seeds,
-        const std::vector<bool> &outer_room, bool *busy, bool *waits)
+        const std::vector<bool> &holds, const std::vector<bool> &outer_room, bool *busy,
+        bool *waits)
     {
         size_t n = this->cfg.size();
         Step &s = this->stepped;
@@ -632,14 +670,19 @@ private:
                 const Link &e = this->links[i];
                 linked = linked && (e.depth == 0 ? offer[e.from] : this->l[i].occupancy > 0);
             }
-            // a seeded unit's job's first beat waits for its seed too
-            bool first = us.firings % this->job_beats[k] == 0;
-            this->outer_ok[k] = inputs[k] && (!c.seeded || !first || seeds[k]);
+            // a seeded unit's job's first beats (a bank's row's each) wait for its seed too;
+            // NB (D190): a held input's beat is needed only on a row's first firing
+            uint32_t d = us.firings % this->job_beats[k];
+            bool first = d < this->rows[k];
+            bool taking = us.firings % this->rows[k] == 0;
+            this->outer_ok[k] = inputs[k] && (!c.seeded || !first || seeds[k]) &&
+                (!c.held || !taking || holds[k]);
             avail[k] = this->outer_ok[k] && linked;
             bool ii_ok = !us.has_fired || cycle >= us.last_fire + c.ii;
             wants[k] = us.firings < this->firings_per_run[k] && ii_ok && !this->blocked[k];
             would_fire[k] = wants[k] && avail[k] && (c.span == 1 || us.lane == c.span - 1);
-            gives[k] = would_fire[k] && (us.firings + 1) % this->job_beats[k] == 0;
+            // NB (D191): a bank gives on its job's last ROWS firings
+            gives[k] = would_fire[k] && d >= this->job_beats[k] - this->rows[k];
             head[k] = c.latency > 0 && us.slots[c.latency - 1];
             offer[k] = c.latency > 0 ? head[k] : gives[k];
         }
@@ -659,7 +702,9 @@ private:
                 room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
             }
             st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
-            st.first = us.firings % this->job_beats[k] == 0;
+            st.first = us.firings % this->job_beats[k] < this->rows[k];
+            st.row = us.firings % this->rows[k];
+            st.job = us.firings / this->job_beats[k];
             if (!st.frozen)
             {
                 st.fire = would_fire[k];
@@ -672,6 +717,7 @@ private:
                 *waits = *waits || (wants[k] && !this->outer_ok[k]);
             }
             st.seed = st.fire && st.first && c.seeded;
+            st.take = st.fire && st.row == 0 && c.held;
         }
     }
 
@@ -715,6 +761,7 @@ private:
     Step stepped;
     std::vector<bool> avail, wants, would_fire, gives, head, offer, outer_ok, blocked;
     std::vector<bool> no_seeds;     // the three-argument step's seeds, all there
+    std::vector<bool> no_holds;     // the four-argument step's held inputs, all there
 };
 
 
@@ -775,6 +822,7 @@ public:
             en[k].first = u.first;
             en[k].read = u.read;
             en[k].lane = u.lane;
+            en[k].row = u.row;
             en[k].en = u.fire;
         }
         for (size_t i = 0; i < this->buffers.size(); i++)
