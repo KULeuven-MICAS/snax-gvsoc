@@ -171,6 +171,41 @@ class ForkRefused(unittest.TestCase):
                       output=["mul", "mac"], forks=[[("mul", 0), ("mac", 0)]])
 
 
+class Bank(unittest.TestCase):
+    """A banked Mac (D191) with r held (D190): one job of M rows, ROWS beats a row."""
+
+    def mac(self, rows=2, hold=(1,)):
+        return GroupRule([dict(unit("mac", L=1), rows=rows, hold=list(hold))], [])
+
+    def test_a_job_gives_rows_results_on_its_last_firings(self):
+        rows, end = self.mac().run(1, [6], lambda c: (1, 1), lambda c: 1, 16)
+        self.assertEqual([r[2][0] for r in rows[1:8]],
+                         [(1, 0)] * 5 + [(1, 1), (0, 1)])  # fmt: skip
+        self.assertEqual(end, 7)
+
+    def test_a_held_input_is_needed_once_a_row(self):
+        late = {2}  # row 0's second firing: the held r serves
+        rows, end = self.mac().run(1, [6], lambda c: (1, 0 if c in late else 1),
+                                   lambda c: 1, 16)
+        self.assertEqual(end, 7)
+        late = {3}  # row 1's first firing waits
+        rows, end = self.mac().run(1, [6], lambda c: (1, 0 if c in late else 1),
+                                   lambda c: 1, 16)
+        self.assertEqual(end, 8)
+
+    def test_refused(self):
+        for kw, text in (({"rows": 0}, "a bank has one row or more"),
+                         ({"rows": 1, "hold": [1]}, "it has no bank"),
+                         ({"rows": 2, "hold": [2]}, "not an outer input of its own")):
+            with self.subTest(**kw), self.assertRaisesRegex(GroupError, text):
+                GroupRule([dict(unit("mac", L=1), **kw)], [])
+        with self.assertRaisesRegex(GroupError, "it is a chain's sink"):
+            GroupRule([dict(unit("mac", L=1), rows=2), unit("sum", L=1, inputs=0)],
+                      [link("mac", "sum")])
+        with self.assertRaisesRegex(GroupError, "T 5 is not a multiple of its 2 rows"):
+            self.mac().run(1, [5], lambda c: (1, 1), lambda c: 1, 4)
+
+
 def unit_case(path):
     """A unit case's header and its cycle lines: per cycle the input valids, the output's
     ready, then the expected fire, push and busy."""

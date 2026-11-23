@@ -84,7 +84,8 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
         links = [{"from": a, "to": b, "to_input": 0, "depth": d} for a, b, d in links]
         depths = [e["depth"] for e in links]
     m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4],
-                        seed=len(u) > 5 and u[5]) for u in units], links, forks=forks)
+                        seed=len(u) > 5 and u[5], **(u[6] if len(u) > 6 else {}))
+                   for u in units], links, forks=forks)  # fmt: skip
     several = len(m.outputs) > 1
     sliced = [(i, d) for i, d in enumerate(d_in) if d > 1]
     if sliced:  # a sliced input's reader has ceil(pops / d_in) words, then no more
@@ -116,8 +117,11 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
     lines = [f"# {title}", *(f"# {c}" for c in comment), ""]
     for u in units:
         k = units.index(u)
+        extra = u[6] if len(u) > 6 else {}
         lines.append(f"unit {u[0]} {u[1]} latency {u[2]} ii 1 span {u[3]} t {ts[k]} "
-                     f"inputs {u[4]}" + (" seed 1" if len(u) > 5 and u[5] else ""))
+                     f"inputs {u[4]}" + (" seed 1" if len(u) > 5 and u[5] else "")
+                     + (f" rows {extra['rows']}" if extra.get("rows", 1) > 1 else "")
+                     + "".join(f" hold {j}" for j in extra.get("hold", ())))  # fmt: skip
     for e in links:
         lines.append(f"link {e['from']} {e['to']} depth {e['depth']}")
     for f in forks:
@@ -325,6 +329,36 @@ def fork_cases():
                    "seeds are there"], **both)
 
 
+def bank_cases():
+    """A banked Mac (D191) with its r held (D190): rows outer, each row of A N/W = ROWS beats,
+    beat b into bank row b mod ROWS; a job of M rows gives ROWS results, one on each of its
+    last ROWS firings. Alone, then as bicg's one pass in strips (the fork, D189)."""
+    m, rows = 3, 2
+    mac = ("mac", "Mac", 1, 1, 2, False, {"rows": rows, "hold": [1]})
+    write(f"bank_r{rows}_m{m}", f"mac with a bank of {rows} rows, r (b) held, M = {m}: T = "
+          f"{m * rows}, one job", [mac], [], 1, [m * rows], valid=lambda c: (1, 1),
+          comment=["each row of A is 2 beats, r taken on its first; the bank gives row 0 and "
+                   "row 1 on the job's last 2 firings"])
+    write(f"bank_r{rows}_r_late", f"the bank of {rows} rows, M = {m}, r missing in cycles 2 to 4",
+          [mac], [], 1, [m * rows], valid=lambda c: (1, 0 if c in (2, 3, 4) else 1),
+          comment=["r is needed only on a row's first firing: cycle 2 (row 0's second) fires "
+                   "on the held r, cycle 3 (row 1's first) waits"])
+    write(f"bank_r{rows}_s_backpressure", f"the bank of {rows} rows, M = {m}, two jobs, s's "
+          "writer not ready in cycles 6 to 8", [mac], [], 2, [m * rows],
+          valid=lambda c: (1, 1), ready=lambda c: 0 if c in (6, 7, 8) else 1,
+          comment=["the first job's bank rows wait for the writer; the next job's first beats "
+                   "wait while they hold"])
+    units = [("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 1, True),
+             ("mac", "Mac", 1, 1, 2, False, {"rows": rows, "hold": [1]})]
+    k = 2
+    write(f"bank_fork_strips{k}", f"bicg's one pass in {k} strips at M = {m}, ROWS = {rows}: q's "
+          f"sum T {rows} seeded from q (JOBS {k * m}), the mac T {m * rows} (JOBS {k}), A forked",
+          units, None, [k * m, k], [1, rows, m * rows], valid=lambda c: (1, 1, 1, 1),
+          ready=lambda c: (1, 1), links=[("vmul", "sum", 1)], forks=[[("vmul", 0), ("mac", 0)]],
+          comment=["the heads fire alike, K·M·ROWS = 12 times; each strip's s comes on its "
+                   "last row, q's partial each row"])
+
+
 def main():
     table = {}
     for v, (units, depth, fold) in VARIANTS.items():
@@ -362,6 +396,7 @@ def main():
     pack_cases()
     slice_cases()
     fork_cases()
+    bank_cases()
     print("T, J | " + " | ".join(f"dot {v}" for v in VARIANTS))
     for t in (2, 4):
         for j in (1, 2):

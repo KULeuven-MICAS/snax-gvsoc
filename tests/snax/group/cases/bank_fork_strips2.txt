@@ -1,0 +1,33 @@
+# bicg's one pass in 2 strips at M = 3, ROWS = 2: q's sum T 2 seeded from q (JOBS 6), the mac T 6 (JOBS 2), A forked
+# the heads fire alike, K·M·ROWS = 12 times; each strip's s comes on its last row, q's partial each row
+
+unit vmul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 1 seed 1
+unit mac Mac latency 1 ii 1 span 1 t 6 inputs 2 rows 2 hold 1
+link vmul sum depth 1
+fork vmul.0 mac.0
+outputs sum mac
+jobs 6 2
+start 0 taken
+expect run index=0 firings=12 busy=13 stall_in=0 stall_out=0 flush=1
+# E - s = 14
+
+# vmul.a vmul.b sum.seed mac.b sum.ready mac.ready | vmul fire give | sum fire give | mac fire give | occ0 | busy
+cycles
+1 1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 0: idle
+1 1 1 1 1 1 | 1 1 | 0 0 | 1 0 | 1 | 1    # 1: vmul pushes; vmul fires 0 (gives); mac fires 0
+1 1 1 1 1 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 2: vmul pushes; vmul fires 1 (gives); mac fires 1; sum fires 0, takes its seed
+1 1 1 1 1 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 3: vmul pushes; vmul fires 2 (gives); mac fires 2; sum fires 1 (gives)
+1 1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 4: vmul pushes; vmul fires 3 (gives); mac fires 3; sum pushes; sum fires 2, takes its seed
+1 1 1 1 1 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 5: vmul pushes; vmul fires 4 (gives); mac fires 4 (gives); sum fires 3 (gives)
+1 1 1 1 1 1 | 1 1 | 1 1 | 1 1 | 1 | 1    # 6: vmul pushes; vmul fires 5 (gives); mac pushes; mac fires 5 (gives); sum pushes; sum fires 4, takes its seed
+1 1 1 1 1 1 | 1 1 | 1 0 | 1 1 | 1 | 1    # 7: vmul pushes; vmul fires 6 (gives); mac pushes; mac fires 6; sum fires 5 (gives)
+1 1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 8: vmul pushes; vmul fires 7 (gives); mac fires 7; sum pushes; sum fires 6, takes its seed
+1 1 1 1 1 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 9: vmul pushes; vmul fires 8 (gives); mac fires 8; sum fires 7 (gives)
+1 1 1 1 1 1 | 1 1 | 1 1 | 1 0 | 1 | 1    # 10: vmul pushes; vmul fires 9 (gives); mac fires 9; sum pushes; sum fires 8, takes its seed
+1 1 1 1 1 1 | 1 1 | 1 0 | 1 0 | 1 | 1    # 11: vmul pushes; vmul fires 10 (gives); mac fires 10 (gives); sum fires 9 (gives)
+1 1 1 1 1 1 | 1 1 | 1 1 | 1 1 | 1 | 1    # 12: vmul pushes; vmul fires 11 (gives); mac pushes; mac fires 11 (gives); sum pushes; sum fires 10, takes its seed
+1 1 1 1 1 1 | 0 0 | 1 0 | 0 1 | 0 | 1    # 13: mac pushes; sum fires 11 (gives)
+1 1 1 1 1 1 | 0 0 | 0 1 | 0 0 | 0 | 1    # 14: sum pushes
+1 1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 15: idle
+1 1 1 1 1 1 | 0 0 | 0 0 | 0 0 | 0 | 0    # 16: idle

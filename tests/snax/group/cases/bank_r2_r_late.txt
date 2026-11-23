@@ -1,0 +1,23 @@
+# the bank of 2 rows, M = 3, r missing in cycles 2 to 4
+# r is needed only on a row's first firing: cycle 2 (row 0's second) fires on the held r, cycle 3 (row 1's first) waits
+
+unit mac Mac latency 1 ii 1 span 1 t 6 inputs 2 rows 2 hold 1
+jobs 1
+start 0 taken
+expect run index=0 firings=6 busy=6 stall_in=2 stall_out=0 flush=1
+# E - s = 9
+
+# a b ready | mac fire give | busy
+cycles
+1 1 1 | 0 0 | 0    # 0: idle
+1 1 1 | 1 0 | 1    # 1: mac fires 0
+1 0 1 | 1 0 | 1    # 2: mac fires 1
+1 0 1 | 0 0 | 1    # 3: stall_in
+1 0 1 | 0 0 | 1    # 4: stall_in
+1 1 1 | 1 0 | 1    # 5: mac fires 2
+1 1 1 | 1 0 | 1    # 6: mac fires 3
+1 1 1 | 1 0 | 1    # 7: mac fires 4 (gives)
+1 1 1 | 1 1 | 1    # 8: mac pushes; mac fires 5 (gives)
+1 1 1 | 0 1 | 1    # 9: mac pushes
+1 1 1 | 0 0 | 0    # 10: idle
+1 1 1 | 0 0 | 0    # 11: idle

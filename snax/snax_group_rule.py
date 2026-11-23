@@ -53,6 +53,14 @@ unit order unless ``output`` lists them); a unit fires JOBS of its own chain tim
 over itself and the units after it. The cycle is stall_out when any output's unit is frozen;
 the run ends when every chain has.
 
+A banked unit (D191) has ``rows`` R (``ROWS``, default 1): its sums are R rows, one a firing
+in turn, so a job of T firings (T a multiple of R) starts each row on its first R firings
+(``first``, a seed taken on each) and gives R results, one on each of its last R firings (a
+row is done when the job's last pass adds into it). It is a chain's sink. Its ``hold``
+(optional, outer input places among its own) are read once every R firings and kept (D190):
+such an input needs its beat only on the firings where fired mod R = 0, and its reader's beat
+(a slicer's slice) is taken there.
+
 With ``d_out`` above 1 the outer output goes through a packer (D174, snax_group.hpp's
 SnaxPacker): the owning unit's outer room is ``ready`` only on a push that sends the word (its
 slice is d_out - 1, or the push is the run's last result, from the count of pushes), true on a
@@ -113,6 +121,7 @@ class GroupRule:
         self.chain = [self.outputs.index(sinks[o]) for o in self.chain]
         self.forks = [[(index[u], j) for u, j in f] for f in forks]
         self._check_forks()
+        self._check_banks()
         if len(sinks) > 1:
             joined = list(range(len(sinks)))
 
@@ -169,6 +178,25 @@ class GroupRule:
                 if u["span"] != 1:
                     raise GroupError(f"{what}: {u['name']} has span {u['span']}; a forked "
                                      "input's units read it at span 1")
+
+    def _check_banks(self):
+        """A banked unit (rows > 1) is a sink; its held inputs are outer inputs, not its seed,
+        not forked."""
+        forked = {x for f in self.forks for x in f}
+        for k, u in enumerate(self.units):
+            rows, hold = u.get("rows", 1), list(u.get("hold", ()))
+            if not isinstance(rows, int) or rows < 1:
+                raise GroupError(f"unit {u['name']}: rows {rows!r}; a bank has one row or more")
+            if rows > 1 and self.outs[k]:
+                raise GroupError(f"unit {u['name']}: a bank of {rows} rows gives {rows} results a "
+                                 "job; it is a chain's sink, not linked on")
+            for j in hold:
+                if rows == 1:
+                    raise GroupError(f"unit {u['name']}: input {j} held, but it has no bank; a "
+                                     "hold counts the bank's rows")
+                if not 0 <= j < u["inputs"] - (1 if u.get("seed") else 0) or (k, j) in forked:
+                    raise GroupError(f"unit {u['name']}: input {j} held is not an outer input "
+                                     "of its own (not its seed, not forked)")
 
     def _topological(self):
         """The units in a topological order, each before its consumers (index order among
@@ -229,7 +257,12 @@ class GroupRule:
         occ = [0] * len(links)
         rows, end = [], None
         empty = 0 in jobs_o or 0 in job_beats
-        results = [0 if empty else firings_per_run[k] // job_beats[k] for k in outs]
+        for k, u in enumerate(self.units):
+            if job_beats[k] % u.get("rows", 1):
+                raise GroupError(f"unit {u['name']}: T {job_beats[k]} is not a multiple of its "
+                                 f"{u['rows']} rows")
+        results = [0 if empty else firings_per_run[k] // job_beats[k] * self.units[k].get("rows", 1)
+                   for k in outs]  # fmt: skip
         pushes, slice_ = [0] * len(outs), [0] * len(outs)
         self.sent = []
         # each place in valid(c): its first unit and whether it is that unit's seed
@@ -237,7 +270,8 @@ class GroupRule:
         for k, u in enumerate(self.units):
             for j, i in enumerate(self.place[k]):
                 if port[i] is None:
-                    port[i] = (k, bool(u.get("seed")) and j == u["inputs"] - 1)
+                    port[i] = (k, "seed" if u.get("seed") and j == u["inputs"] - 1 else
+                               "hold" if j in u.get("hold", ()) else None)  # fmt: skip
         sliced = {i: d for i, d in enumerate(d_in) if d > 1}
         full, count = dict.fromkeys(sliced, False), dict.fromkeys(sliced, 0)
         self.took = []
@@ -254,12 +288,14 @@ class GroupRule:
                        for o in range(len(outs))]
             seen = [int(full[i]) if i in sliced else x for i, x in enumerate(v)]
             ins, seeds = [], []
-            for u, places in zip(self.units, self.place):
+            for k, (u, places) in enumerate(zip(self.units, self.place)):
                 mine = [seen[i] for i in places]
                 seeds.append(mine.pop() if u.get("seed") else 1)
-                ins.append(all(mine))
-            for k, u in enumerate(self.units):  # a job's first beat waits for its seed
-                first = fired[k] % job_beats[k] == 0
+                taking = fired[k] % u.get("rows", 1) == 0  # NB (D190): a held input's beat
+                ins.append(all(x for j, x in enumerate(mine)
+                               if j not in u.get("hold", ()) or taking))  # fmt: skip
+            for k, u in enumerate(self.units):  # a job's first beats (a row's each) wait for
+                first = fired[k] % job_beats[k] < u.get("rows", 1)  # their seed
                 ins[k] = ins[k] and (not u.get("seed") or not first or bool(seeds[k]))
             # NB (D189): a forked input's members fire together; one that would fire waits
             # while another cannot, so the cycle is decided again with it blocked
@@ -289,13 +325,13 @@ class GroupRule:
                     o = outs.index(k)
                     pushes[o] += 1
                     slice_[o] = 0 if sending[o] else slice_[o] + 1
-            fires, seeded = step["fire"], step["seeded"]
+            fires, seeded, takes = step["fire"], step["seeded"], step["takes"]
             # NB (D180): a slicer pops on its unit's firing (a seed's on its take); it takes the
             # reader's word when empty or on its last pop, so the word shows the next cycle
             took = []
             for i, d in sliced.items():
-                k, seed = port[i]
-                pop = seeded[k] if seed else fires[k]
+                k, kind = port[i]
+                pop = {"seed": seeded, "hold": takes}.get(kind, fires)[k]
                 last_pop = pop and count[i] == d - 1
                 take = bool(v[i]) and (not full[i] or last_pop)
                 if last_pop:
@@ -334,12 +370,13 @@ class GroupRule:
             ii_ok = last[k] is None or c >= last[k] + u["ii"]
             wants[k] = fired[k] < firings_per_run[k] and ii_ok and k not in blocked
             wfire[k] = wants[k] and avail[k] and (u["span"] == 1 or lane[k] == u["span"] - 1)
-            gives[k] = wfire[k] and (fired[k] + 1) % job_beats[k] == 0
+            rows = u.get("rows", 1)  # NB (D191): a bank gives on a job's last ROWS firings
+            gives[k] = wfire[k] and fired[k] % job_beats[k] >= job_beats[k] - rows
             head[k] = u["L"] > 0 and slots[k][-1]
             offer[k] = head[k] if u["L"] > 0 else gives[k]
         notes = []
         busy_cls = waits = False
-        frozen, fires, seeded = [False] * n, [False] * n, [False] * n
+        frozen, fires, seeded, takes = [False] * n, [False] * n, [False] * n, [False] * n
         pushes, reads = [False] * n, [False] * n
         for k in reversed(self.order):
             u = self.units[k]
@@ -364,7 +401,8 @@ class GroupRule:
             if read and not fire:
                 notes.append(f"{u['name']} reads lane {lane[k]}")
             if fire:
-                seed = u.get("seed") and fired[k] % job_beats[k] == 0
+                seed = u.get("seed") and fired[k] % job_beats[k] < u.get("rows", 1)
+                takes[k] = bool(u.get("hold")) and fired[k] % u.get("rows", 1) == 0
                 notes.append(f"{u['name']} fires {fired[k]}" + (" (gives)" if gives[k] else "")
                              + (f", lane {lane[k]}" if u["span"] > 1 else "")
                              + (", takes its seed" if seed else ""))
@@ -373,4 +411,4 @@ class GroupRule:
                 notes.append(f"{u['name']} pushes")
             fires[k], pushes[k], reads[k] = fire, push, read
         return {"fire": fires, "push": pushes, "read": reads, "frozen": frozen, "gives": gives,
-                "seeded": seeded, "notes": notes, "busy": busy_cls, "waits": waits}
+                "seeded": seeded, "takes": takes, "notes": notes, "busy": busy_cls, "waits": waits}
