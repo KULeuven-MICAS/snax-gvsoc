@@ -24,7 +24,7 @@ trace on and the counter check below; then
 every folder of forge/ (FORGE_DIR) with the generic app `forge`
 (snax-forge's generated main.c and data.h), named forge.<design>: the
 fixture's manifest.json gives its cluster file, the unit's trace path and
-each accelerator task's beats and, with several groups (forge/dot_v1), its
+each accelerator task's beats and, with several groups (forge/mvt_v5_sequential), its
 unit's own trace path (each unit's `summary`, `events` and `beats` traces
 under its trace path are on); it runs on `snax_hjson` with
 `--param hjson=<cluster file>` (but for vecadd's, its components are not

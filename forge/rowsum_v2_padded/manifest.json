@@ -1,7 +1,7 @@
 {
  "design": "rowsum_v2",
  "design_point": "out/design/rowsum_v2_padded/design_point.json",
- "symbols": {"M": 8, "N": 64},
+ "symbols": {"M": 4, "N": 8},
  "cluster": "snax_forge.hjson",
  "files": ["snax_forge.hjson", "snax_forge_rowsum_v2_streamer_acc.hjson", "accelerator.json", "include/streamer_acc_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
  "program": "main.c",
@@ -16,5 +16,5 @@
    "ACC_RO_BUSY_COUNTER": 979
   }
  },
- "tasks": [{"name": "sum_acc", "beats": 128, "csrs": {"JOBS": 2, "JOB_BEATS": 64}}]
+ "tasks": [{"name": "sum_acc", "beats": 8, "csrs": {"JOBS": 1, "JOB_BEATS": 8}}]
 }

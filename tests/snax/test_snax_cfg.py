@@ -161,22 +161,6 @@ class Fixtures(unittest.TestCase):
                          ("acc", STREAMER, 2, 2, "snax_streamer_sets[0]"))
         self.assertEqual(slot.description, VECADD)
 
-    def test_vecmul(self):
-        slot = self.slot("vecmul_v1")
-        self.assertEqual(slot.sets[0].streamer, STREAMER)
-        self.assertEqual(slot.description,
-                         accelerator("vecmul_v1", simd("acc", "mul")))
-
-    def test_relu(self):
-        """One stream: SimdLanes with one input a, params op max and k 0, opType int32, a's;
-        a reader and a writer of two channels each."""
-        slot = self.slot("relu_v1")
-        unit = Unit("acc", "simd", "SimdLanes",
-                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "out")},
-                    "int32", {"op": "max", "k": 0}, 0, 1, [])
-        self.assertEqual(slot.description, accelerator("relu_v1", unit))
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (4, 2, 2))
-
     def test_axpy(self):
         """axpby with k1 read from its CSR: scalars {k1: int32}, the R/W CSR K1 (pin k1, 32
         bits) after JOBS, so STATUS and BUSY_COUNTER one later; 3 R/W CSRs."""
@@ -189,27 +173,15 @@ class Fixtures(unittest.TestCase):
         self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 3, 2))
         self.assertEqual(unit.slot_params, {"op": "axpby", "k1": None})
 
-    def test_axpy_baked(self):
-        """axpby with k1 baked at 3: params.k1, no scalar, no unit CSR."""
-        slot = self.slot("axpy_v1_1")
-        unit = Unit("acc", "simd", "SimdLanes",
-                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
-                    "int32", {"op": "axpby", "k1": 3}, 0, 1, [])
-        self.assertEqual(slot.description, accelerator("axpy_v1_1", unit))
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 2, 2))
-
-    def test_vsum_tree_i32(self):
-        """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
-        slot = self.slot("vsum_v1_1_1")
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (3, 3, 2))
-        self.assertEqual(slot.description,
-                         accelerator("vsum_v1_1_1", fold("acc", 0, "int32", 4), between=1))
-        self.assertEqual([c.name for c in slot.description.csrs],
+    def test_fold_job_beats(self):
+        """A fold (dot_v4's mac): JOB_BEATS between JOBS and STATUS."""
+        desc = self.slot("dot_v4").description
+        self.assertEqual([c.name for c in desc.csrs],
                          ["START", "JOBS", "JOB_BEATS", "STATUS", "BUSY_COUNTER"])
-        self.assertEqual(slot.description.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
+        self.assertEqual(desc.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
         # The widths: START a strobe, JOBS and JOB_BEATS job_width, BUSY_COUNTER busy_counter_width
-        self.assertEqual(slot.description.groups[0].rw_widths, [1, 32, 32])
-        self.assertEqual(slot.description.groups[0].busy_counter_width, 32)
+        self.assertEqual(desc.groups[0].rw_widths, [1, 32, 32])
+        self.assertEqual(desc.groups[0].busy_counter_width, 32)
 
     def test_mvt_v6_seeded_bank(self):
         """mvt's one pass (D194): x2's Mac a bank of 8 rows, seeded (its seed of the output's 8
@@ -1380,17 +1352,6 @@ class Dot1(unittest.TestCase):
                                                       ["START", "JOBS", "JOB_BEATS"]])
         self.assertEqual(dot.ports_of("vsum", dot.inputs), [(2, "a")])
         self.assertEqual(dot.ports_of("vsum", dot.outputs), [(1, "out")])
-
-    def test_forge(self):
-        """forge/dot_v1/ and dot_v1_1/, snax-forge's: the same, their design points named."""
-        for design, want, sets in (("dot_v1", DOT1, ["vmul", "vsum"]),
-                                   ("dot_v1_1", DOT, ["dot"])):
-            with self.subTest(design):
-                (slot,) = snax_cfg.load(FORGE / design / "snax_forge.hjson").cores[0].accelerators
-                self.assertEqual(slot.description, want)
-                self.assertEqual([x.name for x in slot.sets], sets)
-                self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports),
-                                 (5, 4, 17))
 
 
 class Shared(unittest.TestCase):

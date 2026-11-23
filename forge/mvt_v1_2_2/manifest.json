@@ -1,7 +1,7 @@
 {
  "design": "mvt_v1_2_2",
  "design_point": "out/design/mvt_v1_2_2/design_point.json",
- "symbols": {"M": 64, "N": 64},
+ "symbols": {"M": 8, "N": 8},
  "cluster": "snax_forge.hjson",
  "files": ["snax_forge.hjson", "snax_forge_mvt_v1_2_2_streamer_mvt_vadd.hjson", "accelerator.json", "include/streamer_mvt_vadd_csr_addr_map.h", "include/mvt_vadd_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
  "program": "main.c",
@@ -26,17 +26,17 @@
  "tasks": [
   {
    "name": "tmp0_mult_mvt",
-   "beats": 512,
-   "csrs": {"JOBS": 64, "VSUM_X1_JOB_BEATS": 8},
+   "beats": 8,
+   "csrs": {"JOBS": 8, "VSUM_X1_JOB_BEATS": 1},
    "trace": "snax_acc0/group_mvt"
   },
-  {"name": "augassign_18_4_vadd", "beats": 8, "csrs": {"JOBS": 8}, "trace": "snax_acc0/unit_vadd"},
+  {"name": "augassign_18_4_vadd", "beats": 1, "csrs": {"JOBS": 1}, "trace": "snax_acc0/unit_vadd"},
   {
    "name": "tmp2_mult_mvt",
-   "beats": 512,
-   "csrs": {"JOBS": 64, "VSUM_X1_JOB_BEATS": 8},
+   "beats": 8,
+   "csrs": {"JOBS": 8, "VSUM_X1_JOB_BEATS": 1},
    "trace": "snax_acc0/group_mvt"
   },
-  {"name": "augassign_19_4_vadd", "beats": 8, "csrs": {"JOBS": 8}, "trace": "snax_acc0/unit_vadd"}
+  {"name": "augassign_19_4_vadd", "beats": 1, "csrs": {"JOBS": 1}, "trace": "snax_acc0/unit_vadd"}
  ]
 }

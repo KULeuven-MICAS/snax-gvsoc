@@ -36,9 +36,10 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
 from test_snax_cfg import (BICG3, BICG3_STREAMER, BICG4, BICG4_STREAMER, CLUSTER,  # noqa: E402
-                           DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
+                           DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD,
+                           VMUL_STREAMER, VSUM_STREAMER, Port, Unit, acc_json, accelerator,
                            dot1_cluster, dot_cluster, dot_shared_cluster, seeded, seeded_mac,
-                           streamer)
+                           streamer, write_design)
 
 
 def slot_of(description, *streamers):
@@ -156,14 +157,23 @@ class Built(unittest.TestCase):
                           unit["k2"], unit["scalars"], unit["in_widths"], unit["op_width"]),
                          ("SimdLanes", ["acc_a", "acc_b"], "axpby", "", "", "", [["k1", 1]],
                           [32, 32], 32))
-        baked = self.build(CLUSTER.parent.parent / "axpy_v1_1" / "snax_forge.hjson")
+        with tempfile.TemporaryDirectory() as tmp:
+            baked = self.build(write_design(Path(tmp), acc_json(accelerator("axpy_v1_1", Unit(
+                "acc", "simd", "SimdLanes",
+                {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                "int32", {"op": "axpby", "k1": 3}, 0, 1, []))), streamer([2, 2], [2]), 2, 2))
         (unit,) = baked.components["unit"].properties["units"]
         self.assertEqual((unit["k1"], unit["scalars"]), ("3", []))
         self.assertEqual(baked.components["shell"].properties["csrs"], ["START", "JOBS"])
 
     def test_relu_one_stream(self):
         """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
-        acc = self.build(CLUSTER.parent.parent / "relu_v1" / "snax_forge.hjson")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "out")},
+                    "int32", {"op": "max", "k": 0}, 0, 1, [])
+        with tempfile.TemporaryDirectory() as tmp:
+            acc = self.build(write_design(Path(tmp), acc_json(accelerator("relu_v1", unit)),
+                                          streamer([2], [2]), 2, 2))
         (unit,) = acc.components["unit"].properties["units"]
         self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"], unit["k"],
                           unit["in_widths"], unit["op_width"], unit["lanes"]),

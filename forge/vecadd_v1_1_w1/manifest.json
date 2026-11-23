@@ -1,7 +1,7 @@
 {
  "design": "vecadd_v1_1",
  "design_point": "out/design/vecadd_v1_1_w1/design_point.json",
- "symbols": {"N": 64},
+ "symbols": {"N": 8},
  "cluster": "snax_forge.hjson",
  "files": ["snax_forge.hjson", "snax_forge_vecadd_v1_1_streamer_acc.hjson", "accelerator.json", "include/streamer_acc_csr_addr_map.h", "include/acc_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
  "program": "main.c",
@@ -15,5 +15,5 @@
    "ACC_RO_BUSY_COUNTER": 981
   }
  },
- "tasks": [{"name": "add_acc", "beats": 64, "csrs": {"JOBS": 64}}]
+ "tasks": [{"name": "add_acc", "beats": 8, "csrs": {"JOBS": 8}}]
 }

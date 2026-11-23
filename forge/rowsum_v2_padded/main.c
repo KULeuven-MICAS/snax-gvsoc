@@ -22,7 +22,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 1);  // dma load_A
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10000000, A, 4160);
+    snrt_dma_start_1d((void *)0x10000000, A, 320);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -31,21 +31,21 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #endif  // FORGE_QUIET
     csrw_ss(ACC_BASE_PTR_READER_0_LOW, 0x10000000);
     csrw_ss(ACC_BASE_PTR_READER_0_HIGH, 0);
-    csrw_ss(ACC_S_STRIDE_READER_0_0, 520);
-    csrw_ss(ACC_T_BOUND_READER_0_0, 64);
-    csrw_ss(ACC_T_BOUND_READER_0_1, 2);
+    csrw_ss(ACC_S_STRIDE_READER_0_0, 72);
+    csrw_ss(ACC_T_BOUND_READER_0_0, 8);
+    csrw_ss(ACC_T_BOUND_READER_0_1, 1);
     csrw_ss(ACC_T_STRIDE_READER_0_0, 8);
-    csrw_ss(ACC_T_STRIDE_READER_0_1, 2080);
-    csrw_ss(ACC_BASE_PTR_WRITER_0_LOW, 0x10001040);
+    csrw_ss(ACC_T_STRIDE_READER_0_1, 288);
+    csrw_ss(ACC_BASE_PTR_WRITER_0_LOW, 0x10000140);
     csrw_ss(ACC_BASE_PTR_WRITER_0_HIGH, 0);
     csrw_ss(ACC_S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(ACC_T_BOUND_WRITER_0_0, 2);
+    csrw_ss(ACC_T_BOUND_WRITER_0_0, 1);
     csrw_ss(ACC_T_STRIDE_WRITER_0_0, 32);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 3);  // acc config acc
 #endif  // FORGE_QUIET
-    csrw_ss(ACC_RW_JOBS, 2);
-    csrw_ss(ACC_RW_JOB_BEATS, 64);
+    csrw_ss(ACC_RW_JOBS, 1);
+    csrw_ss(ACC_RW_JOB_BEATS, 8);
 #ifndef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -62,7 +62,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 5);  // dma store_y
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d(y, (void *)0x10001040, 64);
+    snrt_dma_start_1d(y, (void *)0x10000140, 64);
     snrt_dma_wait_all();
     return 0;
 }
@@ -79,19 +79,19 @@ static __attribute__((noinline)) int forge_check(uint32_t t0) {
 #endif  // FORGE_QUIET
     int err = 0;
     int data_errors = 0;
-    for (uint32_t i = 0; i < 8; i++) {
+    for (uint32_t i = 0; i < 4; i++) {
         if (((volatile int64_t *)y)[i] != y_golden[i]) {
             data_errors++;
         }
     }
     err += data_errors;
 #ifndef FORGE_QUIET
-    printf("forge data: %d errors (%u words)\n", data_errors, 8u);
+    printf("forge data: %d errors (%u words)\n", data_errors, 4u);
 #endif  // FORGE_QUIET
 #ifndef FORGE_QUIET
     printf("forge counter sum_acc: %u\n", forge_counter[0]);
 #endif  // FORGE_QUIET
-    err += forge_counter[0] < 128;
+    err += forge_counter[0] < 8;
 #ifndef FORGE_QUIET
     printf("forge errors: %d\n", err);
 #endif  // FORGE_QUIET

@@ -7,7 +7,7 @@ regress.py's check_quiet() and run_mark(). Run from snax-gvsoc:
     python3 -m unittest discover -s tests/snax -p 'test_*.py'
 
 The log is a quiet run written by hand in GVSoC's header and docs/EVENTS.md's
-grammar, as forge/dot_v3's: a linked group (mul, sum), one reader, a crossbar of
+grammar, as forge/dot_v4's: a linked group (mul, sum), one reader, a crossbar of
 two inputs and one bank; marks 1 at 100 and 2 at 200 around the group's one run
 (10 to 140) and the streamer's (reader0 ends at 142), and a DMA copy inside L1 of
 64 bank words read and written, the end at 300.
@@ -155,8 +155,8 @@ class Regress(unittest.TestCase):
             self.assertIn("not a trace line", regress.check_quiet(traces, 1))
 
     def test_run_mark_of_the_fixtures(self):
-        self.assertEqual(regress.run_mark("dot_v3"), 5)
-        self.assertIsNone(regress.run_mark("dot_v1"))
+        self.assertEqual(regress.run_mark("dot_v4"), 5)
+        self.assertIsNone(regress.run_mark("mvt_v5_sequential"))
 
 
 if __name__ == "__main__":
