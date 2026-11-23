@@ -211,6 +211,21 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(slot.description.groups[0].rw_widths, [1, 32, 32])
         self.assertEqual(slot.description.groups[0].busy_counter_width, 32)
 
+    def test_mvt_v6_seeded_bank(self):
+        """mvt's one pass (D194): x2's Mac a bank of 8 rows, seeded (its seed of the output's 8
+        int32 lanes, the last in port), y2 held and broadcast; A forked to vmul_x1 and mac_x2."""
+        desc = self.slot("mvt_v6").description
+        (acc,) = desc.accelerators
+        self.assertEqual(acc.inputs, [["vmul_x1.a", "mac_x2.a"], "vmul_x1.b", "vsum_x1.seed",
+                                      "mac_x2.b", "mac_x2.seed"])
+        (group,) = acc.groups
+        mac = group.units[2]
+        self.assertEqual((mac.datapath, mac.params["rows"], list(mac.ports)),
+                         ("Mac", 8, ["a", "b", "seed", "out"]))
+        self.assertEqual((mac.ports["seed"].dtype, mac.ports["seed"].lanes), ("int32", 8))
+        self.assertTrue(mac.ports["b"].hold and mac.ports["b"].broadcast)
+        self.assertEqual([c.name for c in mac.csrs], ["JOB_BEATS", "ROWS"])
+
     def test_every_fixture_reads(self):
         for folder in sorted(p for p in FORGE.iterdir() if p.is_dir()):
             with self.subTest(folder.name):
@@ -1269,7 +1284,7 @@ class Bank(unittest.TestCase):
                 c["offset"] += 1
         self.acc["accelerators"][0]["groups"][0]["csrs"][3]["offset"] = 7
         self.acc["accelerators"][0]["groups"][0]["csrs"][4]["offset"] = 8
-        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; a bank (D191) is an unseeded "
+        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; a bank (D191) is an "
                    "accumulating Mac's", rw=7)
         self.acc = acc_json(BICG4)
         self.unit("mac")["params"]["rows"] = 0
