@@ -149,6 +149,8 @@ class GroupRule:
             for f in self.forks:
                 for k, _ in f[1:]:
                     joined[root(self.chain[k])] = root(self.chain[f[0][0]])
+            for e in self.fork_links:  # a buffered branch joins its reader's chain as well
+                joined[root(self.chain[e["dst"]])] = root(self.chain[self.forks[e["fork"]][0][0]])
             parts = {}
             for o, k in enumerate(sinks):
                 parts.setdefault(root(o), []).append(units[k]["name"])

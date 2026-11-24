@@ -191,6 +191,13 @@ class Atax(unittest.TestCase):
             with self.subTest(m=m, rows=rows):
                 self.assertEqual(self.one_read(m, rows, rows + 2), self.two_reads(m, rows)[1])
 
+    def test_a_buffered_branch_joins_two_chains(self):
+        # t still from L1: the Mac a chain of its own, A through the buffer (atax_v4 before t's link)
+        g = GroupRule(self.units(2, 1), [link("vmul", "sum", 1)], forks=[[("vmul", 0)]],
+                      fork_links=[{"fork": 0, "to": "mac", "to_input": 0, "depth": 4}])
+        self.assertEqual(g.firings_per_run([3, 1], [1, 2, 6]), [6, 6, 6])  # M t[i], one y
+        self.assertIsNotNone(g.run([3, 1], [1, 2, 6], lambda c: (1, 1, 1), lambda c: [1, 1], 2000)[1])
+
     def test_a_sliced_input_beside_the_buffer(self):
         # vmul's A and x two slices to a word (int8 at W = 4): the buffer runs beside the slicers
         g = GroupRule(self.units(2, 0), self.links(), forks=[[("vmul", 0)]],
