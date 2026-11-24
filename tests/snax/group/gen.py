@@ -399,6 +399,15 @@ def atax_cases():
               forks=[[("vmul", 0)]], fork_links=[(0, "mac", depth)],
               comment=["vmul takes A's beat only when the buffer has room; mac pops it on each "
                        "firing, t[i] held for the row"])
+    # t still from L1 (before its link): mac a chain of its own, joined by the fork's buffer
+    write("atax_fork_buffer_two_chains", f"atax's one pass before t's link, M = {m}, ROWS = "
+          f"{rows}: sum's chain gives t (JOBS {m}), mac's reads it from L1 (JOBS 1), A to mac "
+          "through a buffer of depth 4", [vmul, sum_, ("mac", "Mac", 1, 1, 1, False,
+                                                       {"rows": rows, "hold": [0]})],
+          None, [m, 1], ts, valid=lambda c: (1, 1, 1), ready=lambda c: (1, 1),
+          links=[("vmul", "sum", 1)], forks=[[("vmul", 0)]], fork_links=[(0, "mac", 4)],
+          comment=["the fork's buffered branch joins the two chains: vmul takes A's beat when "
+                   "the buffer has room, mac its t on each row's first firing"])
 
 
 def seeded_bank_cases():

@@ -68,7 +68,8 @@
 // the beat is taken when every unit of the fork fires and the buffer has room
 // (occupancy < D, or its consumer pops one this cycle), each taken beat loads
 // one entry, and the consumer's input has a beat while the buffer holds one,
-// popped on each of its firings. A fork may then have one unit. A buffer
+// popped on each of its firings. A fork may then have one unit, and the
+// branch joins its consumer's chain to the fork's, as a unit of it does. A buffer
 // shallower than the beats the consumer waits through never ends the run
 // (LOWER refuses it).
 //
@@ -396,6 +397,11 @@ public:
                 }
                 joined[root(chain[k])] = root(chain[f[0]]);
             }
+        }
+        // A fork's buffered branch joins its reader's chain as its fork's units do
+        for (const ForkLink &e : fork_links)
+        {
+            joined[root(chain[e.to])] = root(chain[forks[e.fork][0]]);
         }
         // A fork link's consumer comes after every unit of its fork in the order, so the
         // backward pass knows its firing when it decides theirs
