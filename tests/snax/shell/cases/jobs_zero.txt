@@ -1,4 +1,4 @@
-# The empty run (C§17): a start with JOBS 0, or with a JOB_BEATS 0, ends in
+# The empty run (snax-forge CONTRACTS, "Accelerator RTL spec"): a start with JOBS 0, or with a JOB_BEATS 0, ends in
 # the cycle a it is accepted (E = a), without the unit: busy never rises,
 # done pulses in a, STATUS reads 2 from a + 1, BUSY_COUNTER reads 0. A fold group
 # (TreeAccumulate, L = 1): START 0, JOBS 1, JOB_BEATS 2, STATUS 3, BUSY_COUNTER 4.
