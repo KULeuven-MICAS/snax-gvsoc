@@ -346,5 +346,29 @@ class Built(unittest.TestCase):
         self.assertEqual((total["inputs"], total["seed"], total["t"]), (["", "sum_seed"], 1, 8))
 
 
+    def test_a_held_link_and_a_fork_link(self):
+        """forge/atax_v4: sum's t over a held link into mac's b (its buffer of one lane), A
+        forked to mul.a and through a buffer of 4 to mac.a, which is fed ("", no slicer of its
+        own); fork_links only on such a group."""
+        cfg = snax_cfg.load(Path(__file__).resolve().parents[2] / "forge" / "atax_v4" /
+                            "snax_forge.hjson")
+        (slot,) = cfg.cores[0].accelerators
+        cls = snax_accelerator.SnaxAccelerator.for_slot(slot, 131072)
+        group = cls(None, "snax_acc0").components["group_atax"].properties
+        mul, total, mac = group["units"]
+        self.assertEqual([(u["inputs"], u["d_in"]) for u in (mul, total, mac)],
+                         [(["mul_a", "mul_b"], [2, 2]), ([""], [1]), (["", ""], [1, 1])])
+        self.assertEqual((mac["broadcast"], mac["hold"], mac["rows"]),
+                         ([False, True], [False, True], 2))
+        self.assertEqual(group["links"], [
+            {"from": "mul", "to": "sum", "to_input": 0, "depth": 1},
+            {"from": "sum", "to": "mac", "to_input": 1, "depth": 1, "hold": True}])
+        self.assertEqual(group["fork_links"], [{"fork": "mul_a", "to": "mac", "to_input": 0,
+                                                "depth": 4}])
+        cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG4, BICG4_STREAMER), 131072)
+        self.assertNotIn("fork_links",
+                         cls(None, "snax_acc0").components["group_bicg_types"].properties)
+
+
 if __name__ == "__main__":
     unittest.main()

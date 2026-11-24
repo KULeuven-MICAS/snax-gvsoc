@@ -18,6 +18,7 @@ sw/cfg/snax_forge/ is never read.
 
 import copy
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -28,8 +29,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "snax"))
 import hjson  # noqa: E402
 import snax_cfg  # noqa: E402
-from snax_cfg import (Accelerator, Csr, Description, Group, Link, MoverUser, Port,  # noqa: E402
-                      PortMux, SharedMover, Unit)
+from snax_cfg import (Accelerator, Csr, Description, ForkLink, Group, Link,  # noqa: E402
+                      MoverUser, Port, PortMux, SharedMover, Unit)
 
 CFG = ROOT / "sw" / "cfg"
 FORGE = ROOT / "forge"
@@ -1101,6 +1102,79 @@ class Bank(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "gen.fork: accelerator bicg_types: the fork ['mul.a', "
                    "'mac.a']: a port is held for a bank row; a held input is read by its own "
                    "reader")
+
+
+class Atax(unittest.TestCase):
+    """forge/atax_v4: t held over a link into the bank's broadcast b (one lane at the link), A
+    forked to mul.a and, through a buffer, to mac.a (fork_links); each refused case in
+    snax-forge's words (gen.link, gen.link_port, gen.fork)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name) / "atax_v4"
+        shutil.copytree(FORGE / "atax_v4", self.dir)
+        self.acc = json.loads((self.dir / "accelerator.json").read_text())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def load(self):
+        (self.dir / "accelerator.json").write_text(json.dumps(self.acc))
+        (slot,) = snax_cfg.load(self.dir / "snax_forge.hjson").cores[0].accelerators
+        return slot.description
+
+    def fails(self, kind, text):
+        with self.assertRaises(kind) as ctx:
+            self.load()
+        self.assertIn(text, ctx.exception.why)
+
+    def group(self):
+        return self.acc["accelerators"][0]["groups"][0]
+
+    def test_read(self):
+        (acc,) = self.load().accelerators
+        (group,) = acc.groups
+        self.assertEqual(acc.forks, [["mul.a", "mac.a"]])
+        self.assertEqual(group.fork_links, [ForkLink("A", "mac.a", 4)])
+        self.assertEqual(group.links[1], Link("tmp1", "sum.out", "mac.b", 1))
+        b = group.units[2].ports["b"]
+        self.assertEqual((b.lanes, b.stream_lanes, b.broadcast, b.hold), (4, 1, True, True))
+
+    def test_gen_link_held(self):
+        """A held link: one lane at the producer, a buffer; a broadcast linked port held."""
+        self.group()["units"][1]["ports"]["out"]["lanes"] = 4
+        self.fails(snax_cfg.CfgSlotError, "gen.link: group atax's link tmp1: sum.out is 4 lanes "
+                   "of int32, mac.b 1 of int32; both ends are the same")
+        self.acc = json.loads((FORGE / "atax_v4" / "accelerator.json").read_text())
+        self.group()["links"][1]["depth"] = 0
+        self.fails(snax_cfg.CfgSlotError, "gen.link: group atax's link tmp1: depth 0 into mac.b, "
+                   "held for a bank row; a held link is a buffer, depth 1 or more")
+        self.acc = json.loads((FORGE / "atax_v4" / "accelerator.json").read_text())
+        del self.group()["units"][2]["ports"]["b"]["hold"]
+        self.fails(snax_cfg.CfgSlotError, "sum.out is 1 lanes of int32, mac.b 4 of int32")
+        self.group()["units"][1]["ports"]["out"]["lanes"] = 4
+        self.fails(snax_cfg.CfgSlotError, "mac.b is a broadcast; a linked port takes its lanes "
+                   "from the link, so it is not one unless held for a bank row")
+
+    def test_gen_link_fork(self):
+        """A fork link to the fork's reader's port, to a port of no fork, of depth 0."""
+        for to in ("mul.a", "mul.b"):
+            self.acc = json.loads((FORGE / "atax_v4" / "accelerator.json").read_text())
+            self.group()["fork_links"][0]["to"] = to
+            with self.subTest(to=to):
+                self.fails(snax_cfg.CfgSlotError, f"gen.link: group atax's fork link A goes to "
+                           f"{to}; a fork's buffered branch goes to a forked port of the group, "
+                           "not its reader's first")
+        self.acc = json.loads((FORGE / "atax_v4" / "accelerator.json").read_text())
+        self.group()["fork_links"][0]["depth"] = 0
+        self.fails(snax_cfg.CfgSlotError, "gen.link: depth 0; a fork's branch is a buffer, depth "
+                   "1 or more")
+
+    def test_gen_fork_without_its_buffer(self):
+        """mac.a forked with no fork link: mac is fed by a link, so not a chain's head."""
+        del self.group()["fork_links"]
+        self.fails(snax_cfg.CfgSlotError, "gen.fork: accelerator atax: the fork ['mul.a', "
+                   "'mac.a']: mac.a's unit is fed by a link; a fork feeds the heads of chains")
 
 
 class Dot1(unittest.TestCase):
