@@ -22,14 +22,14 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 1);  // dma load_A
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10000000, A, 32768);
+    snrt_dma_start_1d((void *)0x10000000, A, 256);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 2);  // dma load_p
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10008000, p, 4096);
+    snrt_dma_start_1d((void *)0x10000100, p, 128);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -39,24 +39,24 @@ static __attribute__((noinline)) int forge_core_0(void) {
     csrw_ss(MATVEC_BASE_PTR_READER_0_LOW, 0x10000000);
     csrw_ss(MATVEC_BASE_PTR_READER_0_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_READER_0_0, 8);
-    csrw_ss(MATVEC_T_BOUND_READER_0_0, 128);
-    csrw_ss(MATVEC_T_BOUND_READER_0_1, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_0_0, 4);
+    csrw_ss(MATVEC_T_BOUND_READER_0_1, 2);
     csrw_ss(MATVEC_T_STRIDE_READER_0_0, 32);
-    csrw_ss(MATVEC_T_STRIDE_READER_0_1, 4096);
-    csrw_ss(MATVEC_BASE_PTR_READER_1_LOW, 0x10008000);
+    csrw_ss(MATVEC_T_STRIDE_READER_0_1, 128);
+    csrw_ss(MATVEC_BASE_PTR_READER_1_LOW, 0x10000100);
     csrw_ss(MATVEC_BASE_PTR_READER_1_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_READER_1_0, 8);
-    csrw_ss(MATVEC_T_BOUND_READER_1_0, 128);
-    csrw_ss(MATVEC_T_BOUND_READER_1_1, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_1_0, 4);
+    csrw_ss(MATVEC_T_BOUND_READER_1_1, 2);
     csrw_ss(MATVEC_T_STRIDE_READER_1_0, 32);
     csrw_ss(MATVEC_T_STRIDE_READER_1_1, 0);
-    csrw_ss(MATVEC_BASE_PTR_WRITER_0_LOW, 0x10009040);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_0_LOW, 0x100001c0);
     csrw_ss(MATVEC_BASE_PTR_WRITER_0_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(MATVEC_T_BOUND_WRITER_0_0, 128);
-    csrw_ss(MATVEC_T_BOUND_WRITER_0_1, 8);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_0, 4);
+    csrw_ss(MATVEC_T_BOUND_WRITER_0_1, 2);
     csrw_ss(MATVEC_T_STRIDE_WRITER_0_0, 32);
-    csrw_ss(MATVEC_T_STRIDE_WRITER_0_1, 4096);
+    csrw_ss(MATVEC_T_STRIDE_WRITER_0_1, 128);
     csrw_ss(MATVEC_BASE_PTR_READER_2_LOW, 0x00000000);
     csrw_ss(MATVEC_BASE_PTR_READER_2_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_READER_2_0, 0);
@@ -77,7 +77,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 4);  // acc config mul
 #endif  // FORGE_QUIET
-    csrw_ss(MATVEC_RW_MUL_JOBS, 1024);
+    csrw_ss(MATVEC_RW_MUL_JOBS, 8);
 #ifndef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -95,7 +95,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 6);  // dma load_q
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10009000, q, 64);
+    snrt_dma_start_1d((void *)0x10000180, q, 64);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -123,28 +123,28 @@ static __attribute__((noinline)) int forge_core_0(void) {
     csrw_ss(MATVEC_T_BOUND_WRITER_0_1, 0);
     csrw_ss(MATVEC_T_STRIDE_WRITER_0_0, 8);
     csrw_ss(MATVEC_T_STRIDE_WRITER_0_1, 8);
-    csrw_ss(MATVEC_BASE_PTR_READER_2_LOW, 0x10009040);
+    csrw_ss(MATVEC_BASE_PTR_READER_2_LOW, 0x100001c0);
     csrw_ss(MATVEC_BASE_PTR_READER_2_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_READER_2_0, 8);
-    csrw_ss(MATVEC_T_BOUND_READER_2_0, 512);
-    csrw_ss(MATVEC_T_BOUND_READER_2_1, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_2_0, 16);
+    csrw_ss(MATVEC_T_BOUND_READER_2_1, 2);
     csrw_ss(MATVEC_T_STRIDE_READER_2_0, 8);
-    csrw_ss(MATVEC_T_STRIDE_READER_2_1, 4096);
-    csrw_ss(MATVEC_BASE_PTR_READER_3_LOW, 0x10009000);
+    csrw_ss(MATVEC_T_STRIDE_READER_2_1, 128);
+    csrw_ss(MATVEC_BASE_PTR_READER_3_LOW, 0x10000180);
     csrw_ss(MATVEC_BASE_PTR_READER_3_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_READER_3_0, 8);
-    csrw_ss(MATVEC_T_BOUND_READER_3_0, 8);
+    csrw_ss(MATVEC_T_BOUND_READER_3_0, 2);
     csrw_ss(MATVEC_T_STRIDE_READER_3_0, 8);
-    csrw_ss(MATVEC_BASE_PTR_WRITER_1_LOW, 0x10009000);
+    csrw_ss(MATVEC_BASE_PTR_WRITER_1_LOW, 0x10000180);
     csrw_ss(MATVEC_BASE_PTR_WRITER_1_HIGH, 0);
     csrw_ss(MATVEC_S_STRIDE_WRITER_1_0, 8);
-    csrw_ss(MATVEC_T_BOUND_WRITER_1_0, 8);
+    csrw_ss(MATVEC_T_BOUND_WRITER_1_0, 2);
     csrw_ss(MATVEC_T_STRIDE_WRITER_1_0, 8);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 8);  // acc config sum
 #endif  // FORGE_QUIET
-    csrw_ss(MATVEC_RW_SUM_JOBS, 8);
-    csrw_ss(MATVEC_RW_SUM_JOB_BEATS, 512);
+    csrw_ss(MATVEC_RW_SUM_JOBS, 2);
+    csrw_ss(MATVEC_RW_SUM_JOB_BEATS, 16);
 #ifndef FORGE_QUIET
     while (csrr_ss(MATVEC_RO_MUL_STATUS) & 1) {
     }
@@ -168,7 +168,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 10);  // dma store_q
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d(q, (void *)0x10009000, 64);
+    snrt_dma_start_1d(q, (void *)0x10000180, 64);
     snrt_dma_wait_all();
     return 0;
 }
@@ -185,23 +185,23 @@ static __attribute__((noinline)) int forge_check(uint32_t t0) {
 #endif  // FORGE_QUIET
     int err = 0;
     int data_errors = 0;
-    for (uint32_t i = 0; i < 8; i++) {
+    for (uint32_t i = 0; i < 2; i++) {
         if (((volatile int64_t *)q)[i] != q_golden[i]) {
             data_errors++;
         }
     }
     err += data_errors;
 #ifndef FORGE_QUIET
-    printf("forge data: %d errors (%u words)\n", data_errors, 8u);
+    printf("forge data: %d errors (%u words)\n", data_errors, 2u);
 #endif  // FORGE_QUIET
 #ifndef FORGE_QUIET
     printf("forge counter mult_mul: %u\n", forge_counter[0]);
 #endif  // FORGE_QUIET
-    err += forge_counter[0] < 1024;
+    err += forge_counter[0] < 8;
 #ifndef FORGE_QUIET
     printf("forge counter sum_sum: %u\n", forge_counter[1]);
 #endif  // FORGE_QUIET
-    err += forge_counter[1] < 4096;
+    err += forge_counter[1] < 32;
 #ifndef FORGE_QUIET
     printf("forge errors: %d\n", err);
 #endif  // FORGE_QUIET

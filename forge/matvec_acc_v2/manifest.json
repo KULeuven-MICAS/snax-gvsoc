@@ -1,7 +1,7 @@
 {
  "design": "matvec_acc_v2",
  "design_point": "out/design/matvec_acc_v2/design_point.json",
- "symbols": {"M": 8, "N": 512},
+ "symbols": {"M": 2, "N": 16},
  "cluster": "snax_forge.hjson",
  "files": ["snax_forge.hjson", "snax_forge_matvec_acc_v2_streamer_matvec.hjson", "accelerator.json", "include/streamer_matvec_csr_addr_map.h", "include/matvec_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
  "program": "main.c",
@@ -23,11 +23,11 @@
   }
  },
  "tasks": [
-  {"name": "mult_mul", "beats": 1024, "csrs": {"JOBS": 1024}, "trace": "snax_acc0/unit_mul"},
+  {"name": "mult_mul", "beats": 8, "csrs": {"JOBS": 8}, "trace": "snax_acc0/unit_mul"},
   {
    "name": "sum_sum",
-   "beats": 4096,
-   "csrs": {"JOBS": 8, "JOB_BEATS": 512},
+   "beats": 32,
+   "csrs": {"JOBS": 2, "JOB_BEATS": 16},
    "trace": "snax_acc0/unit_sum"
   }
  ]

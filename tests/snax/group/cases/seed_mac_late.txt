@@ -1,4 +1,4 @@
-# mac (Mac, T 4, seeded: its seed has the output's lanes, D187) alone, JOBS 2, its seed missing in cycles 1 to 3 and 6 to 7
+# mac (Mac, T 4, seeded: its seed has the output's lanes) alone, JOBS 2, its seed missing in cycles 1 to 3 and 6 to 7
 # a seeded Mac waits for its seed on each job's first beat, as a seeded fold; its other beats do not
 
 unit mac Mac latency 1 ii 1 span 1 t 4 inputs 3 seed 1

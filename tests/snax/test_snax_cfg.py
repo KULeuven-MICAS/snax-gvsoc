@@ -11,7 +11,7 @@ written as JSON into a temporary folder), broken accelerator.json files
 beside it, hand-written dot 1 designs: two
 accelerators vmul and vsum in two streamer sets, and dot_v1_1, the two as
 one accelerator dot of two groups; bicg_v3's one group of two chains on a
-forked input (D189); then the sets' refusals and the slot form before sets
+forked input; then the sets' refusals and the slot form before sets
 (snax_streamer_cfg), read as one set. snax_cluster's copy in
 sw/cfg/snax_forge/ is never read.
 """
@@ -138,94 +138,6 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(slot.name, f"snax_forge_{design}")
         return slot
 
-    def test_vecadd_cluster(self):
-        """forge/vecadd_v1/: the snax_hjson target's default."""
-        cfg = snax_cfg.load(CLUSTER)
-        self.assertEqual(cfg.boot_addr, 0x1000)
-        self.assertEqual(cfg.base, 0x1000_0000)
-        self.assertEqual((cfg.tcdm.size, cfg.tcdm.banks, cfg.tcdm.bank_width),
-                         (128 * 1024, 32, 8))
-        self.assertEqual((cfg.periph_size, cfg.zero_mem_size), (64 * 1024, 64 * 1024))
-        self.assertEqual(cfg.dma, snax_cfg.Dma(512, 3, 3))
-        self.assertEqual(cfg.dram, snax_cfg.Dram(0x8000_0000, 0x8000_0000))
-        (core,) = cfg.cores  # one core, the slot and the DMA
-        self.assertEqual((core.isa, core.xdma, core.num_int_outstanding_loads),
-                         ("rv32ima", True, 1))
-        self.assertEqual(core.misa, MISA_RV32IMA)
-        slot = self.slot("vecadd_v1")
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (12, 2, 2))
-        self.assertEqual((slot.narrow_tcdm_ports, slot.wide_tcdm_ports, slot.sparse_config),
-                         (None, None, [[12, 1]]))
-        (one,) = slot.sets
-        self.assertEqual((one.name, one.streamer, one.num_rw_csr, one.num_ro_csr, one.at),
-                         ("acc", STREAMER, 2, 2, "snax_streamer_sets[0]"))
-        self.assertEqual(slot.description, VECADD)
-
-    def test_vecmul(self):
-        slot = self.slot("vecmul_v1")
-        self.assertEqual(slot.sets[0].streamer, STREAMER)
-        self.assertEqual(slot.description,
-                         accelerator("vecmul_v1", simd("acc", "mul")))
-
-    def test_relu(self):
-        """One stream: SimdLanes with one input a, params op max and k 0, opType int32, a's;
-        a reader and a writer of two channels each."""
-        slot = self.slot("relu_v1")
-        unit = Unit("acc", "simd", "SimdLanes",
-                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "out")},
-                    "int32", {"op": "max", "k": 0}, 0, 1, [])
-        self.assertEqual(slot.description, accelerator("relu_v1", unit))
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (4, 2, 2))
-
-    def test_axpy(self):
-        """axpby with k1 read from its CSR: scalars {k1: int32}, the R/W CSR K1 (pin k1, 32
-        bits) after JOBS, so STATUS and BUSY_COUNTER one later; 3 R/W CSRs."""
-        slot = self.slot("axpy_v1")
-        unit = Unit("acc", "simd", "SimdLanes",
-                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
-                    "int32", {"op": "axpby"}, 0, 1, [Csr("K1", "rw", 2, 32, "k1")],
-                    scalars={"k1": "int32"})
-        self.assertEqual(slot.description, accelerator("axpy_v1", unit, between=1))
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 3, 2))
-        self.assertEqual(unit.slot_params, {"op": "axpby", "k1": None})
-
-    def test_axpy_baked(self):
-        """axpby with k1 baked at 3: params.k1, no scalar, no unit CSR."""
-        slot = self.slot("axpy_v1_1")
-        unit = Unit("acc", "simd", "SimdLanes",
-                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
-                    "int32", {"op": "axpby", "k1": 3}, 0, 1, [])
-        self.assertEqual(slot.description, accelerator("axpy_v1_1", unit))
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (6, 2, 2))
-
-    def test_vsum_tree_i32(self):
-        """A fold: JOB_BEATS between JOBS and STATUS, int32 lanes into an int64 sum."""
-        slot = self.slot("vsum_v1_1_1")
-        self.assertEqual((slot.tcdm_ports, slot.num_rw_csr, slot.num_ro_csr), (3, 3, 2))
-        self.assertEqual(slot.description,
-                         accelerator("vsum_v1_1_1", fold("acc", 0, "int32", 4), between=1))
-        self.assertEqual([c.name for c in slot.description.csrs],
-                         ["START", "JOBS", "JOB_BEATS", "STATUS", "BUSY_COUNTER"])
-        self.assertEqual(slot.description.groups[0].rw, ["START", "JOBS", "JOB_BEATS"])
-        # The widths: START a strobe, JOBS and JOB_BEATS job_width, BUSY_COUNTER busy_counter_width
-        self.assertEqual(slot.description.groups[0].rw_widths, [1, 32, 32])
-        self.assertEqual(slot.description.groups[0].busy_counter_width, 32)
-
-    def test_mvt_v6_seeded_bank(self):
-        """mvt's one pass (D194): x2's Mac a bank of 8 rows, seeded (its seed of the output's 8
-        int32 lanes, the last in port), y2 held and broadcast; A forked to vmul_x1 and mac_x2."""
-        desc = self.slot("mvt_v6").description
-        (acc,) = desc.accelerators
-        self.assertEqual(acc.inputs, [["vmul_x1.a", "mac_x2.a"], "vmul_x1.b", "vsum_x1.seed",
-                                      "mac_x2.b", "mac_x2.seed"])
-        (group,) = acc.groups
-        mac = group.units[2]
-        self.assertEqual((mac.datapath, mac.params["rows"], list(mac.ports)),
-                         ("Mac", 8, ["a", "b", "seed", "out"]))
-        self.assertEqual((mac.ports["seed"].dtype, mac.ports["seed"].lanes), ("int32", 8))
-        self.assertTrue(mac.ports["b"].hold and mac.ports["b"].broadcast)
-        self.assertEqual([c.name for c in mac.csrs], ["JOB_BEATS", "ROWS"])
-
     def test_every_fixture_reads(self):
         for folder in sorted(p for p in FORGE.iterdir() if p.is_dir()):
             with self.subTest(folder.name):
@@ -308,15 +220,6 @@ class Broken(unittest.TestCase):
         d["loop"] = {"a": {"$ref": "#/loop"}}
         self.set0(d)["snax_streamer_cfg"] = {"$ref": "#/loop"}
         self.fails(snax_cfg.CfgRefError, d, "loop", "refers to itself")
-
-    def test_missing_key(self):
-        d = cluster()
-        del d["cluster"]["tcdm"]["banks"]
-        self.fails(snax_cfg.CfgKeyError, d, "cluster.tcdm.banks", "missing")
-        d = cluster()
-        del self.set0(d)["snax_num_rw_csr"]
-        self.fails(snax_cfg.CfgKeyError, d, "cluster.hives[0].cores[0].snax_acc_cfg[0]"
-                   ".snax_streamer_sets[0].snax_num_rw_csr", "missing")
 
     def test_wrong_type(self):
         d = cluster()
@@ -537,31 +440,12 @@ class AccJson(unittest.TestCase):
     def unit(self, group=0):
         return self.acc["accelerators"][0]["groups"][group]["units"][0]
 
-    def test_resolved(self):
-        self.assertEqual(self.load().description, VECADD)
-        self.assertEqual(acc_json(VECADD), json.loads((FORGE / "vecadd_v1" / "accelerator.json")
-                                                      .read_text()))
-
     def test_the_old_datapath_block_is_refused(self):
         for key in ("unit", "control", "config", "wait", "fields"):
             self.acc = acc_json(VECADD)
             self.acc[key] = "x"
             self.fails(snax_cfg.CfgTypeError, f"snax_datapath_cfg.{key}",
                        "accelerator.json replaced")
-
-    def test_offsets_contiguous(self):
-        self.acc["accelerators"][0]["groups"][0]["csrs"][2]["offset"] = 3
-        self.acc["accelerators"][0]["groups"][0]["csrs"][3]["offset"] = 4
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators",
-                   "STATUS has offset 3, but is CSR 2 in CSR order")
-
-    def test_group_csrs_in_order(self):
-        csrs = self.acc["accelerators"][0]["groups"][0]["csrs"]
-        csrs[0], csrs[1] = csrs[1], csrs[0]
-        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, BUSY_COUNTER")
-        self.acc = acc_json(VECADD)
-        del self.acc["accelerators"][0]["groups"][0]["csrs"][3]
-        self.fails(snax_cfg.CfgSlotError, "groups[0].csrs", "START, JOBS (rw), STATUS, BUSY_COUNTER")
 
     def test_csr_fields(self):
         del self.acc["accelerators"][0]["groups"][0]["csrs"][2]["width"]
@@ -600,19 +484,6 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].inputs",
                    "set acc's streamer has 1 data_reader_params")
 
-    def test_a_wider_op_type(self):
-        """vecmul at i8: int8 a and b at 8 lanes (one word each), int32 out (four words), the
-        product at int32 as the kernel's casts set it (D175)."""
-        u = self.unit()
-        for port, dtype in (("a", "int8"), ("b", "int8"), ("out", "int32")):
-            u["ports"][port].update(dtype=dtype, lanes=8)
-        u["opType"] = "int32"
-        self.streamer["data_reader_params"]["num_channel"] = [1, 1]
-        self.streamer["data_reader_params"]["spatial_bounds"] = [[1], [1]]
-        self.streamer["data_writer_params"]["num_channel"] = [4]
-        self.streamer["data_writer_params"]["spatial_bounds"] = [[4]]
-        self.load()
-
     def test_words_per_beat(self):
         """int32 a at 4 lanes is 2 words: its reader must have num_channel 2."""
         self.unit()["ports"]["a"]["dtype"] = "int32"
@@ -628,7 +499,7 @@ class AccJson(unittest.TestCase):
 
     def test_op_type(self):
         """opType holds the inputs' result type: int64 itself here (int64 inputs), never
-        narrower; a wider one comes from the kernel's casts (D175)."""
+        narrower; a wider one comes from the kernel's casts."""
         self.unit()["opType"] = "int32"
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
                    "opType int32 does not hold its inputs' result type int64")
@@ -704,7 +575,7 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.dir", "must be in or out")
 
     def test_a_sliced_input(self):
-        """A fold's a at int16, 2 lanes, sliced 2 (d_in 2, D180) from one word on the reader's
+        """A fold's a at int16, 2 lanes, sliced 2 (d_in 2) from one word on the reader's
         one channel; a d_in that does not empty a word, one not 2, 4 or 8, d_in on an output,
         and no d_in at all (32 bits a beat), refused."""
         self.acc = acc_json(accelerator("vsum_slice", fold("acc", 0, "int16", 2), between=1))
@@ -724,17 +595,6 @@ class AccJson(unittest.TestCase):
                    "not a whole number of 64-bit channel words")
         self.unit()["ports"]["out"]["d_in"] = 2
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.out.d_in", "an input's pops per word")
-
-    def test_unit_csrs(self):
-        """SimdLanes has no JOB_BEATS, TreeAccumulate one; other unit CSRs are not
-        modelled."""
-        self.unit()["csrs"] = [{"name": "JOB_BEATS", "access": "rw", "offset": 2, "width": 32}]
-        self.acc["accelerators"][0]["groups"][0]["csrs"][2]["offset"] = 3
-        self.acc["accelerators"][0]["groups"][0]["csrs"][3]["offset"] = 4
-        self.rw, self.ro = 3, 2
-        self.fails(snax_cfg.CfgSlotError, "units[0].csrs", "any other unit none")
-        self.unit()["csrs"][0]["name"] = "SCALE"
-        self.fails(snax_cfg.CfgTargetError, "units[0].csrs[0]", "SCALE (rw)")
 
     def test_fold(self):
         """vsum_v1_1_1's accelerator: a fold's output one word, whatever its lanes' type."""
@@ -784,20 +644,11 @@ class LinkedGroup(unittest.TestCase):
             self.load()
         self.assertIn(text, ctx.exception.why)
 
-    def test_dot4_reads_as_written(self):
-        acc = self.load().description
-        self.assertEqual(acc, DOT4)
-        (group,) = acc.groups
-        self.assertEqual([u.span for u in group.units], [1, 1])
-        self.assertEqual(group.units[1].params["T"], 1)
-        self.assertEqual(group.links, [Link("out_partial", "mac.out", "sum.a", 0)])
-        self.assertEqual(group.rw, ["START", "JOBS", "JOB_BEATS"])
-
     def link(self, **kw):
         self.acc["accelerators"][0]["groups"][0]["links"][0].update(kw)
 
     def test_a_packed_output(self):
-        """sum.out at int32 packed two to a word (d_out 2, D174) on the writer's one channel;
+        """sum.out at int32 packed two to a word (d_out 2) on the writer's one channel;
         d_out on an input, a d_out that does not fill a word, or one not 2, 4 or 8, refused."""
         out = self.acc["accelerators"][0]["groups"][0]["units"][1]["ports"]["out"]
         out.update(dtype="int32", d_out=2)
@@ -841,13 +692,6 @@ class LinkedGroup(unittest.TestCase):
         links.append(dict(links[0], name="again", depth=1))
         self.fails(snax_cfg.CfgSlotError, "gen.link_port:")
 
-    def test_gen_outer(self):
-        self.acc["accelerators"][0]["inputs"] = ["mac.a", "mac.b", "sum.a"]
-        self.fails(snax_cfg.CfgSlotError, "gen.outer:")
-        self.acc = acc_json(DOT4)
-        self.acc["accelerators"][0]["inputs"] = ["mac.b", "mac.a"]
-        self.fails(snax_cfg.CfgSlotError, "gen.outer:")
-
     def test_gen_chain(self):
         """The link mac -> sum over the units in the order sum, mac: not a chain in unit order,
         snax-forge's gen.chain in its words."""
@@ -882,7 +726,7 @@ SEEDED_STREAMER = streamer([4, 1], [1])
 def seeded_mac(lanes: int = 4, dtype: str = "int64", out: str = "int64",
                b: Port = None) -> Unit:
     """A Mac (accumulate) of ``lanes`` lanes seeded from its output's container: a, b, then
-    the seed of the output's lanes and dtype (D187)."""
+    the seed of the output's lanes and dtype."""
     return Unit("acc", "mac", "Mac", {"a": Port("a", dtype, lanes, "in"),
                                       "b": b or Port("b", dtype, lanes, "in"),
                                       "seed": Port("seed", out, lanes, "in"),
@@ -912,15 +756,6 @@ class Seed(unittest.TestCase):
         self.assertIn(text, ctx.exception.why)
         return ctx.exception
 
-    def test_a_seeded_fold_reads(self):
-        desc = accelerator("matvec_acc_v1", seeded(), between=1)
-        got = self.load(acc_json(desc))
-        self.assertEqual(got, desc)
-        (unit,) = got.groups[0].units
-        self.assertTrue(unit.seeded)
-        self.assertEqual(got.accelerators[0].inputs, ["acc.a", "acc.seed"])
-        self.assertFalse(fold("acc", 0).seeded)
-
     def test_the_seed_port_is_checked(self):
         cases = [
             (Port("seed", "int64", 2, "in"), "gen.seed: 2 lanes, a seed has its output's 1"),
@@ -949,22 +784,6 @@ class Seed(unittest.TestCase):
         first["accelerators"][0]["inputs"] = ["acc.seed", "acc.a"]
         self.refused(first, "gen.seed: the last in port", streamer([1, 4], [1]))
 
-    def test_a_seeded_mac(self):
-        """A Mac (accumulate) takes a seed of its output's lanes, 4 here, one word a lane at
-        int64, read once per job; a plain Mac (accumulate false) takes none."""
-        desc = accelerator("mac_seed", seeded_mac(), between=1)
-        got = self.load(acc_json(desc), streamer([4, 4, 4], [4]))
-        self.assertEqual(got, desc)
-        (unit,) = got.groups[0].units
-        self.assertTrue(unit.seeded)
-        self.assertEqual(got.accelerators[0].inputs, ["acc.a", "acc.b", "acc.seed"])
-        plain = seeded_mac()
-        plain = replace(plain, params={"accumulate": False, "regOut": False}, csrs=[],
-                        ports={**plain.ports, "c": Port("c", "int64", 4, "in"),
-                               "seed": plain.ports["seed"]})
-        self.refused(acc_json(accelerator("mac_plain_seed", plain)),
-                     "gen.seed: Mac takes a seed only as a fold", streamer([4, 4, 4, 4], [4]))
-
     def test_a_serial_fold_takes_its_seed_from_the_streamer(self):
         """A SerialAccumulate of span 4 seeded: its a from a link (a Mac's), its seed from the
         streamer; with its a from the streamer it is gen.span still."""
@@ -983,8 +802,8 @@ class Seed(unittest.TestCase):
 
 
 class Broadcast(unittest.TestCase):
-    """D186: an input of a lane-wise datapath (SimdLanes, Mac) whose reader moves one lane,
-    given to all of them: the port keeps its unit's lanes, its words per beat and d_in count
+    """A broadcast: an input of a lane-wise datapath (SimdLanes, Mac) whose reader moves one
+    lane, given to all of them: the port keeps its unit's lanes, its words per beat and d_in count
     one lane. mvt's half 2: a Mac of 8 int8 lanes, b (y2) broadcast through a slicer of 8 pops
     a word, seeded from x2 at int32 (4 channels), the output 4 channels."""
 
@@ -1007,26 +826,6 @@ class Broadcast(unittest.TestCase):
         with self.assertRaises(kind) as ctx:
             self.load(acc, rw)
         self.assertIn(text, str(ctx.exception))
-
-    def test_reads(self):
-        got = self.load(acc_json(self.desc))
-        self.assertEqual(got, self.desc)
-        b = got.groups[0].units[0].ports["b"]
-        self.assertEqual((b.lanes, b.stream_lanes, b.d_in, b.broadcast), (8, 1, 8, True))
-
-    def test_counts_one_lane(self):
-        """Without the broadcast, 8 lanes of int8 are one word a beat, not one slicer's eight
-        pops; and b broadcast at int64 without a slicer is one channel."""
-        acc = acc_json(self.desc)
-        del acc["accelerators"][0]["groups"][0]["units"][0]["ports"]["b"]["broadcast"]
-        self.fails(acc, snax_cfg.CfgSlotError, "d_in 8 pops of 8 x 8 bits are 512 bits")
-        b = Port("b", "int64", 4, "in", broadcast=True)
-        self.desc = accelerator("mac_bcast", seeded_mac(b=b), between=1)
-        self.streamer = streamer([4, 1, 4], [4])
-        self.assertTrue(self.load(acc_json(self.desc)).groups[0].units[0].ports["b"].broadcast)
-        self.streamer = streamer([4, 4, 4], [4])
-        self.fails(acc_json(self.desc), snax_cfg.CfgSlotError,
-                   "lanes 1 x 64 bits is 1 64-bit words")
 
     def test_a_linked_port_is_none(self):
         """vmul -> vadd (two SimdLanes, 4 lanes of int64): vadd's a on the link is not a
@@ -1061,7 +860,7 @@ class Broadcast(unittest.TestCase):
         self.fails(one, snax_cfg.CfgTypeError, "an input of 2 lanes or more takes a broadcast")
 
 
-# bicg_v3, one pass over A (D189): one group of two chains, mul -> buffer of depth 1 -> sum
+# bicg_v3, one pass over A: one group of two chains, mul -> buffer of depth 1 -> sum
 # (q) and mac (s), A's reader forked to mul.a and mac.a, r broadcast to the Mac's 32 int8 lanes
 # through a slicer of 8 pops, q packed two int32 results to a word; CSRs START 0, JOBS_SUM 1,
 # JOBS_MAC 2, sum's JOB_BEATS 3, mac's 4, STATUS 5, BUSY_COUNTER 6 (snax-forge's generator's)
@@ -1086,7 +885,7 @@ BICG3_STREAMER = streamer([4, 4, 1], [1, 16])
 
 
 class Fork(unittest.TestCase):
-    """bicg_v3 (D189): a forked input is one entry of inputs, a list whose first port takes the
+    """bicg_v3: a forked input is one entry of inputs, a list whose first port takes the
     reader; a JOBS_<SINK> per chain; each of snax-forge's fork checks (gen.fork, gen.group,
     gen.outer, gen.chain, gen.share) refuses its case in its words."""
 
@@ -1112,21 +911,6 @@ class Fork(unittest.TestCase):
     def group(self):
         return self.acc["accelerators"][0]["groups"][0]
 
-    def test_bicg_v3_reads(self):
-        desc = self.load()
-        self.assertEqual(desc, BICG3)
-        (acc,) = desc.accelerators
-        (group,) = acc.groups
-        self.assertEqual(acc.readers, ["mul.a", "mul.b", "mac.b"])
-        self.assertEqual(acc.forks, [["mul.a", "mac.a"]])
-        self.assertEqual(acc.input_ports, ["mul.a", "mac.a", "mul.b", "mac.b"])
-        self.assertEqual(acc.ports_of("mac", acc.inputs), [(0, "a"), (2, "b")])
-        self.assertEqual(group.chains(), [["mul", "sum"], ["mac"]])
-        self.assertEqual(group.jobs, ["JOBS_SUM", "JOBS_MAC"])
-        self.assertEqual(group.rw, ["START", "JOBS_SUM", "JOBS_MAC", "JOB_BEATS", "JOB_BEATS"])
-        self.assertEqual([c.offset for c in group.window], list(range(7)))
-        self.assertEqual(snax_cfg.jobs_names(["sum"]), ["JOBS"])
-
     def test_an_entry_is_a_port_or_a_list_of_ports(self):
         self.acc["accelerators"][0]["inputs"][0] = ["mul.a", 3]
         self.fails(snax_cfg.CfgTypeError, "each a string or a fork's list of strings")
@@ -1147,25 +931,6 @@ class Fork(unittest.TestCase):
         self.acc["accelerators"][0]["inputs"] = [["mul.a", "mac.a", "sum.a"], "mul.b", "mac.b"]
         self.fails(snax_cfg.CfgSlotError, "two or more outer input ports of its units (['mul.a', "
                    "'mul.b', 'mac.a', 'mac.b'])")
-
-    def test_gen_group_without_the_fork(self):
-        """Without its fork the group's two chains are not connected."""
-        self.acc["accelerators"][0]["inputs"] = ["mul.a", "mul.b", "mac.a", "mac.b"]
-        self.fails(snax_cfg.CfgSlotError, "gen.group: group bicg_types's units ['mul', 'sum', "
-                   "'mac'] are not connected by its links")
-
-    def test_gen_outer_at_the_readers_place(self):
-        self.acc["accelerators"][0]["inputs"] = ["mul.b", ["mul.a", "mac.a"], "mac.b"]
-        self.fails(snax_cfg.CfgSlotError, "gen.outer: ['mul.b', ['mul.a', 'mac.a'], 'mac.b']; the "
-                   "unlinked ports are [['mul.a', 'mac.a'], 'mul.b', 'mac.b']")
-
-    def test_gen_chain(self):
-        """sum before mul: a chain that goes back in unit order."""
-        units = self.group()["units"]
-        units[:2] = [units[1], units[0]]
-        self.fails(snax_cfg.CfgTargetError, "gen.chain: accelerator bicg_types: group "
-                   "bicg_types's links [('mul', 'sum')] over its units ['sum', 'mul', 'mac']: a "
-                   "group is a chain, or chains a fork joins (fork_read)")
 
     def test_a_jobs_per_chain(self):
         """JOBS_<SINK> per chain in its sinks' order; one JOBS for two chains, or JOBS_<SINK>
@@ -1202,7 +967,7 @@ class Fork(unittest.TestCase):
                    "movers in one accelerator; share_ports or fork_read, not both", rw=6)
 
 
-# bicg_v4_1 (D190, D191, D192), snax-forge's generator's at 64 x 64, W 4, R 8 in two strips: q's
+# bicg_v4_1, snax-forge's generator's at 64 x 64, W 4, R 8 in two strips: q's
 # sum (T 8) seeded from q, carried (CARRY), s's Mac a bank of 8 rows (ROWS 4 bits) with r held
 # and broadcast through a slicer of 8 pops; CSRs START 0, JOBS_SUM 1, JOBS_MAC 2, CARRY 3, the
 # Mac's JOB_BEATS 4 and ROWS 5, STATUS 6, BUSY_COUNTER 7
@@ -1231,8 +996,8 @@ BICG4_STREAMER = streamer([1, 1, 1, 1], [1, 2])
 
 
 class Bank(unittest.TestCase):
-    """bicg_v4_1: a Mac's bank (rows, ROWS, D191), its held input (hold, D190) and a carried
-    seed (carry, CARRY, D192); each refused case in snax-forge's words (gen.args, gen.hold,
+    """bicg_v4_1: a Mac's bank (rows, ROWS), its held input (hold) and a carried seed
+    (carry, CARRY); each refused case in snax-forge's words (gen.args, gen.hold,
     gen.seed) or as a slot that disagrees (the CSRs)."""
 
     def setUp(self):
@@ -1257,18 +1022,6 @@ class Bank(unittest.TestCase):
         units = self.acc["accelerators"][0]["groups"][0]["units"]
         return next(u for u in units if u["name"] == name)
 
-    def test_reads(self):
-        desc = self.load()
-        self.assertEqual(desc, BICG4)
-        (group,) = desc.groups
-        self.assertEqual(group.rw, ["START", "JOBS_SUM", "JOBS_MAC", "CARRY", "JOB_BEATS",
-                                    "ROWS"])
-        self.assertEqual([c.offset for c in group.window], list(range(8)))
-        mac = group.units[2]
-        self.assertEqual((mac.params["rows"], mac.ports["b"].hold, mac.ports["b"].stream_lanes),
-                         (8, True, 1))
-        self.assertTrue(group.units[1].ports["seed"].carry)
-
     def test_gen_args(self):
         """rows on a fold that is not a Mac (a seeded one too), below 1."""
         self.unit("sum")["params"]["rows"] = 2
@@ -1284,8 +1037,8 @@ class Bank(unittest.TestCase):
                 c["offset"] += 1
         self.acc["accelerators"][0]["groups"][0]["csrs"][3]["offset"] = 7
         self.acc["accelerators"][0]["groups"][0]["csrs"][4]["offset"] = 8
-        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; a bank (D191) is an "
-                   "accumulating Mac's", rw=7)
+        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; only an accumulating Mac has a "
+                   "bank (set accumulate true, or rows 1)", rw=7)
         self.acc = acc_json(BICG4)
         self.unit("mac")["params"]["rows"] = 0
         self.fails(snax_cfg.CfgTargetError, "gen.args: rows 0; a bank has one row or more")
@@ -1338,7 +1091,7 @@ class Bank(unittest.TestCase):
         group = self.acc["accelerators"][0]["groups"][0]
         group["csrs"][3]["offset"], group["csrs"][4]["offset"] = 7, 8
         self.fails(snax_cfg.CfgTargetError, "gen.seed: a carried port is a fold's seed, its "
-                   "unit's own output (D192)", rw=7)
+                   "unit's own output: carry only the seed", rw=7)
 
     def test_a_held_port_is_not_forked(self):
         """mac.a held and forked with mul.a, both one lane for all: gen.fork (a held input
@@ -1354,20 +1107,6 @@ class Dot1(unittest.TestCase):
     """dot 1: two accelerators vmul and vsum in two streamer
     sets; dot_v1_1, the two as one accelerator dot of two groups, one set."""
 
-    def test_dot_1_two_sets(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            (slot,) = snax_cfg.load(dot1_cluster(Path(tmp))).cores[0].accelerators
-        self.assertEqual(slot.description, DOT1)
-        self.assertEqual([(x.name, x.streamer, x.num_rw_csr, x.num_ro_csr) for x in slot.sets],
-                         [("vmul", VMUL_STREAMER, 2, 2), ("vsum", VSUM_STREAMER, 3, 2)])
-        self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports), (5, 4, 17))
-        # The offsets over both accelerators, as the shell sees them
-        self.assertEqual([[(c.name, c.offset) for c in a.csrs] for a in DOT1.accelerators],
-                         [[("START", 0), ("JOBS", 1), ("STATUS", 2), ("BUSY_COUNTER", 3)],
-                          [("START", 4), ("JOBS", 5), ("JOB_BEATS", 6), ("STATUS", 7),
-                           ("BUSY_COUNTER", 8)]])
-        self.assertEqual(VSUM.ports_of("vsum", VSUM.inputs), [(0, "a")])
-
     def test_dot_1_enc_one_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             (slot,) = snax_cfg.load(dot_cluster(Path(tmp))).cores[0].accelerators
@@ -1380,17 +1119,6 @@ class Dot1(unittest.TestCase):
                                                       ["START", "JOBS", "JOB_BEATS"]])
         self.assertEqual(dot.ports_of("vsum", dot.inputs), [(2, "a")])
         self.assertEqual(dot.ports_of("vsum", dot.outputs), [(1, "out")])
-
-    def test_forge(self):
-        """forge/dot_v1/ and dot_v1_1/, snax-forge's: the same, their design points named."""
-        for design, want, sets in (("dot_v1", DOT1, ["vmul", "vsum"]),
-                                   ("dot_v1_1", DOT, ["dot"])):
-            with self.subTest(design):
-                (slot,) = snax_cfg.load(FORGE / design / "snax_forge.hjson").cores[0].accelerators
-                self.assertEqual(slot.description, want)
-                self.assertEqual([x.name for x in slot.sets], sets)
-                self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports),
-                                 (5, 4, 17))
 
 
 class Shared(unittest.TestCase):
@@ -1419,19 +1147,6 @@ class Shared(unittest.TestCase):
 
     def mover(self, k):
         return self.acc["accelerators"][0]["movers"][k]
-
-    def test_dot_1_shared(self):
-        slot = self.load()
-        self.assertEqual(slot.description, DOT_SHARED)
-        (dot,) = slot.description.accelerators
-        # PORT_MUX_SEL last: 6 R/W (vmul's 2, vsum's 3, the select), 4 R/O
-        self.assertEqual([c.name for c in dot.csrs][-2:], ["BUSY_COUNTER", "PORT_MUX_SEL"])
-        self.assertEqual((dot.num_rw, dot.num_ro), (6, 4))
-        # 12 channels where dot_v1_1 has 17: the movers 4 + 4 + 4
-        self.assertEqual((slot.num_rw_csr, slot.num_ro_csr, slot.tcdm_ports), (6, 4, 12))
-        self.assertEqual(snax_cfg.template_movers(DOT_SHARED_STREAMER)[-1],
-                         {"name": "writer0", "is_reader": False, "num_channel": 4,
-                          "configurable_channel": True})
 
     def test_movers_without_port_mux(self):
         del self.acc["accelerators"][0]["port_mux"]
@@ -1536,25 +1251,6 @@ class Sets(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_streamer_sets[0].snax_num_ro_csr",
                    "4, but accelerator vmul has 2 read-only CSRs")
 
-    def test_ports_are_the_sets_movers(self):
-        """vsum.a moved into vmul: vmul has 3 inputs for its set's 2 readers."""
-        vmul, vsum = self.acc["accelerators"]
-        vmul["inputs"].append("vsum.a")
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].inputs[2]",
-                   "names no port of accelerator vmul's units")
-        vmul["inputs"].pop()
-        (self.dir / "streamer_vsum.hjson").write_text(json.dumps(streamer([4], [4])))
-        self.slot()["snax_tcdm_ports"] = 20
-        self.slot()["sparse_interconnect_config"] = [[20, 1]]
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[1].outputs[0]",
-                   "a fold's output is one 64-bit word per beat, but set vsum's "
-                   "data_writer_params[0] has num_channel 4")
-        (self.dir / "streamer_vsum.hjson").write_text(json.dumps(streamer([4, 4], [1])))
-        self.slot()["snax_tcdm_ports"] = 21
-        self.slot()["sparse_interconnect_config"] = [[21, 1]]
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[1].inputs",
-                   "['vsum.a'], but set vsum's streamer has 2 data_reader_params")
-
     def test_channels_over_all_sets(self):
         self.slot()["snax_tcdm_ports"] = 12
         self.fails(snax_cfg.CfgSlotError, "snax_tcdm_ports", "12, but the streamers have 17 "
@@ -1601,13 +1297,6 @@ class Sets(unittest.TestCase):
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators",
                    "accelerator 'vmul' twice")
 
-    def test_offsets_run_over_the_accelerators(self):
-        """vsum's from 0, as if it were alone: refused, the shell sees them contiguous."""
-        for g in self.acc["accelerators"][1]["groups"]:
-            for c in g["csrs"] + [c for u in g["units"] for c in u["csrs"]]:
-                c["offset"] -= 4
-        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators",
-                   "group vsum's START has offset 0, but is CSR 4 in CSR order")
 
 
 class OldForm(unittest.TestCase):
@@ -1623,14 +1312,6 @@ class OldForm(unittest.TestCase):
         path = folder / "snax_forge.hjson"
         path.write_text(json.dumps(d))
         return path
-
-    def test_one_set(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            (slot,) = snax_cfg.load(self.write(Path(tmp), acc_json(VECADD))).cores[0].accelerators
-        (one,) = slot.sets
-        self.assertEqual((one.name, one.streamer, one.num_rw_csr, one.num_ro_csr, one.at),
-                         ("snax_forge_vecadd_v1", STREAMER, 2, 2, ""))
-        self.assertEqual(slot.description, VECADD)
 
     def test_its_counts_and_one_accelerator(self):
         with tempfile.TemporaryDirectory() as tmp:

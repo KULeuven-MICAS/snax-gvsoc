@@ -22,28 +22,28 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 1);  // dma load_A
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10000000, A, 4096);
+    snrt_dma_start_1d((void *)0x10000000, A, 1280);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 2);  // dma load_p
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10001000, p, 64);
+    snrt_dma_start_1d((void *)0x10000500, p, 64);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 3);  // dma load_q
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10001040, q, 256);
+    snrt_dma_start_1d((void *)0x10000540, q, 192);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 4);  // dma load_r
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10001140, r, 64);
+    snrt_dma_start_1d((void *)0x10000600, r, 64);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -53,57 +53,57 @@ static __attribute__((noinline)) int forge_core_0(void) {
     csrw_ss(BICG_TYPES_BASE_PTR_READER_0_LOW, 0x10000000);
     csrw_ss(BICG_TYPES_BASE_PTR_READER_0_HIGH, 0);
     csrw_ss(BICG_TYPES_S_STRIDE_READER_0_0, 8);
-    csrw_ss(BICG_TYPES_T_BOUND_READER_0_0, 4);
-    csrw_ss(BICG_TYPES_T_BOUND_READER_0_1, 64);
+    csrw_ss(BICG_TYPES_T_BOUND_READER_0_0, 2);
+    csrw_ss(BICG_TYPES_T_BOUND_READER_0_1, 40);
     csrw_ss(BICG_TYPES_T_BOUND_READER_0_2, 2);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_0_0, 8);
-    csrw_ss(BICG_TYPES_T_STRIDE_READER_0_1, 64);
-    csrw_ss(BICG_TYPES_T_STRIDE_READER_0_2, 32);
-    csrw_ss(BICG_TYPES_BASE_PTR_READER_1_LOW, 0x10001000);
+    csrw_ss(BICG_TYPES_T_STRIDE_READER_0_1, 32);
+    csrw_ss(BICG_TYPES_T_STRIDE_READER_0_2, 16);
+    csrw_ss(BICG_TYPES_BASE_PTR_READER_1_LOW, 0x10000500);
     csrw_ss(BICG_TYPES_BASE_PTR_READER_1_HIGH, 0);
     csrw_ss(BICG_TYPES_S_STRIDE_READER_1_0, 8);
-    csrw_ss(BICG_TYPES_T_BOUND_READER_1_0, 4);
-    csrw_ss(BICG_TYPES_T_BOUND_READER_1_1, 64);
+    csrw_ss(BICG_TYPES_T_BOUND_READER_1_0, 2);
+    csrw_ss(BICG_TYPES_T_BOUND_READER_1_1, 40);
     csrw_ss(BICG_TYPES_T_BOUND_READER_1_2, 2);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_1_0, 8);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_1_1, 0);
-    csrw_ss(BICG_TYPES_T_STRIDE_READER_1_2, 32);
-    csrw_ss(BICG_TYPES_BASE_PTR_READER_2_LOW, 0x10001040);
+    csrw_ss(BICG_TYPES_T_STRIDE_READER_1_2, 16);
+    csrw_ss(BICG_TYPES_BASE_PTR_READER_2_LOW, 0x10000540);
     csrw_ss(BICG_TYPES_BASE_PTR_READER_2_HIGH, 0);
     csrw_ss(BICG_TYPES_S_STRIDE_READER_2_0, 8);
-    csrw_ss(BICG_TYPES_T_BOUND_READER_2_0, 32);
+    csrw_ss(BICG_TYPES_T_BOUND_READER_2_0, 20);
     csrw_ss(BICG_TYPES_T_BOUND_READER_2_1, 2);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_2_0, 8);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_2_1, 0);
-    csrw_ss(BICG_TYPES_BASE_PTR_WRITER_0_LOW, 0x10001040);
+    csrw_ss(BICG_TYPES_BASE_PTR_WRITER_0_LOW, 0x10000540);
     csrw_ss(BICG_TYPES_BASE_PTR_WRITER_0_HIGH, 0);
     csrw_ss(BICG_TYPES_S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(BICG_TYPES_T_BOUND_WRITER_0_0, 32);
+    csrw_ss(BICG_TYPES_T_BOUND_WRITER_0_0, 20);
     csrw_ss(BICG_TYPES_T_BOUND_WRITER_0_1, 2);
     csrw_ss(BICG_TYPES_T_STRIDE_WRITER_0_0, 8);
     csrw_ss(BICG_TYPES_T_STRIDE_WRITER_0_1, 0);
-    csrw_ss(BICG_TYPES_BASE_PTR_READER_3_LOW, 0x10001140);
+    csrw_ss(BICG_TYPES_BASE_PTR_READER_3_LOW, 0x10000600);
     csrw_ss(BICG_TYPES_BASE_PTR_READER_3_HIGH, 0);
     csrw_ss(BICG_TYPES_S_STRIDE_READER_3_0, 8);
-    csrw_ss(BICG_TYPES_T_BOUND_READER_3_0, 8);
+    csrw_ss(BICG_TYPES_T_BOUND_READER_3_0, 5);
     csrw_ss(BICG_TYPES_T_BOUND_READER_3_1, 2);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_3_0, 8);
     csrw_ss(BICG_TYPES_T_STRIDE_READER_3_1, 0);
-    csrw_ss(BICG_TYPES_BASE_PTR_WRITER_1_LOW, 0x10001180);
+    csrw_ss(BICG_TYPES_BASE_PTR_WRITER_1_LOW, 0x10000640);
     csrw_ss(BICG_TYPES_BASE_PTR_WRITER_1_HIGH, 0);
     csrw_ss(BICG_TYPES_S_STRIDE_WRITER_1_0, 8);
-    csrw_ss(BICG_TYPES_T_BOUND_WRITER_1_0, 8);
+    csrw_ss(BICG_TYPES_T_BOUND_WRITER_1_0, 4);
     csrw_ss(BICG_TYPES_T_BOUND_WRITER_1_1, 2);
     csrw_ss(BICG_TYPES_T_STRIDE_WRITER_1_0, 16);
-    csrw_ss(BICG_TYPES_T_STRIDE_WRITER_1_1, 128);
+    csrw_ss(BICG_TYPES_T_STRIDE_WRITER_1_1, 64);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 6);  // acc config bicg_types
 #endif  // FORGE_QUIET
-    csrw_ss(BICG_TYPES_RW_JOBS_SUM, 128);
+    csrw_ss(BICG_TYPES_RW_JOBS_SUM, 80);
     csrw_ss(BICG_TYPES_RW_JOBS_MAC, 2);
-    csrw_ss(BICG_TYPES_RW_MAC_JOB_BEATS, 512);
-    csrw_ss(BICG_TYPES_RW_MAC_ROWS, 8);
-    csrw_ss(BICG_TYPES_RW_SUM_CARRY, 64);
+    csrw_ss(BICG_TYPES_RW_MAC_JOB_BEATS, 160);
+    csrw_ss(BICG_TYPES_RW_MAC_ROWS, 4);
+    csrw_ss(BICG_TYPES_RW_SUM_CARRY, 40);
 #ifndef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
@@ -120,14 +120,14 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 8);  // dma store_q
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d(q, (void *)0x10001040, 256);
+    snrt_dma_start_1d(q, (void *)0x10000540, 192);
 #ifdef FORGE_QUIET
     snrt_dma_wait_all();
 #endif  // FORGE_QUIET
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 9);  // dma store_s
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d(s, (void *)0x10001180, 256);
+    snrt_dma_start_1d(s, (void *)0x10000640, 128);
     snrt_dma_wait_all();
 #ifndef FORGE_QUIET
     snrt_dma_wait_all();
@@ -147,24 +147,24 @@ static __attribute__((noinline)) int forge_check(uint32_t t0) {
 #endif  // FORGE_QUIET
     int err = 0;
     int data_errors = 0;
-    for (uint32_t i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < 40; i++) {
         if (((volatile int32_t *)q)[i] != q_golden[i]) {
             data_errors++;
         }
     }
-    for (uint32_t i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < 32; i++) {
         if (((volatile int32_t *)s)[i] != s_golden[i]) {
             data_errors++;
         }
     }
     err += data_errors;
 #ifndef FORGE_QUIET
-    printf("forge data: %d errors (%u words)\n", data_errors, 128u);
+    printf("forge data: %d errors (%u words)\n", data_errors, 72u);
 #endif  // FORGE_QUIET
 #ifndef FORGE_QUIET
     printf("forge counter q_mult_bicg_types: %u\n", forge_counter[0]);
 #endif  // FORGE_QUIET
-    err += forge_counter[0] < 1024;
+    err += forge_counter[0] < 320;
 #ifndef FORGE_QUIET
     printf("forge errors: %d\n", err);
 #endif  // FORGE_QUIET

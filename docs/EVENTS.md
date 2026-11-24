@@ -1,6 +1,6 @@
 # SNAX-GVSoC's events
 
-What SNAX-GVSoC's SNAX components write about a run, line by line: for snax-forge's converter (`snax_forge/run/`) and for anyone reading a run by hand. The grammar is this repository's; snax-forge renames it and never recounts.
+What the SNAX components write about a run, line by line, for snax-forge's converter (`snax_forge/run/`) and for reading a run by hand. snax-forge renames this grammar and never recounts.
 
 ## Traces and levels
 
@@ -13,40 +13,28 @@ Each SNAX component has four GVSoC traces (`vp::Trace`, `snax/snax_events.hpp`),
 | `beats` | one line per beat: grants, DMA beats and bursts, firings, pushes; one per change of a unit's or mover's cycle class | `beat` |
 | `stalls` | one line per refused request and per change of a queue's count | `stall` |
 
-The levels are cumulative, each the one before plus a trace: `off` (`summary`) < `task` (+ `events`) < `beat` (+ `beats`) < `stall` (+ `stalls`) < `finegrained` (+ GVSoC's own `pe<i>/insn`, the instruction trace).
+The levels are cumulative: `off` (`summary`) < `task` (+ `events`) < `beat` (+ `beats`) < `stall` (+ `stalls`) < `finegrained` (+ GVSoC's own `pe<i>/insn`, the instruction trace).
 
-- A level is the set of trace names that are on, given to `gvrun` as one `--trace` regex per name.
-- All of them name one file, so every component's lines come in the order the simulation writes them:
+- A level is the set of trace names that are on, one `gvrun` `--trace` regex per name, all naming one file, so every component's lines come in simulation order:
 
     gvrun ... --trace='/summary$:RUN/events.log' --trace='/events$:RUN/events.log' run
 
-- `--trace-level` is not used: every line here is written at GVSoC's default level.
-- With these traces off, a run is the same as without them.
+- Every line is written at GVSoC's default level (no `--trace-level`). With these traces off, a run is the same as without them.
 
-**Sources.** The crossbar writes the `beats` and `stalls` lines of every L1 access, so a path regex cannot tell the streamer's from the cores'. Its property `trace_inputs` picks the inputs instead:
+**Sources.** A path regex cannot tell the streamer's L1 accesses from the cores' on the crossbar, so its property `trace_inputs` picks the inputs:
 
-- It is a gvrun parameter (`--param chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...`), so nothing is rebuilt.
-- Its value is a list joined by `,`: input names as the summary's `input` lines give them (or indices), and `dma` for the DMA port. `default`, the value when none is given, is the SNAX ports and the DMA; an unknown name is fatal.
-- The cores and AXI are written only when named.
-- It filters only the `beats` and `stalls` lines and the `insn` traces (one regex per core); `summary` and `events` are always whole.
-- A run's window (its `main`) is not known here ahead of time, so boot's lines are written too; the converter drops them.
+- a gvrun parameter (`--param chip/soc/cluster_0/tcdm/snax_xbar/trace_inputs=...`), nothing rebuilt;
+- a list joined by `,`: input names as the summary's `input` lines give them (or indices), and `dma` for the DMA port. `default`, the value when none is given, is the SNAX ports and the DMA; an unknown name is fatal. The cores and AXI are written only when named;
+- it filters only the `beats` and `stalls` lines and the `insn` traces (one regex per core); `summary` and `events` are always whole;
+- a run's window (its `main`) is not known ahead of time, so boot's lines are written too; the converter drops them.
 
-**Ids, not order.** Every line has its own `<cycle>`; ids say which other line it links to, so nothing reading them counts lines by order or rate:
+**Ids, not order.** Every line has its own `<cycle>`, and ids link it to other lines, never their order or rate:
 
-- a streamer beat is (mover, `b`): a reader's beats numbered in its AGU's order from 0 in each run, a writer's in the order the unit hands them over; a reader with a repeat (temporal stride 0 on loop 0) hands one beat out T times, so several firings name one `b`;
+- a streamer beat is (mover, `b`): a reader's beats numbered in its AGU's order from 0 in each run, a writer's in the order the unit hands them over; a reader with a repeat (temporal stride 0 on loop 0) hands a beat out T times, several firings naming one `b`;
 - a firing is `n`, its index in the run; a result is `n`, its index among the run's results, equal to the writer's `b` it becomes;
 - a DMA beat on L1 is (copy `id`, `i`), `i` its index within the copy.
 
-The id travels with the request: the iDMA's TCDM backend puts the copy's `id`, `i` and `l2` in `IoReq` argument slots for the crossbar's `dma` line, under one of two tags: `SNAX_TAG_DMA`, or `SNAX_TAG_DMA_L1L1` for a beat of a copy with its source and destination both in L1 (the crossbar counts its beats in `copies`); the streamer puts `b` on its requests, and returns it to the unit with the beat it hands over.
-
-```mermaid
-flowchart LR
-    rg["grant, crossbar: a reader lane's b"] --> fire["fire, group: n and each input's b"]
-    fire --> push["push, group: result n, from firings first to last"]
-    push --> wg["grant, crossbar: the writer's b, equal to the push's n"]
-    issue["issue, iDMA: id"] --> dma["dma, crossbar: id and i per beat"]
-    dma --> done["done, iDMA: id"]
-```
+The ids travel with the request: the iDMA's TCDM backend puts the copy's `id`, `i` and `l2` in `IoReq` argument slots for the crossbar's `dma` line, under one of two tags: `SNAX_TAG_DMA`, or `SNAX_TAG_DMA_L1L1` for a beat of a copy with its source and destination both in L1 (the crossbar counts its beats in `copies`); the streamer puts `b` on its requests and returns it to the unit with the beat it hands over.
 
 ## Lines
 
@@ -54,14 +42,13 @@ GVSoC writes a header before each line, `<ps>: <cycles>: [<path>] `, with ANSI c
 
     <cycle> <kind> <key>=<value> ...
 
-- `<cycle>` is a cycle of the component's own clock: the cycle the line is about (below, per kind).
+- `<cycle>` is the cycle of the component's own clock the line is about (below, per kind).
 - Most lines are written in that cycle. A `poll`, a `barrier`, a held `csr` write, a single `csr` read, a `fifo` and a mover's `class` for cycles the streamer slept through are written later, once known, so sort by `<cycle>` for time order. Lines of one cycle are in simulation order.
-- A value is a decimal integer; a hexadecimal one with `0x` (addresses, `pc`, `csr`, and every `value`: bank words, each the bytes it covers, little-endian); a list of integers joined by `,`; or a name.
-- Every line ends in a newline.
+- A value is a decimal integer; a hexadecimal one with `0x` (addresses, `pc`, `csr`, and every `value`: bank words, each the bytes it covers, little-endian); a list of integers joined by `,`; or a name. Every line ends in a newline.
 
 ## Components
 
-The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`); `snax_acc<i>` is core `i`'s accelerator. Its components follow its `accelerator.json`, one `SnaxGroup` per group, named by `snax_accelerator.py`'s `component_names`:
+Paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`); `snax_acc<i>` is core `i`'s accelerator, one `SnaxGroup` per group of its `accelerator.json`, named by `snax_accelerator.py`'s `component_names`:
 
 | Accelerator | Group | Its shell |
 |---|---|---|
@@ -69,21 +56,20 @@ The paths are those of `snax_hjson`'s cluster (`/chip/soc/cluster_0/...`); `snax
 | several groups of one unit each | `snax_acc<i>/unit_<unit>` | `snax_acc<i>/shell_<group>` |
 | a linked group (units joined by links) | `snax_acc<i>/group_<group>` | `snax_acc<i>/shell_<group>` |
 
-Each group has the traces below, at its boundary; the shell has no trace of its own.
+Each group has the traces below, at its boundary; the shell has none.
 
 ### Group (`snax_acc<i>/unit`, `snax_acc<i>/unit_<unit>`, `snax_acc<i>/group_<group>`; `snax/snax_group.cpp`)
 
-For a linked group:
-
-- `fire` lines are its head unit's firings, with the head's outer inputs;
-- `push` lines are the last unit's results, `first` and `last` the head's firings each one folds;
-- `count` and `firings` are the head's, and `rate` is the head's firings per result of the last unit.
+For a linked group, `fire` lines are its head unit's firings, with the head's outer inputs; `push` lines are the last unit's results, `first` and `last` the head's firings each folds; `count` and `firings` are the head's, `rate` the head's firings per result of the last unit.
 
 A group of several chains on a forked input (D189) has an output per chain, each its sink's: its `push` lines carry `unit`, the sink's name, and `n` counts that output's results; `rate` is a list, one per output in unit order (the order of the group's `JOBS_<SINK>` CSRs). Its `fire` lines are the head's, the first unit, whose outer inputs include the forked one, read once for all its units. A group of one output writes neither.
 
-An output packed d_out results to a word (D174) still has one `push` line per result; its writer writes one word every d_out pushes, and on the run's last push, so the writer's `b` counts words, not results: the writer's grant of word w follows the push of result (w + 1) · d_out − 1, or the last one.
-
-An input sliced d_in to a word (D180) gives one slice per firing (a seed input: per firing that takes the seed); its reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so the reader's `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word. A broadcast input (D186) moves one lane a beat, given to all the unit's lanes by wires: its `value` is that one lane, as its reader or slicer gave it. A held input (D190) moves its beat on a bank row's first firing only, as a seed on its job's first: its `b` is -1 on the row's other firings, its `value` the beat it keeps. A bank (D191) gives ROWS results a job, so its output's `rate` and a `push`'s `first` and `last` divide the head's firings evenly among the results; they are not the firings a bank row folds. A carried seed (D192) is taken every job; its `value` is the beat as read, the datapath given 0 in its place while the job is below CARRY.
+- **Packed output** (D174, d_out results to a word): one `push` line per result; the writer writes a word every d_out pushes and on the run's last push, so the writer's `b` counts words: the grant of word w follows the push of result (w + 1) · d_out − 1, or the last one.
+- **Sliced input** (D180, d_in to a word): one slice per firing (a seed input: per firing that takes the seed); the reader moves one word every d_in pops, taken when the slicer is empty or on its last pop, so its `b` counts words: in a `fire` line that input's `b` is the beat id of the word the slice came from, the same for d_in firings, and its `value` the slice, its lanes in the low bits of one word.
+- **Broadcast input** (D186): one lane a beat, given to all the unit's lanes by wires; its `value` is that one lane, as its reader or slicer gave it.
+- **Held input** (D190): its beat moves on a bank row's first firing only, as a seed on its job's first; its `b` is -1 on the row's other firings, its `value` the beat it keeps.
+- **Bank** (D191): ROWS results a job, so its output's `rate` and a `push`'s `first` and `last` divide the head's firings evenly among the results; they are not the firings a bank row folds.
+- **Carried seed** (D192): taken every job; its `value` is the beat as read, the datapath given 0 in its place while the job is below CARRY.
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
@@ -101,11 +87,11 @@ A linked group's run line (`SnaxGroupRule` in `snax/snax_group.hpp`) gives each 
 3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat (a forked input's member waiting for its fork counts through the member without its beat, D189);
 4. `flush`: otherwise (results in flight, beats in a buffer).
 
-For one unit these are the unit's own classes. Per-unit events of a linked group are not written yet (snax-forge open item 96).
+For one unit these are the unit's own classes. A linked group's per-unit events are snax-forge's open item 96.
 
 ### Streamer (`snax_acc<i>/streamer_<set>`, `snax/snax_streamer.cpp`)
 
-One streamer per streamer set of the slot, named after the set (`streamer_acc` for a one-accelerator design, `streamer_vmul` and `streamer_vsum` for dot 1), each with the lines below. Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
+One streamer per streamer set of the slot, named after the set (`streamer_acc` for a one-accelerator design, `streamer_vmul` and `streamer_vsum` for dot 1). Per mover (`reader<i>`, `writer<j>`, as `snax_streamer.py` names them):
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
@@ -115,9 +101,8 @@ One streamer per streamer set of the slot, named after the set (`streamer_acc` f
 | `beats` | `class` | the first cycle of a run of one class, from `s + 1` to the streamer's end `e` (the `mover` line's cycle) | `mover`, `mode` (`busy`, `stall_xbar`, `stall_fifo`, `idle`: the class the `mover` line counts the cycle in) |
 | `stalls` | `fifo` | the first cycle a lane's queue count holds (written once it is known: at the lane's next change or the streamer's end) | `mover`, `lane`, `count` |
 
-- **Classes add up.** A run's `class` lines give each cycle the class its summary line counts it in, so per class the lengths of its runs add up to that line's count. `tests/snax/classes.py` checks it on every forge run of `make regress`. No line covers the idle time between runs.
+- **Classes add up.** Per class, the lengths of a run's `class` lines add up to its `mover` line's count (`tests/snax/classes.py`). No line covers the idle time between runs.
 - **Queue count.** A lane's count in a cycle is the RTL queue's, the one the priority hint reads: the words in the queue at the end of the cycle before. A push and a pop in one cycle (a writer's) leave it as it was. `qmax` is its highest value in the run.
-- **Beat ids.** Every TCDM request carries its beat's `b` for the crossbar's lines, numbered as in "Ids, not order" above; the beat a reader hands the unit carries its `b` back.
 
 ### Crossbar (`tcdm/snax_xbar`, `snax/snax_tcdm_xbar.cpp`)
 
@@ -143,7 +128,7 @@ There is no request line (every requesting cycle ends in a grant or a stall) and
 
 ### Core (`pe<i>`, `core/models/cpu/iss/src/snitch/snitch.cpp`)
 
-The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in `pulp/pulp/snitch/snitch_core.py`); `state` comes from `Exec::busy_enter` and `busy_exit`, `func` from `Exec::insn_exec_profiling`, in the shared exec code, and `mcycle` from `Csr` (`src/csr.cpp`).
+The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in `pulp/pulp/snitch/snitch_core.py`).
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
@@ -157,7 +142,7 @@ The `snitch` core only (`CONFIG_GVSOC_ISS_SNAX_EVENTS`, set in `pulp/pulp/snitch
 | `summary` | `csrs` | the end of the simulation | `writes`, `reads` (SNAX CSRs, every read of a poll counted) |
 
 - `csr` and `poll` are the SNAX CSR accesses. Consecutive reads of one CSR that return one value are one `poll`, written when the next access differs; a single read is a `csr` with `op=r`.
-- A barrier stalls the core without leaving `run`, so its own line says when it waits; one reached at once has `first` equal to `last`.
+- A barrier stalls the core without leaving `run`, so its own line says when it waits (`first` equal to `last` if reached at once).
 - `sleep` is `wfi`.
 - `func` is written when the PC enters another function, by the ELF's symbols (`-` where none covers the PC), and only while the core's `events` trace is on.
 
@@ -179,7 +164,7 @@ The AXI backend (`idma/axi_read`, `idma/axi_write`, `pulp/pulp/idma/be/idma_be_a
 
 ### VCD signals
 
-For gtkwave only (snax-forge never reads them): `vp::Signal`s the SNAX components set, grouped under the tag `snax` in their `gen_gtkw`, so gvrun's `--vcd` writes them to `all.vcd` and lists them in `view.gtkw` (with `--event-tags=snax`, or `--event` regexes naming the components). A value holds from the cycle it is true in, as the RTL's register would.
+For gtkwave only (snax-forge never reads them): `vp::Signal`s under the tag `snax`, which gvrun's `--vcd` writes to `all.vcd` and lists in `view.gtkw` (with `--event-tags=snax`, or `--event` regexes naming the components). A value holds from the cycle it is true in, as the RTL's register would.
 
 | Component | Signals |
 |---|---|
@@ -190,13 +175,13 @@ For gtkwave only (snax-forge never reads them): `vp::Signal`s the SNAX component
 
 ### Instructions (`pe<i>/insn`)
 
-GVSoC's own instruction trace, on at `finegrained`, one `--trace` regex per core the sources name; its line is GVSoC's, not this grammar.
+GVSoC's own instruction trace, on at `finegrained`, one `--trace` regex per core the sources name; its lines are not this grammar.
 
 ## Snapshots
 
-The SNAX components count from boot and never reset their counters. A snapshot writes every counter as it stands, running totals since boot, one `snap` line each, on the component's `summary` trace; snax-forge subtracts consecutive snapshots to price a window of the program.
+The SNAX components count from boot and never reset. A snapshot writes every counter as a running total since boot, `snap` lines on the component's `summary` trace; snax-forge subtracts consecutive snapshots to price a window of the program.
 
-**Trigger.** Every write to CSR `0x7C5` (`csr_obs`) by core 0 (`csrw`, `csrrw`, `csrrs`, `csrrc` and their immediate forms) takes one, in the cycle of the write: `mark` is the register's value after it, the value written (the quiet build, `forge_quiet.elf`, writes each section's mark, `obs_marks.json`). Core 0 drives the wire `obs_mark`, bound to the `mark` wire of the crossbar, of every group and of every streamer; the other cores' writes to `0x7C5` take none. The end of the simulation takes the last one, `mark=-1`.
+**Trigger.** Every write to CSR `0x7C5` (`csr_obs`) by core 0 (`csrw`, `csrrw`, `csrrs`, `csrrc` and their immediate forms) takes one, in the cycle of the write: `mark` is the value written (the quiet build, `forge_quiet.elf`, writes each section's mark, `obs_marks.json`). Core 0's wire `obs_mark` is bound to the `mark` wire of the crossbar, every group and every streamer; the other cores' writes take none. The end of the simulation takes the last one, `mark=-1`.
 
 | Component | Line, one per | Fields |
 |---|---|---|
@@ -207,13 +192,13 @@ The SNAX components count from boot and never reset their counters. A snapshot w
 | group | unit, in `accelerator.json`'s order | `mark`, `unit` (its name in `accelerator.json`), `firings` (once per span, as the rule's `fire`), `pushes` (results given to its link or its outer output) |
 | streamer | mover, in mover order | `mark`, `mover` (`reader<i>`, `writer<j>`), `busy`, `stall_xbar`, `stall_fifo`, `idle` (its `mover` lines' classes added up over its runs) |
 
-A linked group writes every unit's line (`dot_v3`: `mul` and `sum`); a group of one unit, that unit's.
+A linked group writes every unit's line (`dot_v4`: `mac` and `sum`); a group of one unit, that unit's.
 
-**Order.** Within a component the lines come in the table's order: the crossbar's inputs, its banks then its copies, a group's own line then its units'. At the end of the simulation the crossbar writes its snapshot after its `input`, `bank` and `copies` lines; a group or a streamer writes no other line then.
+**Order.** Within a component the lines come in the table's order: the crossbar's inputs, its banks then its copies, a group's own line then its units'. At the end the crossbar writes its snapshot after its `input`, `bank` and `copies` lines; a group or streamer writes no other line then.
 
-**Windows.** Number the snapshots from 1 in the order they are taken, snapshot 0 being boot's (every counter 0). Window k is snapshot k + 1 minus snapshot k, field by field: window 0 runs from boot to the first mark's write (the first snapshot itself), window k from the k-th snapshot's write to the next one's, the last to the end (`mark=-1`).
+**Windows.** Number the snapshots from 1 in the order they are taken, snapshot 0 being boot's (every counter 0). Window k is snapshot k + 1 minus snapshot k, field by field: window 0 runs from boot to the first mark's write, window k from the k-th snapshot's write to the next one's, the last to the end (`mark=-1`).
 
 - Every cycle a component counts lands in exactly one window, so the windows add up to the `mark=-1` snapshot, which equals the whole-run counters: the crossbar's `input`, `bank` and `copies` lines, the sums of a group's `run` lines and of a mover's `mover` lines.
 - A snapshot counts what the component has counted when the write reaches it: a cycle the component handles after the write, in the write's own cycle, falls in the next window.
-- A streamer classes the cycles it sleeps through in a run only when it wakes; a snapshot taken in between counts the cycles slept so far in the class the mover slept in, as that wake will.
-- `tests/snax/snapshots.py` checks the `mark=-1` snapshot on every forge run of `make regress`, and on the quiet build of every fixture with one accelerator run, that the window from its `run` mark to the next equals that run's `run` and `mover` lines.
+- A snapshot taken while a streamer sleeps counts the cycles slept so far in the class the mover slept in, as its wake will.
+- `tests/snax/snapshots.py` checks these on `make regress`'s runs.

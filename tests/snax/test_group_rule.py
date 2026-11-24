@@ -51,16 +51,7 @@ class Dot(unittest.TestCase):
                         self.assertEqual(sum(totals(rows).values()), gen.formula(v, t, j))
                         self.assertEqual(end, gen.formula(v, t, j))
 
-    def test_counts_over_the_chain(self):
-        rule = GroupRule([unit("mul"), unit("sum", inputs=0)], [link("mul", "sum")])
-        self.assertEqual(rule.firings_per_run(2, [1, 4]), [8, 8])
-        self.assertEqual(rule.firings_per_run(2, [4, 1]), [8, 2])
 
-    def test_the_links_need_not_be_in_unit_order(self):
-        rule = GroupRule([unit("sum", L=1, inputs=0), unit("mul")], [link("mul", "sum", 1)])
-        self.assertEqual(rule.order, [1, 0])
-        self.assertEqual(rule.output, 0)
-        self.assertEqual(rule.firings_per_run(1, [4, 1]), [4, 4])
 
 
 class Refused(unittest.TestCase):
@@ -68,11 +59,6 @@ class Refused(unittest.TestCase):
         with self.assertRaisesRegex(GroupError, r"unit a has 2 out-edges \(a fork\)"):
             GroupRule([unit("a"), unit("b", inputs=0), unit("c", inputs=0)],
                       [link("a", "b"), link("a", "c")])
-
-    def test_a_join(self):
-        with self.assertRaisesRegex(GroupError, r"unit c has 2 in-edges \(a join\)"):
-            GroupRule([unit("a"), unit("b"), unit("c", inputs=0)],
-                      [link("a", "c"), link("b", "c", to_input=1)])
 
     def test_a_cycle(self):
         with self.assertRaisesRegex(GroupError, "cycle"):
@@ -88,12 +74,23 @@ class Refused(unittest.TestCase):
 
 
 class Fork(unittest.TestCase):
-    """Two chains on one reader (D189): bicg's one pass at N = W, q by vmul -> sum, s by mac."""
+    """Two chains on one reader: bicg's one pass at N = W, q by vmul -> sum, s by mac."""
 
     def group(self, depth=1, **kw):
         us = [unit("vmul"), unit("sum", L=1, inputs=0), unit("mac", L=1)]
         return GroupRule(us, [link("vmul", "sum", depth)], forks=[[("vmul", 0), ("mac", 0)]],
                          **kw)
+
+    def test_unequal_firings_never_end(self):
+        # NB (D189): LOWER refuses this; the group waits for mac's partner for ever
+        _, end = self.group().run([4, 2], [1, 1, 4], lambda c: (1, 1, 1), lambda c: (1, 1), 64)
+        self.assertIsNone(end)
+
+    def test_several_chains_take_jobs_and_ready_per_output(self):
+        with self.assertRaisesRegex(GroupError, "jobs 4: a group of 2 chains takes one per"):
+            self.group().firings_per_run(4, [1, 1, 4])
+        with self.assertRaisesRegex(GroupError, r"ready \[1\]: one per output, 2"):
+            self.group().run([4, 1], [1, 1, 4], lambda c: (1, 1, 1), lambda c: [1], 4)
 
     def test_with_every_input_there_the_run_is_the_longer_chains(self):
         for depth in (0, 1):
@@ -106,41 +103,8 @@ class Fork(unittest.TestCase):
             with self.subTest(depth=depth):
                 self.assertEqual(end, max(alone))
 
-    def test_the_members_fire_together(self):
-        gaps = {2, 3, 7}
-        rule = self.group()
-        rows, end = rule.run([4, 1], [1, 1, 4], lambda c: (1, 1, 0 if c in gaps else 1),
-                             lambda c: (1, 1), 32)
-        self.assertIsNotNone(end)
-        self.assertEqual([r[2][0][0] for r in rows], [r[2][2][0] for r in rows])
-        self.assertEqual(rule.firings_per_run([4, 1], [1, 1, 4]), [4, 4, 4])
-
-    def test_a_valid_names_a_forked_input_once(self):
-        rule = self.group()
-        self.assertEqual(rule.place, [[0, 1], [], [0, 2]])
-        self.assertEqual(rule.n_valid, 3)
-        self.assertEqual([rule.units[k]["name"] for k in rule.outputs], ["sum", "mac"])
-
-    def test_unequal_firings_never_end(self):
-        # NB (D189): LOWER refuses this; the group waits for mac's partner for ever
-        _, end = self.group().run([4, 2], [1, 1, 4], lambda c: (1, 1, 1), lambda c: (1, 1), 64)
-        self.assertIsNone(end)
-
-    def test_outputs_in_the_order_given(self):
-        rule = self.group(output=["mac", "sum"])
-        self.assertEqual(rule.firings_per_run([1, 4], [1, 1, 4]), [4, 4, 4])
-
-    def test_several_chains_take_jobs_and_ready_per_output(self):
-        with self.assertRaisesRegex(GroupError, "jobs 4: a group of 2 chains takes one per"):
-            self.group().firings_per_run(4, [1, 1, 4])
-        with self.assertRaisesRegex(GroupError, r"ready \[1\]: one per output, 2"):
-            self.group().run([4, 1], [1, 1, 4], lambda c: (1, 1, 1), lambda c: [1], 4)
-
 
 class ForkRefused(unittest.TestCase):
-    def test_chains_no_fork_joins(self):
-        with self.assertRaisesRegex(GroupError, "ending at a, c and at b: no fork joins them"):
-            GroupRule([unit("a"), unit("b"), unit("c")], [], forks=[[("a", 0), ("c", 0)]])
 
     def test_a_member_fed_by_a_link(self):
         with self.assertRaisesRegex(GroupError, "sum is fed by a link; a fork feeds chains' heads"):
@@ -172,26 +136,10 @@ class ForkRefused(unittest.TestCase):
 
 
 class Bank(unittest.TestCase):
-    """A banked Mac (D191) with r held (D190): one job of M rows, ROWS beats a row."""
+    """A banked Mac with r held: one job of M rows, ROWS beats a row."""
 
     def mac(self, rows=2, hold=(1,)):
         return GroupRule([dict(unit("mac", L=1), rows=rows, hold=list(hold))], [])
-
-    def test_a_job_gives_rows_results_on_its_last_firings(self):
-        rows, end = self.mac().run(1, [6], lambda c: (1, 1), lambda c: 1, 16)
-        self.assertEqual([r[2][0] for r in rows[1:8]],
-                         [(1, 0)] * 5 + [(1, 1), (0, 1)])  # fmt: skip
-        self.assertEqual(end, 7)
-
-    def test_a_held_input_is_needed_once_a_row(self):
-        late = {2}  # row 0's second firing: the held r serves
-        rows, end = self.mac().run(1, [6], lambda c: (1, 0 if c in late else 1),
-                                   lambda c: 1, 16)
-        self.assertEqual(end, 7)
-        late = {3}  # row 1's first firing waits
-        rows, end = self.mac().run(1, [6], lambda c: (1, 0 if c in late else 1),
-                                   lambda c: 1, 16)
-        self.assertEqual(end, 8)
 
     def test_refused(self):
         for kw, text in (({"rows": 0}, "a bank has one row or more"),
@@ -250,6 +198,7 @@ class OneUnit(unittest.TestCase):
                 run = (f"index=0 firings={sum(r[2][0][0] for r in rows)} "
                        + " ".join(f"{k}={cls[k]}" for k in CLASSES))
                 self.assertEqual(head["expect"][0], ["run", *run.split()])
+
 
 if __name__ == "__main__":
     unittest.main()

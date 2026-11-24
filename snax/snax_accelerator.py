@@ -15,7 +15,7 @@ The slot (snax_cfg.AccSlot) gives its streamer sets and the description
 cluster its TCDM size. Set k's streamer is `streamer_<set>`; each entry of
 its accelerator's inputs ("<unit>.<port>") takes that streamer's reader of
 its index, each entry of its outputs the writer of its index; a port on a
-link is the group's own and meets no streamer. A forked input (D189), an
+link is the group's own and meets no streamer. A forked input, an
 entry listing several ports, is its first port's: that port takes the reader,
 and the group names every port of the fork after it, so its units share it.
 
@@ -53,10 +53,10 @@ among them, the last, or -1), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
 JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
 from its CSRs (scalars, each [slot, words]); d_out, its outer output's results per 64-bit
-word (1 unless packed, D174); d_in, per input its pops per 64-bit word (1 unless sliced,
-D180); broadcast, per input whether its reader's one lane goes to all lanes (D186); hold,
-per input whether it is read once a bank row and kept (D190); rows, a Mac's bank rows (1
-without, D191); carry, whether its seed is carried (D192); and its links as edges, each
+word (1 unless packed); d_in, per input its pops per 64-bit word (1 unless sliced);
+broadcast, per input whether its reader's one lane goes to all lanes; hold, per input
+whether it is read once a bank row and kept; rows, a Mac's bank rows (1 without); carry,
+whether its seed is carried; and its links as edges, each
 {from, to, to_input, depth}:
 the producer's and the consumer's names and the consumer's input it feeds,
 its index in that unit's inputs.
@@ -146,7 +146,7 @@ def group_units(accelerator, group) -> tuple:
     """SnaxGroup's units and links properties for group (module doc)."""
     to = {link.to: link for link in group.links}
     frm = {link.from_: link for link in group.links}
-    # a forked port is its fork's first (its reader's), named once for every member (D189)
+    # a forked port is its fork's first (its reader's), named once for every member
     first = {p: f[0] for f in accelerator.forks for p in f}
     units, ins_of = [], {}
     for u in group.units:

@@ -23,7 +23,7 @@
 // chains, each a path of links from a head to a sink, the unit without an
 // out-edge, which owns one outer output: configure() refuses a unit with two
 // out-edges or two in-edges (a fork or a join of links), a cycle, and chains
-// no fork joins. NB (D189): chains meet only at a forked outer input, one
+// no fork joins. Chains meet only at a forked outer input, one
 // reader's for the heads of several chains (each of span 1): its beat is
 // taken only when every one of them fires, so a head that would fire waits
 // while another cannot (step() decides the cycle again with it blocked, as
@@ -41,28 +41,28 @@
 // outer inputs all have a beat and whether its outer output has room (true for
 // a unit without one).
 //
-// NB (D163): a seeded fold (TreeAccumulate, SerialAccumulate, or a Mac, D187) has
+// A seeded fold (TreeAccumulate, SerialAccumulate, or a Mac) has
 // one more outer input, its seed, one beat per job: its input has a beat when its other
 // inputs have one and, on its job's first beat (d = 0), its seed has one
 // (fire = a.valid and (not first or seed.valid)); the seed is taken with the
 // job's first firing (seed.ready = fire and first, UnitStep::seed). A seed
 // missing when wanted is stall_in, as a missing outer beat.
 //
-// NB (D191): a bank, a unit of rows R > 1 (a Mac's, a chain's sink), keeps R
+// A bank, a unit of rows R > 1 (a Mac's, a chain's sink), keeps R
 // rows of sums, one a firing in turn: its row is d mod ROWS, ROWS (at most R,
 // from its CSR at the start) the rows a run uses, T a multiple of it. first =
 // [d < ROWS] (a seed taken on each), and it gives on its job's last ROWS
-// firings (d >= T - ROWS), so a job gives ROWS results. NB (D190): its held
+// firings (d >= T - ROWS), so a job gives ROWS results. Its held
 // inputs (a broadcast read once a row and kept) count only on a row's first
 // firing (d mod ROWS = 0): outer_ok also needs holds[k] there, and the firing
 // takes them (UnitStep::take); on its other firings the unit uses the beat it
-// kept. A carried seed (D192) is any seed to the rule; the component gives its
+// kept. A carried seed is any seed to the rule; the component gives its
 // datapath 0 in its place while the job (UnitStep::job) is below CARRY.
 //
 // Per unit: its job_beats_counter d (its firings mod T, here derived
 // from its firings; first = [d = 0], it gives a result on firings with d =
 // T - 1; the Chisel keeps it as a counter, and counts each unit's results in
-// nested counters, never against n_k; NB (D153): the RTL counts the same
+// nested counters, never against n_k; the RTL counts the same
 // way, so a change here must match the Chisel), an L-deep pipeline that stalls
 // as a whole when its head cannot be pushed, at most one firing per II (the
 // II counts cycles from the unit's last firing; a stall does not restart it,
@@ -105,7 +105,7 @@
 // order).
 //
 // SnaxPacker: the outer output's packer, when its d_out results fill one 64-bit
-// word (a one-lane int32 fold at d_out 2, int16 at 4, int8 at 8; D174), placed
+// word (a one-lane int32 fold at d_out 2, int16 at 4, int8 at 8), placed
 // between the owning unit and its writer as the Chisel's FifoPacker. A run clears
 // its slice pointer; each push puts the result's low 64 / d_out bits at the
 // slice; the word goes to the writer when the slice is d_out - 1 (full) or the
@@ -118,7 +118,7 @@
 //
 // SnaxSlicer: an outer input's slicer, when its lanes W are fewer than a
 // word's elements and divide them (int32 W = 1; int16 W = 1, 2; int8 W = 1,
-// 2, 4; D180), placed between the reader and the unit as the Chisel's
+// 2, 4), placed between the reader and the unit as the Chisel's
 // FifoSlicer, the packer's mirror. It holds one 64-bit word and gives d_in =
 // elements / W pops of it, low slice first, each slice W lanes in the low
 // bits of the unit's beat. The unit sees full, not the reader's valid; a
@@ -128,7 +128,7 @@
 // busy cycles, so the word shows the cycle after (the RTL's registered
 // output). A run's start drops what it holds.
 //
-// snax_broadcast: a broadcast input's wires (D186), on an input of a datapath
+// snax_broadcast: a broadcast input's wires, on an input of a datapath
 // whose lanes compute on their own (SimdLanes, Mac): its reader, or its slicer
 // sized by one lane (d_in = 64 / width), gives one lane a beat, and each of the
 // unit's W lanes takes that lane, in the unit's words of its type. No register
@@ -164,8 +164,8 @@ public:
         int ii = 1;
         int span = 1;
         bool seeded = false;    // one more outer input, its seed, taken once per job
-        int rows = 1;           // a bank's rows R (D191): ROWS at most R per run
-        bool held = false;      // it has held inputs (D190), taken on a row's first firing
+        int rows = 1;           // a bank's rows R: ROWS at most R per run
+        bool held = false;      // it has held inputs, taken on a row's first firing
     };
 
     // An edge: unit from's output into input to_input of unit to (its index among the
@@ -191,8 +191,8 @@ public:
         bool first = false;     // the beat fired or read is its job's first (d = 0)
         bool frozen = false;    // its head (or, L = 0, a giving firing) had no room
         bool seed = false;      // its seed taken (a seeded unit's fire on its job's first beat)
-        bool take = false;      // its held inputs taken (a firing on a row's first beat, D190)
-        int row = 0;            // a bank's row of the beat fired or read: d mod ROWS (D191)
+        bool take = false;      // its held inputs taken (a firing on a row's first beat)
+        int row = 0;            // a bank's row of the beat fired or read: d mod ROWS
         uint32_t job = 0;       // the job of the beat fired or read in this run: firings / T
     };
 
@@ -216,7 +216,7 @@ public:
 
     // The units, the links between them, the units owning the outer outputs (the chains'
     // sinks, in the order of the start's JOBS and their room; empty: the sinks in unit
-    // order) and the forks, each the units an outer input's one reader feeds (D189).
+    // order) and the forks, each the units an outer input's one reader feeds.
     // Returns why the graph is refused, or "" (then the rule is configured).
     std::string configure(const std::vector<UnitCfg> &units, const std::vector<Link> &links,
         const std::vector<int> &outputs = {}, const std::vector<std::vector<int>> &forks = {})
@@ -488,7 +488,7 @@ public:
         return this->step(cycle, inputs, seeds, this->no_holds, outer_room);
     }
 
-    // holds[k], a unit's held inputs have a beat (any value for one without, D190); its other
+    // holds[k], a unit's held inputs have a beat (any value for one without); its other
     // outer inputs are in inputs[k]
     const Step &step(int64_t cycle, const std::vector<bool> &inputs,
         const std::vector<bool> &seeds, const std::vector<bool> &holds,
@@ -620,7 +620,7 @@ public:
     SnaxRunSpan span;
     std::vector<uint32_t> jobs;
     std::vector<uint32_t> job_beats;        // per unit, its T: a result every T-th firing
-    std::vector<uint32_t> rows;             // per unit, its ROWS: the bank's rows used (D191)
+    std::vector<uint32_t> rows;             // per unit, its ROWS: the bank's rows used
     std::vector<uint32_t> firings_per_run;  // per unit, its n
     int64_t classes[NB_CLASSES];
     int runs;
@@ -889,7 +889,7 @@ private:
 
 
 
-// NB (D174): the Chisel's FifoPacker, cycle for cycle (module doc)
+// The Chisel's FifoPacker, cycle for cycle (module doc)
 struct SnaxPacker
 {
     int d_out = 1;
@@ -934,7 +934,7 @@ struct SnaxPacker
 };
 
 
-// NB (D186): the RTL's <unit>_<port>_bcast, wires: lane 0 of beat, given to each of lanes
+// The RTL's <unit>_<port>_bcast, wires: lane 0 of beat, given to each of lanes
 // lanes of type t in out (snax_words(lanes, t) words), within the cycle (module doc)
 inline void snax_broadcast(const uint64_t *beat, int lanes, SnaxType t, uint64_t *out)
 {
@@ -947,7 +947,7 @@ inline void snax_broadcast(const uint64_t *beat, int lanes, SnaxType t, uint64_t
 }
 
 
-// NB (D180): the Chisel's FifoSlicer, cycle for cycle (module doc)
+// The Chisel's FifoSlicer, cycle for cycle (module doc)
 struct SnaxSlicer
 {
     int d_in = 1;

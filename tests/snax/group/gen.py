@@ -76,7 +76,7 @@ def packed_words(sent_at, pushes_at, d_out):
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
           formula_total=None, comment=(), data=None, d_out=1, d_in=(), links=None, forks=()):
     # A chain: link k joins unit k to unit k + 1's only input; or ``links`` as (from, to,
-    # depth) with ``forks`` for a group of several chains (D189)
+    # depth) with ``forks`` for a group of several chains
     if links is None:
         links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
                  for k, d in enumerate(depths)]
@@ -212,7 +212,7 @@ def seed_cases():
           [2, 1], valid=lambda c: (1, 1, 0 if c in {1, 2, 3, 4, 7} else 1),
           comment=["sum reads its job's first beat lane by lane only once its seed is there; "
                    "mac holds its result"])
-    write("seed_mac_late", "mac (Mac, T 4, seeded: its seed has the output's lanes, D187) "
+    write("seed_mac_late", "mac (Mac, T 4, seeded: its seed has the output's lanes) "
           "alone, JOBS 2, its seed missing in cycles 1 to 3 and 6 to 7",
           [("mac", "Mac", 1, 1, 3, 1)], [], 2, [4],
           valid=lambda c: (1, 1, 0 if c in {1, 2, 3, 6, 7} else 1),
@@ -221,7 +221,7 @@ def seed_cases():
 
 
 def pack_cases():
-    """The outer output's packer (D174): a fold's one-lane result packed d_out to a word, its
+    """The outer output's packer: a fold's one-lane result packed d_out to a word, its
     room the writer's ready only on a sending push. sum (TreeAccumulate, T 2) alone at d_out
     2, 4 and 8 (int32, int16, int8 results), JOBS 1 (a short word at once), 9 (a short last
     word) and 10 (whole words at d_out 2); the writer not ready while the packer fills; and dot
@@ -247,7 +247,7 @@ def pack_cases():
 
 
 def slice_cases():
-    """The input's slicer (D180): one word from the reader, d_in pops, low slice first, a word
+    """The input's slicer: one word from the reader, d_in pops, low slice first, a word
     taken only while busy and shown the cycle after, the next taken on the last pop. sum
     (TreeAccumulate, T 2) alone, its input sliced 2, 4 and 8 (int32, int16, int8 lanes), JOBS
     3 and 2 (6 pops: whole words at 2, a short last word at 4; 4 pops of one word at 8); the
@@ -276,18 +276,18 @@ def slice_cases():
           "sum packed 2 to a word", VARIANTS[3][0], [0], 2, [1, 2], d_out=2, d_in=(2, 2),
           comment=["matvec_v3 at int8, W = 4: both readers sliced, one cycle later than "
                    "pack_dot3"])
-    write("slice_mac_bcast_d8", "mac (Mac, T 4, seeded), JOBS 2, its b sliced 8 and broadcast "
-          "(D186): mvt's half 2 at int8, a and the seed wired", [("mac", "Mac", 1, 1, 3, 1)],
+    write("slice_mac_bcast_d8", "mac (Mac, T 4, seeded), JOBS 2, its b sliced 8 and broadcast: "
+          "mvt's half 2 at int8, a and the seed wired", [("mac", "Mac", 1, 1, 3, 1)],
           [], 2, [4], valid=lambda c: (1, 1, 1), d_in=(1, 8, 1),
           comment=["b's one word gives the 8 firings their y2[i], one a firing; the broadcast "
                    "is wires (each lane gets the pop), so the rule does not see it"])
 
 
 def fork_cases():
-    """Two chains on one reader (D189), bicg's one pass at N = W: vmul (SimdLanes) -> a link ->
+    """Two chains on one reader, bicg's one pass at N = W: vmul (SimdLanes) -> a link ->
     sum (TreeAccumulate, T 1) gives q, one a row; mac (Mac, T = M) gives s once. A is forked to
     vmul.a and mac.a: its beat is taken only when both fire. vmul.b is p, mac.b r (broadcast in
-    the datapath, D186, so one lane to the rule). M = 4: JOBS 4 for q, 1 for s."""
+    the datapath, so one lane to the rule). M = 4: JOBS 4 for q, 1 for s."""
     units = [("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 0),
              ("mac", "Mac", 1, 1, 2)]
     fork = [[("vmul", 0), ("mac", 0)]]
@@ -322,17 +322,17 @@ def fork_cases():
                    "chain drains meanwhile"], **both)
     seeded = [("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 1, 1),
               ("mac", "Mac", 1, 1, 3, 1)]
-    write("fork_seeded", f"mvt's one pass at M = {m}, depth 1: sum seeded per row (x1, D163), "
-          "mac seeded once (x2, D187), x2 missing in cycles 1 to 2", seeded, None, jobs, ts,
+    write("fork_seeded", f"mvt's one pass at M = {m}, depth 1: sum seeded per row (x1), "
+          "mac seeded once (x2), x2 missing in cycles 1 to 2", seeded, None, jobs, ts,
           valid=lambda c: (1, 1, 1, 1, 0 if c in (1, 2) else 1), ready=lambda c: (1, 1),
           comment=["mac's first beat waits for its seed, so vmul waits for its fork; sum's "
                    "seeds are there"], **both)
 
 
 def bank_cases():
-    """A banked Mac (D191) with its r held (D190): rows outer, each row of A N/W = ROWS beats,
+    """A banked Mac with its r held: rows outer, each row of A N/W = ROWS beats,
     beat b into bank row b mod ROWS; a job of M rows gives ROWS results, one on each of its
-    last ROWS firings. Alone, then as bicg's one pass in strips (the fork, D189)."""
+    last ROWS firings. Alone, then as bicg's one pass in strips (the fork)."""
     m, rows = 3, 2
     mac = ("mac", "Mac", 1, 1, 2, False, {"rows": rows, "hold": [1]})
     write(f"bank_r{rows}_m{m}", f"mac with a bank of {rows} rows, r (b) held, M = {m}: T = "
@@ -361,9 +361,9 @@ def bank_cases():
 
 
 def seeded_bank_cases():
-    """A seeded bank (D194): the Mac's seed moves a beat a row, needed and taken on each of a
-    job's first ROWS firings (first = d < ROWS), so row ρ starts from seed beat ρ; y2 held a row
-    (D190). Alone at R = 2 and 4, with a late seed, and as mvt's one pass (the fork, D189)."""
+    """A seeded bank: the Mac's seed moves a beat a row, needed and taken on each of a
+    job's first ROWS firings (first = d < ROWS), so row ρ starts from seed beat ρ; y2 held a row.
+    Alone at R = 2 and 4, with a late seed, and as mvt's one pass (the fork)."""
     for rows, m, jobs in ((2, 3, 2), (4, 2, 1)):
         mac = ("mac", "Mac", 1, 1, 3, True, {"rows": rows, "hold": [1]})
         write(f"bank_seed_r{rows}", f"mac with a seeded bank of {rows} rows, b held, M = {m}: "

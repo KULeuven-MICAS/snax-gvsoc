@@ -22,29 +22,32 @@ Every hjson and C file starts with a comment naming the design point.
 
 ## The fixtures
 
-| Kind | Folders |
+One folder per integration feature (snax-forge's D195), each at the smallest size that shows it; types and ops are left to the datapath testbench (`tests/snax/datapath/`).
+
+| Folder | What it carries |
 |---|---|
-| element-wise, int64 | `vecadd_v1`, `vecmul_v1`, `vecadd_v1_3` (a padded tail) |
-| element-wise, narrow types | `vecadd_v1_1`, `vecmul_v1_1`, `vecmul_v1_1_1`, `vecadd_v1_2`, `matadd_v1` (int32, the first 2-D bind), `vecadd_v1_1_w1` (one lane: inputs sliced 2 from a word, the output packed 2 to one) |
-| one stream and scalars | `relu_v1`, `axpy_v1` (a CSR scalar), `axpy_v1_1` (the scalar baked in) |
-| reductions | `vsum_v1`, `vsum_v1_1`, `vsum_v1_1_1`, `vsum_v1_1_2`, `vsum_v1_1_3`, `rowsum_v1`, `rowsum_v3`, `rowsum_v1_1`, `rowsum_v2`, `rowsum_v2_padded` (`padded_rows` layout) |
-| dot, the six variants | `dot_v1` (two accelerators), `dot_v1_1` (one accelerator of two groups), `dot_v2` to `dot_v6` (one group of linked units) |
-| matvec | `matvec_v1` to `matvec_v6`, `matvec_acc_v1` and `matvec_acc_v2` (a seeded fold) |
-| shared movers | `dot_v1_2`, `mvt_v1_2_2` (W = 8) |
-| a copy in L1, one step at a time | `mvt_v4_1_sequential` (mvt_v4 at W = 8 whose half 2 reads `A_T`, A copied transposed by the DMA one element a burst; every start waited on at once), `mvt_v4_1_1_sequential` (the same at int8 in, int32 out: x sliced 2 from a word, its output packed 2 to one) |
-| the column form, no copy | `mvt_v5_sequential` (mvt_v4 at int8 whose half 2 is one seeded `Mac` of 8 lanes on n, y2 broadcast to every lane and x2 its seed, A read a strip of 8 columns at a time; sequential), `mvt_v5_2_sequential` (the same with an unseeded `Mac` whose 8 sums go through the link `tmp2` into a `SimdLanes` `vadd_x2` adding x2; one group, sequential), `mvt_v6` (mvt's one pass over A at 64 × 64, W = 8, int8 in, int32 out: one group of two chains on one reader of A forked to both (D189), half 1 `mvt_v5`'s seeded `dot_v2` chain, half 2 x2's 64 sums in a seeded `Mac` bank of R = 8 rows of 8 (D194), each row started from its beat of x2 on the job's first 8 firings, y2 read once a row and held (D190); `ROWS`) |
-| bicg | `bicg_v2_1_sequential` (bicg at int8 in, int32 out: q in the row form on `matvec`, s in the column form, one unseeded `Mac` of 8 lanes on its own accelerator with r broadcast to every lane, A read a strip of 8 columns at a time; sequential), `bicg_v3` (bicg's one pass over A at M = 64, N = W = 32, int8 in, int32 out: one group of two chains on one reader of A forked to both (D189), q's `SimdLanes` `mul` linked into a `TreeAccumulate` `sum` whose output is packed 2 to a word, s's `Mac` of 32 lanes with r sliced 8 from a word and broadcast; a JOBS per chain, `JOBS_SUM` and `JOBS_MAC`), `bicg_v4` (the one pass at 64 × 64, W = 4: s's 64 sums in the `Mac`'s bank of R = 16 rows of 4 (D191), its output drained a row at a time at the job's end, r read once a row and held (D190), A and p sliced 2 from a word; `ROWS`), `bicg_v4_1` (the same in two strips of R = 8 rows, q's seed carried from the first strip to the second through L1, 0 on the first (D192); `ROWS` and `SUM_CARRY`) |
+| `vecadd_v1` | one accelerator of one group of one unit (`SimdLanes`, add, int64), at N = 64 so B lies on A's banks; the snax_hjson target's default and the cluster tests' |
+| `vecadd_v1_1_w1` | one lane at int32: inputs sliced 2 from a word (`d_in`), the output packed 2 to one (`d_out`) |
+| `axpy_v1` | a CSR scalar (`K1`, pinned to the unit's `k1`) and a padded tail |
+| `rowsum_v2_padded` | `LaneAccumulate` over the `padded_rows` layout, 4 rows of 8 |
+| `dot_v4` | a linked group, `Mac` into `TreeAccumulate` over a wire (depth 0), `JOB_BEATS` |
+| `matvec_acc_v2` | two groups in one accelerator, a seeded `SerialAccumulate` fold, two tasks |
+| `mvt_v1_2_2` | two groups (`mvt`, a link of depth 1, and `vadd`) on one streamer set whose movers they share, the port mux, four tasks |
+| `mvt_v4_1_1_sequential` | A copied transposed by the DMA one element a burst, int8 in and int32 out, every start waited on at once (`sequential`) |
+| `mvt_v5_sequential` | two accelerators in two streamer sets, a seeded `Mac` with y2 broadcast, A read a strip of 8 columns at a time |
+| `mvt_v6` | the one pass over A: one reader forked to two chains, a seeded `Mac` bank of R = 8 rows (`ROWS`), y2 read once a row and held |
+| `bicg_v4_1` | the one pass in two strips of a bank of R = 4 rows, q's seed carried from the first strip to the second (`CARRY`), A and p sliced 2 from a word, q packed 2 to a word |
 
 ## Refreshing a folder
 
-From a snax-forge checkout next to this one, with the folder cleared first (gen-gvsoc leaves a file it no longer writes in place):
+snax-forge's `tests/gen/test_fixture.py` makes each folder from its recipe and `--set` values, `FORGE_FIXTURES` in snax-forge's `tests/helpers.py`. By hand, from a snax-forge checkout next to this one, with the folder cleared first (gen-gvsoc leaves a file it no longer writes in place):
 
     pixi run sandbox recipes/elementwise/vecadd_v1.json
     pixi run design out/sandbox/vecadd_v1/2_bind.snaxdfg --platform platforms/snax_forge.json
     pixi run gen-gvsoc out/design/vecadd_v1/design_point.json --out ../snax-gvsoc/forge/vecadd_v1
 
 - The design step reads the sandbox's last step, `out/sandbox/<design>/<n>_<transform>.snaxdfg`.
-- `rowsum_v2_padded` is `rowsum_v2` with `--set memory.passes.layout=padded_rows` on the design step; `mvt_v1_2_2` is its recipe with `--set W=8` on the sandbox step; `mvt_v4_1_sequential` is `mvt_v4_1` with `--set design.schedule=sequential` on the design step, and each `_sequential` folder likewise.
+- A recipe param (`M=`, `N=`, `W=`, `R=`) goes to the sandbox step, a `memory.` or `design.` path to the design step; the sandbox's `--out out/sandbox/<folder>` names the design point after the folder.
 - Commit the folder as written, then bump snax-forge's submodule so its test compares against it.
 - `make regress` runs every folder through the generic app, so a new folder needs nothing else.
 

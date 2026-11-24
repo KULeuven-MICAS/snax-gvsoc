@@ -22,17 +22,17 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 1);  // dma load_A
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10000000, A, 4096);
+    snrt_dma_start_1d((void *)0x10000000, A, 256);
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 2);  // dma load_y1
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10002200, y1_l2, 64);
+    snrt_dma_start_1d((void *)0x10000280, y1_l2, 64);
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 3);  // dma load_x1
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10002000, x1, 256);
+    snrt_dma_start_1d((void *)0x10000200, x1, 64);
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 4);  // streamer config mvt_1
@@ -40,32 +40,32 @@ static __attribute__((noinline)) int forge_core_0(void) {
     csrw_ss(MVT_1_BASE_PTR_READER_0_LOW, 0x10000000);
     csrw_ss(MVT_1_BASE_PTR_READER_0_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_READER_0_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_0_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_0_1, 64);
+    csrw_ss(MVT_1_T_BOUND_READER_0_0, 2);
+    csrw_ss(MVT_1_T_BOUND_READER_0_1, 16);
     csrw_ss(MVT_1_T_STRIDE_READER_0_0, 8);
-    csrw_ss(MVT_1_T_STRIDE_READER_0_1, 64);
-    csrw_ss(MVT_1_BASE_PTR_READER_1_LOW, 0x10002200);
+    csrw_ss(MVT_1_T_STRIDE_READER_0_1, 16);
+    csrw_ss(MVT_1_BASE_PTR_READER_1_LOW, 0x10000280);
     csrw_ss(MVT_1_BASE_PTR_READER_1_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_READER_1_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_1_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_1_1, 64);
+    csrw_ss(MVT_1_T_BOUND_READER_1_0, 2);
+    csrw_ss(MVT_1_T_BOUND_READER_1_1, 16);
     csrw_ss(MVT_1_T_STRIDE_READER_1_0, 8);
     csrw_ss(MVT_1_T_STRIDE_READER_1_1, 0);
-    csrw_ss(MVT_1_BASE_PTR_READER_2_LOW, 0x10002000);
+    csrw_ss(MVT_1_BASE_PTR_READER_2_LOW, 0x10000200);
     csrw_ss(MVT_1_BASE_PTR_READER_2_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_READER_2_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_2_0, 32);
+    csrw_ss(MVT_1_T_BOUND_READER_2_0, 8);
     csrw_ss(MVT_1_T_STRIDE_READER_2_0, 8);
-    csrw_ss(MVT_1_BASE_PTR_WRITER_0_LOW, 0x10002000);
+    csrw_ss(MVT_1_BASE_PTR_WRITER_0_LOW, 0x10000200);
     csrw_ss(MVT_1_BASE_PTR_WRITER_0_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(MVT_1_T_BOUND_WRITER_0_0, 32);
+    csrw_ss(MVT_1_T_BOUND_WRITER_0_0, 8);
     csrw_ss(MVT_1_T_STRIDE_WRITER_0_0, 8);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 5);  // acc config mvt_1
 #endif  // FORGE_QUIET
-    csrw_ss(MVT_1_RW_JOBS, 64);
-    csrw_ss(MVT_1_RW_VSUM_X2_JOB_BEATS, 8);
+    csrw_ss(MVT_1_RW_JOBS, 16);
+    csrw_ss(MVT_1_RW_VSUM_X2_JOB_BEATS, 2);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 6);  // run mvt_1
 #endif  // FORGE_QUIET
@@ -79,57 +79,57 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 7);  // dma store_x1
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d(x1, (void *)0x10002000, 256);
+    snrt_dma_start_1d(x1, (void *)0x10000200, 64);
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 8);  // dma transpose_A_T
 #endif  // FORGE_QUIET
-    for (uint32_t k = 0; k < 64; k++) {
-        snrt_dma_start_2d((void *)(0x10001000 + 64 * k), (void *)(0x10000000 + 1 * k), 1, 1, 64, 64);
+    for (uint32_t k = 0; k < 16; k++) {
+        snrt_dma_start_2d((void *)(0x10000100 + 16 * k), (void *)(0x10000000 + 1 * k), 1, 1, 16, 16);
     }
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 9);  // dma load_y2
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10002240, y2, 64);
+    snrt_dma_start_1d((void *)0x100002c0, y2, 64);
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 10);  // dma load_x2
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d((void *)0x10002100, x2, 256);
+    snrt_dma_start_1d((void *)0x10000240, x2, 64);
     snrt_dma_wait_all();
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 11);  // streamer config mvt_1
 #endif  // FORGE_QUIET
-    csrw_ss(MVT_1_BASE_PTR_READER_0_LOW, 0x10001000);
+    csrw_ss(MVT_1_BASE_PTR_READER_0_LOW, 0x10000100);
     csrw_ss(MVT_1_BASE_PTR_READER_0_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_READER_0_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_0_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_0_1, 64);
+    csrw_ss(MVT_1_T_BOUND_READER_0_0, 2);
+    csrw_ss(MVT_1_T_BOUND_READER_0_1, 16);
     csrw_ss(MVT_1_T_STRIDE_READER_0_0, 8);
-    csrw_ss(MVT_1_T_STRIDE_READER_0_1, 64);
-    csrw_ss(MVT_1_BASE_PTR_READER_1_LOW, 0x10002240);
+    csrw_ss(MVT_1_T_STRIDE_READER_0_1, 16);
+    csrw_ss(MVT_1_BASE_PTR_READER_1_LOW, 0x100002c0);
     csrw_ss(MVT_1_BASE_PTR_READER_1_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_READER_1_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_1_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_1_1, 64);
+    csrw_ss(MVT_1_T_BOUND_READER_1_0, 2);
+    csrw_ss(MVT_1_T_BOUND_READER_1_1, 16);
     csrw_ss(MVT_1_T_STRIDE_READER_1_0, 8);
     csrw_ss(MVT_1_T_STRIDE_READER_1_1, 0);
-    csrw_ss(MVT_1_BASE_PTR_READER_2_LOW, 0x10002100);
+    csrw_ss(MVT_1_BASE_PTR_READER_2_LOW, 0x10000240);
     csrw_ss(MVT_1_BASE_PTR_READER_2_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_READER_2_0, 8);
-    csrw_ss(MVT_1_T_BOUND_READER_2_0, 32);
+    csrw_ss(MVT_1_T_BOUND_READER_2_0, 8);
     csrw_ss(MVT_1_T_STRIDE_READER_2_0, 8);
-    csrw_ss(MVT_1_BASE_PTR_WRITER_0_LOW, 0x10002100);
+    csrw_ss(MVT_1_BASE_PTR_WRITER_0_LOW, 0x10000240);
     csrw_ss(MVT_1_BASE_PTR_WRITER_0_HIGH, 0);
     csrw_ss(MVT_1_S_STRIDE_WRITER_0_0, 8);
-    csrw_ss(MVT_1_T_BOUND_WRITER_0_0, 32);
+    csrw_ss(MVT_1_T_BOUND_WRITER_0_0, 8);
     csrw_ss(MVT_1_T_STRIDE_WRITER_0_0, 8);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 12);  // acc config mvt_1
 #endif  // FORGE_QUIET
-    csrw_ss(MVT_1_RW_JOBS, 64);
-    csrw_ss(MVT_1_RW_VSUM_X2_JOB_BEATS, 8);
+    csrw_ss(MVT_1_RW_JOBS, 16);
+    csrw_ss(MVT_1_RW_VSUM_X2_JOB_BEATS, 2);
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 13);  // run mvt_1
 #endif  // FORGE_QUIET
@@ -143,7 +143,7 @@ static __attribute__((noinline)) int forge_core_0(void) {
 #ifdef FORGE_QUIET
     write_csr(0x7c5, 14);  // dma store_x2
 #endif  // FORGE_QUIET
-    snrt_dma_start_1d(x2, (void *)0x10002100, 256);
+    snrt_dma_start_1d(x2, (void *)0x10000240, 64);
     snrt_dma_wait_all();
     return 0;
 }
@@ -160,28 +160,28 @@ static __attribute__((noinline)) int forge_check(uint32_t t0) {
 #endif  // FORGE_QUIET
     int err = 0;
     int data_errors = 0;
-    for (uint32_t i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < 16; i++) {
         if (((volatile int32_t *)x1)[i] != x1_golden[i]) {
             data_errors++;
         }
     }
-    for (uint32_t i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < 16; i++) {
         if (((volatile int32_t *)x2)[i] != x2_golden[i]) {
             data_errors++;
         }
     }
     err += data_errors;
 #ifndef FORGE_QUIET
-    printf("forge data: %d errors (%u words)\n", data_errors, 128u);
+    printf("forge data: %d errors (%u words)\n", data_errors, 32u);
 #endif  // FORGE_QUIET
 #ifndef FORGE_QUIET
     printf("forge counter tmp1_mult_mvt_1: %u\n", forge_counter[0]);
 #endif  // FORGE_QUIET
-    err += forge_counter[0] < 512;
+    err += forge_counter[0] < 32;
 #ifndef FORGE_QUIET
     printf("forge counter tmp4_mult_mvt_1: %u\n", forge_counter[1]);
 #endif  // FORGE_QUIET
-    err += forge_counter[1] < 512;
+    err += forge_counter[1] < 32;
 #ifndef FORGE_QUIET
     printf("forge errors: %d\n", err);
 #endif  // FORGE_QUIET

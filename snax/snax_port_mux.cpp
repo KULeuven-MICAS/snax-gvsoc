@@ -7,7 +7,7 @@
 // A shared streamer's data-side mux: between the movers'
 // beat ports and the groups' ports, selected by PORT_MUX_SEL. The rule is
 // SnaxPortMuxRule (snax_port_mux.hpp); here its ports, its CSR and its fatals.
-// NB (D169): one group owns the movers per streamer run; the core writes
+// One group owns the movers per streamer run; the core writes
 // PORT_MUX_SEL before each STREAMER_START, and the sets run in series.
 //
 // Ports: port_<i>, an io slave per group port (properties.users[i]), the one

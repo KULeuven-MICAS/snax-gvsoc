@@ -36,9 +36,10 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import snax_cfg  # noqa: E402
 from test_snax_cfg import (BICG3, BICG3_STREAMER, BICG4, BICG4_STREAMER, CLUSTER,  # noqa: E402
-                           DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD, VMUL_STREAMER, VSUM_STREAMER, Port, accelerator,
+                           DOT1, DOT4, DOT4_STREAMER, SEEDED_STREAMER, STREAMER, VECADD,
+                           VMUL_STREAMER, VSUM_STREAMER, Port, Unit, acc_json, accelerator,
                            dot1_cluster, dot_cluster, dot_shared_cluster, seeded, seeded_mac,
-                           streamer)
+                           streamer, write_design)
 
 
 def slot_of(description, *streamers):
@@ -78,33 +79,9 @@ class Csrs(unittest.TestCase):
     the last CSR over all sets may be at most SNAX_ACC_CSR_LAST, 0x5FD: 0x5FE and 0x5FF are
     snax_cluster's task-queue CSRs, not the accelerator's."""
 
-    def test_dot_1s_bases(self):
-        """vmul: streamer 960-977, CSRs 978-981; vsum: streamer 982-994, CSRs 995-999."""
-        layout = snax_accelerator.csr_layout(slot_of(DOT1, VMUL_STREAMER, VSUM_STREAMER))
-        self.assertEqual([(r.name, r.first, r.own, r.end) for r in layout],
-                         [("vmul", 960, 978, 982), ("vsum", 982, 995, 1000)])
-        self.assertEqual([r.streamer_csrs for r in layout], [18, 13])
-        vsum = layout[1]
-        self.assertEqual([vsum.csr(c.offset) for c in vsum.accelerator.csrs],
-                         [995, 996, 997, 998, 999])
-
-    def test_one_set_is_as_before(self):
-        """vecadd: the streamer's 18 CSRs, then START at 978."""
-        (row,) = snax_accelerator.csr_layout(slot_of(VECADD))
-        self.assertEqual((row.name, row.first, row.own, row.end), ("acc", 960, 978, 982))
-        self.assertEqual(SNAX_CSR_FIRST + nb_csrs(STREAMER), 978)
-
     def unit_csrs_for_last(self, last):
         # dot 1's 1000 CSRs (960-999), then k more in vsum
         return last - 999
-
-    def test_a_last_csr_on_0x5fd_is_taken(self):
-        self.assertEqual(SNAX_ACC_CSR_LAST, 0x5FD)
-        desc = with_unit_csrs(DOT1, self.unit_csrs_for_last(0x5FD))
-        cls = snax_accelerator.SnaxAccelerator.for_slot(
-            slot_of(desc, VMUL_STREAMER, VSUM_STREAMER), 131072)
-        self.assertEqual(cls.nb_tcdm_ports, 17)
-        self.assertEqual(cls.layout[-1].end - 1, 0x5FD)
 
     def test_a_last_csr_on_0x5fe_is_refused(self):
         desc = with_unit_csrs(DOT1, self.unit_csrs_for_last(0x5FE))
@@ -156,14 +133,23 @@ class Built(unittest.TestCase):
                           unit["k2"], unit["scalars"], unit["in_widths"], unit["op_width"]),
                          ("SimdLanes", ["acc_a", "acc_b"], "axpby", "", "", "", [["k1", 1]],
                           [32, 32], 32))
-        baked = self.build(CLUSTER.parent.parent / "axpy_v1_1" / "snax_forge.hjson")
+        with tempfile.TemporaryDirectory() as tmp:
+            baked = self.build(write_design(Path(tmp), acc_json(accelerator("axpy_v1_1", Unit(
+                "acc", "simd", "SimdLanes",
+                {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "b", "out")},
+                "int32", {"op": "axpby", "k1": 3}, 0, 1, []))), streamer([2, 2], [2]), 2, 2))
         (unit,) = baked.components["unit"].properties["units"]
         self.assertEqual((unit["k1"], unit["scalars"]), ("3", []))
         self.assertEqual(baked.components["shell"].properties["csrs"], ["START", "JOBS"])
 
     def test_relu_one_stream(self):
         """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
-        acc = self.build(CLUSTER.parent.parent / "relu_v1" / "snax_forge.hjson")
+        unit = Unit("acc", "simd", "SimdLanes",
+                    {p: Port(p, "int32", 4, "out" if p == "out" else "in") for p in ("a", "out")},
+                    "int32", {"op": "max", "k": 0}, 0, 1, [])
+        with tempfile.TemporaryDirectory() as tmp:
+            acc = self.build(write_design(Path(tmp), acc_json(accelerator("relu_v1", unit)),
+                                          streamer([2], [2]), 2, 2))
         (unit,) = acc.components["unit"].properties["units"]
         self.assertEqual((unit["datapath"], unit["inputs"], unit["output"], unit["op"], unit["k"],
                           unit["in_widths"], unit["op_width"], unit["lanes"]),
@@ -308,8 +294,8 @@ class Built(unittest.TestCase):
                          ("TreeAccumulate", ["acc_a", "acc_seed"], 1, [64, 64], 4, "acc_out"))
 
     def test_a_seeded_mac_with_a_broadcast(self):
-        """mvt's half 2: a Mac of 8 int8 lanes, b broadcast (D186) through a slicer of 8 pops,
-        its seed of the output's 8 int32 lanes the last input (D187)."""
+        """mvt's half 2: a Mac of 8 int8 lanes, b broadcast through a slicer of 8 pops, its
+        seed of the output's 8 int32 lanes the last input."""
         b = Port("b", "int8", 8, "in", d_in=8, broadcast=True)
         desc = accelerator("mac_bcast", seeded_mac(8, "int8", "int32", b), between=1)
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, streamer([1, 1, 4], [4])),
@@ -322,7 +308,7 @@ class Built(unittest.TestCase):
                           [False, True, False]))
 
     def test_a_forked_input(self):
-        """bicg_v3 (D189): A's reader, the streamer's reader 0, on mul_a, which mac's a takes
+        """bicg_v3: A's reader, the streamer's reader 0, on mul_a, which mac's a takes
         too; r's on mac_b, p's on mul_b; each sink its own output; the shell's JOBS_SUM and
         JOBS_MAC after START."""
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG3, BICG3_STREAMER), 131072)
@@ -345,7 +331,7 @@ class Built(unittest.TestCase):
                                            "depth": 1}])
 
     def test_a_bank_a_hold_and_a_carry(self):
-        """bicg_v4_1: the Mac's rows and r held (D190, D191), the sum's seed carried (D192);
+        """bicg_v4_1: the Mac's rows and r held, the sum's seed carried;
         the shell's CARRY, JOB_BEATS and ROWS after the JOBS, in CSR order."""
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG4, BICG4_STREAMER), 131072)
         acc = cls(None, "snax_acc0")

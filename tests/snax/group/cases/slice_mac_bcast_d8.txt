@@ -1,4 +1,4 @@
-# mac (Mac, T 4, seeded), JOBS 2, its b sliced 8 and broadcast (D186): mvt's half 2 at int8, a and the seed wired
+# mac (Mac, T 4, seeded), JOBS 2, its b sliced 8 and broadcast: mvt's half 2 at int8, a and the seed wired
 # b's one word gives the 8 firings their y2[i], one a firing; the broadcast is wires (each lane gets the pop), so the rule does not see it
 
 unit mac Mac latency 1 ii 1 span 1 t 4 inputs 3 seed 1

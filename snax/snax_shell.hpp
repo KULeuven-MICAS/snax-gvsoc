@@ -14,7 +14,7 @@
 // snax_group.hpp.
 //
 // CSRs, offsets from the group's first CSR (the CSR mux removes it): START,
-// JOBS (with several chains a JOBS_<SINK> per chain, D189), then the units' read-write CSRs (JOB_BEATS for each fold without a
+// JOBS (with several chains a JOBS_<SINK> per chain), then the units' read-write CSRs (JOB_BEATS for each fold without a
 // fixed T, ROWS for a bank, CARRY for a carried seed, then its scalars', K1,
 // or K1_LO and K1_HI at 64 bits, in unit order), each kept at its width (accelerator.json's:
 // a write keeps the low bits, a read gives them with the upper bits 0);
@@ -32,7 +32,7 @@
 //     answered in the cycle busy falls: E + 1, E the run's last cycle. So a
 //     group's settings stay constant through its run, and the RTL's control
 //     unit reads them live with no copy. Reads are never
-//     held. NB (D168): this hold is the RTL's; without it a run's settings
+//     held. This hold is the RTL's; without it a run's settings
 //     could change under it;
 //   - an accepted start a goes to the group's ctrl as every JOBS and every
 //     JOB_BEATS in unit order, as they stand (the JOBS and 1 for a group

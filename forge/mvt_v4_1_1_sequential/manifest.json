@@ -1,7 +1,7 @@
 {
  "design": "mvt_v4_1_1",
  "design_point": "out/design/mvt_v4_1_1_sequential/design_point.json",
- "symbols": {"M": 64, "N": 64},
+ "symbols": {"M": 16, "N": 16},
  "cluster": "snax_forge.hjson",
  "files": ["snax_forge.hjson", "snax_forge_mvt_v4_1_1_streamer_mvt_1.hjson", "accelerator.json", "include/streamer_mvt_1_csr_addr_map.h", "include/mvt_1_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
  "program": "main.c",
@@ -17,7 +17,7 @@
   }
  },
  "tasks": [
-  {"name": "tmp1_mult_mvt_1", "beats": 512, "csrs": {"JOBS": 64, "VSUM_X2_JOB_BEATS": 8}},
-  {"name": "tmp4_mult_mvt_1", "beats": 512, "csrs": {"JOBS": 64, "VSUM_X2_JOB_BEATS": 8}}
+  {"name": "tmp1_mult_mvt_1", "beats": 32, "csrs": {"JOBS": 16, "VSUM_X2_JOB_BEATS": 2}},
+  {"name": "tmp4_mult_mvt_1", "beats": 32, "csrs": {"JOBS": 16, "VSUM_X2_JOB_BEATS": 2}}
  ]
 }

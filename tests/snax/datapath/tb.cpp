@@ -319,7 +319,7 @@ static int check_registry(int *count)
     two_seed.seed = true;
     plain_seed = plain;
     plain_seed.seed = true;
-    // a bank (D191): an accumulating Mac's, seeded or not (D194); none at rows 0
+    // a bank: an accumulating Mac's, seeded or not; none at rows 0
     bank = two;
     bank.rows = 4;
     bank_seed = mac_seed;
@@ -359,7 +359,7 @@ static int check_registry(int *count)
             errors++;
         }
     }
-    // a seed's lanes: the unit's on a Mac, one on a fold that sums its lanes (D187)
+    // a seed's lanes: the unit's on a Mac, one on a fold that sums its lanes
     struct Lanes { const char *name; int lanes, want; };
     for (const Lanes &c : std::vector<Lanes>{{"Mac", 8, 8}, {"TreeAccumulate", 4, 1},
              {"SerialAccumulate", 4, 1}, {"FifoBlock", 4, 0}})
