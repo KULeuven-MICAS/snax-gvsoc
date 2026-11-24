@@ -1,0 +1,31 @@
+# atax's one pass, M = 3, ROWS = 2: A forked to vmul and through a buffer of depth 4 to mac, full rate
+# vmul takes A's beat only when the buffer has room; mac pops it on each firing, t[i] held for the row
+
+unit vmul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2
+unit sum TreeAccumulate latency 1 ii 1 span 1 t 2 inputs 0
+unit mac Mac latency 1 ii 1 span 1 t 6 inputs 0 rows 2
+link vmul sum depth 1
+link sum mac depth 1 hold
+fork vmul.0
+forkbuf 0 mac depth 4
+jobs 1
+start 0 taken
+expect run index=0 firings=6 busy=10 stall_in=0 stall_out=0 flush=1
+# E - s = 11
+
+# vmul.a vmul.b ready | vmul fire give | sum fire give | mac fire give | occ0 occ1 occ2 | busy
+cycles
+1 1 1 | 0 0 | 0 0 | 0 0 | 0 0 0 | 0    # 0: idle
+1 1 1 | 1 1 | 0 0 | 0 0 | 1 0 1 | 1    # 1: vmul pushes; vmul fires 0 (gives)
+1 1 1 | 1 1 | 1 0 | 0 0 | 1 0 2 | 1    # 2: vmul pushes; vmul fires 1 (gives); sum fires 0
+1 1 1 | 1 1 | 1 0 | 0 0 | 1 0 3 | 1    # 3: vmul pushes; vmul fires 2 (gives); sum fires 1 (gives)
+1 1 1 | 1 1 | 1 1 | 0 0 | 1 1 4 | 1    # 4: vmul pushes; vmul fires 3 (gives); sum pushes; sum fires 2
+1 1 1 | 1 1 | 1 0 | 1 0 | 1 0 4 | 1    # 5: vmul pushes; vmul fires 4 (gives); sum fires 3 (gives); mac fires 0
+1 1 1 | 1 1 | 1 1 | 1 0 | 1 1 4 | 1    # 6: vmul pushes; vmul fires 5 (gives); sum pushes; sum fires 4; mac fires 1
+1 1 1 | 0 0 | 1 0 | 1 0 | 0 0 3 | 1    # 7: sum fires 5 (gives); mac fires 2
+1 1 1 | 0 0 | 0 1 | 1 0 | 0 1 2 | 1    # 8: sum pushes; mac fires 3
+1 1 1 | 0 0 | 0 0 | 1 0 | 0 0 1 | 1    # 9: mac fires 4 (gives)
+1 1 1 | 0 0 | 0 0 | 1 1 | 0 0 0 | 1    # 10: mac pushes; mac fires 5 (gives)
+1 1 1 | 0 0 | 0 0 | 0 1 | 0 0 0 | 1    # 11: mac pushes
+1 1 1 | 0 0 | 0 0 | 0 0 | 0 0 0 | 0    # 12: idle
+1 1 1 | 0 0 | 0 0 | 0 0 | 0 0 0 | 0    # 13: idle

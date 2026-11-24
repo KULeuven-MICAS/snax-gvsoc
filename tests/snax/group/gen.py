@@ -385,6 +385,12 @@ def atax_cases():
           None, 1, ts, valid=lambda c: (1, 1, 1), links=links,
           comment=["mac's first firing waits for t[0]; t[i] is taken on row i's first firing, "
                    "so t[i + 1] enters the buffer as row i ends"])
+    write("atax_hold_link_a_late", f"atax's one group, A read twice, M = {m}, ROWS = {rows}: "
+          "mac's A late in cycles 6 to 8, row 0 open while t[1] waits in the buffer",
+          [vmul, sum_, ("mac", "Mac", 1, 1, 1, False, {"rows": rows})], None, 1, ts,
+          valid=lambda c: (1, 1, 0 if 6 <= c <= 8 else 1), links=links,
+          comment=["row 0's second firing uses the t[0] it holds, not t[1] in the buffer; sum "
+                   "holds t[2] until row 1 takes t[1]"])
     mac = ("mac", "Mac", 1, 1, 0, False, {"rows": rows})
     for depth, what in ((rows + 2, "full rate"), (rows, "2 cycles a row of stall")):
         write(f"atax_fork_buffer_d{depth}", f"atax's one pass, M = {m}, ROWS = {rows}: A forked "
