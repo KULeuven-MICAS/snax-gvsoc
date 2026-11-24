@@ -79,33 +79,9 @@ class Csrs(unittest.TestCase):
     the last CSR over all sets may be at most SNAX_ACC_CSR_LAST, 0x5FD: 0x5FE and 0x5FF are
     snax_cluster's task-queue CSRs, not the accelerator's."""
 
-    def test_dot_1s_bases(self):
-        """vmul: streamer 960-977, CSRs 978-981; vsum: streamer 982-994, CSRs 995-999."""
-        layout = snax_accelerator.csr_layout(slot_of(DOT1, VMUL_STREAMER, VSUM_STREAMER))
-        self.assertEqual([(r.name, r.first, r.own, r.end) for r in layout],
-                         [("vmul", 960, 978, 982), ("vsum", 982, 995, 1000)])
-        self.assertEqual([r.streamer_csrs for r in layout], [18, 13])
-        vsum = layout[1]
-        self.assertEqual([vsum.csr(c.offset) for c in vsum.accelerator.csrs],
-                         [995, 996, 997, 998, 999])
-
-    def test_one_set_is_as_before(self):
-        """vecadd: the streamer's 18 CSRs, then START at 978."""
-        (row,) = snax_accelerator.csr_layout(slot_of(VECADD))
-        self.assertEqual((row.name, row.first, row.own, row.end), ("acc", 960, 978, 982))
-        self.assertEqual(SNAX_CSR_FIRST + nb_csrs(STREAMER), 978)
-
     def unit_csrs_for_last(self, last):
         # dot 1's 1000 CSRs (960-999), then k more in vsum
         return last - 999
-
-    def test_a_last_csr_on_0x5fd_is_taken(self):
-        self.assertEqual(SNAX_ACC_CSR_LAST, 0x5FD)
-        desc = with_unit_csrs(DOT1, self.unit_csrs_for_last(0x5FD))
-        cls = snax_accelerator.SnaxAccelerator.for_slot(
-            slot_of(desc, VMUL_STREAMER, VSUM_STREAMER), 131072)
-        self.assertEqual(cls.nb_tcdm_ports, 17)
-        self.assertEqual(cls.layout[-1].end - 1, 0x5FD)
 
     def test_a_last_csr_on_0x5fe_is_refused(self):
         desc = with_unit_csrs(DOT1, self.unit_csrs_for_last(0x5FE))

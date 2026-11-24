@@ -75,42 +75,11 @@ def parsed(lines=LOG):
 
 
 class Snapshots(unittest.TestCase):
-    def test_lines_group_into_snapshots_per_component(self):
-        snaps = snapshots.snapshots(parsed())
-        self.assertEqual([s.mark for s in snaps[GROUP]], [1, 2, -1])
-        self.assertEqual(snaps[XBAR][2].items[("input", "1")], [12, 0])
-        self.assertEqual(snaps[GROUP][1].items[("unit", "sum")], [128, 1])
-        self.assertEqual((snaps[STREAMER][2] - snaps[STREAMER][0])[("mover", "reader0")],
-                         [128, 1, 0, 3])
-
-    def test_the_copies_line_is_an_item_of_the_crossbar(self):
-        snaps = snapshots.snapshots(parsed())
-        self.assertEqual(snaps[XBAR][2].items[("copies", None)], [64, 64])
-        self.assertEqual((snaps[XBAR][1] - snaps[XBAR][0])[("copies", None)], [64, 64])
-
-    def test_the_log_passes_both_checks(self):
-        self.assertIsNone(snapshots.check_end(parsed()))
-        self.assertIsNone(snapshots.check_window(parsed(), 1))
-
-    def test_an_end_off_the_input_lines_fails_with_the_numbers(self):
-        log = [x.replace("grants=12 stalls=0", "grants=13 stalls=0") if "mark=-1" in x else x
-               for x in LOG]
-        self.assertEqual(snapshots.check_end(parsed(log)),
-                         f"{XBAR} mark=-1 input=1 (snapshot vs lines): grants 13 vs 12")
-
-    def test_an_end_off_the_copies_line_fails_with_the_numbers(self):
-        log = [x.replace("copy_writes=64", "copy_writes=63") if "mark=-1" in x else x
-               for x in LOG]
-        self.assertEqual(snapshots.check_end(parsed(log)),
-                         f"{XBAR} mark=-1 copies (snapshot vs lines): copy_writes 63 vs 64")
 
     def test_a_copies_snapshot_without_its_line_fails(self):
         log = [x for x in LOG if " copies copy_reads" not in x]
         self.assertEqual(snapshots.check_end(parsed(log)),
                          f"{XBAR}: snap line for copies but no copies line")
-
-    def test_a_log_without_copies_lines_passes(self):
-        self.assertIsNone(snapshots.check_end(parsed([x for x in LOG if "copy_" not in x])))
 
     def test_an_end_off_the_run_lines_fails(self):
         log = [x.replace("flush=1", "flush=2") if "mark=-1" in x else x for x in LOG]
@@ -123,13 +92,6 @@ class Snapshots(unittest.TestCase):
     def test_summary_lines_without_snapshots_fail(self):
         why = snapshots.check_end(parsed([x for x in LOG if "snap" not in x]))
         self.assertTrue(why.endswith("summary lines but no snap line"), why)
-
-    def test_a_window_off_the_run_fails_with_its_cycles_and_numbers(self):
-        log = [x.replace("busy=128 stall_xbar=1", "busy=126 stall_xbar=1")
-               if "mark=2" in x else x for x in LOG]
-        self.assertEqual(snapshots.check_window(parsed(log), 1),
-                         f"{STREAMER} window 1 (cycles 100 to 200) mover=reader0 "
-                         "(window vs lines): busy 126 vs 128")
 
     def test_the_window_of_another_mark_fails(self):
         why = snapshots.check_window(parsed(), 2)

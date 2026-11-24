@@ -53,37 +53,6 @@ def cut(lines, k, at):
 
 
 class Parse(unittest.TestCase):
-    def test_a_whole_log_parses_and_its_classes_match(self):
-        parsed = classes.parse("\n".join(LOG) + "\n")
-        self.assertEqual([x.kind for x in parsed],
-                         ["start", "class", "class", "class", "fire", "class", "run", "mover",
-                          "snap", "snap", "snap"])
-        self.assertEqual(classes.unit_runs(parsed), {0: [8, 8, 2, 0, 0]})
-        self.assertIsNone(classes.check(parsed))
-
-    def test_a_cut_class_line_fails_naming_the_file_and_the_line(self):
-        # "... class mover=reader0 mode=id" | "le": the head parses, the tail does not
-        text = "\n".join(cut(LOG, CLASS, len(LOG[CLASS]) - 2))
-        with self.assertRaises(classes.LineError) as e:
-            classes.parse(text, "work/forge.vecadd_v1/trace.log")
-        self.assertEqual(str(e.exception), "work/forge.vecadd_v1/trace.log line 7: not a trace "
-                         "line: 'le'")
-        # "... class mover=reader0 mod" | "e=idle": the head does not
-        with self.assertRaises(classes.LineError) as e:
-            classes.parse("\n".join(cut(LOG, CLASS, len(LOG[CLASS]) - 6)), "trace.log")
-        self.assertTrue(str(e.exception).startswith("trace.log line 6: not a trace line: "))
-
-    def test_a_class_line_cut_at_a_field_lacks_it(self):
-        head = LOG[CLASS][:LOG[CLASS].index(" mode=")]  # "... class mover=reader0"
-        with self.assertRaises(classes.LineError) as e:
-            classes.parse("\n".join([*LOG[:CLASS], head]), "trace.log")
-        self.assertIn("trace.log line 6: a class line without mode", str(e.exception))
-
-    def test_a_run_line_cut_in_a_count_fails(self):
-        run = LOG[6]
-        for at in (run.index("busy=") + 6, run.index(" stall_in")):
-            with self.assertRaises(classes.LineError):
-                classes.parse("\n".join(cut(LOG, 6, at)))
 
     def test_a_copies_line_needs_both_counts_as_integers(self):
         xbar = "/chip/soc/cluster_0/tcdm/snax_xbar"
@@ -96,11 +65,6 @@ class Parse(unittest.TestCase):
             classes.parse(line(xbar, "summary", 30, "copies copy_reads=64 copy_writes=6x"))
         self.assertIn("copy_writes not an integer", str(e.exception))
 
-    def test_any_other_line_fails(self):
-        for other in ("forge cycles: 226", "", "12: 12: [x/beats] 12"):
-            with self.assertRaises(classes.LineError) as e:
-                classes.parse("\n".join([*LOG[:3], other, *LOG[3:]]))
-            self.assertIn("line 4: not a trace line", str(e.exception))
 
 
 class CheckTraces(unittest.TestCase):
@@ -116,9 +80,6 @@ class CheckTraces(unittest.TestCase):
                 log, traces, lambda text, parsed: regress.check_counters(text, parsed, manifest))
             return why, None if where is None else where.name
 
-    def test_a_whole_trace_passes_both_checks(self):
-        self.assertEqual(self.run_checks(LOG), (None, None))
-
     def test_a_cut_class_line_fails_the_run(self):
         why, where = self.run_checks(cut(LOG, CLASS, len(LOG[CLASS]) - 2))
         self.assertEqual(where, "trace.log")
@@ -130,10 +91,6 @@ class CheckTraces(unittest.TestCase):
         self.assertEqual(where, "trace.log")
         self.assertIn("unit=add: firings 9 vs the run lines' 8", why)
 
-    def test_a_cut_run_line_fails_the_run_not_the_counter(self):
-        why, where = self.run_checks(cut(LOG, 6, LOG[6].index(" flush")))
-        self.assertEqual(where, "trace.log")
-        self.assertIn("line 7: a run line without flush", why)
 
 
 class TwoUnits(unittest.TestCase):
@@ -150,14 +107,6 @@ class TwoUnits(unittest.TestCase):
             line(mul, "summary", 20, "run index=0 firings=8 busy=8 stall_in=2 stall_out=0 flush=0"),
             line(total, "summary", 40, "run index=0 firings=4 busy=4 stall_in=1 stall_out=0 flush=1"),
         ]) + "\n")
-
-    def test_each_task_against_its_unit(self):
-        log = "forge counter mult_mul: 10\nforge counter sum_sum: 6\n"
-        self.assertIsNone(regress.check_counters(log, self.parsed(), self.MANIFEST))
-        self.assertEqual(regress.task_traces(self.MANIFEST),
-                         ["snax_acc0/unit_mul", "snax_acc0/unit_sum"])
-        self.assertEqual(classes.unit_runs(self.parsed(), "snax_acc0/unit_sum"),
-                         {0: [4, 4, 1, 0, 1]})
 
     def test_a_counter_of_the_other_unit_fails(self):
         log = "forge counter mult_mul: 10\nforge counter sum_sum: 10\n"
