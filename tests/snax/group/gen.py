@@ -74,18 +74,23 @@ def packed_words(sent_at, pushes_at, d_out):
 
 
 def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=lambda c: 1,
-          formula_total=None, comment=(), data=None, d_out=1, d_in=(), links=None, forks=()):
+          formula_total=None, comment=(), data=None, d_out=1, d_in=(), links=None, forks=(),
+          fork_links=()):
     # A chain: link k joins unit k to unit k + 1's only input; or ``links`` as (from, to,
     # depth) with ``forks`` for a group of several chains
     if links is None:
         links = [{"from": units[k][0], "to": units[k + 1][0], "to_input": 0, "depth": d}
                  for k, d in enumerate(depths)]
     else:
-        links = [{"from": a, "to": b, "to_input": 0, "depth": d} for a, b, d in links]
+        links = [{"from": x[0], "to": x[1], "to_input": 0, "depth": x[2],
+                  **({"hold": True} if len(x) > 3 and x[3] else {})} for x in links]
         depths = [e["depth"] for e in links]
+    # a fork's buffered branch (fork, consumer, depth): its occupancy after the links'
+    fork_links = [{"fork": f, "to": b, "to_input": 0, "depth": d} for f, b, d in fork_links]
+    depths = list(depths) + [e["depth"] for e in fork_links]
     m = GroupRule([dict(name=u[0], datapath=u[1], L=u[2], ii=1, span=u[3], inputs=u[4],
                         seed=len(u) > 5 and u[5], **(u[6] if len(u) > 6 else {}))
-                   for u in units], links, forks=forks)  # fmt: skip
+                   for u in units], links, forks=forks, fork_links=fork_links)  # fmt: skip
     several = len(m.outputs) > 1
     sliced = [(i, d) for i, d in enumerate(d_in) if d > 1]
     if sliced:  # a sliced input's reader has ceil(pops / d_in) words, then no more
@@ -123,9 +128,12 @@ def write(name, title, units, depths, jobs, ts, valid=lambda c: (1, 1), ready=la
                      + (f" rows {extra['rows']}" if extra.get("rows", 1) > 1 else "")
                      + "".join(f" hold {j}" for j in extra.get("hold", ())))  # fmt: skip
     for e in links:
-        lines.append(f"link {e['from']} {e['to']} depth {e['depth']}")
+        lines.append(f"link {e['from']} {e['to']} depth {e['depth']}"
+                     + (" hold" if e.get("hold") else ""))
     for f in forks:
         lines.append("fork " + " ".join(f"{u}.{j}" for u, j in f))
+    for e in fork_links:
+        lines.append(f"forkbuf {e['fork']} {e['to']} depth {e['depth']}")
     if several:
         lines.append("outputs " + " ".join(units[k][0] for k in m.outputs))
     lines.append("jobs " + (" ".join(map(str, jobs)) if several else str(jobs)))
@@ -358,6 +366,33 @@ def bank_cases():
           comment=["the heads fire alike, K·M·ROWS = 12 times; each strip's s comes on its "
                    "last row, q's partial each row"])
     seeded_bank_cases()
+    atax_cases()
+
+
+def atax_cases():
+    """atax's one group, rows outer at W = 2, N = 4 (T = ROWS = 2), M = 3: vmul -> a buffer ->
+    sum (t[i], one a row) -> a held buffer -> mac's broadcast input, taken on each row's first
+    firing (the bank's rows, D197). With A read again by mac's own reader, then forked to vmul
+    and through a buffer of depth D to mac (D196): D = T + 2 runs as the second read, D = T
+    stalls 2 cycles a row (D < T never ends: the rule test)."""
+    m, rows = 3, 2
+    vmul, sum_ = ("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 0)
+    ts = [1, rows, m * rows]
+    links = [("vmul", "sum", 1), ("sum", "mac", 1, True)]
+    write("atax_hold_link", f"atax's one group, A read twice, M = {m}, ROWS = {rows}: sum's "
+          "t held over a buffer into mac's bank", [vmul, sum_, ("mac", "Mac", 1, 1, 1, False,
+                                                                 {"rows": rows})],
+          None, 1, ts, valid=lambda c: (1, 1, 1), links=links,
+          comment=["mac's first firing waits for t[0]; t[i] is taken on row i's first firing, "
+                   "so t[i + 1] enters the buffer as row i ends"])
+    mac = ("mac", "Mac", 1, 1, 0, False, {"rows": rows})
+    for depth, what in ((rows + 2, "full rate"), (rows, "2 cycles a row of stall")):
+        write(f"atax_fork_buffer_d{depth}", f"atax's one pass, M = {m}, ROWS = {rows}: A forked "
+              f"to vmul and through a buffer of depth {depth} to mac, {what}",
+              [vmul, sum_, mac], None, 1, ts, valid=lambda c: (1, 1), links=links,
+              forks=[[("vmul", 0)]], fork_links=[(0, "mac", depth)],
+              comment=["vmul takes A's beat only when the buffer has room; mac pops it on each "
+                       "firing, t[i] held for the row"])
 
 
 def seeded_bank_cases():
