@@ -349,8 +349,8 @@ class GroupRule:
                 # a fork with a buffered branch takes a beat only when the buffer has room
                 for i, e in enumerate(self.fork_links):
                     f = self.forks[e["fork"]]
-                    full = focc[i] >= e["depth"] and not step["fire"][e["dst"]]
-                    if full and any(step["fire"][k] for k, _ in f):
+                    stuck = focc[i] >= e["depth"] and not step["fire"][e["dst"]]
+                    if stuck and any(step["fire"][k] for k, _ in f):
                         held |= {k for k, _ in f}
                 if not held:
                     break

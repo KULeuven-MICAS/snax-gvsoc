@@ -191,6 +191,13 @@ class Atax(unittest.TestCase):
             with self.subTest(m=m, rows=rows):
                 self.assertEqual(self.one_read(m, rows, rows + 2), self.two_reads(m, rows)[1])
 
+    def test_a_sliced_input_beside_the_buffer(self):
+        # vmul's A and x two slices to a word (int8 at W = 4): the buffer runs beside the slicers
+        g = GroupRule(self.units(2, 0), self.links(), forks=[[("vmul", 0)]],
+                      fork_links=[{"fork": 0, "to": "mac", "to_input": 0, "depth": 4}])
+        _, end = g.run(1, [1, 2, 6], lambda c: (1, 1), lambda c: 1, 2000, 1, [2, 2])
+        self.assertIsNotNone(end)
+
     def test_a_buffer_of_t_stalls(self):
         for m, rows in ((3, 2), (64, 8)):
             end = self.one_read(m, rows, rows)
