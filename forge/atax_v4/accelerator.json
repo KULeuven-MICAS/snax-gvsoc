@@ -1,0 +1,79 @@
+{
+ "design_point": "out/design/atax_v4/design_point.json",
+ "tag": "snax_forge_atax_v4",
+ "accelerators": [
+  {
+   "name": "atax",
+   "inputs": [["mul.a", "mac.a"], "mul.b"],
+   "outputs": ["mac.out"],
+   "groups": [
+    {
+     "name": "atax",
+     "csrs": [
+      {"name": "START", "access": "rw", "offset": 0, "width": 1},
+      {"name": "JOBS", "access": "rw", "offset": 1, "width": 32},
+      {"name": "STATUS", "access": "ro", "offset": 5, "width": 2},
+      {"name": "BUSY_COUNTER", "access": "ro", "offset": 6, "width": 32}
+     ],
+     "units": [
+      {
+       "name": "mul",
+       "brm": "simd",
+       "datapath": "SimdLanes",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int8", "lanes": 4, "d_in": 2},
+        "b": {"port": "b", "dir": "in", "dtype": "int8", "lanes": 4, "d_in": 2},
+        "out": {"port": "out", "dir": "out", "dtype": "int32", "lanes": 4}
+       },
+       "opType": "int32",
+       "params": {"op": "mul"},
+       "timing": {"latency": 0, "ii": 1, "span": 1},
+       "csrs": []
+      },
+      {
+       "name": "sum",
+       "brm": "accumulate",
+       "datapath": "TreeAccumulate",
+       "ports": {
+        "a": {"port": "in", "dir": "in", "dtype": "int32", "lanes": 4},
+        "out": {"port": "out", "dir": "out", "dtype": "int32", "lanes": 1}
+       },
+       "params": {"op": "add"},
+       "timing": {"latency": 1, "ii": 1, "span": 1},
+       "csrs": [{"name": "JOB_BEATS", "access": "rw", "offset": 2, "width": 32}]
+      },
+      {
+       "name": "mac",
+       "brm": "mac",
+       "datapath": "Mac",
+       "ports": {
+        "a": {"port": "a", "dir": "in", "dtype": "int8", "lanes": 4, "d_in": 2},
+        "b": {
+         "port": "b",
+         "dir": "in",
+         "dtype": "int32",
+         "lanes": 4,
+         "broadcast": true,
+         "hold": true
+        },
+        "out": {"port": "out", "dir": "out", "dtype": "int32", "lanes": 4}
+       },
+       "opType": "int32",
+       "params": {"accumulate": true, "regOut": false, "rows": 2},
+       "timing": {"latency": 1, "ii": 1, "span": 1},
+       "csrs": [
+        {"name": "JOB_BEATS", "access": "rw", "offset": 3, "width": 32},
+        {"name": "ROWS", "access": "rw", "offset": 4, "width": 2}
+       ]
+      }
+     ],
+     "links": [
+      {"name": "tmp2_prod", "from": "mul.out", "to": "sum.a", "depth": 1},
+      {"name": "tmp1", "from": "sum.out", "to": "mac.b", "depth": 1}
+     ],
+     "fork_links": [{"name": "A", "to": "mac.a", "depth": 4}]
+    }
+   ]
+  }
+ ]
+}
