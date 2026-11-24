@@ -1,4 +1,4 @@
-# mvt's one pass at M = 4, depth 1: sum seeded per row (x1, D163), mac seeded once (x2, D187), x2 missing in cycles 1 to 2
+# mvt's one pass at M = 4, depth 1: sum seeded per row (x1), mac seeded once (x2), x2 missing in cycles 1 to 2
 # mac's first beat waits for its seed, so vmul waits for its fork; sum's seeds are there
 
 unit vmul SimdLanes latency 0 ii 1 span 1 t 1 inputs 2

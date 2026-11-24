@@ -20,11 +20,11 @@
 // Every port carries whole 64-bit channel words, lane l of a b-bit type at
 // bits [l * b, (l + 1) * b) (snax_types.hpp), but a fold's one-lane output,
 // one word, and a port whose lanes are a slice of a word (lanes x b divides
-// 64: a sliced input or a packed output, D180, D174), one word, its lanes in
+// 64: a sliced input or a packed output), one word, its lanes in
 // the low bits. The enables (SnaxEnables) come from the control model per cycle:
 // fire (a beat taken from every input), first (the job's first beat, d = 0),
 // read and lane (a SerialAccumulate reading lane `lane` in place), en (a
-// plain Mac's output register, regOut), row (a banked Mac's row, D191), load,
+// plain Mac's output register, regOut), row (a banked Mac's row), load,
 // wslot and rslot (a LinkBuffer's write enable and its ring's write and read
 // slots).
 //
@@ -46,9 +46,9 @@
 //       s; seeded (a third input, the seed: its output's lanes, of out's type,
 //       read once per job), the first firing starts from it: s <- seed + p;
 //       plain, a * b + c at outType (c of out's type and lanes): L 0, or with
-//       regOut L 1, pin en, the output its register. A bank (rows R > 1, D191,
+//       regOut L 1, pin en, the output its register. A bank (rows R > 1,
 //       accumulating) keeps R rows of s, pin row: a firing adds into row `row`,
-//       first starting it (seeded, from the seed's beat it takes then, D194),
+//       first starting it (seeded, from the seed's beat it takes then),
 //       and the output is the row the last firing wrote, so a result pushed L
 //       after its firing is that row
 //   LaneAccumulate(inType, outType, lanes)   L 1, pins fire, first: per lane
@@ -105,7 +105,7 @@ struct SnaxDatapathParams
     SnaxType op_type = {64, true};
     SnaxType out_type = {64, true};
     int lanes = 1;
-    int rows = 1;           // a Mac's bank rows (D191)
+    int rows = 1;           // a Mac's bank rows
     int op = SNAX_OP_ADD;
     bool accumulate = true;
     bool reg_out = false;
@@ -120,7 +120,7 @@ struct SnaxDatapathParams
     uint64_t k2 = 0;
     bool k2_csr = false;
     bool seed = false;      // a fold's seed: its last input, its output's lanes (one element
-                            // in one word on a fold that sums its lanes, D187)
+                            // in one word on a fold that sums its lanes)
 };
 
 
@@ -309,7 +309,7 @@ public:
             uint64_t v;
             if (p.accumulate)
             {
-                // seeded, the job's first firing (a bank row's, D194) starts from the
+                // seeded, the job's first firing (a bank row's) starts from the
                 // seed's lane l
                 v = en.first && !p.seed ? q : snax_op_compute(SNAX_OP_ADD, p.out_type,
                     snax_lane_get(en.first ? in[2] : row.data(), w, l), q);
@@ -486,12 +486,12 @@ struct SnaxDatapathEntry
 {
     bool whole_words;           // each input's lanes fill whole 64-bit words, or a slice of one
     bool seedable;              // it takes a seed, its last input
-    bool reduces;               // it sums its lanes: its seed is one element (D187)
+    bool reduces;               // it sums its lanes: its seed is one element
     SnaxDatapathFactory make;
 };
 
 // Whether the elements of lanes of t fill whole 64-bit words, or a slice of one word (lanes x
-// width divides 64: a sliced input's beat, D180)
+// width divides 64: a sliced input's beat)
 inline bool snax_whole_words(int lanes, SnaxType t)
 {
     return lanes > 0 && (lanes * t.width % 64 == 0 || 64 % (lanes * t.width) == 0);
@@ -546,8 +546,8 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
             size_t n = p.accumulate && !p.seed ? 2 : 3;
             if (p.rows < 1 || (p.rows > 1 && !p.accumulate))
             {
-                *why = "rows " + std::to_string(p.rows) + "; a bank (D191) is an accumulating "
-                    "Mac's";
+                *why = "rows " + std::to_string(p.rows) + "; only an accumulating Mac has a "
+                    "bank (set accumulate true, or rows 1)";
                 return std::unique_ptr<SnaxDatapath>();
             }
             if (p.in_types.size() != n || (p.accumulate && p.reg_out) ||
@@ -620,7 +620,7 @@ inline std::unique_ptr<SnaxDatapath> snax_datapath_new(const std::string &name,
 }
 
 // The lanes of a seed of datapath name at lanes: its output's, one on a fold that sums its
-// lanes (D187); 0 when name is no datapath
+// lanes; 0 when name is no datapath
 inline int snax_seed_lanes(const std::string &name, int lanes)
 {
     auto it = snax_datapaths().find(name);

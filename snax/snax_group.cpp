@@ -20,13 +20,13 @@
 //                                   port's name, or "" for an input a link
 //                                   feeds (exactly one; a unit of span > 1
 //                                   has no outer one but its seed); a name
-//                                   several units give is a forked input
-//                                   (D189), one reader's for the heads of
+//                                   several units give is a forked input,
+//                                   one reader's for the heads of
 //                                   their chains, alike on each (never a seed)
 //                seed               the index in inputs of a fold's seed (the
 //                                   last, an outer port, taken once per job:
 //                                   one element in one word, a Mac's its
-//                                   output's lanes, D187), or -1
+//                                   output's lanes), or -1
 //                output             the outer output's port name, or ""
 //                                   (linked); each chain's sink has one
 //                in_widths, in_signed, out_width, out_signed, op_width,
@@ -37,21 +37,21 @@
 //                d_in               optional, per input: an outer input's pops
 //                                   per 64-bit word, through a slicer when
 //                                   above 1 (2, 4 or 8, lanes x width x d_in
-//                                   = 64 bits; D180); absent, 1 for each
+//                                   = 64 bits); absent, 1 for each
 //                broadcast          optional, per input: an outer input read
 //                                   as one lane a beat and given to all lanes
-//                                   (snax_group.hpp's snax_broadcast, D186), so
+//                                   (snax_group.hpp's snax_broadcast), so
 //                                   its words and d_in count one lane; never
 //                                   a linked input or the seed; absent, false
 //                hold               optional, per input: a broadcast outer input
-//                                   of a bank, read once a row and kept (D190):
+//                                   of a bank, read once a row and kept:
 //                                   its beat moved only on a row's first firing
 //                                   (the rule's take), the unit using the beat
 //                                   it holds on the others; never linked, the
 //                                   seed or forked; absent, false
-//                rows               optional: a Mac's bank rows R (D191), its
+//                rows               optional: a Mac's bank rows R, its
 //                                   ROWS from the start; absent, 1
-//                carry              optional: its seed is carried (D192), the
+//                carry              optional: its seed is carried, the
 //                                   unit's own output: taken every job, its
 //                                   value given as 0 while the job is below
 //                                   CARRY, from the start; absent, false
@@ -157,7 +157,7 @@ private:
     SnaxSignal sig_push;
     SnaxSignal sig_class;
 
-    // An outer input: its port, its units (two or more: a forked input, D189), its words per
+    // An outer input: its port, its units (two or more: a forked input), its words per
     // beat, the beat taken, and whether it is the unit's seed (taken once per job); with d_in
     // above 1 its slicer, the beat its slice, and the beat id of the word it holds (-1
     // untagged); a broadcast's type, the unit's lanes and the unit's beat, the beat's lane 0
@@ -173,7 +173,7 @@ private:
         SnaxSlicer slicer;
         long word_id = -1;
         bool broadcast = false;
-        bool hold = false;      // held for a bank row (D190): moved on the rule's take
+        bool hold = false;      // held for a bank row: moved on the rule's take
         SnaxType type = {64, true};
         int lanes = 1;
         std::vector<uint64_t> wide;
@@ -204,8 +204,8 @@ private:
     std::vector<bool> inputs, seeds, holds, room;
     std::vector<std::vector<const uint64_t *>> outer;
     std::vector<uint32_t> fixed_t;      // per unit: its t, 0 from the start
-    std::vector<int> bank_rows;         // per unit: its bank's rows R (D191), 1 without
-    std::vector<bool> carried;          // per unit: its seed is carried (D192)
+    std::vector<int> bank_rows;         // per unit: its bank's rows R, 1 without
+    std::vector<bool> carried;          // per unit: its seed is carried
     std::vector<uint32_t> carry_jobs;   // per unit: its CARRY, from the start
     // per unit, its slots read from CSRs, each (slot, words), in CSR order
     std::vector<std::vector<std::pair<std::string, int>>> scalars;
@@ -246,7 +246,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     }
 
     // The outer ports, counted first: in_itf and out_itf are sized once. A name two units
-    // give is one input, forked (D189)
+    // give is one input, forked
     std::vector<std::string> in_names;
     size_t nb_out = 0;
     for (size_t k = 0; k < units.size(); k++)
@@ -331,7 +331,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         if (carry && seed == -1)
         {
             this->trace.fatal("Property %s.carry: true, but the unit has no seed; a carried "
-                "port is a fold's seed (D192)\n", w.c_str());
+                "port is a fold's seed: carry false, or give the unit its seed\n", w.c_str());
         }
         this->bank_rows.push_back(p.rows);
         this->carried.push_back(carry);
@@ -794,7 +794,7 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
                     _this->bank_rows[k], ts[k]);
             }
         }
-        // NB (D192): the jobs a carried seed is given as 0
+        // the jobs a carried seed is given as 0
         if (_this->carried[k])
         {
             _this->carry_jobs[k] = w[next++];
@@ -942,11 +942,11 @@ void SnaxGroup::cycle_handler(vp::Block *__this, vp::ClockEvent *event)
             snax_group_class_names[step.cls], cycle);
 
         // The beats of each unit that fires, its outer inputs in port order (outer); a forked
-        // input's once, when its units fire (together, D189). A sliced input pops on that
+        // input's once, when its units fire (together). A sliced input pops on that
         // firing (a seed's on its take, a held input's on its row's first firing), its slice
         // the beat, then takes the reader's word when its slicer was empty or that was its last
         // pop. A broadcast's beat goes to all its unit's lanes. A held input's beat stays until
-        // its next take: the register of its element's width that keeps it for the row (D190).
+        // its next take: the register of its element's width that keeps it for the row.
         std::string beats, values;
         bool traced = _this->ev.beats.get_active();
         for (OuterIn &o : _this->in_itf)

@@ -11,7 +11,7 @@ written as JSON into a temporary folder), broken accelerator.json files
 beside it, hand-written dot 1 designs: two
 accelerators vmul and vsum in two streamer sets, and dot_v1_1, the two as
 one accelerator dot of two groups; bicg_v3's one group of two chains on a
-forked input (D189); then the sets' refusals and the slot form before sets
+forked input; then the sets' refusals and the slot form before sets
 (snax_streamer_cfg), read as one set. snax_cluster's copy in
 sw/cfg/snax_forge/ is never read.
 """
@@ -499,7 +499,7 @@ class AccJson(unittest.TestCase):
 
     def test_op_type(self):
         """opType holds the inputs' result type: int64 itself here (int64 inputs), never
-        narrower; a wider one comes from the kernel's casts (D175)."""
+        narrower; a wider one comes from the kernel's casts."""
         self.unit()["opType"] = "int32"
         self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
                    "opType int32 does not hold its inputs' result type int64")
@@ -575,7 +575,7 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "units[0].ports.a.dir", "must be in or out")
 
     def test_a_sliced_input(self):
-        """A fold's a at int16, 2 lanes, sliced 2 (d_in 2, D180) from one word on the reader's
+        """A fold's a at int16, 2 lanes, sliced 2 (d_in 2) from one word on the reader's
         one channel; a d_in that does not empty a word, one not 2, 4 or 8, d_in on an output,
         and no d_in at all (32 bits a beat), refused."""
         self.acc = acc_json(accelerator("vsum_slice", fold("acc", 0, "int16", 2), between=1))
@@ -648,7 +648,7 @@ class LinkedGroup(unittest.TestCase):
         self.acc["accelerators"][0]["groups"][0]["links"][0].update(kw)
 
     def test_a_packed_output(self):
-        """sum.out at int32 packed two to a word (d_out 2, D174) on the writer's one channel;
+        """sum.out at int32 packed two to a word (d_out 2) on the writer's one channel;
         d_out on an input, a d_out that does not fill a word, or one not 2, 4 or 8, refused."""
         out = self.acc["accelerators"][0]["groups"][0]["units"][1]["ports"]["out"]
         out.update(dtype="int32", d_out=2)
@@ -726,7 +726,7 @@ SEEDED_STREAMER = streamer([4, 1], [1])
 def seeded_mac(lanes: int = 4, dtype: str = "int64", out: str = "int64",
                b: Port = None) -> Unit:
     """A Mac (accumulate) of ``lanes`` lanes seeded from its output's container: a, b, then
-    the seed of the output's lanes and dtype (D187)."""
+    the seed of the output's lanes and dtype."""
     return Unit("acc", "mac", "Mac", {"a": Port("a", dtype, lanes, "in"),
                                       "b": b or Port("b", dtype, lanes, "in"),
                                       "seed": Port("seed", out, lanes, "in"),
@@ -802,8 +802,8 @@ class Seed(unittest.TestCase):
 
 
 class Broadcast(unittest.TestCase):
-    """D186: an input of a lane-wise datapath (SimdLanes, Mac) whose reader moves one lane,
-    given to all of them: the port keeps its unit's lanes, its words per beat and d_in count
+    """A broadcast: an input of a lane-wise datapath (SimdLanes, Mac) whose reader moves one
+    lane, given to all of them: the port keeps its unit's lanes, its words per beat and d_in count
     one lane. mvt's half 2: a Mac of 8 int8 lanes, b (y2) broadcast through a slicer of 8 pops
     a word, seeded from x2 at int32 (4 channels), the output 4 channels."""
 
@@ -860,7 +860,7 @@ class Broadcast(unittest.TestCase):
         self.fails(one, snax_cfg.CfgTypeError, "an input of 2 lanes or more takes a broadcast")
 
 
-# bicg_v3, one pass over A (D189): one group of two chains, mul -> buffer of depth 1 -> sum
+# bicg_v3, one pass over A: one group of two chains, mul -> buffer of depth 1 -> sum
 # (q) and mac (s), A's reader forked to mul.a and mac.a, r broadcast to the Mac's 32 int8 lanes
 # through a slicer of 8 pops, q packed two int32 results to a word; CSRs START 0, JOBS_SUM 1,
 # JOBS_MAC 2, sum's JOB_BEATS 3, mac's 4, STATUS 5, BUSY_COUNTER 6 (snax-forge's generator's)
@@ -885,7 +885,7 @@ BICG3_STREAMER = streamer([4, 4, 1], [1, 16])
 
 
 class Fork(unittest.TestCase):
-    """bicg_v3 (D189): a forked input is one entry of inputs, a list whose first port takes the
+    """bicg_v3: a forked input is one entry of inputs, a list whose first port takes the
     reader; a JOBS_<SINK> per chain; each of snax-forge's fork checks (gen.fork, gen.group,
     gen.outer, gen.chain, gen.share) refuses its case in its words."""
 
@@ -967,7 +967,7 @@ class Fork(unittest.TestCase):
                    "movers in one accelerator; share_ports or fork_read, not both", rw=6)
 
 
-# bicg_v4_1 (D190, D191, D192), snax-forge's generator's at 64 x 64, W 4, R 8 in two strips: q's
+# bicg_v4_1, snax-forge's generator's at 64 x 64, W 4, R 8 in two strips: q's
 # sum (T 8) seeded from q, carried (CARRY), s's Mac a bank of 8 rows (ROWS 4 bits) with r held
 # and broadcast through a slicer of 8 pops; CSRs START 0, JOBS_SUM 1, JOBS_MAC 2, CARRY 3, the
 # Mac's JOB_BEATS 4 and ROWS 5, STATUS 6, BUSY_COUNTER 7
@@ -996,8 +996,8 @@ BICG4_STREAMER = streamer([1, 1, 1, 1], [1, 2])
 
 
 class Bank(unittest.TestCase):
-    """bicg_v4_1: a Mac's bank (rows, ROWS, D191), its held input (hold, D190) and a carried
-    seed (carry, CARRY, D192); each refused case in snax-forge's words (gen.args, gen.hold,
+    """bicg_v4_1: a Mac's bank (rows, ROWS), its held input (hold) and a carried seed
+    (carry, CARRY); each refused case in snax-forge's words (gen.args, gen.hold,
     gen.seed) or as a slot that disagrees (the CSRs)."""
 
     def setUp(self):
@@ -1037,8 +1037,8 @@ class Bank(unittest.TestCase):
                 c["offset"] += 1
         self.acc["accelerators"][0]["groups"][0]["csrs"][3]["offset"] = 7
         self.acc["accelerators"][0]["groups"][0]["csrs"][4]["offset"] = 8
-        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; a bank (D191) is an "
-                   "accumulating Mac's", rw=7)
+        self.fails(snax_cfg.CfgTargetError, "gen.args: rows 2; only an accumulating Mac has a "
+                   "bank (set accumulate true, or rows 1)", rw=7)
         self.acc = acc_json(BICG4)
         self.unit("mac")["params"]["rows"] = 0
         self.fails(snax_cfg.CfgTargetError, "gen.args: rows 0; a bank has one row or more")
@@ -1091,7 +1091,7 @@ class Bank(unittest.TestCase):
         group = self.acc["accelerators"][0]["groups"][0]
         group["csrs"][3]["offset"], group["csrs"][4]["offset"] = 7, 8
         self.fails(snax_cfg.CfgTargetError, "gen.seed: a carried port is a fold's seed, its "
-                   "unit's own output (D192)", rw=7)
+                   "unit's own output: carry only the seed", rw=7)
 
     def test_a_held_port_is_not_forked(self):
         """mac.a held and forked with mul.a, both one lane for all: gen.fork (a held input

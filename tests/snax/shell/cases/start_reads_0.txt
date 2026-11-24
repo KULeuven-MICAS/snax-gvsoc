@@ -1,4 +1,4 @@
-# START is a strobe (D152): no register, so it reads 0 whatever was written,
+# START is a strobe: no register, so it reads 0 whatever was written,
 # before a run, during it and after. JOBS 2; c2's start (0xffffffff: bit 0
 # set) is accepted, busy in c3 and c4 (E = 4); STATUS 2 from c5.
 cycles

@@ -62,7 +62,7 @@ accelerator.json, what the standard composite
       name                    Accelerator.name (the header's <ACC>, the set's)
       inputs, outputs         the outer ports, "<unit>.<port>", in its set's
                               streamer's reader and writer order; a forked
-                              input (D189) one entry of inputs, the list of
+                              input one entry of inputs, the list of
                               the ports its reader feeds, the reader's first
       groups[]                Group: name, csrs (START, JOBS, STATUS,
                               BUSY_COUNTER; with several chains a
@@ -83,7 +83,7 @@ accelerator.json, what the standard composite
                               inputs, k1 * a + k2 * b; k: SimdLanes' constant at
                               one stream, its one input, an int of its opType;
                               k1, k2: axpby's baked; accumulate, regOut: Mac's;
-                              rows: a Mac's bank, absent at 1, D191; T: a
+                              rows: a Mac's bank, absent at 1; T: a
                               fold's rate fixed at design time), scalars
                               (SimdLanes' slots read from CSRs, k at one
                               stream, k1, k2, each at its opType, none baked),
@@ -122,19 +122,19 @@ outer inputs of one group's chain heads, alike in dtype, lanes, d_in and
 broadcast (gen.fork; never beside shared movers, gen.share), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
-1); a held input (``hold``, D190) is a broadcast outer input of a bank, read
-once a row, and a carried seed (``carry``, D192) a seed, 0 before CARRY jobs
-(gen.args, gen.hold, gen.seed); an outer output with d_out (D174) fills one
-word with d_out results, on one channel, through SnaxGroup's packer; an outer input with d_in (D180) takes one
+1); a held input (``hold``) is a broadcast outer input of a bank, read
+once a row, and a carried seed (``carry``) a seed, 0 before CARRY jobs
+(gen.args, gen.hold, gen.seed); an outer output with d_out fills one
+word with d_out results, on one channel, through SnaxGroup's packer; an outer input with d_in takes one
 word on one channel, d_in pops of its lanes through SnaxGroup's slicer, d_in
-the word's elements / lanes; a broadcast input (D186, a lane-wise datapath's:
+the word's elements / lanes; a broadcast input (a lane-wise datapath's:
 SimdLanes, Mac) keeps its unit's lanes, its reader moving one lane a beat, so
 its words per beat and d_in count one lane; a seed has its output's lanes
-(one on a fold that sums its lanes, the unit's on a Mac, D187); each set's snax_num_rw_csr and
+(one on a fold that sums its lanes, the unit's on a Mac); each set's snax_num_rw_csr and
 snax_num_ro_csr are its accelerator's R/W and R/O CSRs. A SimdLanes unit's
 opType holds its inputs' NumPy result type (snax_types.hpp's
 snax_op_result_type: a signed type with uint64 has none), a Mac's that of a
-and b: that type itself, or a wider one the kernel's casts chose (D175).
+and b: that type itself, or a wider one the kernel's casts chose.
 
 Everything wrong is a SnaxCfgError naming the file and the key's path:
 CfgParseError (not an hjson object), CfgRefError (a $ref that does not
@@ -243,10 +243,10 @@ CATALOGUE = {
                                latency=lambda p: 1),
 }
 # A fold's seed port (snax-forge's brm.SEED): its output's lanes (one on a fold that sums its
-# lanes), read once per job (D163, D187)
+# lanes), read once per job
 SEED = 'seed'
-# A group's own CSRs: START and JOBS (with several chains a JOBS_<SINK> per chain, D189,
-# jobs_names), read-write, first; STATUS and BUSY_COUNTER, read-only, last
+# A group's own CSRs: START and JOBS (with several chains a JOBS_<SINK> per chain, as
+# jobs_names names them), read-write, first; STATUS and BUSY_COUNTER, read-only, last
 GROUP_RO = ('STATUS', 'BUSY_COUNTER')
 
 
@@ -254,8 +254,8 @@ def jobs_names(sinks: list) -> list:
     """A group's JOBS CSRs for its chains' sinks, in their order: JOBS for one chain,
     JOBS_<SINK> for each of several (snax-forge's design/streamers.py's jobs_csr)."""
     return ['JOBS'] if len(sinks) == 1 else [f'JOBS_{s.upper()}' for s in sinks]
-# The unit CSRs modelled: a fold's JOB_BEATS, a bank's ROWS (D191), a carried seed's CARRY
-# (D192), then its scalars' (scalar_csrs)
+# The unit CSRs modelled: a fold's JOB_BEATS, a bank's ROWS, a carried seed's CARRY, then its
+# scalars' (scalar_csrs)
 UNIT_RW = ('JOB_BEATS', 'ROWS', 'CARRY')
 # The op names (snax_types.hpp's snax_op_names), and SimdLanes' axpby
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
@@ -431,10 +431,10 @@ class Csr:
 @dataclass(frozen=True)
 class Port:
     """A unit's BRM port: the datapath's port, its dtype (NumPy's name), its lanes, its
-    direction (in or out) and, on an outer output a packer feeds, d_out (D174), on an outer
-    input a slicer feeds, d_in (D180); ``broadcast`` on an outer input whose reader gives one
-    lane to all of them (D186); ``hold`` on one read once a bank row and kept (D190); ``carry``
-    on a seed that is its unit's own output, 0 before CARRY jobs (D192)."""
+    direction (in or out) and, on an outer output a packer feeds, d_out, on an outer input a
+    slicer feeds, d_in; ``broadcast`` on an outer input whose reader gives one lane to all of
+    them; ``hold`` on one read once a bank row and kept; ``carry`` on a seed that is its unit's
+    own output, 0 before CARRY jobs."""
 
     port: str
     dtype: str
@@ -448,7 +448,7 @@ class Port:
 
     @property
     def stream_lanes(self) -> int:
-        """The lanes its reader moves a beat: one for a broadcast (D186), else its lanes."""
+        """The lanes its reader moves a beat: one for a broadcast, else its lanes."""
         return 1 if self.broadcast else self.lanes
 
     @property
@@ -524,7 +524,7 @@ class Group:
 
     def chains(self) -> list:
         """Its chains, each its units' names from head to sink along its links, in the order
-        of their sinks among its units (one for a group no fork joins, D189)."""
+        of their sinks among its units (one for a group no fork joins)."""
         nxt = {k.from_.split('.')[0]: k.to.split('.')[0] for k in self.links}
         prev = {b: a for a, b in nxt.items()}
         out = []
@@ -595,7 +595,7 @@ class Accelerator:
     port_mux which group is connected; its outer ports are then in no mover order."""
 
     name: str
-    inputs: list    # a fork's ports (D189) as one entry, a list, the reader's first
+    inputs: list    # a fork's ports as one entry, a list, the reader's first
     outputs: list
     groups: list
     movers: list = field(default_factory=list)
@@ -609,7 +609,7 @@ class Accelerator:
 
     @property
     def forks(self) -> list:
-        """Its forked inputs (D189), each the ports one reader feeds, the reader's first."""
+        """Its forked inputs, each the ports one reader feeds, the reader's first."""
         return [list(x) for x in self.inputs if not isinstance(x, str)]
 
     @property
@@ -833,7 +833,7 @@ def _names(node: _Node, key, default=...) -> list:
 
 
 def _inputs(node: _Node) -> list:
-    """An accelerator's inputs: each a port, or a fork's list of two or more ports (D189)."""
+    """An accelerator's inputs: each a port, or a fork's list of two or more ports."""
     values = node.get('inputs', list)
     for v in values:
         if not (isinstance(v, str) or (isinstance(v, list) and v
@@ -1018,10 +1018,12 @@ def _unit(node: _Node) -> Unit:
             f'{rows.bit_length()} bits')
     if rows > 1 and (datapath != 'Mac' or not fold):
         raise CfgTargetError(node.file, params.where('rows'),
-            f'gen.args: rows {rows}; a bank (D191) is an accumulating Mac\'s')
+            f'gen.args: rows {rows}; only an accumulating Mac has a bank (set accumulate '
+            'true, or rows 1)')
     if [k for k in carried if k != SEED]:
         raise CfgTargetError(node.file, f'{node.where("ports")}.{carried[0]}',
-            'gen.seed: a carried port is a fold\'s seed, its unit\'s own output (D192)')
+            'gen.seed: a carried port is a fold\'s seed, its unit\'s own output: carry only '
+            'the seed')
     for key, x in unit_ports.items():
         if x.hold and (rows == 1 or not x.broadcast or key == SEED):
             raise CfgTargetError(node.file, f'{node.where("ports")}.{key}',
@@ -1031,7 +1033,7 @@ def _unit(node: _Node) -> Unit:
     if SEED in unit_ports:
         seed = unit_ports[SEED]
         outs = [x for x in unit_ports.values() if x.dir == 'out']
-        seed_lanes = 1 if facts.reduces else lanes  # its output's lanes (D187)
+        seed_lanes = 1 if facts.reduces else lanes  # its output's lanes
         why = (f'{datapath} takes no seed (TreeAccumulate, SerialAccumulate and Mac do)'
                if not facts.seedable else f'{datapath} takes a seed only as a fold'
                if not fold else 'an in port' if seed.dir != 'in'
@@ -1318,7 +1320,7 @@ def _check_links(node: _Node, acc: Accelerator):
 
     # SnaxGroup's shape, with snax-forge's codes and wording (its gen/accelerator.py's
     # _check_chain): gen.chain, a chain in unit order whose last unit's output alone is outer,
-    # or with a fork (D189) the chains it joins, each forward in unit order with its sink's
+    # or with a fork the chains it joins, each forward in unit order with its sink's
     # output outer; gen.span, a unit of span > 1 reads from a link
     for g in acc.groups:
         names = [u.name for u in g.units]
@@ -1362,7 +1364,7 @@ def _check_links(node: _Node, acc: Accelerator):
 
 
 def _check_fork(node: _Node, acc: Accelerator, f: list, outer: list):
-    """gen.fork, snax-forge's in its wording: a forked input's ports (D189), two or more outer
+    """gen.fork, snax-forge's in its wording: a forked input's ports, two or more outer
     inputs of one group's chain heads, alike in dtype, lanes, slicing and broadcast."""
     def fail(why):
         raise CfgSlotError(node.file, node.where('inputs'), f'gen.fork: {what}: {why}')
@@ -1561,7 +1563,7 @@ def _check_description(acc: _Node, slot: AccSlot):
             _check_shared_set(acc, at, s, accelerator)
         else:
             for key, mover in (('inputs', 'data_reader_params'), ('outputs', 'data_writer_params')):
-                # a fork's ports (D189) share their reader, the first's
+                # a fork's ports share their reader, the first's
                 ports = accelerator.readers if key == 'inputs' else accelerator.outputs
                 channels = s.streamer.get(mover, {}).get('num_channel', [])
                 if len(ports) != len(channels):
@@ -1589,15 +1591,15 @@ def _port_words(accelerator: Accelerator, entry: str, output: bool, channels: in
     unit, _, name = entry.partition('.')
     u = accelerator.unit(unit)
     port = u.ports[name]
-    if port.d_out > 1:  # packed (D174): d_out results of lanes x width bits fill one word
+    if port.d_out > 1:  # packed: d_out results of lanes x width bits fill one word
         bits = (1 if CATALOGUE[u.datapath].reduces else port.lanes) * port.width * port.d_out
         if bits != 64 or channels != 1:
             return (f'{entry}: d_out {port.d_out} results of {bits // port.d_out} bits are '
                     f'{bits} bits, not one 64-bit word, or {mover} has num_channel {channels}, '
                     'not 1')
         return None
-    lanes = port.stream_lanes  # a broadcast's reader moves one lane (D186)
-    if port.d_in > 1:  # sliced (D180): one word gives d_in pops of lanes x width bits
+    lanes = port.stream_lanes  # a broadcast's reader moves one lane
+    if port.d_in > 1:  # sliced: one word gives d_in pops of lanes x width bits
         if lanes * port.width * port.d_in != 64 or channels != 1:
             return (f'{entry}: d_in {port.d_in} pops of {lanes} x {port.width} bits are '
                     f'{lanes * port.width * port.d_in} bits, not one 64-bit word, or '

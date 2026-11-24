@@ -31,7 +31,7 @@ class SnaxShell(gvsoc.systree.Component):
         Number of the group's first CSR (its START), for the trace.
     csrs : list[str]
         The group's read-write CSRs in CSR order: START, JOBS (with several
-        chains a JOBS_<SINK> per chain, D189), then the units' (JOB_BEATS for
+        chains a JOBS_<SINK> per chain), then the units' (JOB_BEATS for
         each fold without a fixed T, ROWS for a bank, CARRY for a carried seed,
         then its scalars', in unit order).
         STATUS and BUSY_COUNTER follow them.

@@ -294,8 +294,8 @@ class Built(unittest.TestCase):
                          ("TreeAccumulate", ["acc_a", "acc_seed"], 1, [64, 64], 4, "acc_out"))
 
     def test_a_seeded_mac_with_a_broadcast(self):
-        """mvt's half 2: a Mac of 8 int8 lanes, b broadcast (D186) through a slicer of 8 pops,
-        its seed of the output's 8 int32 lanes the last input (D187)."""
+        """mvt's half 2: a Mac of 8 int8 lanes, b broadcast through a slicer of 8 pops, its
+        seed of the output's 8 int32 lanes the last input."""
         b = Port("b", "int8", 8, "in", d_in=8, broadcast=True)
         desc = accelerator("mac_bcast", seeded_mac(8, "int8", "int32", b), between=1)
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(desc, streamer([1, 1, 4], [4])),
@@ -308,7 +308,7 @@ class Built(unittest.TestCase):
                           [False, True, False]))
 
     def test_a_forked_input(self):
-        """bicg_v3 (D189): A's reader, the streamer's reader 0, on mul_a, which mac's a takes
+        """bicg_v3: A's reader, the streamer's reader 0, on mul_a, which mac's a takes
         too; r's on mac_b, p's on mul_b; each sink its own output; the shell's JOBS_SUM and
         JOBS_MAC after START."""
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG3, BICG3_STREAMER), 131072)
@@ -331,7 +331,7 @@ class Built(unittest.TestCase):
                                            "depth": 1}])
 
     def test_a_bank_a_hold_and_a_carry(self):
-        """bicg_v4_1: the Mac's rows and r held (D190, D191), the sum's seed carried (D192);
+        """bicg_v4_1: the Mac's rows and r held, the sum's seed carried;
         the shell's CARRY, JOB_BEATS and ROWS after the JOBS, in CSR order."""
         cls = snax_accelerator.SnaxAccelerator.for_slot(slot_of(BICG4, BICG4_STREAMER), 131072)
         acc = cls(None, "snax_acc0")

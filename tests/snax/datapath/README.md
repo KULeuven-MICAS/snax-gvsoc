@@ -15,7 +15,7 @@ The datapaths of `snax/snax_datapath.hpp`, one plain C++ class per entry of snax
     out int64                    the output's type (a LinkBuffer's dtype)
     lanes 4
     accumulate 1                 Mac only; also regOut, depth (LinkBuffer), op, k (a one-stream SimdLanes' constant)
-    rows 4                       Mac only: a bank of rows (D191); its steps carry two more enables, row and drain
+    rows 4                       Mac only: a bank of rows; its steps carry two more enables, row and drain
     seed 1                       a seeded fold (TreeAccumulate, SerialAccumulate: its last input the seed, one element; Mac: its output's lanes)
     k1 3                         axpby's (op axpby) k1, baked, or `k1 csr` (from its CSR); k2 likewise; `kcsr`: a one-stream k from its CSR
     set k1 7                     a CSR slot's value, given to the datapath (set_scalar) before the next step
@@ -29,15 +29,15 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 - SimdLanes at one stream (relu's, the header's `k`: op(a, k) at a's type): add, sub, mul, min and max at int32 (4 lanes) and int64 (2), each with k = 0, -1, the type's min and max, and a random k; and max(a, 0) from int32 into int64.
 - SimdLanes at axpby (axpy's, `k1 * a + k2 * b` at the inputs' result type, + b without k2): k1 baked or from its CSR, k2 unset, baked or from its CSR, at int32 (2 and 4 lanes), int64 (2) and int64 with an int16 b (4), a CSR slot's value set anew every other step; int32 into int64; and one stream with k from its CSR (add, mul, max at int32 and int64), k set anew every step.
 - The folds at narrow types: TreeAccumulate, SerialAccumulate and LaneAccumulate from int8 (8 lanes) and int16 (4) into int32.
-- An opType wider than the inputs' result type, as a kernel's casts set it (D175): SimdLanes mul and add from int8 at int32 (8 lanes), mul from int8 at int32 into int16, from int16 at int32 (4) and from int32 at int64 (2); Mac accumulating int8 at int32 (8).
+- An opType wider than the inputs' result type, as a kernel's casts set it: SimdLanes mul and add from int8 at int32 (8 lanes), mul from int8 at int32 into int16, from int16 at int32 (4) and from int32 at int64 (2); Mac accumulating int8 at int32 (8).
 - Mac in its three forms: accumulate, plain, plain with regOut. Plain at W = 4: a = (3, 5, -9, 5), b = (-1, 0, 2, -4), c = (8, -9, -4, -3) give y = (5, -9, -22, -23).
 - Accumulate at W = 2, J = 2, T = 3: A's rows (1, -2, 3, 4, -5, 6) and (2, 2, 2, 2, 2, 2) against p = (2, 1, 0, -1, 3, 2), a beat a cycle, give the partials (-13, 6) and (10, 4); dot's sums of them are q = (-7, 14).
 - The int32 product that wraps, W = 2, T = 8: 46341 x 46341 wraps at int32, and the partials are (-2147478991, 4).
 - SerialAccumulate over the beat (-13, 6): -13 after lane 0, -7 after lane 1.
 - The fold's seed: TreeAccumulate and SerialAccumulate seeded at int64 (1, 2 and 4 lanes) and int32 into int64 (2 and 4), random beats, seeds and enables: a job's first firing starts from its seed (TreeAccumulate), or adds it on the first beat's last lane (SerialAccumulate); and matvec_acc's worked example on TreeAccumulate at W = 2, rows (1, 2, 3, 4) against p = (1, 2, 0, 1) from q = 1: 6 after the first beat, 10 after the second.
-- The seeded Mac (D187, mvt's column form): int8 x int8 into int32 and int64 at W = 4 and 8, random beats, seeds and enables: a job's first firing starts from its seed, s <- seed + a * b, lane by lane.
-- A Mac's bank (D191, bicg's s): rows 2 and 4, int8 into int32 at W = 4 and int64 at W = 2, two jobs and more of 2R beats, random beats and enables: firing f adds into row f mod R, the job's first R firings starting their rows, and the output is the row the last firing wrote; the registry builds it at L 1, seeded too, and refuses it plain or at rows 0.
-- A seeded bank (D194, mvt's x2): rows 2 and 4, int8 into int32 at W = 4 and 8, random beats, seeds and enables: a row's first firing in its job starts from the seed it takes, s[row] <- seed + a * b.
+- The seeded Mac (mvt's column form): int8 x int8 into int32 and int64 at W = 4 and 8, random beats, seeds and enables: a job's first firing starts from its seed, s <- seed + a * b, lane by lane.
+- A Mac's bank (bicg's s): rows 2 and 4, int8 into int32 at W = 4 and int64 at W = 2, two jobs and more of 2R beats, random beats and enables: firing f adds into row f mod R, the job's first R firings starting their rows, and the output is the row the last firing wrote; the registry builds it at L 1, seeded too, and refuses it plain or at rows 0.
+- A seeded bank (mvt's x2): rows 2 and 4, int8 into int32 at W = 4 and 8, random beats, seeds and enables: a row's first firing in its job starts from the seed it takes, s[row] <- seed + a * b.
 - LaneAccumulate (rowsum 2's): its worked example at W = 2, J = 2, T = 3, A's rows (1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12) a column a beat, giving (6, 15) then (24, 33); random beats and enables at int64 (1, 4 and 8 lanes), int32 (4 and 8) and int32 into int64 (4 and 8); the registry builds it at L 1, span 1, and refuses it with two inputs.
 - `snax/snax_types.hpp`'s arithmetic, which the classes run, on fixed vectors worked by hand in `tb.cpp`, for the edges the NumPy vectors do not reach: `ops`, the op table (wrapping at 8 to 64 bits, signed and unsigned min and max); `tree`, a fold's tree over a beat's lanes (`snax_op_tree`: halves first, wrapping); `types`, NumPy's result types (`snax_op_result_type`: int64 with uint64 refused); `beats`, whole beats (`snax_op_elementwise` and `snax_op_fold` on 64-bit channel words, lane 0 lowest, with int8, uint8, int16, int32 and int64 ports).
 

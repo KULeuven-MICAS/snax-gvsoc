@@ -25,17 +25,17 @@
 // SnaxSlicer): its V column is its reader's valid, the rule sees the slicer's
 // full, each cycle's word taken is compared, and the slices popped from each
 // whole word, put back low first, must give that word. A seeded Mac alone
-// (D187) runs its datapath too: 4 lanes of int8 a and b into int32, its seed
+// runs its datapath too: 4 lanes of int8 a and b into int32, its seed
 // of 4 int32 lanes, each job's result seed + its products; a or b sliced to one
-// lane a pop is a broadcast (D186), each slice given to the 4 lanes by
-// snax_broadcast, as SnaxGroup does. A fork case of bicg's one pass (D189:
-// vmul -> sum and mac, A forked to vmul.a and mac.a) runs its datapaths on 4
+// lane a pop is a broadcast, each slice given to the 4 lanes by
+// snax_broadcast, as SnaxGroup does. A fork case of bicg's one pass
+// (vmul -> sum and mac, A forked to vmul.a and mac.a) runs its datapaths on 4
 // lanes of int8 A, p and r into int32: each row's q = A p from the sum (its
 // seed added when seeded) and s = A^T r from the Mac, r_i given to every
-// lane (its seed added when seeded). A bank (rows R, D191) with its b held
-// (D190), alone or as the fork's Mac, runs its datapath on r held a row: each
+// lane (its seed added when seeded). A bank (rows R) with its b held,
+// alone or as the fork's Mac, runs its datapath on r held a row: each
 // result is the bank row its giving firing wrote, its sums worked out here;
-// seeded (D194), each row of a job starts from the seed beat its first firing
+// seeded, each row of a job starts from the seed beat its first firing
 // took, int32 lanes seed_of(n * 4 + l) for the n-th beat taken.
 //
 //   tb CASE...
@@ -63,7 +63,7 @@ struct UnitLine
     uint32_t t = 1;
     int inputs = 0;     // outer inputs
     bool seed = false;  // the last of them is a fold's seed, one beat per job
-    std::vector<int> hold;  // the held ones among them (D190)
+    std::vector<int> hold;  // the held ones among them
 };
 
 struct CycleLine
@@ -501,7 +501,7 @@ static std::unique_ptr<SnaxGroupDatapaths> mac_datapaths(const Case &c, const Sn
     return g;
 }
 
-// bicg's one pass (D189): 4 lanes of int8 A, p and r into int32, the sum's seed one int32
+// bicg's one pass: 4 lanes of int8 A, p and r into int32, the sum's seed one int32
 // a row, the Mac's 4 int32 lanes once
 static const SnaxType I8 = {8, true}, I32 = {32, true};
 
@@ -556,9 +556,9 @@ static std::unique_ptr<SnaxGroupDatapaths> fork_datapaths(const Case &c, const S
     return g;
 }
 
-// NB (D191): a bank's sums as the tb works them out, R rows of LANES int32 lanes, and its
-// held r (D190), r_of(n) for the n-th row taken: a firing adds a * r into row fired mod R,
-// starting it on its job's first R firings (seeded, D194, from the seed beat taken then:
+// A bank's sums as the tb works them out, R rows of LANES int32 lanes, and its
+// held r, r_of(n) for the n-th row taken: a firing adds a * r into row fired mod R,
+// starting it on its job's first R firings (seeded, from the seed beat taken then:
 // seed_of(n * LANES + l) for the n-th); a result is the row the last firing wrote
 struct BankModel
 {

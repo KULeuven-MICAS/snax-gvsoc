@@ -5,7 +5,7 @@
 # is taken (the next input taken as the result leaves, no drain cycle); firing
 # 5 (cycle 6) the sum of beats 3 .. 5, 4 * (4 + 5 + 6) = 60, pushed in cycle
 # 7, the run's last (flush): busy 6 + flush 1 = 7 busy cycles. Each lane is
-# cast to int64 before the tree (D143)
+# cast to int64 before the tree
 latency 1
 ii 1
 inputs 1

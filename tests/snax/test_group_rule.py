@@ -74,7 +74,7 @@ class Refused(unittest.TestCase):
 
 
 class Fork(unittest.TestCase):
-    """Two chains on one reader (D189): bicg's one pass at N = W, q by vmul -> sum, s by mac."""
+    """Two chains on one reader: bicg's one pass at N = W, q by vmul -> sum, s by mac."""
 
     def group(self, depth=1, **kw):
         us = [unit("vmul"), unit("sum", L=1, inputs=0), unit("mac", L=1)]
@@ -136,7 +136,7 @@ class ForkRefused(unittest.TestCase):
 
 
 class Bank(unittest.TestCase):
-    """A banked Mac (D191) with r held (D190): one job of M rows, ROWS beats a row."""
+    """A banked Mac with r held: one job of M rows, ROWS beats a row."""
 
     def mac(self, rows=2, hold=(1,)):
         return GroupRule([dict(unit("mac", L=1), rows=rows, hold=list(hold))], [])

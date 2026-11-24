@@ -1,5 +1,5 @@
 # A write to any read-write CSR while the unit is busy is held until E + 1
-# (snax-forge D168), so a group's settings stay constant through its run: the
+# (as snax-forge's <tag>_csr holds it), so a group's settings stay constant through its run: the
 # RTL's control unit reads JOBS and JOB_BEATS live from the csr, with no copy.
 # A fold group with a scalar (TreeAccumulate, L = 1): START 0, JOBS 1,
 # JOB_BEATS 2, K1 3, STATUS 4, BUSY_COUNTER 5. A run of J jobs of T beats

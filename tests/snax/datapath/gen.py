@@ -45,7 +45,7 @@ class Test:
         fire, first, read, lane, eon, load, ws, rs = en
         ins = " ; ".join(" ".join(str(int(x)) for x in v) for v in values)
         o = " ".join(str(int(x)) for x in np.atleast_1d(out))
-        # a bank's row and drain (D191): the row a firing adds into, the row the output shows
+        # a bank's row and drain: the row a firing adds into, the row the output shows
         r = "" if row is None else f" {row} {drain}"
         self.lines.append(f"step {int(fire)} {int(first)} {int(read)} {lane} {int(eon)} {int(load)} "
                           f"{ws} {rs}{r} : {ins} => {o}")
@@ -167,7 +167,7 @@ def mac_plain(name, t_in, op_t, out_t, lanes, reg_out, steps=6):
 
 
 def mac_seed(name, t_in, out_t, lanes, beats, firings=12):
-    """A seeded Mac (accumulate) at out_t: its third input the seed, its output's lanes (D187),
+    """A seeded Mac (accumulate) at out_t: its third input the seed, its output's lanes,
     a random one each step; a job's first firing starts from it, s <- seed + a * b."""
     t = Test(name, "Mac", [t_in, t_in, out_t], out_t, out_t, lanes, accumulate=True,
              regOut=False, seed=True)
@@ -185,9 +185,9 @@ def mac_seed(name, t_in, out_t, lanes, beats, firings=12):
 
 
 def mac_bank(name, t_in, out_t, lanes, rows, beats, firings=24, seed=False):
-    """A Mac with a bank (D191) of rows R at out_t: firing f adds a * b into row f mod R, its
+    """A Mac with a bank of rows R at out_t: firing f adds a * b into row f mod R, its
     job's first R firings starting their rows (first); the output is the row the last firing
-    wrote (drain, the RTL's pin). T = beats firings a job, a multiple of R. Seeded (D194), its
+    wrote (drain, the RTL's pin). T = beats firings a job, a multiple of R. Seeded, its
     third input the seed, a random one each step: a row's first firing starts from it."""
     t = Test(name, "Mac", [t_in, t_in] + [out_t] * seed, out_t, out_t, lanes, accumulate=True,
              regOut=False, rows=rows, **({"seed": True} if seed else {}))
@@ -434,14 +434,14 @@ def main():
     t.step(en(fire=1, first=0), [[0, 4], [7]], [6])
     t.step(EN0, [[0, 0], [0]], [10])
     tests.append(t)
-    # the seeded Mac (D187, mvt's column form): int8 x int8 into int32 and int64 at W 4 and 8,
+    # the seeded Mac (mvt's column form): int8 x int8 into int32 and int64 at W 4 and 8,
     # random seeds (drawn last, so the tests above stay as they were)
     with np.errstate(over="ignore"):
         for out_t in ("int32", "int64"):
             for lanes in (4, 8):
                 tests.append(mac_seed(f"mac_seed_int8_to_{out_t}_w{lanes}", "int8", out_t, lanes,
                                       3))
-    # a Mac's bank (D191): rows 2 and 4, int8 into int32 at W 4 and int64 at W 2, two jobs and
+    # a Mac's bank: rows 2 and 4, int8 into int32 at W 4 and int64 at W 2, two jobs and
     # more of 2R beats (drawn last, so the tests above stay as they were)
     with np.errstate(over="ignore"):
         for rows in (2, 4):
@@ -449,7 +449,7 @@ def main():
                                   2 * rows))
             tests.append(mac_bank(f"mac_bank_r{rows}_int64_w2", "int64", "int64", 2, rows,
                                   2 * rows))
-    # a seeded bank (D194, mvt's x2): rows 2 and 4, int8 into int32 at W 4 and 8, each row's
+    # a seeded bank (mvt's x2): rows 2 and 4, int8 into int32 at W 4 and 8, each row's
     # first firing from the seed (drawn after the banks, so they stay as they were)
     with np.errstate(over="ignore"):
         for rows in (2, 4):

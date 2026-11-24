@@ -14,7 +14,7 @@ group cases from it and snax-forge can import it from the submodule.
 A unit is a dict: ``name``, ``L`` (latency), ``ii``, ``span`` (the cycles it reads one beat in
 place), ``inputs`` (its count of outer inputs, from the streamer) and ``seed`` (optional, false
 by default: its last outer input is a fold's or a Mac's seed, one beat per job). A broadcast
-input (D186) is wires between its slicer or reader and the lanes: the rule does not see it. A link is an edge
+input is wires between its slicer or reader and the lanes: the rule does not see it. A link is an edge
 ``{"from", "to", "to_input", "depth"}``: the producer's and the consumer's names, the
 consumer's input it drives (the datapaths use it, the rule does not), and its depth D (0 a
 wire, >= 1 a buffer of D beats). ``output`` names the unit that owns the group's outer output;
@@ -41,7 +41,7 @@ judged at the units owning the outer outputs: stall_out (one is frozen) > busy (
 reads or is in its II gap) > stall_in (a unit with outer inputs wants to fire and one has no
 beat) > flush.
 
-A group is one or more chains (D189): each a path of units joined by links, from a head to a
+A group is one or more chains: each a path of units joined by links, from a head to a
 sink that owns one outer output; a unit with two out-edges (a fork) or two in-edges (a join)
 or a cycle is refused (GroupError), as snax_cfg.py's ``gen.chain``. Chains meet only at a
 fork of an outer input, ``forks``: lists of ``(unit, j)``, unit's j-th outer input, each a
@@ -53,20 +53,20 @@ unit order unless ``output`` lists them); a unit fires JOBS of its own chain tim
 over itself and the units after it. The cycle is stall_out when any output's unit is frozen;
 the run ends when every chain has.
 
-A banked unit (D191) has ``rows`` R (``ROWS``, default 1): its sums are R rows, one a firing
+A banked unit has ``rows`` R (``ROWS``, default 1): its sums are R rows, one a firing
 in turn, so a job of T firings (T a multiple of R) starts each row on its first R firings
 (``first``, a seed taken on each) and gives R results, one on each of its last R firings (a
 row is done when the job's last pass adds into it). It is a chain's sink. Its ``hold``
-(optional, outer input places among its own) are read once every R firings and kept (D190):
+(optional, outer input places among its own) are read once every R firings and kept:
 such an input needs its beat only on the firings where fired mod R = 0, and its reader's beat
 (a slicer's slice) is taken there.
 
-With ``d_out`` above 1 the outer output goes through a packer (D174, snax_group.hpp's
+With ``d_out`` above 1 the outer output goes through a packer (snax_group.hpp's
 SnaxPacker): the owning unit's outer room is ``ready`` only on a push that sends the word (its
 slice is d_out - 1, or the push is the run's last result, from the count of pushes), true on a
 push the packer keeps; ``sent`` lists, per cycle, whether a word went to the writer.
 
-With ``d_in`` above 1 on an outer input, a slicer (D180, snax_group.hpp's SnaxSlicer) sits
+With ``d_in`` above 1 on an outer input, a slicer (snax_group.hpp's SnaxSlicer) sits
 between its reader and the unit: the rule sees its held word (``full``), not the reader's
 valid; a firing (a seed's take) pops a slice, the d_in-th clears ``full``; it takes the
 reader's word when empty or on that last pop, only in busy cycles, so the word shows the

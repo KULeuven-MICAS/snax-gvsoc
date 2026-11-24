@@ -14,7 +14,7 @@
 // Properties (a missing or bad one is a fatal error naming it):
 //   csr_base   the group's first CSR (its START), for the trace
 //   csrs       its read-write CSRs' names in CSR order: START, JOBS (with
-//              several chains a JOBS_<SINK> per chain, D189), then the units'
+//              several chains a JOBS_<SINK> per chain), then the units'
 //              (JOB_BEATS, each fold's without a fixed T, ROWS, a bank's,
 //              CARRY, a carried seed's, then its scalars', in unit order);
 //              STATUS and BUSY_COUNTER follow
@@ -80,7 +80,7 @@ SnaxShell::SnaxShell(vp::ComponentConf &config)
     {
         names.push_back(props.as_str(name, "csrs[" + std::to_string(names.size()) + "]"));
     }
-    // JOBS, or with several chains a JOBS_<SINK> each (D189)
+    // JOBS, or with several chains a JOBS_<SINK> each
     int nb_jobs = 0;
     while (1 + nb_jobs < (int)names.size() && names[1 + nb_jobs].rfind("JOBS_", 0) == 0)
     {
