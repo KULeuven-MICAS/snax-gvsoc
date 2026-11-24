@@ -1,147 +1,69 @@
 # SNAX-GVSoC notes
 
-What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC itself: only the facts that still hold. The events and traces are in `docs/EVENTS.md`, each component's rules in its own comments, the decisions in snax-forge's `docs/DECISIONS.md`. Open items are snax-forge's (`docs/STATUS.md`).
+What SNAX-GVSoC was measured to do against snax_cluster's RTL and against GVSoC itself, only what still holds; each component's rules are in its comments, open items in snax-forge's `docs/STATUS.md`.
 
 ## Versions compared against
 
-| What | Where it is pinned |
-|---|---|
-| GVSoC and its folded submodules | `UPSTREAM.md` |
-| snax_cluster: the copy in `sw/` and the RTL compared against | `sw/README.md` |
-| common_cells, the TCDM arbiter | `v1.40.0`, in the RTL build's `Bender.lock` |
+GVSoC in `UPSTREAM.md`; snax_cluster (the `sw/` copy and the RTL) in `sw/README.md`; common_cells, the TCDM arbiter, `v1.40.0` in the RTL build's `Bender.lock`.
 
 ## The core and its timing
 
-- **Cluster CSRs.** snax_cluster's start-up code reads the cluster base and {core count, index} from CSRs 0xBC1 to 0xBC3. The Snitch model declares them read-only, as the RTL does.
-- **SNAX CSRs.**
-  - 0x3C0 to 0x5FF go out as 32-bit IO requests on port `snax_csr`, at 4 × the CSR number. An accelerator's range stops at 0x5FD; 0x5FE and 0x5FF go to the cluster's top-level CSR port.
-  - `csrrw` and `csrrwi` read only when `rd` is not `x0`; the set and clear forms are a read, then a write, as on the RTL (`snax-csr`: 0 errors).
-  - A pending write stalls the instruction until its answer (the shell's held start). A pending read is fatal; a refused access ends the run.
-- **Loads.**
-  - One integer load in flight, as the RTL's `num_int_outstanding_loads: 1`.
-  - Load to next load: 4 cycles from L1, 14 from DRAM (`core_latency` `tcdm` 2, `narrow` 6).
-  - A load answered pending lets the core go on until its next memory access or a use of its register.
-- **Instruction fetch** (open item 65). The RTL's L0 cache prefetches the next line and taken branches' targets; GVSoC's `Hierarchical_cache` does not. So SNAX-GVSoC misses more lines, for fewer cycles each. Putting a start write and the loads after it in one cache line (`.balign 32`) brought `core-tcdm`'s `core_vs_reader` to the RTL's 18.
-- **Other core timing** (open items 66, 67, 70, 71), none of which a measured loop hits:
-  - `dmstati` is polled every 2 cycles here, every 5 on the RTL; a SNAX CSR poll every 6 here, 5 there.
-  - Atomics to DRAM are one access here, a read-modify-write on the RTL testbench (the exit barrier is about 50 cycles shorter here).
-  - A store or AMO after a pending L1 load waits for its data; an L1 load after a DRAM load reaches the crossbar up to 13 cycles early.
-- **The host.** GVSoC's HTIF polls `tohost` every 1000 cycles. With `htif_poll_backdoor` (the SNAX targets) the poll takes zero time, same value and period. A `printf` waits on the host's answer, on that 1000-cycle grid.
-- **Boot.** snRuntime zeroes `.bss` before `main`, so a larger `.bss` moves the program's start (about 470 cycles for snax-forge's generated program against vecadd's old hand-written one).
+- **CSRs.** The cluster base and {core count, index} are read-only CSRs 0xBC1 to 0xBC3, as on the RTL. SNAX CSRs 0x3C0 to 0x5FF go out as 32-bit IO requests on port `snax_csr`, at 4 × the CSR number; an accelerator's stop at 0x5FD, 0x5FE and 0x5FF go to the cluster's CSR port. `csrrw` and `csrrwi` read only when `rd` is not `x0`; the set and clear forms read, then write, as on the RTL (`snax-csr`: 0 errors). A pending write stalls until its answer; a pending read is fatal.
+- **Loads.** One integer load in flight; load to next load 4 cycles from L1, 14 from DRAM, as on the RTL (`core_latency` `tcdm` 2, `narrow` 6). A pending load lets the core go on until its next memory access or a use of its register.
+- **Instruction fetch** (open item 65). The RTL's L0 cache prefetches the next line and taken branches' targets, GVSoC's `Hierarchical_cache` does not: more misses here, fewer cycles each. A start write and its loads in one cache line (`.balign 32`) give `core-tcdm`'s `core_vs_reader` the RTL's 18.
+- **Other core timing** (open items 66, 67, 70, 71), hit by no measured loop: `dmstati` is polled every 2 cycles here, every 5 on the RTL; a SNAX CSR poll every 6 here, 5 there; atomics to DRAM are one access here, a read-modify-write on the RTL testbench (the exit barrier about 50 cycles shorter); a store or AMO after a pending L1 load waits for its data; an L1 load after a DRAM load reaches the crossbar up to 13 cycles early.
+- **The host.** HTIF polls `tohost` every 1000 cycles, in zero time (`htif_poll_backdoor`); a `printf` waits on that grid. snRuntime zeroes `.bss` before `main`, so a larger `.bss` moves the program's start.
 
 ## The DMA
 
-- **On the RTL:**
-  - `busy = L_rd + N_beats + 2`, with `L_rd` 11 from DRAM and 5 from L1, and one 64 B beat a cycle.
-  - `busy_o` (`DMA_BUSY`, `dmstati 2`, which `snrt_dma_wait_all` polls) drops before the write response.
-  - A 3-deep request FIFO, at most 3 bursts in flight per direction, a 3-beat buffer between reads and writes, and bursts that end at the nearer 4 KiB boundary. The testbench DRAM takes 2 reads and 2 writes in flight.
-  - `DMA_BUF_W_STALL` and `DMA_BUF_R_STALL` are never set.
-  - **The wide port.** The DMA reaches L1's banks through one 512-bit port per superbank (`mem_wide_narrow_mux`, `hw/mem_interface/src/mem_wide_narrow_mux.sv` lines 81 to 93 in snax_cluster): while it is selected, every one of the superbank's 8 banks gets the wide request's `q_valid`, and only the data and byte strobes are cut per bank (asserted, `DmaSelected`, line 120). So a beat is one access on the port and a read, or a write of its strobed bytes, on each of the 8 banks, whatever bytes it covers: a one-element burst is 8 bank reads and 8 bank writes. Measured at gate level on the DMA's transposed copy of a 64 × 64 matrix (4096 one-element bursts, int8 and int64 alike): each of L1's 32 banks reads 1024 times and writes 1024 times.
-  - **The way into L1** (the backend `idma_backend_rw_axi`, read from a run's iDMA trace and waveform, `dma-timing`'s short-burst cases). The DMA reaches L1 over AXI even when both ends are in L1, and the rule below sets its cycles:
-    1. A burst is one AXI transaction: AR, R, then AW, W, B.
-    2. At most 3 bursts are in flight; a slot frees at the burst's last W, not at its B: AR(k + 3) = W(k) + 1. B gates nothing.
-    3. The write is coupled to its read (`rw_coupling_avail`): AW(k) in R(k)'s cycle, W(k) one cycle later.
-    4. L1 has one port for the DMA (`axi_to_mem_interleaved` with `NumBanks(1)`, `snitch_cluster.sv`), one read or one write a cycle. A read asks for it 2 cycles after its AR and returns 3 cycles after its grant (the 5 of `L_rd`); a write asks for it 2 cycles after its W. Its arbiter (an `rr_arb_tree` of two inputs) is one priority bit: a side that asks alone is granted and takes the priority; when both ask, the side holding it goes first and the priority passes to the other; at reset the write holds it (61 970 grants of a run predicted, 0 wrong).
-  - One limit is left out of the rule: the RTL's W channel stops taking beats while 3 wait for the port, so a long copy inside L1 ends one cycle later than the rule gives (`l1l1 1x4096`: 129 against 128). `dma-timing` allows that case one cycle.
-  - So a long copy pays the latency once: one beat a cycle from DRAM to L1 or from L1 to DRAM, one every 2 cycles inside L1 (R and W alternate on the port: `l1l1 1x4096` busy 129). Short bursts inside L1 run 3 per 8 cycles, whatever their size of 1 to 64 B (`t-l1l1`, `s-l1l1`: busy 173 for 64 bursts, 10 925 for 4096).
-  - Short bursts from L1 into DRAM are paced by the DRAM side: B returns 2 per 7 cycles and at most 8 writes wait for theirs (`s-l1l2 64x1 B p64` busy 211), the testbench's memory rather than the iDMA (open item 146).
-- **The model** (`DMA_TIMING` and `DMA_L1_PORT` in `snax/snax_hjson.py`):
-  - `read_latency` 5 and `hbm_latency` 6, so DRAM is 11 on both sides; DRAM moves 64 B a cycle. `read_latency` is the sum of the way into L1's two read stages below.
-  - `tcdm_write_latency` 2: a beat asks for L1's port 2 cycles after it leaves the DMA, which is done at the send.
-  - `one_cycle_per_stage`: the midend, the backend and the AXI read take a cycle each.
-  - A beat reaches L1 16 cycles after its `dmcpyi` on both sides (`l2l1 1x64`).
-  - **The way into L1**, the rule's four parts in the TCDM back-ends (`idma_be_tcdm.cpp`), with no AXI channels: a read burst takes one of `burst_queue_size` slots (the cluster file's `dma_axi_req_fifo_depth`, 3) at its AR, in order and one AR a cycle, from the cycle the backend hands it over, and frees it the cycle after the write side sends its last line. Each of its lines asks for the port `tcdm_read_request_latency` 2 cycles after the AR (and after the previous line's grant); its data comes `tcdm_read_response_latency` 3 cycles after the grant and leaves as the coupled write `coupled_write_latency` 1 cycle later, which asks for the port `tcdm_write_latency` 2 cycles after that. The port (`IDmaTcdmPort`, one per DMA, in `snitch_dma.cpp`) grants one read or one write a cycle by the priority bit, and the crossbar's `dma` line is written at the grant. On the DRAM side the coupled cycle is the AXI read's own stage.
-- **Measured** (`dma-timing`): `busy`, `r` and `w` of its 17 pinned cases equal the RTL's, `l1l1 1x4096` within its one cycle (128); `done` is 2 to 6 cycles under it, from the core's issue and polling. `t-l1l1 1x1 B p64`'s 64 bursts have the RTL's R and W cycles; 19 of them take their AR a cycle after the RTL's, as the next row reaches the read side only when the write side's queue of `burst_queue_size` bursts frees, but the port is busy then and no data moves. `dma-timing` fails when the DMA's own timing moves: a cycle more on either read stage puts 15 cases off, on `coupled_write_latency` 7.
-- **The wide port** in the crossbar's `dma` port (`snax_tcdm_xbar.cpp`): a beat counts a read or a write on every bank of its superbank line in the `bank` lines, and, in a copy inside L1, one `copy_reads` or `copy_writes` (docs/EVENTS.md): a one-element burst is 1 each, a 4 KiB copy 64. `dma-timing`'s copies inside L1 count 25 088 of each over the run (12 544 per pass, each case run twice), the beats of their shapes.
+- **On the RTL:** `busy = L_rd + N_beats + 2`, with `L_rd` 11 from DRAM and 5 from L1, one 64 B beat a cycle. `busy_o` (`DMA_BUSY`, `dmstati 2`) drops before the write response. A 3-deep request FIFO, at most 3 bursts in flight per direction, a 3-beat buffer between reads and writes, bursts cut at 4 KiB boundaries; the testbench DRAM takes 2 reads and 2 writes in flight. `DMA_BUF_W_STALL` and `DMA_BUF_R_STALL` are never set.
+- **The wide port.** The DMA reaches L1 through one 512-bit port per superbank (snax_cluster's `mem_wide_narrow_mux.sv` lines 81 to 93): while it is selected, all 8 banks of the superbank get its `q_valid`, only data and strobes cut per bank. A one-element burst is thus 8 bank reads and 8 bank writes; at gate level the DMA's transposed copy of a 64 × 64 matrix (4096 one-element bursts, int8 and int64 alike) reads and writes each of L1's 32 banks 1024 times.
+- **The way into L1** (`idma_backend_rw_axi`, `dma-timing`'s short bursts), over AXI even within L1:
+  1. A burst is one AXI transaction: AR, R, then AW, W, B.
+  2. At most 3 bursts are in flight; a slot frees at the burst's last W: AR(k + 3) = W(k) + 1. B gates nothing.
+  3. The write is coupled to its read (`rw_coupling_avail`): AW(k) in R(k)'s cycle, W(k) one cycle later.
+  4. L1 has one DMA port (`axi_to_mem_interleaved` with `NumBanks(1)`), one read or one write a cycle. A read asks for it 2 cycles after its AR and returns 3 after its grant (the 5 of `L_rd`); a write asks 2 cycles after its W. One priority bit: a side asking alone is granted and takes it; when both ask, the holder goes first and the bit passes; the write holds it at reset (61 970 grants of a run predicted, 0 wrong).
+- **So** a long copy pays the latency once: a beat a cycle between DRAM and L1, one per 2 cycles inside L1. The RTL's W channel stops taking beats while 3 wait for the port, which the rule leaves out: `l1l1 1x4096` is 129 there, 128 here, a cycle `dma-timing` allows. Short bursts inside L1 run 3 per 8 cycles, for any size of 1 to 64 B (`t-l1l1`, `s-l1l1`: busy 173 for 64 bursts, 10 925 for 4096).
+- **Short bursts into DRAM** are paced by the testbench's memory, which the model leaves out: B returns 2 per 7 cycles, at most 8 writes wait (`s-l1l2 64x1 B p64` busy 211 on the RTL, 155 here, open item 146).
+- **The model** (`snax/snax_hjson.py`, `idma_be_tcdm.cpp`) has the rule's four parts without AXI channels; a beat reaches L1 16 cycles after its `dmcpyi` on both sides (`l2l1 1x64`).
+- **Measured** (`dma-timing`): `busy`, `r` and `w` of its 17 pinned cases equal the RTL's, `l1l1 1x4096` within its one cycle; `done` is 2 to 6 cycles under, from the core's issue and polling. `t-l1l1 1x1 B p64`'s 64 bursts have the RTL's R and W cycles; 19 take their AR a cycle late, while the port is busy. A cycle more on either read stage puts 15 cases off, on `coupled_write_latency` 7. Its copies inside L1 count 25 088 `copy_reads` and `copy_writes` each (12 544 per pass, each case run twice).
 - **Counters.** `CYCLE`, `DMA_R_DONE`, `DMA_W_DONE` and `DMA_BUSY` come from the iDMA's `busy`, `r_beats` and `w_beats`.
-- Short bursts into DRAM stay off, paced by the testbench's memory (`s-l1l2 64x1 B p64`: 155 against 211, open item 146); the AXI fabric itself is not modelled: the four parts above stand for it. A program makes such a copy: `forge/mvt_v4_1_1_sequential`'s `transpose_A_T`, one burst an element inside L1.
 
 ## The crossbar and the sparse interconnect
 
-- **The RTL's layout.**
-  - snaxgen's `sparse_config` lists ports as `[width, granularity]`: each accelerator's ports per core, then `[1, 1]` per core, then `[1, 1]` for AXI.
-  - Bank of an address: `(addr >> 3) & 31`, on 32 banks of 64 bit.
-  - Input `j` of granularity `g` reaches only banks with `b % g == j % g`.
-- **The pick** (`snax/snax_sparse_arb.hpp`), per bank and cycle:
-  1. only the valid requests at the highest priority count;
-  2. the last pick wins again if its bank refused it (the lock);
-  3. else the lowest input above the last pick, else the lowest;
-  4. an idle bank cycle restarts from the last input.
-
-  Read data comes one cycle after the grant.
-- **Checked against the RTL** (`tests/snax/sparse_arb/`, Verilator on the elaborated `SparseInterconnect.sv`, 20000 cycles, seeds 1 to 3):
-  - 15 and 23 inputs: 0 differences in nine runs. Copies with one rule broken (no idle restart, no lock, priority ignored) give 1534, 1244 and 8248 differences.
-  - 100 and 128 inputs (`m100`, `m128`, `n128`): 0 differences in twelve runs, with thousands of selections at arbiter inputs 64 and above. A copy limited to a 64-bit mask gives 83017 selection differences on `n128`.
-- **Up to 128 inputs.** The request masks are `std::bitset<128>` (`SnaxInputMask`, `kMaxInputs`); a crossbar or a bank with more inputs is refused. `tests/snax/sparse_pick/` checks the pick on 1 to 128 inputs against a plain loop of the rule. The fixtures' forge lines did not change when the 128-input mask replaced the 64-bit one.
-- **The priority bit.** A new request carries its lane queue's hint of the cycle before (a reader's count ≤ 1, a writer's ≥ `fifo_depth` − 1) and keeps it while it is resent. Without `dynamicPriority` it is `higherStaticPriority`. There is a wire per SNAX port (`prio_<i>`); an unbound wire asks with 0, as the cores and AXI do.
-- **Inputs.**
-  - The SNAX ports drop a losing request and send it again; the cores and AXI hold theirs for the next cycle.
-  - A read, AMO or LR/SC is answered a cycle after its grant plus the request's latency; a write at its grant.
-  - An access is 1 to 8 bytes inside one bank word; one crossing a word is refused. LR reservations are per hart.
-- **The DMA's superbank.**
-  - 8 banks a superbank, 4 superbanks: `(addr >> 6) & 3`.
-  - On the RTL the DMA's beat gets every bank of its superbank for its cycle, granted at once, and the narrow winner there is refused and keeps its turn. The `dma` port does the same here; a beat crossing a superbank line is refused.
-  - The DMA's beats come from events queued a cycle or more ahead, so a beat always comes first. A later one on a superbank already granted to a narrow request is fatal (no program has one).
-- **Measured against the RTL:** every compared counter equal. `stream-timing`'s `prio_queued` and `idle_restart` 6; `core-tcdm`'s `after_stores` 6 and `core_vs_reader` 18; `dma-tcdm`'s `dma_vs_reader` 264. In `dma_vs_reader` the DMA's beats land 3 to 7 cycles before the RTL's, all of it the core's DMA issue (open item 67).
-- **Not used yet:** the AXI input (wired, but no program sends through it, open item 69); granularity above 1 (open item 75); the iDMA as sparse ports (open item 74).
+- **The RTL's layout.** snaxgen's `sparse_config` lists ports `[width, granularity]`: the accelerators' per core, `[1, 1]` per core, `[1, 1]` for AXI. Bank of an address: `(addr >> 3) & 31`, 32 banks of 64 bit; input `j` of granularity `g` reaches only banks with `b % g == j % g`. 4 superbanks of 8 banks, `(addr >> 6) & 3`; a DMA beat takes its superbank's banks, and a narrow winner there is refused and keeps its turn.
+- **The pick** (`snax/snax_sparse_arb.hpp`), per bank and cycle: (1) only the valid requests at the highest priority count; (2) the last pick wins again if its bank refused it; (3) else the lowest input above the last pick, else the lowest; (4) an idle bank cycle restarts from the last input. Read data comes a cycle after the grant.
+- **Checked against the RTL** (`tests/snax/sparse_arb/`, Verilator on the elaborated `SparseInterconnect.sv`, 20000 cycles, seeds 1 to 3): 15 and 23 inputs, 0 differences in nine runs (no idle restart, no lock, priority ignored: 1534, 1244, 8248); `m100`, `m128`, `n128`, 0 in twelve, thousands of selections at inputs 64 and above (a 64-bit mask: 83017 on `n128`). `tests/snax/sparse_pick/` checks the pick on 1 to 128 inputs against a plain loop.
+- **Measured against the RTL**, every compared counter equal: `stream-timing`'s `prio_queued` and `idle_restart` 6; `core-tcdm`'s `after_stores` 6 and `core_vs_reader` 18; `dma-tcdm`'s `dma_vs_reader` 264, its DMA beats 3 to 7 cycles before the RTL's, all from the core's DMA issue (open item 67).
+- **Not used yet:** the AXI input (open item 69); granularity above 1 (75); the iDMA as sparse ports (74).
 
 ## The streamer
 
-- **From the hjson** (`snax_cfg.py`):
-  - one streamer per streamer set, one set per accelerator of `accelerator.json`;
-  - the slot's TCDM ports are the sets' channels, in set order;
-  - per set its streamer's CSRs come first, then its accelerator's, packed from 960 (dot 1: `vmul`'s streamer 960–977 and CSRs 978–981, `vsum`'s 982–994 and 995–999).
-- **Matches the RTL:** start, AGU pace, end rule and the round-robin order (`stream-timing`'s counters 0, 9, 9, 10, 12, equal).
-- **Cycle classes per mover:** `busy` > `stall_xbar` > `stall_fifo` > `idle`.
-- **The queue count.** A writer's push and pop share a cycle, push first, so its data queue holds two words where the RTL counts one; `qmax` reports the RTL's count.
-- **Widths.** A b-bit input port takes lanes × b / 64 words. Each mover's spatial bounds multiply to its `num_channel`, and each datapath port's words must equal its mover's `num_channel`; `snax_cfg.py` refuses the rest at load.
-- **Configurable channels:**
-  - a mover with `configurable_channel` has ENABLED_CHANNEL after its temporal strides: `ceil(num_channel / 32)` CSRs, bit l for lane l, taken at the start;
-  - it reads 0 after reset, so every lane is off until the program writes it;
-  - a lane that is off sends no request; a reader's lane puts a 0 word in its queue instead, and a writer's lane drops its address and data;
-  - not checked against the RTL on its own; the shared-mover fixtures run it.
-- **Shared movers:**
-  - `SnaxPortMux` (`snax_port_mux.cpp`, its rule in `snax_port_mux.hpp`) sits between the groups' ports and the movers, combinational, no cycle;
-  - PORT_MUX_SEL, the accelerator's last CSR, picks the group;
-  - fatal: a beat from a group not selected, a select write while the streamer is busy, and a select past the last group;
-  - `tests/snax/port_mux/` checks the rule on `mvt_v1_2`'s mux.
+- **Matches the RTL:** start, AGU pace, end rule and round-robin order (`stream-timing`'s counters 0, 9, 9, 10, 12, equal).
+- **CSRs.** Per set, the streamer's CSRs, then its accelerator's, packed from 960 (dot 1: `vmul`'s streamer 960–977 and CSRs 978–981, `vsum`'s 982–994 and 995–999).
+- **The queue count.** A writer's push and pop share a cycle, so its queue holds two words where the RTL counts one; `qmax` reports the RTL's count.
+- **Configurable channels** are checked against the RTL only through the shared-mover fixtures.
 
 ## The group and its datapaths
 
-- **One rule on three sides.** The group control rule exists as `SnaxGroupRule` (`snax/snax_group.hpp`), its Python twin (`snax/snax_group_rule.py`) and snax-forge's Chisel. The group, unit and shell cases check it; NumPy's vectors check the datapath classes (`tests/snax/datapath/`).
-- **The shell.** A start while busy is answered pending and taken in E + 1. The counter is reset by an accepted start and counts the busy cycles.
-- **Arithmetic** (the int32 and int8 fixtures, `forge data: 0 errors`):
-  - an elementwise op runs at NumPy's result type of its inputs, then is cast to the output's type;
-  - a fold's lanes are cast to its output's type before its tree;
-  - a signed type with uint64 is refused (NumPy gives float64).
-- **The counter** on every forge variant at W = 4 and 8: the control rule's cycles plus the streamers' fill, 3 cycles (2 for a unit with one input). `make regress` checks each forge run's counters against its tasks.
+- **One rule on three sides:** `SnaxGroupRule`, its Python twin and snax-forge's Chisel, checked by the same cases.
+- **Arithmetic** (the int32 and int8 fixtures, `forge data: 0 errors`): an elementwise op runs at NumPy's result type of its inputs, then is cast to the output's; a fold's lanes are cast to its output's type before its tree; a signed type with uint64 is refused (NumPy gives float64).
+- **The counter** on every forge variant at W = 4 and 8: the control rule's cycles plus the streamers' fill, 3 cycles (2 for a unit with one input).
 
 ## Events and traces
 
-`docs/EVENTS.md` has the lines. What was measured about them:
-
-- **One file in simulation order.** Several `--trace` patterns into one file land in order, and a component's message from `stop()` lands last, so end-of-run counters go there. A trace file's name is relative to the work directory; on stdout a `printf` can split a trace line.
-- **The core** writes `func` with the function's name without the instruction trace. Its `state` and `func` lines are behind `CONFIG_GVSOC_ISS_SNAX_EVENTS`, on `snitch` only. The window snax-forge reports is the program's two `mcycle` reads.
-- **The iDMA** the SNAX targets build is `pulp/pulp/idma/` (`idma_fe_xdma.cpp`); `pulp/models/ips/pulp/idma_v2/` is an unused copy.
-- **VCD.** `--vcd --event-tags=snax` names 98 SNAX signals on vecadd, each value set in its own cycle; `--vcd` changes neither `events.log` nor stdout.
-- **Sizes** (vecadd at trace level `stall`): a grant is 180 B in `events.log` and 222 B in `trace.jsonl`; GVSoC's line header is 55 % of the beat lines' bytes.
-- **Exit codes.** A program's exit code is not its error count (two wrong goldens: `forge errors: 2`, exit 1); snax-forge reads the counts from the printed lines.
+- `--trace` patterns into one file land in simulation order, `stop()` messages last; a trace file's name is relative to the work directory.
+- The SNAX targets build `pulp/pulp/idma/`; `pulp/models/ips/pulp/idma_v2/` is unused.
+- `--vcd --event-tags=snax` names 98 SNAX signals on vecadd; `--vcd` changes neither `events.log` nor stdout.
+- Vecadd at level `stall`: a grant is 180 B in `events.log`, 222 B in `trace.jsonl`; GVSoC's header is 55 % of the beat lines' bytes.
+- An exit code is not the error count (`forge errors: 2`, exit 1); snax-forge reads the printed counts.
 
 ## The comparison with snax_cluster's RTL
 
-- **What is compared:** each accelerator's `forge counter` and `forge data: 0 errors` must be equal; the window (`forge cycles`) within about 10 %.
-- **Where the window's gap lies.** Every counter is equal, so the accelerator's busy span is the same on both sides; the gap is in the cores and the DMA (the sections above). On vecadd the RTL is a fixed 13 to 14 cycles longer at N = 64 and 512.
-- **The current numbers** per bundle are in snax-forge's open item 95.
+Each accelerator's `forge counter` and `forge data: 0 errors` must be equal, the window (`forge cycles`) within about 10 % (per bundle: snax-forge's open item 95); the gap is in the cores and the DMA; on vecadd the RTL is a fixed 13 to 14 cycles longer at N = 64 and 512.
 
 ## GVSoC itself
 
-- **Targets.**
-  - GVSoC reads a target twice, at `make build` and under gvrun, with different arch classes.
-  - The install's `gvrun` puts its own `targets` and `generators` first on `sys.path`, so an installed module shadows a `--target-dir` one: a generated target never takes an installed target's name.
-  - A target without its platform tree runs on the JSON config, with gvrun's warning; a property reaches the C++ through `gvsoc_config.json`, nothing compiled.
-- **The TCDM's** size, banks and bank width come from the hjson. L1's size and base reach the program through `sw/generated/`, so changing them needs the program rebuilt; changing the banks alone keeps the ELF.
-- **The build.**
-  - `make build` recompiles `cluster_registers` every time (not looked into).
-  - CMake refuses a build folder made from another checkout.
-  - gvrun needs the image's `/opt/venv` Python (under `pixi run` it lacks `rich`).
-  - GVSoC runs with `werror: true`: any `force_warning` ends the run.
+- **Targets.** GVSoC reads a target twice, at `make build` and under gvrun, with different arch classes. The install's `gvrun` puts its own `targets` and `generators` first on `sys.path`, so a generated target never takes an installed one's name. Without its platform tree a target runs on the JSON config; a property reaches the C++ through `gvsoc_config.json`, nothing compiled.
+- **The TCDM's** size, banks and bank width come from the hjson; L1's size and base reach the program through `sw/generated/` (a change needs it rebuilt, the banks alone not).
+- **The build.** `make build` recompiles `cluster_registers` every time. CMake refuses a build folder from another checkout. gvrun needs the image's `/opt/venv` Python (under `pixi run` it lacks `rich`). `werror: true`: any `force_warning` ends the run.
