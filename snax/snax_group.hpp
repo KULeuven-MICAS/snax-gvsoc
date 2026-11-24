@@ -800,8 +800,8 @@ private:
             const UnitCfg &c = this->cfg[k];
             const UnitState &us = this->u[k];
             // a seeded unit's job's first beats (a bank's row's each) wait for its seed too;
-            // NB (D190): a held input's beat is needed only on a row's first firing, a held
-            // link's too (D197)
+            // NB (D190): a held input's beat is needed only on a row's first firing
+            // NB (D197): a held link's too
             uint32_t d = us.firings % this->job_beats[k];
             bool first = d < this->rows[k];
             bool taking = us.firings % this->rows[k] == 0;

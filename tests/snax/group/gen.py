@@ -372,8 +372,8 @@ def bank_cases():
 def atax_cases():
     """atax's one group, rows outer at W = 2, N = 4 (T = ROWS = 2), M = 3: vmul -> a buffer ->
     sum (t[i], one a row) -> a held buffer -> mac's broadcast input, taken on each row's first
-    firing (the bank's rows, D197). With A read again by mac's own reader, then forked to vmul
-    and through a buffer of depth D to mac (D196): D = T + 2 runs as the second read, D = T
+    firing (the bank's rows). With A read again by mac's own reader, then forked to vmul and
+    through a fork's buffer of depth D to mac: D = T + 2 runs as the second read, D = T
     stalls 2 cycles a row (D < T never ends: the rule test)."""
     m, rows = 3, 2
     vmul, sum_ = ("vmul", "SimdLanes", 0, 1, 2), ("sum", "TreeAccumulate", 1, 1, 0)
