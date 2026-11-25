@@ -193,7 +193,7 @@ inline bool snax_holds(SnaxType t, SnaxType a)
 
 
 // A one-stream SimdLanes beat, as NumPy's out = op(a, k).astype(out_t): per
-// lane, a extended to t (a's own type, its opType), the op at t with the
+// lane, a extended to t (its opType, holding a's type), the op at t with the
 // constant k, given as its bits (two's complement in 64 bits, a value of t),
 // and the result cast to out_t. out's words are cleared here.
 inline void snax_op_elementwise_k(int op, int lanes, SnaxType a_t, SnaxType t,
