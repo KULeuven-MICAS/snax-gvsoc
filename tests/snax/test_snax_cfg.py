@@ -529,6 +529,27 @@ class AccJson(unittest.TestCase):
         self.unit()["params"]["k"] = 0
         self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "a TreeAccumulate unit has no")
 
+    def test_one_stream_widened(self):
+        """gesummv's literal scale at int8: a at int8 times k from its CSR at int32, the op at
+        int32 (an opType that holds a's type); one narrower than a is refused."""
+        scale = snax_cfg.Unit(
+            "acc", "simd", "SimdLanes",
+            {"a": snax_cfg.Port("a", "int8", 8, "in"),
+             "out": snax_cfg.Port("out", "int32", 8, "out")},
+            "int32", {"op": "mul"}, 0, 1, [Csr("K", "rw", 2, 32, "k")], scalars={"k": "int32"})
+        self.acc = acc_json(accelerator("gesummv_v1_1", scale, between=1))
+        self.streamer, self.rw = streamer([1], [4]), 3
+        (unit,) = self.load().description.groups[0].units
+        self.assertEqual((unit.op_type, unit.ports["a"].dtype, unit.scalars),
+                         ("int32", "int8", {"k": "int32"}))
+        self.unit()["opType"] = "int8"
+        self.unit()["ports"]["a"]["dtype"] = "int32"
+        self.unit()["ports"]["out"]["dtype"] = "int8"
+        self.unit()["scalars"] = {"k": "int8"}
+        self.unit()["csrs"][0]["width"] = 8
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
+                   "opType int8 does not hold its one input's type int32")
+
     def test_axpby_and_scalars(self):
         """axpby takes k1, baked or from its CSR; k1 and k2 are axpby's; a scalar is a SimdLanes
         slot not baked, at the opType, and its CSRs (K1, or K1_LO and K1_HI, pin k1) follow

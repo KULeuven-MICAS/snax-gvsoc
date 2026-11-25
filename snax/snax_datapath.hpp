@@ -30,7 +30,7 @@
 //
 //   SimdLanes(inTypes, opType, outType, lanes, op[, k])   L 0: per lane
 //       a op b at opType, cast to outType (snax_op_elementwise_at); with one
-//       input (one stream), op(a, k) with the constant k at opType, a's type
+//       input (one stream), op(a, k) with the constant k at opType (holding a's type)
 //       (snax_op_elementwise_k); at op axpby, k1 * a + k2 * b (+ b without k2)
 //       at opType (snax_op_axpby). A slot read from its CSR (k at one stream,
 //       k1, k2) takes its value at each start (set_scalar), as the shell
@@ -519,10 +519,10 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
             }
             else if (p.has_k)
             {
-                if (p.in_types.size() != 1 || p.op_type.width != p.in_types[0].width ||
-                    p.op_type.is_signed != p.in_types[0].is_signed)
+                // NB (D175): a k from its CSR has opType's width, so the op may be wider than a
+                if (p.in_types.size() != 1 || !snax_holds(p.op_type, p.in_types[0]))
                 {
-                    *why = "one input with k, at its own type";
+                    *why = "one input with k, at an opType that holds its type";
                     return std::unique_ptr<SnaxDatapath>();
                 }
             }

@@ -1461,12 +1461,13 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
             raise CfgTypeError(node.file, node.where('groups'),
                 f'unit {u.name}: opType {u.op_type}; a {u.datapath} unit has none')
         return
-    if n_in == 1:  # one stream: the op at a's type, with the constant k
+    if n_in == 1:  # one stream: a cast to opType, then the op with k
         a = (ins[0].width, ins[0].signed)
-        if u.op_type != type_name(*a):
+        # NB (D175): a k from its CSR has opType's width, so the op may be wider than a
+        if result_type(DTYPES[u.op_type], a) != DTYPES[u.op_type]:
             raise CfgSlotError(node.file, node.where('groups'),
-                f'unit {u.name}: opType {u.op_type}, but its one input is {type_name(*a)} (the op '
-                'runs at it with k)')
+                f'unit {u.name}: opType {u.op_type} does not hold its one input\'s type '
+                f'{type_name(*a)}')
         return
     a, b = ((p.width, p.signed) for p in ins[:2])
     t = result_type(a, b)

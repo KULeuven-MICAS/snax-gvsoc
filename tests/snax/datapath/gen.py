@@ -108,17 +108,21 @@ def axpby(name, t_a, t_b, t_out, lanes, k1, k2, steps=6):
     return t
 
 
-def simd_kcsr(name, op, t_a, lanes, steps=6):
-    """A one-stream SimdLanes with k read from its CSR (kcsr): a random k set before each step."""
-    t = Test(name, "SimdLanes", [t_a], t_a, t_a, lanes, op=op)
+def simd_kcsr(name, op, t_a, lanes, steps=6, t_op=None):
+    """A one-stream SimdLanes with k read from its CSR (kcsr): a random k set before each step;
+    the op at t_op (a's type unless given: a wider one holds a, gesummv's int8 scale by an int32
+    alpha), out at t_op."""
+    t_op = t_op or t_a
+    t = Test(name, "SimdLanes", [t_a], t_op, t_op, lanes, op=op)
     t.lines.append("kcsr")
     for _ in range(steps):
-        k = int(rand(t_a, 1)[0])
+        k = int(rand(t_op, 1)[0])
         t.lines.append(f"set k {k}")
-        a, y = rand(t_a, lanes), NP[t_a](k)
-        r = {"add": a + y, "sub": a - y, "mul": a * y, "min": np.minimum(a, y),
-             "max": np.maximum(a, y)}[op]
-        t.step(en(fire=1), [a], wrap(r, t_a))
+        a, y = rand(t_a, lanes), NP[t_op](k)
+        x = a.astype(NP[t_op])
+        r = {"add": x + y, "sub": x - y, "mul": x * y, "min": np.minimum(x, y),
+             "max": np.maximum(x, y)}[op]
+        t.step(en(fire=1), [a], wrap(r, t_op))
     return t
 
 
@@ -456,6 +460,12 @@ def main():
             for lanes in (4, 8):
                 tests.append(mac_bank(f"mac_bank_seed_r{rows}_int8_to_int32_w{lanes}", "int8",
                                       "int32", lanes, rows, 2 * rows, seed=True))
+    # one stream with k from its CSR at an opType wider than a (gesummv's literal scale: A at
+    # int8 times alpha at int32); drawn last, so the tests above stay as they were
+    with np.errstate(over="ignore"):
+        for op in ("mul", "add", "max"):
+            tests.append(simd_kcsr(f"simd_kcsr_{op}_int8_at_int32_w8", op, "int8", 8, t_op="int32"))
+        tests.append(simd_kcsr("simd_kcsr_mul_int16_at_int64_w4", "mul", "int16", 4, t_op="int64"))
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))
