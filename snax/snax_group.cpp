@@ -42,13 +42,16 @@
 //                                   as one lane a beat and given to all lanes
 //                                   (snax_group.hpp's snax_broadcast), so
 //                                   its words and d_in count one lane; never
-//                                   a linked input or the seed; absent, false
-//                hold               optional, per input: a broadcast outer input
+//                                   the seed, linked only when held; absent,
+//                                   false
+//                hold               optional, per input: a broadcast input
 //                                   of a bank, read once a row and kept:
 //                                   its beat moved only on a row's first firing
 //                                   (the rule's take), the unit using the beat
-//                                   it holds on the others; never linked, the
-//                                   seed or forked; absent, false
+//                                   it holds on the others; outer, or a held
+//                                   link's (its one-lane beat popped into the
+//                                   hold register); never the seed or forked;
+//                                   absent, false
 //                rows               optional: a Mac's bank rows R, its
 //                                   ROWS from the start; absent, 1
 //                carry              optional: its seed is carried, the
@@ -74,9 +77,16 @@
 //   links      the edges between the units, each an object: from and to, the
 //              producer's and the consumer's names; to_input, the consumer's
 //              input it feeds (an index in its inputs, one left ""); depth, 0 a
-//              wire, >= 1 a buffer (a LinkBuffer of that many beats). The
-//              edges are chains, joined by the forked inputs: SnaxGroupRule
-//              refuses a fork or a join of links, and chains no fork joins
+//              wire, >= 1 a buffer (a LinkBuffer of that many beats); hold,
+//              optional, true into a held input (a buffer of one-lane beats,
+//              taken once a bank row). The edges are chains, joined by the
+//              forked inputs: SnaxGroupRule refuses a fork or a join of links,
+//              and chains no fork joins
+//   fork_links optional: a fork's buffered branches, each an object: fork, the
+//              forked input's port name (its reader's); to and to_input, the
+//              consumer (after every unit of the fork) and its input left "";
+//              depth >= 1, the LinkBuffer the fork's taken beats enter, one an
+//              entry, popped by the consumer's firings (snax_group.hpp)
 //   csr_base   the group's first CSR, for the trace
 //
 // Ports:
@@ -270,6 +280,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
     std::vector<std::string> names;
     std::vector<SnaxDatapathParams> params;
     std::vector<std::vector<int>> linked(units.size());     // per unit, its inputs left ""
+    std::vector<std::vector<bool>> held_link(units.size()); // per unit and input: a held link's
     std::vector<int> outputs;
     size_t at = 0;
     std::string described;
@@ -349,18 +360,18 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
                 std::to_string(i) + "]");
             bool hold = holds && this->props.as_bool(kept[i], w + ".hold[" + std::to_string(i) +
                 "]");
-            if (hold && (port.empty() || is_seed || !broadcast || p.rows < 2))
+            if (hold && (is_seed || !broadcast || p.rows < 2))
             {
                 this->trace.fatal("Property %s.hold[%ld]: true, but a held input is a broadcast "
-                    "outer input of a bank (rows above 1), not a linked one or the seed\n",
-                    w.c_str(), i);
+                    "input of a bank (rows above 1), not the seed\n", w.c_str(), i);
             }
-            held = held || hold;
-            if (broadcast && (port.empty() || is_seed || p.lanes < 2))
+            held = held || (hold && !port.empty());
+            if (broadcast && ((port.empty() && !hold) || is_seed || p.lanes < 2))
             {
-                this->trace.fatal("Property %s.broadcast[%ld]: true, but a broadcast is an outer "
-                    "input of 2 lanes or more, not a linked one or the seed\n", w.c_str(), i);
+                this->trace.fatal("Property %s.broadcast[%ld]: true, but a broadcast is an input "
+                    "of 2 lanes or more, outer or a held link's, not the seed\n", w.c_str(), i);
             }
+            held_link[k].push_back(hold && port.empty());
             // the lanes its stream moves a beat: one for a broadcast, a seed its output's
             int lanes = broadcast ? 1 : is_seed ? snax_seed_lanes(datapath, p.lanes) : p.lanes;
             if ((d_in != 1 && d_in != 2 && d_in != 4 && d_in != 8) ||
@@ -572,6 +583,8 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         }
         e.to_input = this->props.int_prop(links[i], "to_input", w);
         e.depth = this->props.int_prop(links[i], "depth", w);
+        js::Config *hold_prop = links[i]->get("hold");
+        e.hold = hold_prop && this->props.as_bool(hold_prop, w + ".hold");
         if (e.depth < 0)
         {
             this->trace.fatal("Property %s.depth: %d, must be 0 or more\n", w.c_str(), e.depth);
@@ -587,29 +600,100 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             this->trace.fatal("Property %s.to_input: %d; units[%d].inputs[%d] is not an input "
                 "left \"\", or another link feeds it\n", w.c_str(), e.to_input, e.to, e.to_input);
         }
+        if (e.hold != held_link[e.to][e.to_input] || (e.hold && e.depth < 1))
+        {
+            this->trace.fatal("Property %s.hold: %d, units[%d].hold[%d] %d, depth %d; a held "
+                "link, a buffer of depth 1 or more, feeds a held input\n", w.c_str(), e.hold,
+                e.to, e.to_input, (int)held_link[e.to][e.to_input], e.depth);
+        }
+        // NB (D197): a held link's beat is one lane, broadcast from the hold register
+        const SnaxType &type = params[e.to].in_types[e.to_input];
+        const int lanes = e.hold ? 1 : params[e.to].lanes;
         const SnaxDatapath *src = this->data.units[e.from].get();
         const SnaxDatapath *dst = this->data.units[e.to].get();
-        if (src->out_words != dst->in_words[e.to_input])
+        int takes = e.hold ? snax_words(1, type) : dst->in_words[e.to_input];
+        if (src->out_words != takes)
         {
             this->trace.fatal("Property %s: the link carries %d words a beat, units[%d].inputs[%d] "
-                "takes %d\n", w.c_str(), src->out_words, e.to, e.to_input,
-                dst->in_words[e.to_input]);
+                "takes %d\n", w.c_str(), src->out_words, e.to, e.to_input, takes);
         }
         std::unique_ptr<SnaxDatapath> buffer;
         if (e.depth > 0)
         {
             SnaxDatapathParams b;
-            b.in_types = {params[e.to].in_types[e.to_input]};
-            b.out_type = params[e.to].in_types[e.to_input];
-            b.lanes = params[e.to].lanes;
+            b.in_types = {type};
+            b.out_type = type;
+            b.lanes = lanes;
             b.depth = e.depth;
             std::string why;
             buffer = snax_datapath_new("LinkBuffer", b, &why);
         }
         this->data.buffers.push_back(std::move(buffer));
+        this->data.held.push_back({e.hold ? params[e.to].lanes : 0, type});
         edges.push_back(e);
         described += "; " + names[e.from] + " -> " + names[e.to] + " depth " +
-            std::to_string(e.depth);
+            std::to_string(e.depth) + (e.hold ? " held" : "");
+    }
+
+    // The fork links: a forked input's beat through a buffer into an input left "" of a unit
+    // further down a chain
+    js::Config *fork_prop = this->get_js_config()->get("fork_links");
+    std::vector<js::Config *> fork_links = fork_prop ? this->props.as_list(fork_prop,
+        "fork_links") : std::vector<js::Config *>();
+    std::vector<SnaxGroupRule::ForkLink> branches;
+    std::vector<size_t> branch_in;      // per fork link, its forked input (in_itf index)
+    for (size_t i = 0; i < fork_links.size(); i++)
+    {
+        std::string w = "fork_links[" + std::to_string(i) + "]";
+        SnaxGroupRule::ForkLink e;
+        std::string fork = this->props.str_prop(fork_links[i], "fork", w);
+        std::string to = this->props.str_prop(fork_links[i], "to", w);
+        size_t x = std::find_if(this->in_itf.begin(), this->in_itf.end(),
+            [&](const OuterIn &o) { return o.name == fork; }) - this->in_itf.begin();
+        e.to = std::find(names.begin(), names.end(), to) - names.begin();
+        if (x == this->in_itf.size() || this->in_itf[x].seed || this->in_itf[x].hold ||
+            e.to == (int)names.size())
+        {
+            this->trace.fatal("Property %s: fork \"%s\" to \"%s\": a fork link goes from an outer "
+                "input of the group (not a seed, not held) to one of its units\n", w.c_str(),
+                fork.c_str(), to.c_str());
+        }
+        const OuterIn &o = this->in_itf[x];
+        e.to_input = this->props.int_prop(fork_links[i], "to_input", w);
+        e.depth = this->props.int_prop(fork_links[i], "depth", w);
+        bool is_open = false;
+        for (int y : linked[e.to])
+        {
+            is_open = is_open || y == e.to_input;
+        }
+        if (!is_open || fed[e.to][e.to_input]++ || e.depth < 1)
+        {
+            this->trace.fatal("Property %s: to_input %d, depth %d; units[%d].inputs[%d] is not an "
+                "input left \"\", or another link feeds it, or the depth is below 1\n", w.c_str(),
+                e.to_input, e.depth, e.to, e.to_input);
+        }
+        const std::vector<size_t> &head_ins = this->unit_ins[o.units[0]];
+        e.from_input = std::find(head_ins.begin(), head_ins.end(), x) - head_ins.begin();
+        const SnaxType &type = params[e.to].in_types[e.to_input];
+        int words = o.broadcast ? snax_words(o.lanes, o.type) : o.words;
+        if (o.type.width != type.width || o.type.is_signed != type.is_signed ||
+            words != this->data.units[e.to]->in_words[e.to_input] || held_link[e.to][e.to_input])
+        {
+            this->trace.fatal("Property %s: the fork's beat is %d words of %d bits, "
+                "units[%d].inputs[%d] takes %d of %d bits (not held)\n", w.c_str(), words,
+                o.type.width, e.to, e.to_input, this->data.units[e.to]->in_words[e.to_input],
+                type.width);
+        }
+        SnaxDatapathParams b;
+        b.in_types = {type};
+        b.out_type = type;
+        b.lanes = params[e.to].lanes;
+        b.depth = e.depth;
+        std::string why;
+        this->data.fork_buffers.push_back(snax_datapath_new("LinkBuffer", b, &why));
+        branches.push_back(e);
+        branch_in.push_back(x);
+        described += "; " + fork + " to " + to + " through " + std::to_string(e.depth);
     }
     for (size_t k = 0; k < units.size(); k++)
     {
@@ -622,11 +706,18 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             }
         }
     }
+    // the forks: an input of two or more units, or one with a fork link
     std::vector<std::vector<int>> forks;
-    for (const OuterIn &o : this->in_itf)
+    for (size_t x = 0; x < this->in_itf.size(); x++)
     {
-        if (o.units.size() > 1)
+        const OuterIn &o = this->in_itf[x];
+        bool branched = std::find(branch_in.begin(), branch_in.end(), x) != branch_in.end();
+        if (o.units.size() > 1 || branched)
         {
+            for (size_t i = 0; i < branches.size(); i++)
+            {
+                branches[i].fork = branch_in[i] == x ? (int)forks.size() : branches[i].fork;
+            }
             forks.emplace_back(o.units.begin(), o.units.end());
             described += "; " + o.name + " forked to";
             for (size_t k : o.units)
@@ -635,7 +726,7 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             }
         }
     }
-    std::string refused = this->rule.configure(cfgs, edges, outputs, forks);
+    std::string refused = this->rule.configure(cfgs, edges, outputs, forks, branches);
     if (!refused.empty())
     {
         this->trace.fatal("Property units, links: %s\n", refused.c_str());
@@ -808,7 +899,7 @@ vp::IoReqStatus SnaxGroup::ctrl_req(vp::Block *__this, vp::IoReq *req)
                 cycle, k, slot.first.c_str(), bits);
         }
     }
-    for (uint64_t n : _this->rule.firings_for(jobs, ts))
+    for (uint64_t n : _this->rule.firings_for(jobs, ts, rows))
     {
         if (n > UINT32_MAX)
         {

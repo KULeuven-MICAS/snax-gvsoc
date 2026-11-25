@@ -67,7 +67,8 @@ accelerator.json, what the standard composite
       groups[]                Group: name, csrs (START, JOBS, STATUS,
                               BUSY_COUNTER; with several chains a
                               JOBS_<SINK> per chain in place of JOBS, in the
-                              order of their sinks), units, links
+                              order of their sinks), units, links,
+                              fork_links (optional)
     groups[].units[]          Unit: name, brm, datapath (a unit datapath of
                               snax_datapath.hpp's registry: SimdLanes,
                               TreeAccumulate, Mac, SerialAccumulate,
@@ -95,6 +96,9 @@ accelerator.json, what the standard composite
                               width the type's bits, 32 a word)
     groups[].links[]          Link: name, from (an out port, "<unit>.<port>"),
                               to (an in port), depth (0 a wire, >= 1 a buffer)
+    groups[].fork_links[]     ForkLink: name, to (a forked in port, not its
+                              reader's first), depth (>= 1): the fork's beat
+                              through a ring buffer of that many beats
     a CSR                     Csr: name, access (rw, ro), offset (from the
                               accelerator's first CSR), width (its bits, every
                               CSR: START 1, JOBS and JOB_BEATS job_width, STATUS
@@ -115,14 +119,16 @@ one snax_streamer_cfg takes one accelerator, whatever its name); each
 accelerator's inputs and outputs are its set's readers and writers in number;
 they are exactly the ports on no link, group by group, unit by unit in port
 order, a fork's at its reader's place (gen.outer), each link goes from an out port to an in port of its
-group's units with the same dtype and lanes, neither end sliced nor packed
+group's units with the same dtype and lanes, neither end sliced nor packed nor a
+broadcast, but a held broadcast bank input, the link's one lane, of depth 1 or more
+(gen.link), a fork link goes to a forked port but its reader's first, of depth 1 or more
 (gen.link), no port is on two links (gen.link_port), a group's links and
 forks connect its units (gen.group), and a fork gives one reader to two or more
 outer inputs of one group's chain heads, alike in dtype, lanes, d_in and
 broadcast (gen.fork; never beside shared movers, gen.share), the
 codes snax-forge's reader gives; each outer port's words per beat (lanes *
 its dtype's bits / 64) are its mover's num_channel (a fold's one-lane output:
-1); a held input (``hold``) is a broadcast outer input of a bank, read
+1); a held input (``hold``) is a broadcast input of a bank (outer, or a held link's), read
 once a row, and a carried seed (``carry``) a seed, 0 before CARRY jobs
 (gen.args, gen.hold, gen.seed); an outer output with d_out fills one
 word with d_out results, on one channel, through SnaxGroup's packer; an outer input with d_in takes one
@@ -501,14 +507,25 @@ class Link:
 
 
 @dataclass(frozen=True)
+class ForkLink:
+    """A fork's buffered branch: ``to`` a forked in port, not its reader's first, fed through
+    a ring buffer of ``depth`` beats, one pushed each beat the fork takes."""
+
+    name: str
+    to: str
+    depth: int
+
+
+@dataclass(frozen=True)
 class Group:
     """A group: its own CSRs (START, JOBS or a JOBS_<SINK> per chain, STATUS,
-    BUSY_COUNTER), its units and links."""
+    BUSY_COUNTER), its units and links, and its forks' buffered branches."""
 
     name: str
     csrs: list
     units: list
     links: list
+    fork_links: list = field(default_factory=list)
 
     @property
     def window(self) -> list:
@@ -1070,8 +1087,17 @@ def _link(node: _Node) -> Link:
                 depth=depth)
 
 
+def _fork_link(node: _Node) -> ForkLink:
+    depth = node.get('depth', int)
+    if depth < 1:
+        raise CfgSlotError(node.file, node.where('depth'),
+                           f"gen.link: depth {depth}; a fork's branch is a buffer, depth 1 or more")
+    return ForkLink(name=node.get('name', str), to=node.get('to', str), depth=depth)
+
+
 def _group(node: _Node) -> Group:
     links = [_link(k) for k in node.nodes('links')]
+    fork_links = [_fork_link(k) for k in node.nodes('fork_links', [])]
     units = [_unit(u) for u in node.nodes('units')]
     if not units:
         raise CfgTypeError(node.file, node.where('units'), 'no unit')
@@ -1092,7 +1118,8 @@ def _group(node: _Node) -> Group:
             if c.name == 'CARRY' and c.width != jobs_width:
                 raise CfgSlotError(node.file, f'{node.where("units")}[{k}].csrs',
                     f'CARRY: width {c.width}; it counts jobs, as JOBS ({jobs_width} bits)')
-    return Group(name=node.get('name', str), csrs=csrs, units=units, links=links)
+    return Group(name=node.get('name', str), csrs=csrs, units=units, links=links,
+                 fork_links=fork_links)
 
 
 def _mover(node: _Node) -> SharedMover:
@@ -1283,22 +1310,36 @@ def _check_links(node: _Node, acc: Accelerator):
             if a is None or b is None or a[1] != 'out' or b[1] != 'in':
                 fail('groups', f'{what} goes from {k.from_} to {k.to}; a link goes from an out '
                      'port to an in port of the group\'s units')
-            if (a[0].dtype, a[0].lanes) != (b[0].dtype, b[0].lanes):
+            # NB (D197): a held link's beat is one lane, kept a bank row and broadcast
+            lanes = 1 if b[0].broadcast and b[0].hold else b[0].lanes
+            if (a[0].dtype, a[0].lanes) != (b[0].dtype, lanes):
                 fail('groups', f'{what}: {k.from_} is {a[0].lanes} lanes of {a[0].dtype}, '
-                     f'{k.to} {b[0].lanes} of {b[0].dtype}; both ends are the same')
+                     f'{k.to} {lanes} of {b[0].dtype}; both ends are the same')
             for end, p in ((k.from_, a[0]), (k.to, b[0])):
                 if p.d_in > 1 or p.d_out > 1:
                     fail('groups', f'{what}: {end} has d_in {p.d_in} and d_out {p.d_out}; a '
                          'linked port has no slicer or packer, so both are 1 (absent)')
-                if p.broadcast:
+                if p.broadcast and not p.hold:
                     fail('groups', f'{what}: {end} is a broadcast; a linked port takes its '
-                         'lanes from the link, so it is not one (absent)')
+                         'lanes from the link, so it is not one unless held for a bank row '
+                         '(absent)')
+            if b[0].hold and k.depth < 1:
+                fail('groups', f'{what}: depth {k.depth} into {k.to}, held for a bank row; a '
+                     'held link is a buffer, depth 1 or more')
             for end in (k.from_, k.to):
                 if end in linked:
                     fail('groups', f'gen.link_port: group {g.name}\'s link {k.name}: port {end} '
                          'is on another link too')
                 linked.add(end)
             parent[root(k.from_.split('.')[0])] = root(k.to.split('.')[0])
+        for k in g.fork_links:
+            what = f'gen.link: group {g.name}\'s fork link {k.name}'
+            if not any(k.to in f[1:] for f in acc.forks) or k.to not in ports:
+                fail('groups', f"{what} goes to {k.to}; a fork's buffered branch goes to a "
+                     "forked port of the group, not its reader's first")
+            if k.to in linked:
+                fail('groups', f'gen.link_port: group {g.name}\'s fork link {k.name}: port '
+                     f'{k.to} is on another link too')
         for f in acc.forks:
             mine = [x.split('.')[0] for x in f if x.split('.')[0] in parent]
             for u in mine[1:]:
@@ -1365,7 +1406,8 @@ def _check_links(node: _Node, acc: Accelerator):
 
 def _check_fork(node: _Node, acc: Accelerator, f: list, outer: list):
     """gen.fork, snax-forge's in its wording: a forked input's ports, two or more outer
-    inputs of one group's chain heads, alike in dtype, lanes, slicing and broadcast."""
+    inputs of one group's chain heads (or a port down a chain behind a buffer, a fork link),
+    alike in dtype, lanes, slicing and broadcast."""
     def fail(why):
         raise CfgSlotError(node.file, node.where('inputs'), f'gen.fork: {what}: {why}')
 
@@ -1377,8 +1419,9 @@ def _check_fork(node: _Node, acc: Accelerator, f: list, outer: list):
     if len({group_of[x.split('.')[0]].name for x in f}) > 1:
         fail('its ports are in several groups; a fork feeds the chains of one group')
     fed = {k.to.split('.')[0] for g in acc.groups for k in g.links}
+    buffered = {k.to for g in acc.groups for k in g.fork_links}
     for x in f:
-        if x.split('.')[0] in fed:
+        if x.split('.')[0] in fed and x not in buffered:
             fail(f"{x}'s unit is fed by a link; a fork feeds the heads of chains")
     kinds = {(port[x].dtype, port[x].lanes, port[x].d_in, port[x].broadcast) for x in f}
     if len(kinds) > 1:

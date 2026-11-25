@@ -154,6 +154,83 @@ class Bank(unittest.TestCase):
             self.mac().run(1, [5], lambda c: (1, 1), lambda c: 1, 4)
 
 
+class Atax(unittest.TestCase):
+    """atax's one group: vmul -> sum gives t[i] once a row into mac's bank over a held link
+    (y += A[i] t[i]); mac reads A again, or takes vmul's forked A through a buffer of depth D.
+    T = N // W beats a row, the bank has ROWS = T rows, M rows of A."""
+
+    def units(self, rows, mac_inputs):
+        return [unit("vmul"), unit("sum", L=1, inputs=0),
+                dict(unit("mac", L=1, inputs=mac_inputs), rows=rows)]
+
+    def links(self, depth=1):
+        return [link("vmul", "sum", 1), dict(link("sum", "mac", depth, 1), hold=True)]
+
+    def two_reads(self, m, rows):
+        g = GroupRule(self.units(rows, 1), self.links())
+        return g, g.run(1, [1, rows, m * rows], lambda c: (1, 1, 1), lambda c: 1, 2000)[1]
+
+    def one_read(self, m, rows, depth):
+        g = GroupRule(self.units(rows, 0), self.links(),
+                      forks=[[("vmul", 0)]], fork_links=[{"fork": 0, "to": "mac", "to_input": 0,
+                                                          "depth": depth}])
+        return g.run(1, [1, rows, m * rows], lambda c: (1, 1), lambda c: 1, 2000)[1]
+
+    def test_t_is_taken_once_a_row(self):
+        # sum fires T times a row and gives once; mac fires T times a row and takes t once
+        for m, rows in ((3, 2), (64, 8), (64, 4)):
+            g, end = self.two_reads(m, rows)
+            with self.subTest(m=m, rows=rows):
+                self.assertEqual(g.firings_per_run(1, [1, rows, m * rows]), [m * rows] * 3)
+                self.assertIsNotNone(end)
+                # t[0] after vmul's T beats and sum's latency, then one row a T cycles
+                self.assertEqual(end, rows + 3 + m * rows)
+
+    def test_a_buffer_of_t_plus_2_runs_as_a_second_read(self):
+        for m, rows in ((3, 2), (64, 8), (64, 4)):
+            with self.subTest(m=m, rows=rows):
+                self.assertEqual(self.one_read(m, rows, rows + 2), self.two_reads(m, rows)[1])
+
+    def test_a_buffered_branch_joins_two_chains(self):
+        # t still from L1: the Mac a chain of its own, A through the buffer (atax_v4 before t's link)
+        g = GroupRule(self.units(2, 1), [link("vmul", "sum", 1)], forks=[[("vmul", 0)]],
+                      fork_links=[{"fork": 0, "to": "mac", "to_input": 0, "depth": 4}])
+        self.assertEqual(g.firings_per_run([3, 1], [1, 2, 6]), [6, 6, 6])  # M t[i], one y
+        self.assertIsNotNone(g.run([3, 1], [1, 2, 6], lambda c: (1, 1, 1), lambda c: [1, 1], 2000)[1])
+
+    def test_a_sliced_input_beside_the_buffer(self):
+        # vmul's A and x two slices to a word (int8 at W = 4): the buffer runs beside the slicers
+        g = GroupRule(self.units(2, 0), self.links(), forks=[[("vmul", 0)]],
+                      fork_links=[{"fork": 0, "to": "mac", "to_input": 0, "depth": 4}])
+        _, end = g.run(1, [1, 2, 6], lambda c: (1, 1), lambda c: 1, 2000, 1, [2, 2])
+        self.assertIsNotNone(end)
+
+    def test_a_buffer_of_t_stalls(self):
+        for m, rows in ((3, 2), (64, 8)):
+            end = self.one_read(m, rows, rows)
+            with self.subTest(m=m, rows=rows):
+                self.assertIsNotNone(end)
+                self.assertGreater(end, self.two_reads(m, rows)[1])
+
+    def test_a_buffer_below_t_never_ends(self):
+        # NB (D196): LOWER refuses D < T; the fork waits for room that mac's first t never frees
+        for m, rows in ((3, 2), (64, 8)):
+            with self.subTest(m=m, rows=rows):
+                self.assertIsNone(self.one_read(m, rows, rows - 1))
+
+    def test_refused(self):
+        with self.assertRaisesRegex(GroupError, "a held link is a buffer into a bank"):
+            GroupRule(self.units(1, 1), self.links())
+        with self.assertRaisesRegex(GroupError, "a held link is a buffer into a bank"):
+            GroupRule(self.units(2, 1), self.links(depth=0))
+        for depth, text in ((0, "a buffer of depth 1 or more"),
+                            (2, "not after the fork's units")):
+            to = "mac" if depth == 0 else "vmul"
+            with self.subTest(depth=depth), self.assertRaisesRegex(GroupError, text):
+                GroupRule(self.units(2, 0), self.links(), forks=[[("vmul", 0)]],
+                          fork_links=[{"fork": 0, "to": to, "to_input": 0, "depth": depth}])
+
+
 def unit_case(path):
     """A unit case's header and its cycle lines: per cycle the input valids, the output's
     ready, then the expected fire, push and busy."""

@@ -1,5 +1,5 @@
 # mac with a seeded bank of 2 rows, b held, M = 3: T = 6, JOBS 2
-# each job's first 2 firings take a seed beat, one a row; the cycles as unseeded
+# each job's first 2 firings take a seed beat, one a row; with every seed there none waits
 
 unit mac Mac latency 1 ii 1 span 1 t 6 inputs 3 seed 1 rows 2 hold 1
 jobs 2

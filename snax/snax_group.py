@@ -39,8 +39,14 @@ class SnaxGroup(gvsoc.systree.Component):
     links : list[dict]
         Each link an edge: from and to (the producer's and the consumer's
         names), to_input (the consumer's input it feeds, an index in its
-        inputs) and depth (0 a wire, >= 1 a buffer). Chains joined by forked
-        inputs, no fork or join of links.
+        inputs), depth (0 a wire, >= 1 a buffer) and hold (optional, true:
+        a buffer into a bank's held broadcast input, popped once a row).
+        Chains joined by forked inputs, no fork or join of links.
+    fork_links : list[dict]
+        Optional, a fork's buffered branches, each fork (the forked input's port name,
+        its reader's), to and to_input (the consumer, after the fork's units,
+        and its input, one left "") and depth (>= 1): the fork's beat
+        through a ring of that many beats.
     csr_base : int
         Number of its group's first CSR, for the trace.
 
@@ -61,7 +67,7 @@ class SnaxGroup(gvsoc.systree.Component):
     SOURCES = ['snax_group.cpp']
 
     def __init__(self, parent: gvsoc.systree.Component, name: str, units: list, links: list,
-            csr_base: int = 0):
+            csr_base: int = 0, fork_links: list = ()):
         super().__init__(parent, name)
 
         self.add_sources(self.SOURCES)
@@ -70,6 +76,8 @@ class SnaxGroup(gvsoc.systree.Component):
             'units': [dict(u) for u in units],
             'links': [dict(x) for x in links],
             'csr_base': csr_base,
+            # written only when there is one, so every other group's properties stay as they were
+            **({'fork_links': [dict(x) for x in fork_links]} if fork_links else {}),
         })
 
     def i_CTRL(self) -> gvsoc.systree.SlaveItf:

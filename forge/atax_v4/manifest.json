@@ -1,0 +1,28 @@
+{
+ "design": "atax_v4",
+ "design_point": "out/design/atax_v4/design_point.json",
+ "symbols": {"M": 4, "N": 8},
+ "cluster": "snax_forge.hjson",
+ "files": ["snax_forge.hjson", "snax_forge_atax_v4_streamer_atax.hjson", "accelerator.json", "include/streamer_atax_csr_addr_map.h", "include/atax_csr.h", "include/snitch_cluster_cfg.h", "include/snitch_cluster_addrmap.h", "data.h", "main.c", "obs_marks.json", "manifest.json"],
+ "program": "main.c",
+ "trace": "snax_acc0/group_atax",
+ "csrs": {
+  "streamers": [{"name": "atax", "first": 960, "last": 983, "trace": "snax_acc0/streamer_atax"}],
+  "accelerator": {
+   "ATAX_RW_START": 984,
+   "ATAX_RW_JOBS": 985,
+   "ATAX_RW_SUM_JOB_BEATS": 986,
+   "ATAX_RW_MAC_JOB_BEATS": 987,
+   "ATAX_RW_MAC_ROWS": 988,
+   "ATAX_RO_STATUS": 989,
+   "ATAX_RO_BUSY_COUNTER": 990
+  }
+ },
+ "tasks": [
+  {
+   "name": "tmp2_mult_atax",
+   "beats": 8,
+   "csrs": {"JOBS": 1, "SUM_JOB_BEATS": 2, "MAC_JOB_BEATS": 8, "MAC_ROWS": 2}
+  }
+ ]
+}

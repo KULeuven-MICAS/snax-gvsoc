@@ -37,6 +37,7 @@ One folder per integration feature (snax-forge's D195), each at the smallest siz
 | `mvt_v5_sequential` | two accelerators in two streamer sets, a seeded `Mac` with y2 broadcast, A read a strip of 8 columns at a time |
 | `mvt_v6` | the one pass over A: one reader forked to two chains, a seeded `Mac` bank of R = 8 rows (`ROWS`), y2 read once a row and held |
 | `bicg_v4_1` | the one pass in two strips of a bank of R = 4 rows, q's seed carried from the first strip to the second (`CARRY`), A and p sliced 2 from a word, q packed 2 to a word |
+| `atax_v4` | atax's one group at M = 4, N = 8, W = 4: t = A x from the sum over a held link into the `Mac` bank's broadcast `b` (R = 2 rows, `ROWS`), A read once and forked to `mul.a` and through a fork link of depth 4 to `mac.a` (`fork_links`), y = Aᵀ t; A and x sliced 2 from a word |
 
 ## Refreshing a folder
 

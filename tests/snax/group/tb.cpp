@@ -36,7 +36,14 @@
 // alone or as the fork's Mac, runs its datapath on r held a row: each
 // result is the bank row its giving firing wrote, its sums worked out here;
 // seeded, each row of a job starts from the seed beat its first firing
-// took, int32 lanes seed_of(n * 4 + l) for the n-th beat taken.
+// took, int32 lanes seed_of(n * 4 + l) for the n-th beat taken. A case of
+// atax's one group (vmul -> sum -> a held link -> a banked Mac, mac.a A
+// again from its own reader or through a fork buffer) runs its datapaths on
+// 4 lanes of int8 A and x: each t from the sum against its row of A x, each
+// bank row against y = A^T t, t broadcast from the link's hold register.
+// A forkbuf line is a fork link (the case's occupancy columns after the
+// links'); a unit's inputs are its outer ones but its seed, its fork links',
+// its link's, then its seed.
 //
 //   tb CASE...
 //
@@ -84,6 +91,7 @@ struct Case
     std::vector<UnitLine> units;
     std::vector<SnaxGroupRule::Link> links;
     std::vector<std::vector<std::pair<int, int>>> forks;   // per fork, its (unit, input)s
+    std::vector<SnaxGroupRule::ForkLink> fork_links;        // forkbuf lines
     std::vector<int> outputs;           // the outputs' units, in the order of jobs and R
     std::vector<uint32_t> jobs = {1};   // one per output
     std::vector<std::vector<int>> place;    // per unit and outer input, its V column
@@ -186,7 +194,7 @@ static bool parse(const std::string &path, Case &c)
         {
             // V... READY | F G | F G ... | OCC... | BUSY
             std::vector<std::string> cols = fields(line, '|');
-            size_t buffers = 0;
+            size_t buffers = c.fork_links.size();
             for (const SnaxGroupRule::Link &e : c.links)
             {
                 buffers += e.depth > 0;
@@ -283,12 +291,17 @@ static bool parse(const std::string &path, Case &c)
         }
         else if (key == "link")
         {
-            // link FROM TO depth D
-            std::string from, to, k1;
+            // link FROM TO depth D [hold]
+            std::string from, to, k1, k2;
             int depth;
             SnaxGroupRule::Link e;
             e.from = e.to = -1;
             ok = (bool)(ss >> from >> to >> k1 >> depth) && k1 == "depth" && depth >= 0;
+            if (ok && ss >> k2)
+            {
+                e.hold = k2 == "hold";
+                ok = e.hold && !(ss >> k2);
+            }
             for (size_t k = 0; k < c.units.size(); k++)
             {
                 e.from = c.units[k].name == from ? (int)k : e.from;
@@ -297,8 +310,7 @@ static bool parse(const std::string &path, Case &c)
             ok = ok && e.from != -1 && e.to != -1;
             if (ok)
             {
-                e.to_input = c.units[e.to].inputs - (int)c.units[e.to].seed;
-                e.depth = depth;
+                e.depth = depth;     // its to_input once every line is read
                 c.links.push_back(e);
             }
         }
@@ -330,8 +342,27 @@ static bool parse(const std::string &path, Case &c)
                 ok = k >= 0 && i >= 0 && i < c.units[k].inputs;
                 f.push_back({k, i});
             }
-            ok = ok && f.size() >= 2;
+            ok = ok && !f.empty();
             c.forks.push_back(f);
+        }
+        else if (key == "forkbuf")
+        {
+            // forkbuf F TO depth D: fork F's beat through a buffer of depth D into unit TO
+            std::string to, k1;
+            SnaxGroupRule::ForkLink e;
+            e.to = -1;
+            ok = (bool)(ss >> e.fork >> to >> k1 >> e.depth) && k1 == "depth" && e.fork >= 0 &&
+                e.fork < (int)c.forks.size();
+            for (size_t k = 0; k < c.units.size(); k++)
+            {
+                e.to = c.units[k].name == to ? (int)k : e.to;
+            }
+            ok = ok && e.to != -1;
+            if (ok)
+            {
+                e.from_input = c.forks[e.fork][0].second;
+                c.fork_links.push_back(e);
+            }
         }
         else if (key == "outputs")
         {
@@ -405,6 +436,20 @@ static bool parse(const std::string &path, Case &c)
         return false;
     }
     valid_columns(c);
+    // A unit's inputs: its outer ones but its seed, then its fork links', then its link's,
+    // then its seed
+    for (size_t k = 0; k < c.units.size(); k++)
+    {
+        int next = c.units[k].inputs - (int)c.units[k].seed;
+        for (SnaxGroupRule::ForkLink &e : c.fork_links)
+        {
+            e.to_input = e.to == (int)k ? next++ : e.to_input;
+        }
+        for (SnaxGroupRule::Link &e : c.links)
+        {
+            e.to_input = e.to == (int)k ? next++ : e.to_input;
+        }
+    }
     size_t nb_out = c.outputs.empty() ? 1 : c.outputs.size();
     if (c.jobs.size() != nb_out)
     {
@@ -658,6 +703,69 @@ static bool bank_result(const BankModel &m, const std::vector<uint64_t> &out, st
     return true;
 }
 
+// atax's one group: vmul (SimdLanes mul, A and x) -> sum (TreeAccumulate, t = A x a row) ->
+// a held link -> mac (a bank of ROWS rows, y = A^T t), t broadcast to mac.b's lanes; mac.a
+// A again from its own reader, or the fork's beat through a buffer. 4 lanes of int8 A and x,
+// t and y int32 (an int8 x int32 Mac); nullptr when the case is not one
+static std::unique_ptr<SnaxGroupDatapaths> atax_datapaths(const Case &c, const SnaxGroupRule &rule)
+{
+    bool one_read = c.fork_links.size() == 1;
+    int mac_inputs = one_read ? 0 : 1;
+    if (c.units.size() != 3 || c.units[0].datapath != "SimdLanes" || c.units[0].inputs != 2 ||
+        c.units[1].datapath != "TreeAccumulate" || c.units[1].inputs != 0 ||
+        c.units[2].datapath != "Mac" || c.units[2].inputs != mac_inputs ||
+        c.units[2].cfg.rows < 2 || c.units[2].seed || c.links.size() != 2 ||
+        c.links[0].from != 0 || c.links[0].to != 1 || c.links[1].from != 1 ||
+        c.links[1].to != 2 || !c.links[1].hold || !c.din.empty() || c.dout != 1 ||
+        (one_read && (c.forks.size() != 1 || c.forks[0] != std::vector<std::pair<int, int>>{{0, 0}}
+            || c.fork_links[0].to != 2)))
+    {
+        return nullptr;
+    }
+    auto g = std::unique_ptr<SnaxGroupDatapaths>(new SnaxGroupDatapaths());
+    SnaxDatapathParams p[3];
+    p[0].in_types = {I8, I8};
+    p[0].op = SNAX_OP_MUL;
+    p[1].in_types = {I32};
+    p[2].in_types = {I8, I32};
+    p[2].rows = c.units[2].cfg.rows;
+    for (int k = 0; k < 3; k++)
+    {
+        p[k].lanes = LANES;
+        p[k].op_type = p[k].out_type = I32;
+        std::string why;
+        g->units.push_back(snax_datapath_new(c.units[k].datapath, p[k], &why));
+        if (!g->units.back())
+        {
+            return nullptr;
+        }
+    }
+    for (int i = 0; i < 2; i++)
+    {
+        SnaxDatapathParams b;
+        b.in_types = {I32};
+        b.out_type = I32;
+        b.lanes = i == 0 ? LANES : 1;     // a held link's beat is one lane
+        b.depth = c.links[i].depth;
+        std::string why;
+        g->buffers.push_back(snax_datapath_new("LinkBuffer", b, &why));
+    }
+    if (one_read)
+    {
+        SnaxDatapathParams b;
+        b.in_types = {I8};
+        b.out_type = I8;
+        b.lanes = LANES;
+        b.depth = c.fork_links[0].depth;
+        std::string why;
+        g->fork_buffers.push_back(snax_datapath_new("LinkBuffer", b, &why));
+    }
+    g->held.assign(2, SnaxGroupDatapaths::Held());
+    g->held[1] = {LANES, I32};
+    g->wire(rule);
+    return g;
+}
+
 // The rule of the case's group; "" or why it refuses the graph
 static std::string configure(const Case &c, SnaxGroupRule &rule)
 {
@@ -675,7 +783,7 @@ static std::string configure(const Case &c, SnaxGroupRule &rule)
             forks.back().push_back(m.first);
         }
     }
-    return rule.configure(cfgs, c.links, c.outputs, forks);
+    return rule.configure(cfgs, c.links, c.outputs, forks, c.fork_links);
 }
 
 static int run(const Case &c)
@@ -704,6 +812,9 @@ static int run(const Case &c)
     std::unique_ptr<SnaxGroupDatapaths> mac = mac_datapaths(c, rule);
     std::unique_ptr<SnaxGroupDatapaths> forked = fork_datapaths(c, rule);
     std::unique_ptr<SnaxGroupDatapaths> banked = bank_datapaths(c, rule);
+    std::unique_ptr<SnaxGroupDatapaths> atax = atax_datapaths(c, rule);
+    // atax's: the beats vmul and mac fired, the t pushed, the y rows pushed
+    int vmul_fired = 0, mac_fired = 0, t_pushed = 0, y_pushed = 0;
     // the fork's: the rows fired, the sum's seeds taken, the Mac's sums so far and its pushes
     int rows = 0, q_pushed = 0, s_pushed = 0, q_seeded = 0;
     std::vector<int64_t> s_sum(LANES, 0);
@@ -1094,6 +1205,73 @@ static int run(const Case &c)
             }
             rows += step.units[0].fire;
         }
+        if (busy && atax)
+        {
+            // beat f of A: row f / ROWS of A, its slice f mod ROWS; x the same slice of x
+            const int rows_a = c.units[2].cfg.rows;
+            auto A = [](int f, int lane) { return a_of(f * LANES + lane); };
+            auto x = [rows_a](int f, int lane) { return p_of((f % rows_a) * LANES + lane); };
+            std::vector<uint64_t> va(1, 0), vx(1, 0), ma(1, 0);
+            for (int lane = 0; lane < LANES; lane++)
+            {
+                snax_lane_set(va.data(), I8.width, lane, A(vmul_fired, lane));
+                snax_lane_set(vx.data(), I8.width, lane, x(vmul_fired, lane));
+                snax_lane_set(ma.data(), I8.width, lane, A(mac_fired, lane));
+            }
+            std::vector<std::vector<const uint64_t *>> outer = {{va.data(), vx.data()}, {}, {}};
+            if (c.fork_links.empty())
+            {
+                outer[2].push_back(ma.data());
+            }
+            atax->cycle(step, outer);
+            // t[i] = A[i] x, y[r][l] = sum over i of A[i][r * LANES + l] t[i]
+            auto t_of = [&](int i) {
+                int64_t t = 0;
+                for (int f = i * rows_a; f < (i + 1) * rows_a; f++)
+                {
+                    for (int lane = 0; lane < LANES; lane++)
+                    {
+                        t += A(f, lane) * x(f, lane);
+                    }
+                }
+                return t;
+            };
+            if (step.units[1].push)
+            {
+                int64_t got = (int64_t)snax_lane_cast(snax_lane_get(atax->out(1).data(),
+                    I32.width, 0), I32, {64, true});
+                if (got != t_of(t_pushed))
+                {
+                    fail("t[" + std::to_string(t_pushed) + "] is " + std::to_string(got) +
+                        ", (A x)[" + std::to_string(t_pushed) + "] " +
+                        std::to_string(t_of(t_pushed)));
+                }
+                t_pushed++;
+            }
+            if (step.units[2].push)
+            {
+                int r = y_pushed % rows_a, m = (int)(ts[2] / rows_a);
+                for (int lane = 0; lane < LANES; lane++)
+                {
+                    int64_t want = 0;
+                    for (int i = 0; i < m; i++)
+                    {
+                        want += A(i * rows_a + r, lane) * t_of(i);
+                    }
+                    int64_t got = (int64_t)snax_lane_cast(snax_lane_get(atax->out(2).data(),
+                        I32.width, lane), I32, {64, true});
+                    if (got != want)
+                    {
+                        fail("y[" + std::to_string(r * LANES + lane) + "] is " +
+                            std::to_string(got) + ", (A^T t)[" + std::to_string(r * LANES +
+                            lane) + "] " + std::to_string(want));
+                    }
+                }
+                y_pushed++;
+            }
+            vmul_fired += step.units[0].fire;
+            mac_fired += step.units[2].fire;
+        }
         if (!c.din.empty() && took != l.took)
         {
             std::string got, want;
@@ -1132,6 +1310,15 @@ static int run(const Case &c)
             }
             b++;
         }
+        for (size_t k = 0; busy && k < c.fork_links.size(); k++, b++)
+        {
+            if (step.fork_links[k].occupancy != l.occupancy[b])
+            {
+                fail("fork link " + std::to_string(k) + ": occupancy " +
+                    std::to_string(step.fork_links[k].occupancy) + ", expected " +
+                    std::to_string(l.occupancy[b]));
+            }
+        }
         if (busy && step.end)
         {
             std::string got = rule.run_line();
@@ -1168,6 +1355,12 @@ static int run(const Case &c)
             s_pushed, c.jobs[0], c.jobs[1]);
         errors++;
     }
+    if (atax && (t_pushed != (int)(ts[2] / c.units[2].cfg.rows) * (int)jobs ||
+        y_pushed != c.units[2].cfg.rows * (int)jobs))
+    {
+        printf("%s: %d t and %d y result(s) pushed\n", c.name.c_str(), t_pushed, y_pushed);
+        errors++;
+    }
     if (data && c.lanes && (size_t)pushed != c.sums.size())
     {
         printf("%s: %d result(s) pushed, %zu sums in the case\n", c.name.c_str(), pushed,
@@ -1198,7 +1391,8 @@ int main(int argc, char **argv)
     return tb_main<Case>(argc, argv, parse, run, [](const Case &c) {
         SnaxGroupRule rule;
         bool data = configure(c, rule).empty() && (dot_datapaths(c, rule) ||
-            mac_datapaths(c, rule) || fork_datapaths(c, rule) || bank_datapaths(c, rule));
+            mac_datapaths(c, rule) || fork_datapaths(c, rule) || bank_datapaths(c, rule) ||
+            atax_datapaths(c, rule));
         printf("%s: %zu units, %zu cycles, %zu run(s)%s\n", c.name.c_str(), c.units.size(),
             c.cycles.size(), c.expects.size(), data ? ", data" : "");
     });

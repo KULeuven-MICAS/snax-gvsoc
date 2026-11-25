@@ -70,6 +70,8 @@ A group of several chains on a forked input (D189) has an output per chain, each
 - **Held input** (D190): its beat moves on a bank row's first firing only, as a seed on its job's first; its `b` is -1 on the row's other firings, its `value` the beat it keeps.
 - **Bank** (D191): ROWS results a job, so its output's `rate` and a `push`'s `first` and `last` divide the head's firings evenly among the results; they are not the firings a bank row folds.
 - **Carried seed** (D192): taken every job; its `value` is the beat as read, the datapath given 0 in its place while the job is below CARRY.
+- **Held link** (D197): a link into a bank's held input is popped into its hold register on a row's first firing only, its one lane given to all the unit's lanes; a link writes no line.
+- **Fork link** (D196): a forked input's beat is taken when its units fire and the fork's buffer has room, so a `fire` line's `b` for it is the beat that buffer also takes; the buffer writes no line.
 
 | Trace | Kind | Cycle | Fields |
 |---|---|---|---|
@@ -84,8 +86,8 @@ A linked group's run line (`SnaxGroupRule` in `snax/snax_group.hpp`) gives each 
 
 1. `stall_out`: the last unit of a chain (an output's unit) has a result and no room;
 2. `busy`: any unit fires, reads a lane in place, or is in its II gap;
-3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat (a forked input's member waiting for its fork counts through the member without its beat, D189);
-4. `flush`: otherwise (results in flight, beats in a buffer).
+3. `stall_in`: a unit with outer inputs wants to fire and one of them has no beat (a forked input's member waiting for its fork counts through the member without its beat, D189; a unit waiting for a fork link's beat, or a fork waiting for that buffer's room, does not);
+4. `flush`: otherwise (results in flight, beats in a buffer or a fork link).
 
 For one unit these are the unit's own classes. A linked group's per-unit events are snax-forge's open item 96.
 

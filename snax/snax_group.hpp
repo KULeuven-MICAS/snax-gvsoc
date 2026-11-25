@@ -58,6 +58,20 @@
 // takes them (UnitStep::take); on its other firings the unit uses the beat it
 // kept. A carried seed is any seed to the rule; the component gives its
 // datapath 0 in its place while the job (UnitStep::job) is below CARRY.
+// A held link (Link::hold, a buffer into a bank) is the same: its beat is
+// needed and taken (popped into the unit's hold register) on a row's first
+// firing only, so the bank takes one result of its producer every ROWS
+// firings (n_producer = n_bank / ROWS * T_producer).
+//
+// A fork's buffered branch (ForkLink) gives the fork's beat to a unit further
+// down a chain, after every unit of the fork, through a ring of D >= 1 beats:
+// the beat is taken when every unit of the fork fires and the buffer has room
+// (occupancy < D, or its consumer pops one this cycle), each taken beat loads
+// one entry, and the consumer's input has a beat while the buffer holds one,
+// popped on each of its firings. A fork may then have one unit, and the
+// branch joins its consumer's chain to the fork's, as a unit of it does. A buffer
+// shallower than the beats the consumer waits through never ends the run
+// (LOWER refuses it).
 //
 // Per unit: its job_beats_counter d (its firings mod T, here derived
 // from its firings; first = [d = 0], it gives a result on firings with d =
@@ -99,7 +113,7 @@
 // outputs, in this order: stall_out (one has a result and no room: it is frozen) >
 // busy (any unit fires or reads, or is in its II gap) > stall_in (a unit with
 // outer inputs wants to fire and one of them has no beat) > flush (results in
-// flight, beats in a buffer: accel.py's idle). busy + stall_in + stall_out +
+// flight, beats in a buffer or a fork link: accel.py's idle). busy + stall_in + stall_out +
 // flush is the run's busy cycles, E - s, E the cycle the last chain ends;
 // the run line's firings are the head's (the first unit in the topological
 // order).
@@ -132,8 +146,8 @@
 // whose lanes compute on their own (SimdLanes, Mac): its reader, or its slicer
 // sized by one lane (d_in = 64 / width), gives one lane a beat, and each of the
 // unit's W lanes takes that lane, in the unit's words of its type. No register
-// and no cycle of its own, so the rule does not see it; a linked port is never
-// one.
+// and no cycle of its own, so the rule does not see it; a linked port is one
+// only when held, its one-lane beat taken into the hold register first.
 
 #pragma once
 
@@ -169,13 +183,26 @@ public:
     };
 
     // An edge: unit from's output into input to_input of unit to (its index among the
-    // unit's inputs, for the datapaths; the rule does not read it)
+    // unit's inputs, for the datapaths; the rule does not read it); held, a buffer into a
+    // bank taken once a row (module doc)
     struct Link
     {
         int from = 0;
         int to = 0;
         int to_input = 0;
         int depth = 0;
+        bool hold = false;
+    };
+
+    // A fork's buffered branch: fork's beat (its first unit's outer input from_input, for the
+    // datapaths) through a buffer of depth >= 1 into input to_input of unit to (module doc)
+    struct ForkLink
+    {
+        int fork = 0;
+        int from_input = 0;
+        int to = 0;
+        int to_input = 0;
+        int depth = 1;
     };
 
     // What one unit does in a busy cycle: its datapath's enables are fire,
@@ -210,19 +237,23 @@ public:
     {
         std::vector<UnitStep> units;
         std::vector<LinkStep> links;
+        std::vector<LinkStep> fork_links;   // per fork link: a load the fork's taken beat
         Class cls = FLUSH;
         bool end = false;       // the run's last cycle: idle from the next one
     };
 
     // The units, the links between them, the units owning the outer outputs (the chains'
     // sinks, in the order of the start's JOBS and their room; empty: the sinks in unit
-    // order) and the forks, each the units an outer input's one reader feeds.
-    // Returns why the graph is refused, or "" (then the rule is configured).
+    // order), the forks, each the units an outer input's one reader feeds, and the forks'
+    // buffered branches. Returns why the graph is refused, or "" (then the rule is
+    // configured).
     std::string configure(const std::vector<UnitCfg> &units, const std::vector<Link> &links,
-        const std::vector<int> &outputs = {}, const std::vector<std::vector<int>> &forks = {})
+        const std::vector<int> &outputs = {}, const std::vector<std::vector<int>> &forks = {},
+        const std::vector<ForkLink> &fork_links = {})
     {
         size_t n = units.size();
-        std::vector<std::vector<int>> ins(n), outs(n);
+        std::vector<std::vector<int>> ins(n), outs(n), fork_ins(n);
+        std::vector<bool> holding(n, false);
         for (size_t i = 0; i < links.size(); i++)
         {
             const Link &e = links[i];
@@ -232,6 +263,25 @@ public:
             }
             outs[e.from].push_back(i);
             ins[e.to].push_back(i);
+            if (e.hold && (units[e.to].rows == 1 || e.depth < 1))
+            {
+                return "link " + std::to_string(i) + ": held, but unit " + std::to_string(e.to) +
+                    " has " + std::to_string(units[e.to].rows) + " row(s) and the link depth " +
+                    std::to_string(e.depth) + "; a held link is a buffer into a bank";
+            }
+            holding[e.to] = holding[e.to] || e.hold;
+        }
+        for (size_t i = 0; i < fork_links.size(); i++)
+        {
+            const ForkLink &e = fork_links[i];
+            if (e.fork < 0 || e.fork >= (int)forks.size() || e.to < 0 || e.to >= (int)n ||
+                e.depth < 1)
+            {
+                return "fork link " + std::to_string(i) + ": no such fork or unit, or a depth "
+                    "below 1; a fork's branch to a unit down a chain is a buffer of depth 1 or "
+                    "more";
+            }
+            fork_ins[e.to].push_back(i);
         }
         for (size_t k = 0; k < n; k++)
         {
@@ -319,11 +369,23 @@ public:
             }
             return o;
         };
-        for (const std::vector<int> &f : forks)
+        std::vector<size_t> pos(n);
+        for (size_t r = 0; r < n; r++)
         {
+            pos[order[r]] = r;
+        }
+        for (size_t i = 0; i < forks.size(); i++)
+        {
+            const std::vector<int> &f = forks[i];
             std::vector<int> members = f;
             std::sort(members.begin(), members.end());
-            if (f.size() < 2 || std::unique(members.begin(), members.end()) != members.end())
+            size_t buffered = 0;
+            for (const ForkLink &e : fork_links)
+            {
+                buffered += e.fork == (int)i;
+            }
+            if (f.empty() || f.size() + buffered < 2 ||
+                std::unique(members.begin(), members.end()) != members.end())
             {
                 return "a fork gives one input to two or more units";
             }
@@ -334,6 +396,25 @@ public:
                     return "fork: unit " + std::to_string(k) + " is not a chain's head of span 1";
                 }
                 joined[root(chain[k])] = root(chain[f[0]]);
+            }
+        }
+        // A fork's buffered branch joins its reader's chain as its fork's units do
+        for (const ForkLink &e : fork_links)
+        {
+            joined[root(chain[e.to])] = root(chain[forks[e.fork][0]]);
+        }
+        // A fork link's consumer comes after every unit of its fork in the order, so the
+        // backward pass knows its firing when it decides theirs
+        for (size_t i = 0; i < fork_links.size(); i++)
+        {
+            const ForkLink &e = fork_links[i];
+            for (int k : forks[e.fork])
+            {
+                if (pos[e.to] <= pos[k])
+                {
+                    return "fork link " + std::to_string(i) + ": unit " + std::to_string(e.to) +
+                        " is not after the fork's units in the chain";
+                }
             }
         }
         for (size_t o = 1; o < mine.size(); o++)
@@ -353,10 +434,15 @@ public:
         this->outputs = mine;
         this->chain = chain;
         this->forks = forks;
+        this->fork_links = fork_links;
+        this->fork_ins = fork_ins;
+        this->holding = holding;
         this->u.assign(n, UnitState());
         this->l.assign(links.size(), LinkState());
+        this->fl.assign(fork_links.size(), LinkState());
         this->stepped.units.assign(n, UnitStep());
         this->stepped.links.assign(links.size(), LinkStep());
+        this->stepped.fork_links.assign(fork_links.size(), LinkStep());
         for (std::vector<bool> *v : {&this->avail, &this->wants, &this->would_fire, &this->gives,
             &this->head, &this->offer, &this->outer_ok, &this->blocked})
         {
@@ -382,6 +468,10 @@ public:
         {
             ls = LinkState();
         }
+        for (LinkState &ls : this->fl)
+        {
+            ls = LinkState();
+        }
         this->runs = 0;
         for (int c = 0; c < NB_CLASSES; c++)
         {
@@ -398,6 +488,8 @@ public:
     size_t output_unit() const { return this->outputs[0]; }
     const std::vector<int> &chains() const { return this->chain; }
     const std::vector<Link> &edges() const { return this->links; }
+    const std::vector<std::vector<int>> &fork_units() const { return this->forks; }
+    const std::vector<ForkLink> &fork_edges() const { return this->fork_links; }
 
     // Idle in cycle: no run, or the last one ended before it
     bool idle(int64_t cycle) const { return this->span.idle(cycle); }
@@ -406,17 +498,27 @@ public:
     bool busy(int64_t cycle) const { return this->span.busy(cycle); }
 
     // Each unit's firings in a run of jobs (one per output), unit k a result every
-    // job_beats[k] firings: from each sink back, each firing of a consumer takes one result
-    // of its producer
+    // job_beats[k] firings, its bank's ROWS rows[k] (empty: its rows R): from each sink back,
+    // each firing of a consumer takes one result of its producer, across a held link one a
+    // ROWS firings
     std::vector<uint64_t> firings_for(const std::vector<uint32_t> &jobs,
-        const std::vector<uint32_t> &job_beats) const
+        const std::vector<uint32_t> &job_beats, const std::vector<uint32_t> &rows = {}) const
     {
         std::vector<uint64_t> n(this->cfg.size(), 0);
         for (size_t r = this->order.size(); r-- > 0;)
         {
             size_t k = this->order[r];
-            uint64_t next = this->outs[k].empty() ? jobs[this->chain[k]]
-                : n[this->links[this->outs[k][0]].to];
+            uint64_t next;
+            if (this->outs[k].empty())
+            {
+                next = jobs[this->chain[k]];
+            }
+            else
+            {
+                const Link &e = this->links[this->outs[k][0]];
+                uint32_t per = rows.empty() ? this->cfg[e.to].rows : rows[e.to];
+                next = n[e.to] / (e.hold ? per : 1);
+            }
             n[k] = next * job_beats[k];
         }
         return n;
@@ -449,7 +551,7 @@ public:
         this->jobs = jobs;
         this->job_beats = job_beats;
         this->rows = rows.empty() ? std::vector<uint32_t>(this->cfg.size(), 1) : rows;
-        std::vector<uint64_t> n = this->firings_for(jobs, job_beats);
+        std::vector<uint64_t> n = this->firings_for(jobs, job_beats, this->rows);
         for (size_t k = 0; k < n.size(); k++)
         {
             this->firings_per_run[k] = (uint32_t)n[k];
@@ -520,6 +622,26 @@ public:
                     }
                 }
             }
+            // NB (D196): a fork with a buffered branch takes a beat only when the buffer has
+            // room (occupancy < D, or its consumer pops one this cycle)
+            for (size_t i = 0; i < this->fork_links.size(); i++)
+            {
+                const ForkLink &e = this->fork_links[i];
+                bool stuck = this->fl[i].occupancy >= e.depth && !s.units[e.to].fire;
+                bool any = false;
+                for (int k : this->forks[e.fork])
+                {
+                    any = any || s.units[k].fire;
+                }
+                for (int k : this->forks[e.fork])
+                {
+                    if (stuck && any)
+                    {
+                        this->blocked[k] = true;
+                        held = true;
+                    }
+                }
+            }
             if (!held)
             {
                 break;
@@ -566,20 +688,20 @@ public:
             {
                 continue;
             }
+            // NB (D197): a held link is taken on its bank's row's first firing only
             ls.load = s.units[e.from].push;
+            ls.take = e.hold ? s.units[e.to].take : s.units[e.to].fire;
+            advance(state, ls, e.depth);
+        }
+        // A fork link's: a load the fork's beat taken (its units fire), a take its consumer's
+        // firing
+        for (size_t i = 0; i < this->fork_links.size(); i++)
+        {
+            const ForkLink &e = this->fork_links[i];
+            LinkStep &ls = s.fork_links[i];
+            ls.load = s.units[this->forks[e.fork][0]].fire;
             ls.take = s.units[e.to].fire;
-            ls.wslot = state.wptr;
-            ls.rslot = state.rptr;
-            if (ls.load)
-            {
-                state.wptr = (state.wptr + 1) % e.depth;
-            }
-            if (ls.take)
-            {
-                state.rptr = (state.rptr + 1) % e.depth;
-            }
-            state.occupancy += (int)ls.load - (int)ls.take;
-            ls.occupancy = state.occupancy;
+            advance(this->fl[i], ls, e.depth);
         }
 
         bool frozen = false;
@@ -642,6 +764,24 @@ private:
         int rptr = 0;
     };
 
+    // A buffer's cycle, its load and take in ls: the slots before them, then the ring's
+    // pointers and the occupancy after
+    static void advance(LinkState &state, LinkStep &ls, int depth)
+    {
+        ls.wslot = state.wptr;
+        ls.rslot = state.rptr;
+        if (ls.load)
+        {
+            state.wptr = (state.wptr + 1) % depth;
+        }
+        if (ls.take)
+        {
+            state.rptr = (state.rptr + 1) % depth;
+        }
+        state.occupancy += (int)ls.load - (int)ls.take;
+        ls.occupancy = state.occupancy;
+    }
+
     // One cycle's choices into stepped.units, changing no state, the units blocked not
     // firing: forward, what each unit offers whatever its room; backward, in reverse order,
     // room, frozen, fire, read, push (an out-edge takes on its consumer's firing); *busy and
@@ -654,6 +794,7 @@ private:
         Step &s = this->stepped;
         std::fill(s.units.begin(), s.units.end(), UnitStep());
         std::fill(s.links.begin(), s.links.end(), LinkStep());
+        std::fill(s.fork_links.begin(), s.fork_links.end(), LinkStep());
         s.cls = FLUSH;
         s.end = false;
         std::vector<bool> &avail = this->avail, &wants = this->wants,
@@ -664,17 +805,23 @@ private:
         {
             const UnitCfg &c = this->cfg[k];
             const UnitState &us = this->u[k];
+            // a seeded unit's job's first beats (a bank's row's each) wait for its seed too;
+            // NB (D190): a held input's beat is needed only on a row's first firing
+            // NB (D197): a held link's too
+            uint32_t d = us.firings % this->job_beats[k];
+            bool first = d < this->rows[k];
+            bool taking = us.firings % this->rows[k] == 0;
             bool linked = true;
             for (int i : this->ins[k])
             {
                 const Link &e = this->links[i];
-                linked = linked && (e.depth == 0 ? offer[e.from] : this->l[i].occupancy > 0);
+                linked = linked && (e.depth == 0 ? offer[e.from]
+                    : this->l[i].occupancy > 0 || (e.hold && !taking));
             }
-            // a seeded unit's job's first beats (a bank's row's each) wait for its seed too;
-            // NB (D190): a held input's beat is needed only on a row's first firing
-            uint32_t d = us.firings % this->job_beats[k];
-            bool first = d < this->rows[k];
-            bool taking = us.firings % this->rows[k] == 0;
+            for (int i : this->fork_ins[k])
+            {
+                linked = linked && this->fl[i].occupancy > 0;
+            }
             this->outer_ok[k] = inputs[k] && (!c.seeded || !first || seeds[k]) &&
                 (!c.held || !taking || holds[k]);
             avail[k] = this->outer_ok[k] && linked;
@@ -698,7 +845,7 @@ private:
             for (int i : this->outs[k])
             {
                 const Link &e = this->links[i];
-                bool take = s.units[e.to].fire;
+                bool take = e.hold ? s.units[e.to].take : s.units[e.to].fire;
                 room = room && (e.depth == 0 ? take : this->l[i].occupancy < e.depth || take);
             }
             st.frozen = c.latency > 0 ? head[k] && !room : gives[k] && !room;
@@ -717,7 +864,7 @@ private:
                 *waits = *waits || (wants[k] && !this->outer_ok[k]);
             }
             st.seed = st.fire && st.first && c.seeded;
-            st.take = st.fire && st.row == 0 && c.held;
+            st.take = st.fire && st.row == 0 && (c.held || this->holding[k]);
         }
     }
 
@@ -738,11 +885,14 @@ private:
                 }
             }
         }
-        for (const LinkState &ls : this->l)
+        for (const std::vector<LinkState> *v : {&this->l, &this->fl})
         {
-            if (ls.occupancy)
+            for (const LinkState &ls : *v)
             {
-                return false;
+                if (ls.occupancy)
+                {
+                    return false;
+                }
             }
         }
         return true;
@@ -755,8 +905,12 @@ private:
     std::vector<int> outputs;                   // the units owning the outer outputs
     std::vector<int> chain;                     // per unit, its chain's output (an index there)
     std::vector<std::vector<int>> forks;        // per fork, its units
+    std::vector<ForkLink> fork_links;
+    std::vector<std::vector<int>> fork_ins;     // per unit, the fork links into it
+    std::vector<bool> holding;                  // per unit, a held link into it
     std::vector<UnitState> u;
     std::vector<LinkState> l;
+    std::vector<LinkState> fl;                  // per fork link
     // step()'s, sized at configure: its result and its passes' per-unit values
     Step stepped;
     std::vector<bool> avail, wants, would_fire, gives, head, offer, outer_ok, blocked;
@@ -765,31 +919,65 @@ private:
 };
 
 
+// The RTL's <unit>_<port>_bcast, wires: lane 0 of beat, given to each of lanes
+// lanes of type t in out (snax_words(lanes, t) words), within the cycle (module doc)
+inline void snax_broadcast(const uint64_t *beat, int lanes, SnaxType t, uint64_t *out)
+{
+    const uint64_t x = snax_lane_get(beat, t.width, 0);
+    std::fill(out, out + snax_words(lanes, t), 0);     // snax_lane_set ORs into a word
+    for (int l = 0; l < lanes; l++)
+    {
+        snax_lane_set(out, t.width, l, x);
+    }
+}
+
+
 // SnaxGroupDatapaths: a group's datapaths (snax_datapath.hpp) wired as the
-// component wires them, one per unit and one LinkBuffer per link of depth >=
-// 1, so the component (snax_group.cpp) and the tests run the same cycle:
+// component wires them, one per unit, one LinkBuffer per link of depth >= 1
+// and one per fork link, so the component (snax_group.cpp) and the tests run
+// the same cycle:
 //
 //   en = the rule's step
+//   for each fork link: eval(the fork's outer beat, en)
 //   for each unit, producer before consumer: eval(its inputs' sources, en)
 //   for each unit and buffer: commit(en)
 //
 // An input's source is an outer port (the streamer's beat, moved when the
 // unit fires), a wire (the producer's output from its eval this cycle) or a
-// buffer (its slot rslot, written in an earlier cycle). A unit takes each
-// in-edge on that edge's to_input; its other inputs are outer, in port order
-// (a forked input's beat given to each of its units). wire() takes the edges
-// and the order from the configured rule.
+// buffer (its slot rslot, written in an earlier cycle; a fork link's loaded
+// with the fork's beat when its units fire). A unit takes each in-edge and
+// fork link on its to_input; its other inputs are outer, in port order (a
+// forked input's beat given to each of its units). A held link's consumer
+// takes its buffer's beat into the link's hold register on the rule's take
+// and, every firing of the row, the register's lane 0 on each of its lanes
+// (snax_broadcast): the RTL's <unit>_<port>_hold and its _bcast. wire() takes
+// the edges and the order from the configured rule.
 class SnaxGroupDatapaths
 {
 public:
+    // A held link's broadcast: its consumer's lanes and element type
+    struct Held
+    {
+        int lanes = 0;
+        SnaxType type = {64, true};
+    };
+
     std::vector<std::unique_ptr<SnaxDatapath>> units;
-    std::vector<std::unique_ptr<SnaxDatapath>> buffers;     // per link; null for a wire
+    std::vector<std::unique_ptr<SnaxDatapath>> buffers;         // per link; null for a wire
+    std::vector<std::unique_ptr<SnaxDatapath>> fork_buffers;    // per fork link
+    std::vector<Held> held;     // per held link, set before wire(); absent ones: none held
 
     // The rule's links, its topological order and the unit owning the first outer output;
-    // per unit and input, the link feeding it (-1: an outer input)
+    // per unit and input, the link feeding it (-1: an outer input; -2 - i: fork link i)
     void wire(const SnaxGroupRule &rule)
     {
         this->links = rule.edges();
+        this->fork_links = rule.fork_edges();
+        this->fork_heads.clear();
+        for (const SnaxGroupRule::ForkLink &e : this->fork_links)
+        {
+            this->fork_heads.push_back(rule.fork_units()[e.fork][0]);
+        }
         this->order = rule.topological();
         this->output = rule.output_unit();
         this->feeds.assign(this->units.size(), {});
@@ -803,8 +991,24 @@ public:
         {
             this->feeds[this->links[i].to][this->links[i].to_input] = i;
         }
+        for (size_t i = 0; i < this->fork_links.size(); i++)
+        {
+            this->feeds[this->fork_links[i].to][this->fork_links[i].to_input] = -2 - (int)i;
+        }
+        this->held.resize(this->links.size());
+        this->hold_regs.assign(this->links.size(), {});
+        this->wide.assign(this->links.size(), {});
+        for (size_t i = 0; i < this->links.size(); i++)
+        {
+            if (this->links[i].hold)
+            {
+                this->hold_regs[i].assign(this->units[this->links[i].from]->out_words, 0);
+                this->wide[i].assign(snax_words(this->held[i].lanes, this->held[i].type), 0);
+            }
+        }
         this->en.assign(this->units.size(), SnaxEnables());
         this->ben.assign(this->buffers.size(), SnaxEnables());
+        this->fen.assign(this->fork_buffers.size(), SnaxEnables());
         this->buffer_in.assign(1, nullptr);
     }
 
@@ -831,6 +1035,14 @@ public:
             ben[i].wslot = step.links[i].wslot;
             ben[i].rslot = step.links[i].rslot;
         }
+        for (size_t i = 0; i < this->fork_buffers.size(); i++)
+        {
+            fen[i].load = step.fork_links[i].load;
+            fen[i].wslot = step.fork_links[i].wslot;
+            fen[i].rslot = step.fork_links[i].rslot;
+            this->buffer_in[0] = outer[this->fork_heads[i]][this->fork_links[i].from_input];
+            this->fork_buffers[i]->eval(this->buffer_in, fen[i]);
+        }
         for (size_t k : this->order)
         {
             std::vector<const uint64_t *> &in = this->in[k];
@@ -838,11 +1050,27 @@ public:
             for (size_t j = 0; j < in.size(); j++)
             {
                 int i = this->feeds[k][j];
-                if (i >= 0)
+                if (i >= 0 && this->links[i].hold)
+                {
+                    // NB (D197): popped into the hold register on the row's first firing
+                    if (step.units[k].take)
+                    {
+                        const std::vector<uint64_t> &beat = this->buffers[i]->out();
+                        std::copy(beat.begin(), beat.end(), this->hold_regs[i].begin());
+                        snax_broadcast(this->hold_regs[i].data(), this->held[i].lanes,
+                            this->held[i].type, this->wide[i].data());
+                    }
+                    in[j] = this->wide[i].data();
+                }
+                else if (i >= 0)
                 {
                     const SnaxDatapath *src = this->buffers[i] ? this->buffers[i].get()
                         : this->units[this->links[i].from].get();
                     in[j] = src->out().data();
+                }
+                else if (i < -1)
+                {
+                    in[j] = this->fork_buffers[-2 - i]->out().data();
                 }
                 else
                 {
@@ -870,6 +1098,10 @@ public:
                 this->buffers[i]->commit(ben[i]);
             }
         }
+        for (size_t i = 0; i < this->fork_buffers.size(); i++)
+        {
+            this->fork_buffers[i]->commit(fen[i]);
+        }
         return this->units[this->output]->out();
     }
 
@@ -878,11 +1110,15 @@ public:
 
 private:
     std::vector<SnaxGroupRule::Link> links;
+    std::vector<SnaxGroupRule::ForkLink> fork_links;
+    std::vector<int> fork_heads;    // per fork link, its fork's first unit
     std::vector<size_t> order;
     size_t output = 0;
     std::vector<std::vector<int>> feeds;
     // cycle()'s, sized at wire(): the enables, each unit's input words, a buffer's input
-    std::vector<SnaxEnables> en, ben;
+    std::vector<SnaxEnables> en, ben, fen;
+    std::vector<std::vector<uint64_t>> hold_regs, wide;     // per link: a held one's register
+                                                            // and its lanes
     std::vector<std::vector<const uint64_t *>> in;
     std::vector<const uint64_t *> buffer_in;
 };
@@ -932,19 +1168,6 @@ struct SnaxPacker
         return false;
     }
 };
-
-
-// The RTL's <unit>_<port>_bcast, wires: lane 0 of beat, given to each of lanes
-// lanes of type t in out (snax_words(lanes, t) words), within the cycle (module doc)
-inline void snax_broadcast(const uint64_t *beat, int lanes, SnaxType t, uint64_t *out)
-{
-    const uint64_t x = snax_lane_get(beat, t.width, 0);
-    std::fill(out, out + snax_words(lanes, t), 0);     // snax_lane_set ORs into a word
-    for (int l = 0; l < lanes; l++)
-    {
-        snax_lane_set(out, t.width, l, x);
-    }
-}
 
 
 // The Chisel's FifoSlicer, cycle for cycle (module doc)

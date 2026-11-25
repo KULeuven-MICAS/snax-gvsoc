@@ -56,10 +56,13 @@ from its CSRs (scalars, each [slot, words]); d_out, its outer output's results p
 word (1 unless packed); d_in, per input its pops per 64-bit word (1 unless sliced);
 broadcast, per input whether its reader's one lane goes to all lanes; hold, per input
 whether it is read once a bank row and kept; rows, a Mac's bank rows (1 without); carry,
-whether its seed is carried; and its links as edges, each
+whether its seed is carried; its links as edges, each
 {from, to, to_input, depth}:
 the producer's and the consumer's names and the consumer's input it feeds,
-its index in that unit's inputs.
+its index in that unit's inputs, with hold true into a held port; and its fork links,
+each {fork, to, to_input, depth}: the fork's reader port (`<unit>_<port>`, its first
+port's), the consumer and its input, "" among its inputs (d_in 1: the buffer holds the
+reader's slices), and the buffer's depth.
 """
 
 from dataclasses import dataclass
@@ -146,6 +149,7 @@ def group_units(accelerator, group) -> tuple:
     """SnaxGroup's units and links properties for group (module doc)."""
     to = {link.to: link for link in group.links}
     frm = {link.from_: link for link in group.links}
+    buffered = {k.to: k for k in group.fork_links}
     # a forked port is its fork's first (its reader's), named once for every member
     first = {p: f[0] for f in accelerator.forks for p in f}
     units, ins_of = [], {}
@@ -161,7 +165,7 @@ def group_units(accelerator, group) -> tuple:
         t = u.params['T'] if 'T' in u.params else 0 if facts.is_fold(u.params) else 1
         units.append({
             'name': u.name, 'datapath': u.datapath,
-            'inputs': ['' if f'{u.name}.{p}' in to
+            'inputs': ['' if f'{u.name}.{p}' in to or f'{u.name}.{p}' in buffered
                        else first.get(f'{u.name}.{p}', f'{u.name}.{p}').replace('.', '_', 1)
                        for p in ins],
             'seed': ins.index(SEED) if SEED in ins else -1,
@@ -178,7 +182,9 @@ def group_units(accelerator, group) -> tuple:
             'k2': str(u.params['k2']) if 'k2' in u.params else '',
             'scalars': [[s, len(scalar_csrs(s, dtype))] for s, dtype in u.scalars.items()],
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
-            'd_out': out_port.d_out, 'd_in': [p.d_in for p in in_ports],
+            'd_out': out_port.d_out,
+            # a fork link's port takes the reader's slices through its buffer: no slicer
+            'd_in': [1 if f'{u.name}.{p}' in buffered else u.ports[p].d_in for p in ins],
             'broadcast': [p.broadcast for p in in_ports],
             'hold': [p.hold for p in in_ports], 'rows': u.params.get('rows', 1),
             'carry': any(p.carry for p in in_ports),
@@ -186,9 +192,15 @@ def group_units(accelerator, group) -> tuple:
     links = []
     for x in group.links:
         src, dst = x.from_.split('.', 1)[0], x.to.split('.', 1)
+        held = accelerator.unit(dst[0]).ports[dst[1]].hold
         links.append({'from': src, 'to': dst[0], 'to_input': ins_of[dst[0]].index(dst[1]),
-                      'depth': x.depth})
-    return units, links
+                      'depth': x.depth, **({'hold': True} if held else {})})
+    fork_links = []
+    for x in group.fork_links:
+        dst = x.to.split('.', 1)
+        fork_links.append({'fork': first[x.to].replace('.', '_', 1), 'to': dst[0],
+                           'to_input': ins_of[dst[0]].index(dst[1]), 'depth': x.depth})
+    return units, links, fork_links
 
 
 def mux_ports(accelerator) -> list:
@@ -275,9 +287,9 @@ class SnaxAccelerator(gvsoc.systree.Component):
                        else mux_csr if mux_csr is not None else set_end)
                 csr_mux.o_MAP(shell.i_INPUT(), base=4 * base, size=4 * (end - base))
 
-                units, links = group_units(acc, group)
+                units, links, fork_links = group_units(acc, group)
                 comp = SnaxGroup(self, group_names[group.name], units=units, links=links,
-                    csr_base=base)
+                    fork_links=fork_links, csr_base=base)
                 shell.o_CTRL(comp.i_CTRL())
                 comp.o_BUSY(shell.i_BUSY())
                 self.bind(self, 'mark', comp, 'mark')
