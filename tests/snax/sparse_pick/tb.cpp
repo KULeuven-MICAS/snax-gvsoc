@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The crossbar's pick at up to 128 inputs (README.md), g++ only: the pick of
+// The crossbar's pick at up to 256 inputs (README.md), g++ only: the pick of
 // snax/snax_sparse_arb.hpp on SnaxInputMask against
 //   - OldArb, the pick as it was on 64-bit masks (snax-gvsoc 85552fc4), for
 //     1 to 64 inputs: the same winners;
-//   - RefArb, the rule written as a plain loop over the inputs, for 1 to 128.
+//   - RefArb, the rule written as a plain loop over the inputs, for 1 to 256.
 // Random stimulus per arbiter: valid and priority bits, idle cycles (no pick),
 // refusals. Then the sparse configuration of 128 inputs (bank_inputs, reaches)
-// and its refusal past 128. Exit 1 on a difference.
+// and its refusal past kMaxInputs. Exit 1 on a difference.
 
 #include <cstdio>
 #include <random>
@@ -231,8 +231,8 @@ int main()
     }
     try
     {
-        SnaxSparseConfig({{129, 1}}, 32);
-        printf("config: 129 inputs per bank taken\n");
+        SnaxSparseConfig({{kMaxInputs + 1, 1}}, 32);
+        printf("config: %d inputs per bank taken\n", kMaxInputs + 1);
         failures++;
     }
     catch (const std::invalid_argument &)

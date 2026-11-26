@@ -22,17 +22,18 @@
 
 
 // NB (D85): the most inputs the crossbar takes; snax-forge's platform field
-// l1.max_xbar_inputs must not exceed it. Also
+// l1.max_xbar_inputs must not exceed it. Checked against the RTL up to 128
+// inputs (tests/snax/sparse_arb), above that model against model. Also
 // a set of them, one bit each: per bank its requesters, per arbiter its valid
 // and high local inputs
-constexpr int kMaxInputs = 128;
+constexpr int kMaxInputs = 256;
 using SnaxInputMask = std::bitset<kMaxInputs>;
 
 
-// The first input of mask at or after from, -1 if none
-inline int snax_first_input(const SnaxInputMask &mask, int from = 0)
+// The first input of mask at or after from and before to, -1 if none
+inline int snax_first_input(const SnaxInputMask &mask, int from = 0, int to = kMaxInputs)
 {
-    for (int i = from; i < kMaxInputs; i++)
+    for (int i = from; i < to; i++)
     {
         if (mask[i])
         {
@@ -171,10 +172,10 @@ public:
         else
         {
             // Round robin: the first after the last pick, else the first
-            winner = snax_first_input(mask, this->previous + 1);
+            winner = snax_first_input(mask, this->previous + 1, this->nb_inputs);
             if (winner < 0)
             {
-                winner = snax_first_input(mask);
+                winner = snax_first_input(mask, 0, this->nb_inputs);
             }
         }
 
