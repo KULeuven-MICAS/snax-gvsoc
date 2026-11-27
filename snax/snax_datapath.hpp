@@ -68,6 +68,14 @@
 //   LinkBuffer(depth, lanes, dtype)   D slots of one beat, L 1: the output is
 //       slot rslot, and on load slot wslot takes the input; the occupancy and
 //       the slots are the control model's
+//   HaloLink(taps, lanes, dtype)   T windows of a row, L 0, pin load (D206):
+//       it holds H = ceil((T - 1) / W) beats; with e_0 ... e_((H+1)W-1) the
+//       held beats' elements, oldest first, then the input's, tap t lane l
+//       is e_(l+t), read from the input in its own cycle; on load the held
+//       beats shift by one, the input the newest. Its output is T beats, tap
+//       t in words [t * out_words / T, (t + 1) * out_words / T) (out_beats
+//       T), each beat laid out as the input's; the fill (a job's first H
+//       beats give no output) is the control model's
 //
 // The registry (snax_datapath_new) builds one by its catalogue name from a
 // unit's params (SnaxDatapathParams), or says why it cannot.
@@ -134,6 +142,7 @@ struct SnaxDatapathParams
     uint64_t hi = 0;
     bool seed = false;      // a fold's seed: its last input, its output's lanes (one element
                             // in one word on a fold that sums its lanes)
+    int taps = 0;           // a HaloLink's windows T
 };
 
 
@@ -155,6 +164,9 @@ public:
     // Words per beat of each input, in port order, and of the output
     std::vector<int> in_words;
     int out_words = 1;
+    // The output's beats, each in its own out_words / out_beats words: 1 but for a HaloLink,
+    // whose T taps are T beats, tap t the consumer's input t
+    int out_beats = 1;
     // Its latency and span, for the control model's check
     int latency = 0;
     int span = 1;
@@ -258,6 +270,59 @@ public:
 private:
     SnaxDatapathParams p;
     int shift = 0;  // log2(d)
+};
+
+
+// NB (D206): tap t lane l is element l + t of the held beats (oldest first) then the input,
+// cut as snax-forge's HaloLink cuts it
+class SnaxHaloLink : public SnaxDatapath
+{
+public:
+    explicit SnaxHaloLink(const SnaxDatapathParams &p) : p(p)
+    {
+        this->held = (p.taps - 1 + p.lanes - 1) / p.lanes;
+        this->beat_words = snax_words(p.lanes, p.out_type);
+        this->in_words = {this->beat_words};
+        this->out_beats = p.taps;
+        this->out_words = p.taps * this->beat_words;
+        this->beats.assign(this->held, std::vector<uint64_t>(this->beat_words, 0));
+        this->in.assign(this->beat_words, 0);
+        this->out_.assign(this->out_words, 0);
+    }
+
+    void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &) override
+    {
+        std::copy(in[0], in[0] + this->beat_words, this->in.begin());
+        std::fill(this->out_.begin(), this->out_.end(), 0);
+        int w = this->p.out_type.width, n = this->p.lanes;
+        for (int t = 0; t < this->p.taps; t++)
+        {
+            for (int l = 0; l < n; l++)
+            {
+                int e = l + t;
+                const uint64_t *beat = e < this->held * n ? this->beats[e / n].data()
+                    : this->in.data();
+                snax_lane_set(this->out_.data() + t * this->beat_words, w, l,
+                    snax_lane_get(beat, w, e % n));
+            }
+        }
+    }
+
+    void commit(const SnaxEnables &en) override
+    {
+        if (en.load)
+        {
+            std::rotate(this->beats.begin(), this->beats.begin() + 1, this->beats.end());
+            this->beats.back() = this->in;
+        }
+    }
+
+private:
+    SnaxDatapathParams p;
+    int held = 1;           // H, the beats it holds
+    int beat_words = 1;     // a beat's words, the input's and each tap's
+    std::vector<std::vector<uint64_t>> beats;  // the held beats, oldest first
+    std::vector<uint64_t> in;
 };
 
 
@@ -660,6 +725,18 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxLinkBuffer(p));
+        }}},
+        // A halo link cuts lanes out of its beats: whole 64-bit words, or a slice of one
+        {"HaloLink", {true, false, false, [](const SnaxDatapathParams &p, std::string *why) {
+            if (p.taps < 2 || p.lanes < 1 || p.in_types.size() != 1 ||
+                p.in_types[0].width != p.out_type.width ||
+                p.in_types[0].is_signed != p.out_type.is_signed)
+            {
+                *why = "taps 2 or more, lanes 1 or more, one input of the output's type (the "
+                    "link's dtype)";
+                return std::unique_ptr<SnaxDatapath>();
+            }
+            return std::unique_ptr<SnaxDatapath>(new SnaxHaloLink(p));
         }}},
     };
     return registry;

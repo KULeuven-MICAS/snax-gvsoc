@@ -435,6 +435,88 @@ def buffer(name, dtype, lanes, depth, steps=12):
     return t
 
 
+class Halo:
+    """A halo link as D206 states it: H = ceil((T - 1) / W) beats held, oldest first; tap t,
+    lane l is element l + t of the held beats' elements then the incoming beat's; on load the
+    held beats shift by one, the incoming beat the newest."""
+
+    def __init__(self, dtype, lanes, taps):
+        self.lanes, self.taps = lanes, taps
+        self.held = [np.zeros(lanes, NP[dtype]) for _ in range(-(-(taps - 1) // lanes))]
+
+    def out(self, beat):
+        e = np.concatenate(self.held + [beat])
+        return np.concatenate([e[t:t + self.lanes] for t in range(self.taps)])
+
+    def load(self, beat):
+        self.held = self.held[1:] + [np.asarray(beat)]
+
+
+def halo(name, dtype, lanes, taps, steps=12, p_load=0.7):
+    """A HaloLink on random beats and loads: its taps, tap by tap, every step."""
+    t = Test(name, "HaloLink", [dtype], dtype, dtype, lanes, taps=taps)
+    m = Halo(dtype, lanes, taps)
+    for _ in range(steps):
+        a = rand(dtype, lanes)
+        load = bool(RNG.random() < p_load)
+        t.step(en(load=load), [a], m.out(a))
+        if load:
+            m.load(a)
+    return t
+
+
+def halo_worked():
+    """D206's worked examples, a load every beat: from beat H + 1 on, each beat in gives one
+    output, so a job gives beats in - H; the steps before give the fill's taps (zeros held)."""
+    out = []
+    for lanes, taps, beats, want in (
+            (4, 3, [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]],
+             [[1, 2, 3, 4, 2, 3, 4, 5, 3, 4, 5, 6], [5, 6, 7, 8, 6, 7, 8, 9, 7, 8, 9, 10]]),
+            (1, 3, [[1], [2], [3], [4]], [[1, 2, 3], [2, 3, 4]]),
+            (2, 5, [[1, 2], [3, 4], [5, 6], [7, 8]],
+             [[1, 2, 2, 3, 3, 4, 4, 5, 5, 6], [3, 4, 4, 5, 5, 6, 6, 7, 7, 8]])):
+        t = Test(f"halo_worked_w{lanes}_t{taps}", "HaloLink", ["uint8"], "uint8", "uint8", lanes,
+                 taps=taps)
+        m = Halo("uint8", lanes, taps)
+        h = len(m.held)
+        assert len(beats) - h == len(want)
+        for i, b in enumerate(beats):
+            got = m.out(np.array(b, np.uint8))
+            if i >= h:
+                assert got.tolist() == want[i - h], (lanes, taps, i, got)
+            t.step(en(load=1), [b], got)
+            m.load(np.array(b, np.uint8))
+        out.append(t)
+    # W 8, T 3: tap t is bits [8 t, 8 t + 64) of {incoming, held} as 128 bits, held low
+    t = Test("halo_worked_w8_t3_bits", "HaloLink", ["uint8"], "uint8", "uint8", 8, taps=3)
+    m, held = Halo("uint8", 8, 3), 0
+    for _ in range(6):
+        a = rand("uint8", 8)
+        word = int.from_bytes(a.tobytes(), "little") << 64 | held
+        got = m.out(a)
+        for k in range(3):
+            assert int.from_bytes(got[8 * k:8 * k + 8].tobytes(), "little") == \
+                (word >> (8 * k)) & ((1 << 64) - 1)
+        t.step(en(load=1), [a], got)
+        m.load(a)
+        held = int.from_bytes(a.tobytes(), "little")
+    out.append(t)
+    return out
+
+
+def halos():
+    """The worked examples; T 2, 3 and 5 at W 1, 2, 4, 8 and 32 on uint8 and at W 4 on int32,
+    random beats and loads; and 200 beats at W 8, T 3, uint8, a load in most (the cross-check
+    with snax-forge's model)."""
+    out = halo_worked()
+    for taps in (2, 3, 5):
+        for lanes in (1, 2, 4, 8, 32):
+            out.append(halo(f"halo_uint8_w{lanes}_t{taps}", "uint8", lanes, taps))
+        out.append(halo(f"halo_int32_w4_t{taps}", "int32", 4, taps))
+    out.append(halo("halo_uint8_w8_t3_200", "uint8", 8, 3, steps=200, p_load=0.85))
+    return out
+
+
 def fixed():
     """The named vectors, worked by hand and checked against NumPy here."""
     out = []
@@ -607,6 +689,8 @@ def main():
     # requant, axpbypcz and threshold; drawn last, so the tests above stay as they were
     with np.errstate(over="ignore"):
         tests += options()
+    # the halo link (D206); drawn last, so the tests above stay as they were
+    tests += halos()
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

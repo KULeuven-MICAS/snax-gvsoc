@@ -412,6 +412,34 @@ def dot1_cluster(folder: Path) -> Path:
                                                ("vsum", VSUM_STREAMER, 3, 2)])
 
 
+class LinkDatapaths(unittest.TestCase):
+    """A link's datapaths (LINK_DATAPATHS): their params and checks, and a halo link's fill
+    (D206)."""
+
+    def test_params_and_refusals(self):
+        self.assertEqual(snax_cfg.link_datapath_why("HaloLink", {"taps": 3, "lanes": 8}, "uint8"),
+                         "")
+        self.assertEqual(snax_cfg.link_datapath_why("LinkBuffer", {"depth": 2, "lanes": 4},
+                                                    "int64"), "")
+        for name, params, dtype, why in (
+                ("HaloLink", {"taps": 1, "lanes": 8}, "uint8", "taps 1; HaloLink takes an int of "
+                 "at least 2"),
+                ("HaloLink", {"taps": 3, "lanes": 0}, "uint8", "lanes 0; HaloLink takes an int"),
+                ("HaloLink", {"depth": 1, "lanes": 8}, "uint8", "HaloLink takes taps, lanes"),
+                ("HaloLink", {"taps": 3, "lanes": 8}, "float32", "not a NumPy integer type"),
+                ("Fifo", {}, "uint8", "not a link's datapath")):
+            self.assertIn(why, snax_cfg.link_datapath_why(name, params, dtype))
+
+    def test_halo_held_and_outputs(self):
+        """H = ceil((T - 1) / W): 1 at W >= 2 with T 3, 2 at W 1 or at W 2 with T 5; a job of
+        beats gives beats - H outputs."""
+        for (taps, lanes), held in (((3, 4), 1), ((3, 8), 1), ((3, 1), 2), ((5, 2), 2),
+                                    ((2, 1), 1), ((5, 32), 1), ((9, 4), 2)):
+            self.assertEqual(snax_cfg.halo_held(taps, lanes), held, (taps, lanes))
+        self.assertEqual([snax_cfg.halo_outputs(b, 3, 4) for b in (0, 1, 3)], [0, 0, 2])
+        self.assertEqual(snax_cfg.halo_outputs(4, 3, 1), 2)
+
+
 class AccJson(unittest.TestCase):
     """accelerator.json beside the cluster file: what it holds, and each thing wrong in it a
     named error at its key."""

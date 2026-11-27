@@ -239,7 +239,8 @@ def _accumulates(params: dict) -> bool:
 
 
 # The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
-# LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
+# LinkBuffer and HaloLink, a link's (LINK_DATAPATHS). A new datapath is an entry here and one in
+# the registry.
 CATALOGUE = {
     'SimdLanes': Datapath(nb_inputs=lambda p: NAMED[p['op']][0] if p.get('op') in NAMED
                           else 1 if 'k' in p else 2, is_fold=lambda p: False,
@@ -255,6 +256,44 @@ CATALOGUE = {
     'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1),
 }
+# A link's datapaths, the registry's other entries: per name its int params with the least each
+# takes, besides its ends' dtype. A LinkBuffer's ring of depth beats; a HaloLink (D206) gives its
+# consumer's taps inputs one stream's beat as windows shifted by 0 ... taps - 1 elements
+LINK_DATAPATHS = {
+    'LinkBuffer': {'depth': 1, 'lanes': 1},
+    'HaloLink': {'taps': 2, 'lanes': 1},
+}
+
+
+def link_datapath_why(name: str, params: dict, dtype: str) -> str:
+    """Why a link's datapath name cannot take params (its ints) at dtype, or '' when it
+    can."""
+    if name not in LINK_DATAPATHS:
+        return f'{name!r}, not a link\'s datapath ({", ".join(LINK_DATAPATHS)})'
+    want = LINK_DATAPATHS[name]
+    if set(params) != set(want):
+        return f'params {sorted(params)}; {name} takes {", ".join(want)}'
+    for key, least in want.items():
+        v = params[key]
+        if type(v) is not int or v < least:
+            return f'{key} {v!r}; {name} takes an int of at least {least}'
+    if dtype not in DTYPES:
+        return f'{dtype!r}, not a NumPy integer type'
+    return ''
+
+
+def halo_held(taps: int, lanes: int) -> int:
+    """H, the beats a halo link of taps windows over beats of lanes elements holds:
+    ceil((taps - 1) / lanes), 1 at lanes >= 2 with taps 3, 2 at lanes 1."""
+    return -(-(taps - 1) // lanes)
+
+
+def halo_outputs(beats: int, taps: int, lanes: int) -> int:
+    """The outputs a job of beats beats gives through a halo link: its first H beats only fill,
+    every later one gives one (beats - H, none for a job shorter than the fill)."""
+    return max(0, beats - halo_held(taps, lanes))
+
+
 # A fold's seed port (snax-forge's brm.SEED): its output's lanes (one on a fold that sums its
 # lanes), read once per job
 SEED = 'seed'

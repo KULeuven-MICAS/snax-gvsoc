@@ -106,6 +106,7 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         }
         else if (key == "lanes") { ok = (bool)(ss >> tests.back().p.lanes); }
         else if (key == "depth") { ok = (bool)(ss >> tests.back().p.depth); }
+        else if (key == "taps") { ok = (bool)(ss >> tests.back().p.taps); }
         else if (key == "accumulate") { int v; ok = (bool)(ss >> v); tests.back().p.accumulate = v; }
         else if (key == "regOut") { int v; ok = (bool)(ss >> v); tests.back().p.reg_out = v; }
         else if (key == "seed") { int v; ok = (bool)(ss >> v); tests.back().p.seed = v; }
@@ -277,17 +278,22 @@ static int run(const Test &t)
             in.push_back(b.data());
         }
         dp->eval(in, s.en);
-        int out_lanes = dp->out_words * 64 / t.p.out_type.width;
-        out_lanes = (int)s.out.size() < out_lanes ? (int)s.out.size() : out_lanes;
+        // the output's beats (a HaloLink's taps), each in its own words: the step's lanes beat
+        // by beat, as many in each
+        int beat_words = dp->out_words / dp->out_beats;
+        int per = (int)s.out.size() / dp->out_beats;
+        int room = beat_words * 64 / t.p.out_type.width;
+        int out_lanes = (per < room ? per : room) * dp->out_beats;
         if ((int)s.out.size() != out_lanes)
         {
-            printf("%s: step %zu: %zu output lanes expected, the datapath has %d\n",
-                t.name.c_str(), k, s.out.size(), out_lanes);
+            printf("%s: step %zu: %zu output lanes expected, the datapath has %d in %d beat(s)\n",
+                t.name.c_str(), k, s.out.size(), room * dp->out_beats, dp->out_beats);
             errors++;
         }
         for (int l = 0; l < out_lanes; l++)
         {
-            uint64_t got = snax_lane_get(dp->out().data(), t.p.out_type.width, l);
+            uint64_t got = snax_lane_get(dp->out().data() + l / per * beat_words,
+                t.p.out_type.width, l % per);
             uint64_t want = (uint64_t)s.out[l] & snax_lane_mask(t.p.out_type.width);
             if (got != want)
             {
@@ -309,7 +315,7 @@ static int check_registry(int *count)
     SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k, axpby,
         axpby_no_k1, add_k1, mac_seed, mac_seed_bad, two_seed, plain_seed, bank, bank_seed,
         bank_plain, bank_none, xyz, xyz_two, xyz_d3, xyz_no_d, requant, requant_no_lo, requant_k,
-        threshold, threshold_no_k, two_d;
+        threshold, threshold_no_k, two_d, halo, halo_one, halo_w1;
     two.in_types = {i64, i64};
     one.in_types = {i64};
     one_k.in_types = {i64};
@@ -378,6 +384,15 @@ static int check_registry(int *count)
     threshold_no_k.has_k = threshold_no_k.k_csr = false;
     two_d = two;
     two_d.has_d = true;
+    // a halo link: taps 2 or more, its one input of the link's dtype
+    halo.in_types = {{8, false}};
+    halo.out_type = {8, false};
+    halo.lanes = 8;
+    halo.taps = 3;
+    halo_one = halo;
+    halo_one.taps = 1;
+    halo_w1 = halo;
+    halo_w1.lanes = 1;
     std::vector<Case> cases = {
         {"SimdLanes", two, true, 0, 1}, {"SimdLanes", one_k, true, 0, 1},
         {"SimdLanes", xyz, true, 0, 1}, {"SimdLanes", xyz_two, false, 0, 0},
@@ -399,6 +414,8 @@ static int check_registry(int *count)
         {"SerialAccumulate", serial, true, 1, 4},
         {"LaneAccumulate", one, true, 1, 1}, {"LaneAccumulate", two, false, 0, 0},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},
+        {"HaloLink", halo, true, 0, 1}, {"HaloLink", halo_w1, true, 0, 1},
+        {"HaloLink", halo_one, false, 0, 0}, {"HaloLink", two, false, 0, 0},
     };
     int errors = 0;
     *count = cases.size();
