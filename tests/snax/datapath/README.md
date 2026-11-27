@@ -3,7 +3,7 @@
 The datapaths of `snax/snax_datapath.hpp`, one plain C++ class per entry of snax-forge's catalogue (`hw/chisel/blocks.json`: `SimdLanes`, `TreeAccumulate`, `Mac`, `SerialAccumulate`, `LaneAccumulate`, `LinkBuffer`), against NumPy's vectors, with g++ only. `make regress` runs it after `shell`, as `datapath`. The control model (`snax/snax_group.hpp`) gives them their enables; here the vectors give them.
 
 - `gen.py` writes `vectors.txt` with NumPy (a fixed seed, so the same file every time): per test a datapath, its params and per cycle its enables, its inputs and the output its `eval` must give, each datapath's rule written in Python from snax-forge's contract, the arithmetic NumPy's (`astype`, wrapping). `vectors.txt` is checked in, so the tb needs no Python; run `gen.py` again (in snax-forge's pixi environment or anywhere with NumPy) only to change the vectors.
-- `tb.cpp` builds each test's datapath from the registry (`snax_datapath_new`), then per step calls `eval` with the inputs and the enables, compares every output lane, and calls `commit`. It also checks the registry: each name builds with its latency and span, an unknown name, a Mac of the wrong shape and a seed where none is taken are refused, and a seed has its output's lanes (`snax_seed_lanes`: one on a fold that sums its lanes, the unit's on a Mac).
+- `tb.cpp` builds each test's datapath from the registry (`snax_datapath_new`), then per step calls `eval` with the inputs and the enables, compares every output lane, and calls `commit`. It also checks the registry: each name builds with its latency and span, an unknown name, a Mac of the wrong shape, a SimdLanes op without its slots or streams (axpbypcz at two inputs or without d, d not a power of two, requant without lo, threshold without k, d on another op) and a seed where none is taken are refused, and a seed has its output's lanes (`snax_seed_lanes`: one on a fold that sums its lanes, the unit's on a Mac).
 - `run.sh [OBJ_DIR]` builds it into `OBJ_DIR` (default `build/datapath`) and runs it; exit 1 on any difference.
 
 ## A test
@@ -17,7 +17,8 @@ The datapaths of `snax/snax_datapath.hpp`, one plain C++ class per entry of snax
     accumulate 1                 Mac only; also regOut, depth (LinkBuffer), op, k (a one-stream SimdLanes' constant)
     rows 4                       Mac only: a bank of rows; its steps carry two more enables, row and drain
     seed 1                       a seeded fold (TreeAccumulate, SerialAccumulate: its last input the seed, one element; Mac: its output's lanes)
-    k1 3                         axpby's (op axpby) k1, baked, or `k1 csr` (from its CSR); k2 likewise; `kcsr`: a one-stream k from its CSR
+    k1 3                         axpby's or axpbypcz's k1, baked, or `k1 csr` (from its CSR); k2 and k3 likewise; `kcsr`: a one-stream k from its CSR
+    d 256                        axpbypcz's and requant's divisor (a power of two), requant's `lo` and `hi`, threshold's `hi`: baked
     set k1 7                     a CSR slot's value, given to the datapath (set_scalar) before the next step
     step F FI R L E LD WS RS : IN0 ; IN1 ... => OUT
 
@@ -28,6 +29,7 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 - Each class at three sizes, int64 (1, 2, 4 lanes) and int32 (2, 4, 8), random beats and enables; a tree, a MAC and a serial sum from int32 into int64; LinkBuffer at depth 1, 2 and 4.
 - SimdLanes at one stream (relu's, the header's `k`: op(a, k) at a's type): add, sub, mul, min and max at int32 (4 lanes) and int64 (2), each with k = 0, -1, the type's min and max, and a random k; and max(a, 0) from int32 into int64.
 - SimdLanes at axpby (axpy's, `k1 * a + k2 * b` at the inputs' result type, + b without k2): k1 baked or from its CSR, k2 unset, baked or from its CSR, at int32 (2 and 4 lanes), int64 (2) and int64 with an int16 b (4), a CSR slot's value set anew every other step; int32 into int64; and one stream with k from its CSR (add, mul, max at int32 and int64), k set anew every step.
+- SimdLanes at requant (`min(max(a // d, lo), hi)`), axpbypcz (`(k1 * a + k2 * b + k3 * c) // d`, three inputs) and threshold (`hi * min(max(a - k + 1, 0), 1)`), each at the op type, wrapping, the floor division a shift: requant at int32 and int16 into int8 and uint32 into uint8, with d = 1, the largest power of two the type holds (2^(w-2) signed, 2^(w-1) unsigned), lo = hi, lo above hi and the full range; axpbypcz at uint8 at uint16 into uint8 (gray's types), int32 and int32 into int8, each k at the type's min or max, unset, mixed or from its CSR; threshold at uint8 at int16 into uint8, uint16 and int32 into int8, k at the type's min and max, 0, random or from its CSR; lanes 1, 4 and 8, a quarter of the inputs at their type's ends; and the worked lanes: requant int32 into int8 (d 1024, 0 to 127) of 150000 and -5000 gives 127 and 0, gray's (200, 100, 50) at k (77, 150, 29) and d 256 gives 124, blur's (10, 20, 30) at k2 2 and d 4 gives 20, threshold at int16 with k 128 of 128 gives 255 and with k -32768 of 255 gives 0 (a - k + 1 wraps to -32512).
 - The folds at narrow types: TreeAccumulate, SerialAccumulate and LaneAccumulate from int8 (8 lanes) and int16 (4) into int32.
 - An opType wider than the inputs' result type, as a kernel's casts set it: SimdLanes mul and add from int8 at int32 (8 lanes), mul from int8 at int32 into int16, from int16 at int32 (4) and from int32 at int64 (2); Mac accumulating int8 at int32 (8). At one stream with k from its CSR (gesummv's scale, A at int8 times an int32 alpha): mul, add and max from int8 at int32 (8 lanes), mul from int16 at int64 (4), k set anew every step.
 - Mac in its three forms: accumulate, plain, plain with regOut. Plain at W = 4: a = (3, 5, -9, 5), b = (-1, 0, 2, -4), c = (8, -9, -4, -3) give y = (5, -9, -22, -23).
@@ -45,4 +47,4 @@ A step's enables are fire, first, read, lane, en, load, wslot and rslot (`SnaxEn
 
     tests/snax/datapath/run.sh
 
-It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `177 passed, 0 failed`.
+It prints `PASS` per test (and `registry`, `ops`, `tree`, `types` and `beats`) and ends with `238 passed, 0 failed`.

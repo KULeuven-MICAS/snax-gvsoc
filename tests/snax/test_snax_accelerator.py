@@ -142,6 +142,24 @@ class Built(unittest.TestCase):
         self.assertEqual((unit["k1"], unit["scalars"]), ("3", []))
         self.assertEqual(baked.components["shell"].properties["csrs"], ["START", "JOBS"])
 
+    def test_gray_three_inputs(self):
+        """gray's SimdLanes at axpbypcz: three inputs, k1 and k2 and d baked (decimal), k3 read
+        from its CSR (one word), the slots the op has none of empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            acc = self.build(write_design(Path(tmp), acc_json(accelerator("gray_v1", Unit(
+                "acc", "simd", "SimdLanes",
+                {p: Port(p, "uint8", 8, "out" if p == "out" else "in")
+                 for p in ("a", "b", "c", "out")},
+                "uint16", {"op": "axpbypcz", "k1": 77, "k2": 150, "d": 256}, 0, 1,
+                [Csr("K3", "rw", 2, 16, "k3")], scalars={"k3": "uint16"}), between=1)),
+                streamer([1, 1, 1], [1]), 3, 2))
+        (unit,) = acc.components["unit"].properties["units"]
+        self.assertEqual(
+            (unit["inputs"], unit["op"], *(unit[s] for s in ("k", "k1", "k2", "k3", "d", "lo",
+                                                              "hi")), unit["scalars"]),
+            (["acc_a", "acc_b", "acc_c"], "axpbypcz", "", "77", "150", "", "256", "", "",
+             [["k3", 1]]))
+
     def test_relu_one_stream(self):
         """relu: SimdLanes with one input, op max, its constant k "0" passed to SnaxGroup."""
         unit = Unit("acc", "simd", "SimdLanes",

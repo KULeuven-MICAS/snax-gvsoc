@@ -53,6 +53,7 @@ A cycle line: each input's valid and the output's ready (0 or 1), then the cycle
 | `scalar_k1_int64` | a 64-bit scalar as K1_LO at 2 and K1_HI at 3, and an 8-bit K2 at 4 keeping a write's low 8 bits (0x1fe reads 0xfe): STATUS 5, BUSY_COUNTER 6; the start sends JOBS, 1, K1_LO, K1_HI, K2 |
 | `settings_held` | a fold group with K1: while busy, writes to JOBS, JOB_BEATS, K1 and START with bit 0 clear each held until E + 1 and then taken (the next run's words and length show it), a read of JOBS answered at once |
 | `counter_saturates` | at `job_width` 8 a JOBS write of 0x105 keeps 5 and runs 5 jobs; at `busy_counter_width` 2 BUSY_COUNTER reads 0, 1, 2, 3, then 3 held |
+| `three_inputs` | a unit of three inputs (axpbypcz's): a firing waits for all three valids and the output's ready; STATUS and BUSY_COUNTER as for two |
 
 ## Running
 
@@ -60,4 +61,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/shell/run.sh
 
-It prints `PASS` per case and ends with `15 passed, 0 failed`.
+It prints `PASS` per case and ends with `16 passed, 0 failed`.

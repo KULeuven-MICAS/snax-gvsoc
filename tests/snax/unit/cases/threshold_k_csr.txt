@@ -1,0 +1,29 @@
+# threshold (snax-forge's SimdLanes at op threshold, k read from its CSR K): each lane
+# hi * min(max(a - k + 1, 0), 1) at the opType int16, a and the output uint8, hi 255 baked;
+# K = 128, written before START, sent with the start. W = 4 lanes, N = 8, so JOBS = 2 and
+# T = 1; L = 0, II 1 (lockstep). Worked by hand: a - 127 at int16 is at least 1 where
+# a >= 128, so a's beats (0, 127, 128, 255) and (200, 1, 129, 64) give (0, 0, 255, 255) and
+# (255, 0, 255, 0)
+latency 0
+ii 1
+inputs 1
+lanes 4
+types uint8 uint8
+optype int16
+op threshold
+k 128 csr
+hi 255
+start 0 2 1 taken
+expect run index=0 firings=2 busy=2 stall_in=0 stall_out=0 flush=0
+# each firing's beat: a's 4 lanes
+beat 0 0 127 128 255
+beat 1 200 1 129 64
+# each pushed result: 255 where a - 127 >= 1, else 0
+result 0 0 0 255 255
+result 1 255 0 255 0
+cycles
+# a out  fire push busy
+1 1      0 0 0     # 0: start, jobs 2, job_beats 1, K 128
+1 1      1 1 1     # 1: firing 0 -> (0, 0, 255, 255)
+1 1      1 1 1     # 2: firing 1 -> (255, 0, 255, 0); the run's end
+1 1      0 0 0     # 3: idle

@@ -58,15 +58,20 @@
 //                                   unit's own output: taken every job, its
 //                                   value given as 0 while the job is below
 //                                   CARRY, from the start; absent, false
-//                op                 SimdLanes' op (add ... max, or axpby);
-//                                   a fold's add
+//                op                 SimdLanes' op (add ... max, axpby,
+//                                   axpbypcz, requant or threshold); a
+//                                   fold's add
 //                k                  SimdLanes' constant at one stream,
 //                                   decimal ("0", "-3"), its second operand
 //                                   at opType for every lane; "" at two
-//                k1, k2             axpby's baked k1 and k2, decimal; ""
-//                                   when not baked
+//                k1, k2, k3         axpby's and axpbypcz's baked k1, k2
+//                                   and k3, decimal; "" when not baked
+//                d, lo, hi          axpbypcz's and requant's divisor d (a
+//                                   power of two), requant's bounds lo and
+//                                   hi, threshold's hi, decimal; "" when
+//                                   the op has none
 //                scalars            the slots read from CSRs (k at one
-//                                   stream, k1, k2), in CSR order, each
+//                                   stream, k1, k2, k3), in CSR order, each
 //                                   [slot, words]: 1 word, or 2 at 64 bits
 //                                   (low first), sent at each start
 //                accumulate, reg_out  Mac's variant
@@ -430,15 +435,19 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         p.out_type = this->type_prop(u, "out_width", "out_signed", w);
         p.op_type = this->type_prop(u, "op_width", "op_signed", w);
         std::string op = this->props.str_prop(u, "op", w);
-        p.op = op == snax_op_axpby_name ? SNAX_OP_AXPBY : -1;
+        p.op = -1;
         for (int i = 0; i < SNAX_NB_OPS; i++)
         {
             p.op = op == snax_op_names[i] ? i : p.op;
         }
+        for (int i = 0; i < SNAX_NB_NAMED_OPS; i++)
+        {
+            p.op = op == snax_named_ops[i] ? SNAX_OP_AXPBY + i : p.op;
+        }
         if (p.op == -1)
         {
             this->trace.fatal("Property %s.op: \"%s\", not an op (add, sub, mul, and, or, xor, "
-                "min, max, axpby)\n", w.c_str(), op.c_str());
+                "min, max, axpby, axpbypcz, requant, threshold)\n", w.c_str(), op.c_str());
         }
         p.accumulate = this->props.bool_prop(u, "accumulate", w);
         p.reg_out = this->props.bool_prop(u, "reg_out", w);
@@ -469,6 +478,10 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
         baked("k", &p.has_k, &p.k);
         baked("k1", &p.has_k1, &p.k1);
         baked("k2", &p.has_k2, &p.k2);
+        baked("k3", &p.has_k3, &p.k3);
+        baked("d", &p.has_d, &p.d);
+        baked("lo", &p.has_lo, &p.lo);
+        baked("hi", &p.has_hi, &p.hi);
         this->scalars.emplace_back();
         std::vector<js::Config *> slots = this->props.list_prop(u, "scalars", w);
         for (size_t i = 0; i < slots.size(); i++)
@@ -482,14 +495,15 @@ SnaxGroup::SnaxGroup(vp::ComponentConf &config)
             std::string slot = this->props.as_str(pair[0], at_i);
             int words = this->props.as_int(pair[1], at_i);
             bool *has = slot == "k" ? &p.has_k : slot == "k1" ? &p.has_k1 : slot == "k2" ? &p.has_k2
-                : nullptr;
+                : slot == "k3" ? &p.has_k3 : nullptr;
             if (!has || *has || (words != 1 && words != 2))
             {
-                this->trace.fatal("Property %s: [\"%s\", %d]: a slot k, k1 or k2 not baked, of 1 "
-                    "or 2 words\n", at_i.c_str(), slot.c_str(), words);
+                this->trace.fatal("Property %s: [\"%s\", %d]: a slot k, k1, k2 or k3 not baked, of "
+                    "1 or 2 words\n", at_i.c_str(), slot.c_str(), words);
             }
             *has = true;
-            (slot == "k" ? p.k_csr : slot == "k1" ? p.k1_csr : p.k2_csr) = true;
+            (slot == "k" ? p.k_csr : slot == "k1" ? p.k1_csr : slot == "k2" ? p.k2_csr : p.k3_csr) =
+                true;
             this->scalars.back().push_back({slot, words});
             this->scalar_words += words;
         }

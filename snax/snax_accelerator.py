@@ -51,7 +51,7 @@ its datapath, its inputs in BRM port order (an outer one named
 `<unit>_<port>`, a forked one after its fork's first port, a linked one ""), seed (the index of a fold's or a Mac's seed
 among them, the last, or -1), its output (outer, or "" when linked), its
 types, timing and t: params.T when the unit has one, 0 for a fold's
-JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2) and the ones it reads
+JOB_BEATS, else 1; SimdLanes' baked slots (k, k1, k2, k3, d, lo, hi) and the ones it reads
 from its CSRs (scalars, each [slot, words]); d_out, its outer output's results per 64-bit
 word (1 unless packed); d_in, per input its pops per 64-bit word (1 unless sliced);
 broadcast, per input whether its reader's one lane goes to all lanes; hold, per input
@@ -69,7 +69,7 @@ from dataclasses import dataclass
 
 import gvsoc.systree
 import interco.router as router
-from snax_cfg import (CATALOGUE, DTYPES, SEED, CfgTargetError, dirs_of, scalar_csrs,
+from snax_cfg import (CATALOGUE, DTYPES, SEED, SLOTS, CfgTargetError, dirs_of, scalar_csrs,
                       streamer_channels)
 from snax_group import SnaxGroup
 from snax_port_mux import SnaxPortMux
@@ -177,9 +177,7 @@ def group_units(accelerator, group) -> tuple:
             'op': u.params.get('op', 'add'),
             'accumulate': bool(u.params.get('accumulate', True)),
             'reg_out': bool(u.params.get('regOut', False)),
-            'k': str(u.params['k']) if 'k' in u.params else '',
-            'k1': str(u.params['k1']) if 'k1' in u.params else '',
-            'k2': str(u.params['k2']) if 'k2' in u.params else '',
+            **{s: str(u.params[s]) if s in u.params else '' for s in SLOTS},
             'scalars': [[s, len(scalar_csrs(s, dtype))] for s, dtype in u.scalars.items()],
             'latency': u.latency, 'ii': u.ii, 'span': u.span, 't': t,
             'd_out': out_port.d_out,

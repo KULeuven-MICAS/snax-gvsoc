@@ -1,0 +1,33 @@
+# gray (snax-forge's SimdLanes at op axpbypcz, k1 read from its CSR K1): each lane
+# (k1 * a + k2 * b + k3 * c) // d at the opType uint16, the inputs and the output uint8;
+# K1 = 77, written before START, sent with the start, k2 150 and k3 29 baked, d 256 (a
+# shift by 8). W = 2 lanes, N = 4, so JOBS = 2 and T = 1; L = 0, II 1 (lockstep), c missing
+# in cycle 2 (stall_in). Worked by hand: (77 * 200 + 150 * 100 + 29 * 50) // 256 =
+# 31850 // 256 = 124 and 256 * 255 // 256 = 255; then 29 * 255 // 256 = 7395 // 256 = 28 and
+# (770 + 3000 + 870) // 256 = 4640 // 256 = 18
+latency 0
+ii 1
+inputs 3
+lanes 2
+types uint8 uint8 uint8 uint8
+optype uint16
+op axpbypcz
+k1 77 csr
+k2 150
+k3 29
+d 256
+start 0 2 1 taken
+expect run index=0 firings=2 busy=2 stall_in=1 stall_out=0 flush=0
+# each firing's beat: a's 2 lanes, then b's, then c's
+beat 0 200 255 100 255 50 255
+beat 1 0 10 0 20 255 30
+# each pushed result: (77 a + 150 b + 29 c) // 256 per lane
+result 0 124 255
+result 1 28 18
+cycles
+# a b c out  fire push busy
+1 1 1 1      0 0 0     # 0: start, jobs 2, job_beats 1, K1 77
+1 1 1 1      1 1 1     # 1: firing 0 -> (124, 255)
+1 1 0 1      0 0 1     # 2: c missing: stall_in
+1 1 1 1      1 1 1     # 3: firing 1 -> (28, 18); the run's end
+1 1 1 1      0 0 0     # 4: idle
