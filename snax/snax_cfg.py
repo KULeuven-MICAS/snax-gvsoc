@@ -257,7 +257,7 @@ CATALOGUE = {
                                latency=lambda p: 1),
 }
 # A link's datapaths, the registry's other entries: per name its int params with the least each
-# takes, besides its ends' dtype. A LinkBuffer's ring of depth beats; a HaloLink (D206) gives its
+# takes, besides its ends' dtype. A LinkBuffer's ring of depth beats; a HaloLink gives its
 # consumer's taps inputs one stream's beat as windows shifted by 0 ... taps - 1 elements
 LINK_DATAPATHS = {
     'LinkBuffer': {'depth': 1, 'lanes': 1},

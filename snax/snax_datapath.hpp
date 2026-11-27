@@ -68,7 +68,7 @@
 //   LinkBuffer(depth, lanes, dtype)   D slots of one beat, L 1: the output is
 //       slot rslot, and on load slot wslot takes the input; the occupancy and
 //       the slots are the control model's
-//   HaloLink(taps, lanes, dtype)   T windows of a row, L 0, pin load (D206):
+//   HaloLink(taps, lanes, dtype)   T windows of a row, L 0, pin load:
 //       it holds H = ceil((T - 1) / W) beats; with e_0 ... e_((H+1)W-1) the
 //       held beats' elements, oldest first, then the input's, tap t lane l
 //       is e_(l+t), read from the input in its own cycle; on load the held

@@ -413,8 +413,7 @@ def dot1_cluster(folder: Path) -> Path:
 
 
 class LinkDatapaths(unittest.TestCase):
-    """A link's datapaths (LINK_DATAPATHS): their params and checks, and a halo link's fill
-    (D206)."""
+    """A link's datapaths (LINK_DATAPATHS): their params and checks, and a halo link's fill."""
 
     def test_params_and_refusals(self):
         self.assertEqual(snax_cfg.link_datapath_why("HaloLink", {"taps": 3, "lanes": 8}, "uint8"),

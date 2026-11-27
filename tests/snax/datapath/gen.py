@@ -436,7 +436,7 @@ def buffer(name, dtype, lanes, depth, steps=12):
 
 
 class Halo:
-    """A halo link as D206 states it: H = ceil((T - 1) / W) beats held, oldest first; tap t,
+    """A halo link as snax-forge's DECISIONS states it: H = ceil((T - 1) / W) beats held, oldest first; tap t,
     lane l is element l + t of the held beats' elements then the incoming beat's; on load the
     held beats shift by one, the incoming beat the newest."""
 
@@ -466,7 +466,7 @@ def halo(name, dtype, lanes, taps, steps=12, p_load=0.7):
 
 
 def halo_worked():
-    """D206's worked examples, a load every beat: from beat H + 1 on, each beat in gives one
+    """The halo link's worked examples, a load every beat: from beat H + 1 on, each beat in gives one
     output, so a job gives beats in - H; the steps before give the fill's taps (zeros held)."""
     out = []
     for lanes, taps, beats, want in (
@@ -689,7 +689,7 @@ def main():
     # requant, axpbypcz and threshold; drawn last, so the tests above stay as they were
     with np.errstate(over="ignore"):
         tests += options()
-    # the halo link (D206); drawn last, so the tests above stay as they were
+    # the halo link; drawn last, so the tests above stay as they were
     tests += halos()
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
