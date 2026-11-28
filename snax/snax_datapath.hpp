@@ -32,9 +32,13 @@
 //       a op b at opType, cast to outType (snax_op_elementwise_at); with one
 //       input (one stream), op(a, k) with the constant k at opType (holding a's type)
 //       (snax_op_elementwise_k); at op axpby, k1 * a + k2 * b (+ b without k2)
-//       at opType (snax_op_axpby). A slot read from its CSR (k at one stream,
-//       k1, k2) takes its value at each start (set_scalar), as the shell
-//       sends it
+//       at opType (snax_op_axpby); at axpbypcz, three inputs,
+//       (k1 * a + k2 * b + k3 * c) // d, an unset k the input itself
+//       (snax_op_axpbypcz); at requant, one input, min(max(a // d, lo), hi)
+//       (snax_op_requant); at threshold, one input, hi where a - k + 1 at
+//       opType is at least 1, else 0 (snax_op_threshold); d a power of two,
+//       a shift. A slot read from its CSR (k at one stream, k1, k2, k3)
+//       takes its value at each start (set_scalar), as the shell sends it
 //   TreeAccumulate(inType, outType, lanes, add[, seed])   L 1, pins fire,
 //       first: on fire acc <- first ? tree(x) : acc + tree(x), the lanes cast to
 //       outType first (snax_op_fold); the output, one word, is acc. Seeded (a
@@ -64,6 +68,14 @@
 //   LinkBuffer(depth, lanes, dtype)   D slots of one beat, L 1: the output is
 //       slot rslot, and on load slot wslot takes the input; the occupancy and
 //       the slots are the control model's
+//   HaloLink(taps, lanes, dtype)   T windows of a row, L 0, pin load:
+//       it holds H = ceil((T - 1) / W) beats; with e_0 ... e_((H+1)W-1) the
+//       held beats' elements, oldest first, then the input's, tap t lane l
+//       is e_(l+t), read from the input in its own cycle; on load the held
+//       beats shift by one, the input the newest. Its output is T beats, tap
+//       t in words [t * out_words / T, (t + 1) * out_words / T) (out_beats
+//       T), each beat laid out as the input's; the fill (a job's first H
+//       beats give no output) is the control model's
 //
 // The registry (snax_datapath_new) builds one by its catalogue name from a
 // unit's params (SnaxDatapathParams), or says why it cannot.
@@ -119,8 +131,18 @@ struct SnaxDatapathParams
     bool has_k2 = false;    // axpby's k2, as k1; neither: + b
     uint64_t k2 = 0;
     bool k2_csr = false;
+    bool has_k3 = false;    // axpbypcz's k3, as k1 (its k1 and k2 too may be neither: + x)
+    uint64_t k3 = 0;
+    bool k3_csr = false;
+    bool has_d = false;     // axpbypcz's and requant's divisor, baked: a power of two
+    uint64_t d = 1;
+    bool has_lo = false;    // requant's bounds, baked (hi threshold's output too): their bits
+    uint64_t lo = 0;
+    bool has_hi = false;
+    uint64_t hi = 0;
     bool seed = false;      // a fold's seed: its last input, its output's lanes (one element
                             // in one word on a fold that sums its lanes)
+    int taps = 0;           // a HaloLink's windows T
 };
 
 
@@ -142,6 +164,9 @@ public:
     // Words per beat of each input, in port order, and of the output
     std::vector<int> in_words;
     int out_words = 1;
+    // The output's beats, each in its own out_words / out_beats words: 1 but for a HaloLink,
+    // whose T taps are T beats, tap t the consumer's input t
+    int out_beats = 1;
     // Its latency and span, for the control model's check
     int latency = 0;
     int span = 1;
@@ -162,17 +187,40 @@ class SnaxSimdLanes : public SnaxDatapath
 public:
     explicit SnaxSimdLanes(const SnaxDatapathParams &p) : p(p)
     {
-        this->in_words = {snax_words(p.lanes, p.in_types[0])};
-        if (!p.has_k)
+        for (const SnaxType &t : p.in_types)
         {
-            this->in_words.push_back(snax_words(p.lanes, p.in_types[1]));
+            this->in_words.push_back(snax_words(p.lanes, t));
         }
         this->out_words = snax_words(p.lanes, p.out_type);
         this->out_.assign(this->out_words, 0);
+        while (this->shift < 63 && ((uint64_t)1 << this->shift) < p.d)
+        {
+            this->shift++;
+        }
     }
 
     void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &) override
     {
+        if (this->p.op == SNAX_OP_AXPBYPCZ)
+        {
+            const bool has[3] = {this->p.has_k1, this->p.has_k2, this->p.has_k3};
+            const uint64_t k[3] = {this->p.k1, this->p.k2, this->p.k3};
+            snax_op_axpbypcz(this->p.lanes, this->p.in_types.data(), this->p.op_type,
+                this->p.out_type, in.data(), has, k, this->shift, this->out_.data());
+            return;
+        }
+        if (this->p.op == SNAX_OP_REQUANT)
+        {
+            snax_op_requant(this->p.lanes, this->p.in_types[0], this->p.op_type, this->p.out_type,
+                in[0], this->shift, this->p.lo, this->p.hi, this->out_.data());
+            return;
+        }
+        if (this->p.op == SNAX_OP_THRESHOLD)
+        {
+            snax_op_threshold(this->p.lanes, this->p.in_types[0], this->p.op_type,
+                this->p.out_type, in[0], this->p.k, this->p.hi, this->out_.data());
+            return;
+        }
         if (this->p.op == SNAX_OP_AXPBY)
         {
             snax_op_axpby(this->p.lanes, this->p.in_types[0], this->p.in_types[1],
@@ -208,6 +256,10 @@ public:
         {
             this->p.k2 = bits;
         }
+        else if (slot == "k3" && this->p.k3_csr)
+        {
+            this->p.k3 = bits;
+        }
         else
         {
             return false;
@@ -217,6 +269,60 @@ public:
 
 private:
     SnaxDatapathParams p;
+    int shift = 0;  // log2(d)
+};
+
+
+// NB (D206): tap t lane l is element l + t of the held beats (oldest first) then the input,
+// cut as snax-forge's HaloLink cuts it
+class SnaxHaloLink : public SnaxDatapath
+{
+public:
+    explicit SnaxHaloLink(const SnaxDatapathParams &p) : p(p)
+    {
+        this->held = (p.taps - 1 + p.lanes - 1) / p.lanes;
+        this->beat_words = snax_words(p.lanes, p.out_type);
+        this->in_words = {this->beat_words};
+        this->out_beats = p.taps;
+        this->out_words = p.taps * this->beat_words;
+        this->beats.assign(this->held, std::vector<uint64_t>(this->beat_words, 0));
+        this->in.assign(this->beat_words, 0);
+        this->out_.assign(this->out_words, 0);
+    }
+
+    void eval(const std::vector<const uint64_t *> &in, const SnaxEnables &) override
+    {
+        std::copy(in[0], in[0] + this->beat_words, this->in.begin());
+        std::fill(this->out_.begin(), this->out_.end(), 0);
+        int w = this->p.out_type.width, n = this->p.lanes;
+        for (int t = 0; t < this->p.taps; t++)
+        {
+            for (int l = 0; l < n; l++)
+            {
+                int e = l + t;
+                const uint64_t *beat = e < this->held * n ? this->beats[e / n].data()
+                    : this->in.data();
+                snax_lane_set(this->out_.data() + t * this->beat_words, w, l,
+                    snax_lane_get(beat, w, e % n));
+            }
+        }
+    }
+
+    void commit(const SnaxEnables &en) override
+    {
+        if (en.load)
+        {
+            std::rotate(this->beats.begin(), this->beats.begin() + 1, this->beats.end());
+            this->beats.back() = this->in;
+        }
+    }
+
+private:
+    SnaxDatapathParams p;
+    int held = 1;           // H, the beats it holds
+    int beat_words = 1;     // a beat's words, the input's and each tap's
+    std::vector<std::vector<uint64_t>> beats;  // the held beats, oldest first
+    std::vector<uint64_t> in;
 };
 
 
@@ -502,7 +608,41 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
     static const std::map<std::string, SnaxDatapathEntry> registry = {
         {"SimdLanes", {true, false, false, [](const SnaxDatapathParams &p, std::string *why) {
             SnaxType t;
-            if (p.op == SNAX_OP_AXPBY)
+            if (p.has_d && (p.d == 0 || (p.d & (p.d - 1))))
+            {
+                *why = "d " + std::to_string(p.d) + ": a power of two, the lanes shift by it";
+                return std::unique_ptr<SnaxDatapath>();
+            }
+            else if (p.op == SNAX_OP_AXPBYPCZ)
+            {
+                if (p.in_types.size() != 3 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t) ||
+                    !snax_op_result_type(t, p.in_types[2], &t) || !snax_holds(p.op_type, t) ||
+                    !p.has_d || p.has_k || p.has_lo || p.has_hi)
+                {
+                    *why = "axpbypcz: three inputs at an opType that holds their result type, d "
+                        "baked, k1, k2 and k3 each baked, from its CSR or unset";
+                    return std::unique_ptr<SnaxDatapath>();
+                }
+            }
+            else if (p.op == SNAX_OP_REQUANT || p.op == SNAX_OP_THRESHOLD)
+            {
+                bool requant = p.op == SNAX_OP_REQUANT;
+                if (p.in_types.size() != 1 || !snax_holds(p.op_type, p.in_types[0]) ||
+                    p.has_k1 || p.has_k2 || p.has_k3 || !p.has_hi || p.has_lo != requant ||
+                    p.has_d != requant || p.has_k == requant)
+                {
+                    *why = requant ? "requant: one input at an opType that holds it, d, lo and hi "
+                        "baked" : "threshold: one input at an opType that holds it, k baked or "
+                        "from its CSR, hi baked";
+                    return std::unique_ptr<SnaxDatapath>();
+                }
+            }
+            else if (p.has_k3 || p.has_d || p.has_lo || p.has_hi)
+            {
+                *why = "k3, d, lo and hi are axpbypcz's, requant's and threshold's";
+                return std::unique_ptr<SnaxDatapath>();
+            }
+            else if (p.op == SNAX_OP_AXPBY)
             {
                 if (p.in_types.size() != 2 || !snax_op_result_type(p.in_types[0], p.in_types[1], &t) ||
                     t.width != p.op_type.width || t.is_signed != p.op_type.is_signed || !p.has_k1 ||
@@ -514,7 +654,7 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
             }
             else if (p.has_k1 || p.has_k2)
             {
-                *why = "k1 and k2 are axpby's";
+                *why = "k1 and k2 are axpby's and axpbypcz's";
                 return std::unique_ptr<SnaxDatapath>();
             }
             else if (p.has_k)
@@ -585,6 +725,18 @@ inline const std::map<std::string, SnaxDatapathEntry> &snax_datapaths()
                 return std::unique_ptr<SnaxDatapath>();
             }
             return std::unique_ptr<SnaxDatapath>(new SnaxLinkBuffer(p));
+        }}},
+        // A halo link cuts lanes out of its beats: whole 64-bit words, or a slice of one
+        {"HaloLink", {true, false, false, [](const SnaxDatapathParams &p, std::string *why) {
+            if (p.taps < 2 || p.lanes < 1 || p.in_types.size() != 1 ||
+                p.in_types[0].width != p.out_type.width ||
+                p.in_types[0].is_signed != p.out_type.is_signed)
+            {
+                *why = "taps 2 or more, lanes 1 or more, one input of the output's type (the "
+                    "link's dtype)";
+                return std::unique_ptr<SnaxDatapath>();
+            }
+            return std::unique_ptr<SnaxDatapath>(new SnaxHaloLink(p));
         }}},
     };
     return registry;

@@ -81,13 +81,19 @@ accelerator.json, what the standard composite
                               opType (SimdLanes and Mac),
                               params (op: SimdLanes' and
                               TreeAccumulate's, add, or SimdLanes' axpby, two
-                              inputs, k1 * a + k2 * b; k: SimdLanes' constant at
-                              one stream, its one input, an int of its opType;
-                              k1, k2: axpby's baked; accumulate, regOut: Mac's;
+                              inputs, k1 * a + k2 * b, axpbypcz, three,
+                              (k1 * a + k2 * b + k3 * c) // d, requant, one,
+                              min(max(a // d, lo), hi), or threshold, one,
+                              hi * min(max(a - k + 1, 0), 1); k: SimdLanes'
+                              constant at one stream, its one input, an int of
+                              its opType, and threshold's; k1, k2, k3: axpby's
+                              and axpbypcz's baked; d, lo, hi: baked, d a power
+                              of two; accumulate, regOut: Mac's;
                               rows: a Mac's bank, absent at 1; T: a
                               fold's rate fixed at design time), scalars
                               (SimdLanes' slots read from CSRs, k at one
-                              stream, k1, k2, each at its opType, none baked),
+                              stream, k1, k2, k3, each at its opType, none
+                              baked),
                               timing (latency, ii, span: 1 when missing), csrs
                               (its R/W ones: JOB_BEATS, a fold's without T, ROWS,
                               a bank's, of the bits of rows, CARRY, a carried
@@ -233,9 +239,11 @@ def _accumulates(params: dict) -> bool:
 
 
 # The unit datapaths SnaxGroup models, one entry each: snax_datapath.hpp's registry but
-# LinkBuffer, a link's. A new datapath is an entry here and one in the registry.
+# LinkBuffer and HaloLink, a link's (LINK_DATAPATHS). A new datapath is an entry here and one in
+# the registry.
 CATALOGUE = {
-    'SimdLanes': Datapath(nb_inputs=lambda p: 1 if 'k' in p else 2, is_fold=lambda p: False,
+    'SimdLanes': Datapath(nb_inputs=lambda p: NAMED[p['op']][0] if p.get('op') in NAMED
+                          else 1 if 'k' in p else 2, is_fold=lambda p: False,
                           latency=lambda p: 0, typed=True, needs_op=True, lanewise=True),
     'TreeAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1, reduces=True, needs_op=True, only_op='add',
@@ -248,6 +256,44 @@ CATALOGUE = {
     'LaneAccumulate': Datapath(nb_inputs=lambda p: 1, is_fold=lambda p: True,
                                latency=lambda p: 1),
 }
+# A link's datapaths, the registry's other entries: per name its int params with the least each
+# takes, besides its ends' dtype. A LinkBuffer's ring of depth beats; a HaloLink gives its
+# consumer's taps inputs one stream's beat as windows shifted by 0 ... taps - 1 elements
+LINK_DATAPATHS = {
+    'LinkBuffer': {'depth': 1, 'lanes': 1},
+    'HaloLink': {'taps': 2, 'lanes': 1},
+}
+
+
+def link_datapath_why(name: str, params: dict, dtype: str) -> str:
+    """Why a link's datapath name cannot take params (its ints) at dtype, or '' when it
+    can."""
+    if name not in LINK_DATAPATHS:
+        return f'{name!r}, not a link\'s datapath ({", ".join(LINK_DATAPATHS)})'
+    want = LINK_DATAPATHS[name]
+    if set(params) != set(want):
+        return f'params {sorted(params)}; {name} takes {", ".join(want)}'
+    for key, least in want.items():
+        v = params[key]
+        if type(v) is not int or v < least:
+            return f'{key} {v!r}; {name} takes an int of at least {least}'
+    if dtype not in DTYPES:
+        return f'{dtype!r}, not a NumPy integer type'
+    return ''
+
+
+def halo_held(taps: int, lanes: int) -> int:
+    """H, the beats a halo link of taps windows over beats of lanes elements holds:
+    ceil((taps - 1) / lanes), 1 at lanes >= 2 with taps 3, 2 at lanes 1."""
+    return -(-(taps - 1) // lanes)
+
+
+def halo_outputs(beats: int, taps: int, lanes: int) -> int:
+    """The outputs a job of beats beats gives through a halo link: its first H beats only fill,
+    every later one gives one (beats - H, none for a job shorter than the fill)."""
+    return max(0, beats - halo_held(taps, lanes))
+
+
 # A fold's seed port (snax-forge's brm.SEED): its output's lanes (one on a fold that sums its
 # lanes), read once per job
 SEED = 'seed'
@@ -266,8 +312,20 @@ UNIT_RW = ('JOB_BEATS', 'ROWS', 'CARRY')
 # The op names (snax_types.hpp's snax_op_names), and SimdLanes' axpby
 OPS = ('add', 'sub', 'mul', 'and', 'or', 'xor', 'min', 'max')
 AXPBY = 'axpby'
-# SimdLanes' slots: k at one stream, axpby's k1 and k2
-SLOTS = ('k', 'k1', 'k2')
+# SimdLanes' slots: k at one stream (and threshold's), axpby's and axpbypcz's k1 and k2,
+# axpbypcz's k3, the divisor d (axpbypcz's and requant's), requant's lo and hi (hi threshold's
+# too)
+SLOTS = ('k', 'k1', 'k2', 'k3', 'd', 'lo', 'hi')
+# The slots a CSR may hold; d, lo and hi are baked into the hardware
+CSR_SLOTS = ('k', 'k1', 'k2', 'k3')
+# SimdLanes' ops of their own (snax_types.hpp's snax_named_ops): their inputs, the slots they
+# need and the ones they take
+NAMED = {
+    AXPBY: (2, {'k1'}, {'k1', 'k2'}),
+    'axpbypcz': (3, {'d'}, {'k1', 'k2', 'k3', 'd'}),
+    'requant': (1, {'d', 'lo', 'hi'}, {'d', 'lo', 'hi'}),
+    'threshold': (1, {'k', 'hi'}, {'k', 'hi'}),
+}
 
 
 def scalar_csrs(slot: str, dtype: str) -> list:
@@ -957,9 +1015,9 @@ def _unit(node: _Node) -> Unit:
     op = params.get('op', str, None)
     if facts.needs_op and op is None:
         raise CfgKeyError(node.file, params.where('op'), f'missing: {datapath} needs an op')
-    if op is not None and op not in OPS and not (op == AXPBY and datapath == 'SimdLanes'):
+    if op is not None and op not in OPS and not (op in NAMED and datapath == 'SimdLanes'):
         raise CfgTypeError(node.file, params.where('op'), f'{op!r}, not an op ({", ".join(OPS)}; '
-                           f'SimdLanes\' {AXPBY})')
+                           f'SimdLanes\' {", ".join(NAMED)})')
     if facts.only_op is not None and op != facts.only_op:
         raise CfgTargetError(node.file, params.where('op'),
             f'{op!r}: {datapath} {facts.only_op}s; a fold of another op is not modelled')
@@ -975,15 +1033,21 @@ def _unit(node: _Node) -> Unit:
     baked = {s: params.get(s, int, None) for s in SLOTS}
     scalars = node.get('scalars', dict, {})
     for s, dtype in scalars.items():
-        if datapath != 'SimdLanes' or s not in SLOTS or baked[s] is not None:
+        if datapath != 'SimdLanes' or s not in CSR_SLOTS or baked[s] is not None:
             raise CfgTypeError(node.file, f'{node.where("scalars")}.{s}',
-                f'not a slot of SimdLanes ({", ".join(SLOTS)}) that is not baked')
-    for s in ('k1', 'k2'):
-        if (baked[s] is not None or s in scalars) and op != AXPBY:
-            raise CfgTypeError(node.file, params.where(s), f'{s} is {AXPBY}\'s, not {op}\'s')
-    if op == AXPBY and baked['k1'] is None and 'k1' not in scalars:
-        raise CfgKeyError(node.file, params.where('k1'),
-            f'missing: {AXPBY} takes k1, baked in params or read from its CSR (scalars)')
+                f'not a slot of SimdLanes a CSR holds ({", ".join(CSR_SLOTS)}) that is not baked')
+    given = {s for s in SLOTS if baked[s] is not None or s in scalars}
+    takes = NAMED[op][2] if op in NAMED else {'k'}
+    for s in sorted(given - takes, key=SLOTS.index):
+        owners = "'s and ".join(o for o, (_, _, t) in NAMED.items() if s in t)
+        raise CfgTypeError(node.file, params.where(s), f'{s} is {owners}\'s, not {op}\'s')
+    for s in sorted(NAMED[op][1] - given if op in NAMED else (), key=SLOTS.index):
+        raise CfgKeyError(node.file, params.where(s), f'missing: {op} takes {s}, baked in params'
+                          + (' or read from its CSR (scalars)' if s in CSR_SLOTS else ''))
+    d = baked['d']
+    if d is not None and (d < 1 or d & (d - 1)):
+        raise CfgTypeError(node.file, params.where('d'),
+            f'{d}: not a power of two; the unit divides by shifting')
     t = params.get('T', int, None)
     if t is not None and t < 1:
         raise CfgTypeError(node.file, params.where('T'), f'{t}, must be 1 or more')
@@ -1437,8 +1501,8 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
     ins = [u.ports[p] for p in u.ports if dirs[p] == 'in' and p != SEED]  # the seed: _unit
     outs = [u.ports[p] for p in u.ports if dirs[p] == 'out']
     facts = CATALOGUE[u.datapath]
-    plain = facts.nb_inputs(u.slot_params) == 3
     n_in = facts.nb_inputs(u.slot_params)
+    plain = u.datapath == 'Mac' and n_in == 3
     if (len(ins), len(outs)) != (n_in, 1):
         raise CfgTargetError(node.file, node.where('inputs'),
             f'unit {u.name}: {len(ins)} inputs and {len(outs)} outputs; {u.datapath} takes '
@@ -1469,12 +1533,15 @@ def _check_shape(node: _Node, acc: Accelerator, u: Unit):
                 f'unit {u.name}: opType {u.op_type} does not hold its one input\'s type '
                 f'{type_name(*a)}')
         return
-    a, b = ((p.width, p.signed) for p in ins[:2])
-    t = result_type(a, b)
+    # a plain Mac's c is out's type; SimdLanes' axpbypcz runs at its three inputs' result type
+    ops = [(p.width, p.signed) for p in (ins if u.datapath == 'SimdLanes' else ins[:2])]
+    t = ops[0]
+    for x in ops[1:]:
+        t = None if t is None else result_type(t, x)
     if t is None:
         raise CfgTypeError(node.file, node.where('groups'),
-            f'unit {u.name}: {type_name(*a)} with {type_name(*b)} has no integer result type '
-            '(NumPy gives float64)')
+            f'unit {u.name}: {" with ".join(type_name(*x) for x in ops)} has no integer result '
+            'type (NumPy gives float64)')
     # NB (D175): the kernel's casts may set the op wider than the inputs' result type
     if result_type(DTYPES[u.op_type], t) != DTYPES[u.op_type]:
         raise CfgSlotError(node.file, node.where('groups'),

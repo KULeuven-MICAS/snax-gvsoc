@@ -16,15 +16,17 @@ Plain text; `#` starts a comment, blank lines are skipped. Header lines, in any 
 | Line | What |
 |---|---|
 | `latency L`, `ii N` | the unit's L >= 0 and II >= 1 (defaults 0 and 1) |
-| `inputs N` | input columns: 2 (an elementwise op) or 1 (a fold, or with `k` an elementwise op on one input); default 2 |
+| `inputs N` | input columns: 2 (an elementwise op), 3 (axpbypcz) or 1 (a fold, or with `k`, requant or threshold an elementwise op on one input); default 2 |
 | `lanes W` | input lanes (default 1): a fold's tree, or the op's lanes; only the data uses it |
 | `start CYCLE J T taken\|ignored\|refused` | a start offered in that cycle (before the cycle's step) with jobs J and job_beats T, and its expected answer |
 | `expect run index=I firings=F busy=B stall_in=SI stall_out=SO flush=FL` | the summary line expected at the end of run I, in order (`docs/EVENTS.md`) |
 | `types IN... OUT` | optional: each input's and the output's NumPy integer type (`int8` .. `uint64`); with it the data below is checked |
-| `op NAME` | the op with `types`: add, sub, mul, and, or, xor, min, max (default add), or axpby (two inputs, `k1 * a + k2 * b`) |
+| `op NAME` | the op with `types`: add, sub, mul, and, or, xor, min, max (default add), axpby (two inputs, `k1 * a + k2 * b`), axpbypcz (three, `(k1 * a + k2 * b + k3 * c) // d`), requant (one, `min(max(a // d, lo), hi)`) or threshold (one, `hi * min(max(a - k + 1, 0), 1)`) |
+| `optype T` | optional: the type axpbypcz, requant and threshold run at (default the inputs' result type) |
 | `fold tree\|lanes` | a one-input fold's form with `types`: `tree` (the default) sums each beat's lanes into one result, `lanes` (snax-forge's LaneAccumulate) keeps each lane's own sum, W results per push |
-| `k V` | one input's constant (decimal): the case is a one-stream SimdLanes, each lane op(a, k) at the input's type, W results per push |
-| `k1 V [csr]`, `k2 V [csr]` | axpby's k1 (required) and k2 (optional; none: `+ b`), decimal; with `csr` the slot is read from its CSR (K1, K2), V the value the program wrote, sent with each start, otherwise baked; each lane `k1 * a + k2 * b` at the inputs' result type, wrapping, W results per push |
+| `k V [csr]` | one input's constant (decimal): the case is a one-stream SimdLanes, each lane op(a, k) at the input's type, W results per push; or threshold's k, with `csr` read from its CSR (K) |
+| `k1 V [csr]`, `k2 V [csr]` | axpby's k1 (required) and k2 (optional; none: `+ b`), decimal; with `csr` the slot is read from its CSR (K1, K2), V the value the program wrote, sent with each start, otherwise baked; each lane `k1 * a + k2 * b` at the inputs' result type, wrapping, W results per push; axpbypcz's k1, k2 and `k3` likewise, each optional (none: the input itself) |
+| `d V`, `lo V`, `hi V` | baked: axpbypcz's and requant's divisor d (a power of two), requant's bounds, threshold's hi |
 | `beat N V...` | the input lanes of the case's N-th firing (from 0, over every run): W values per input, input 0 first |
 | `result N V...` | the case's N-th pushed result: W values for an elementwise op, one for a fold |
 | `cycles` | the cycle lines follow |
@@ -53,6 +55,8 @@ A cycle line holds each input's valid, the output's ready (room), then the expec
 | `relu_one_stream` | relu's one-stream SimdLanes (op max, k 0) at W = 4, int32, N = 8: JOBS = 2, T = 1, L = 0; A = (-3, 5, 0, -1 \| 7, -8, 2, -2) gives B = (0, 5, 0, 0 \| 7, 0, 2, 0) |
 | `axpy_k1_csr` | axpy's SimdLanes (op axpby, k1 from its CSR K1 = 3, `+ b`) at W = 2, int32, N = 4: JOBS = 2, T = 1, L = 0; x = (1, -2 \| 4, 0), y = (10, 20 \| -5, 7) give y' = (13, 14 \| 7, 7) |
 | `axpby_int64_wrap` | axpby at int64, W = 2, J = 2: k1 baked at -2, k2 from its CSR at 2^62 + 1, so `k1 * a + k2 * b` wraps at int64 (2^63 + 16 gives -2^63 + 16) |
+| `threshold_k_csr` | threshold with k from its CSR K = 128, hi 255, uint8 at the opType int16, W = 4, J = 2: a's (0, 127, 128, 255 \| 200, 1, 129, 64) give (0, 0, 255, 255 \| 255, 0, 255, 0) |
+| `axpbypcz_k1_csr` | gray's axpbypcz, k1 from its CSR K1 = 77, k2 150 and k3 29 baked, d 256, uint8 at uint16, W = 2, J = 2, c missing one cycle (stall_in): (200, 255), (100, 255), (50, 255) give (124, 255), then (0, 10), (0, 20), (255, 30) give (28, 18) |
 | `lane_fold_rowsum` | rowsum 2's lane accumulator, its worked example: `fold lanes`, W = 2, J = M / W = 2, T = N = 3, L = 1, int64; A's rows (1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12), a column a beat, give (6, 15) then (24, 33), each pushed the cycle after its job's last firing |
 | `fold_jobs` | J = 2, T = 3, L = 1, int32 in, int64 out, with data: beats (k, k, k, k) for k = 1 .. 6 give 24 and 60, pushed in the cycles after firings 3 and 6, the next input taken as a result leaves |
 
@@ -62,4 +66,4 @@ From snax-gvsoc's root (in the image or on any host with g++ and C++17):
 
     tests/snax/unit/run.sh
 
-It prints `PASS` per case and ends with `16 passed, 0 failed`.
+It prints `PASS` per case and ends with `18 passed, 0 failed`.

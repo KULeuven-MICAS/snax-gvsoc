@@ -106,6 +106,7 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         }
         else if (key == "lanes") { ok = (bool)(ss >> tests.back().p.lanes); }
         else if (key == "depth") { ok = (bool)(ss >> tests.back().p.depth); }
+        else if (key == "taps") { ok = (bool)(ss >> tests.back().p.taps); }
         else if (key == "accumulate") { int v; ok = (bool)(ss >> v); tests.back().p.accumulate = v; }
         else if (key == "regOut") { int v; ok = (bool)(ss >> v); tests.back().p.reg_out = v; }
         else if (key == "seed") { int v; ok = (bool)(ss >> v); tests.back().p.seed = v; }
@@ -121,20 +122,37 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
                 tests.back().p.has_k = true;
             }
         }
-        else if (key == "k1" || key == "k2")
+        else if (key == "k1" || key == "k2" || key == "k3")
         {
-            // axpby's slot: baked (k1 V), or read from its CSR (k1 csr), set by `set` lines
+            // axpby's or axpbypcz's slot: baked (k1 V), or read from its CSR (k1 csr), set by
+            // `set` lines
             std::string v;
             ok = (bool)(ss >> v) && !v.empty();
             SnaxDatapathParams &q = tests.back().p;
-            (key == "k1" ? q.has_k1 : q.has_k2) = true;
+            int i = key[1] - '1';
+            bool *has[3] = {&q.has_k1, &q.has_k2, &q.has_k3};
+            bool *csr[3] = {&q.k1_csr, &q.k2_csr, &q.k3_csr};
+            uint64_t *bits[3] = {&q.k1, &q.k2, &q.k3};
+            *has[i] = true;
             if (ok && v == "csr")
             {
-                (key == "k1" ? q.k1_csr : q.k2_csr) = true;
+                *csr[i] = true;
             }
             else if (ok)
             {
-                (key == "k1" ? q.k1 : q.k2) = bits_of(v);
+                *bits[i] = bits_of(v);
+            }
+        }
+        else if (key == "d" || key == "lo" || key == "hi")
+        {
+            // axpbypcz's and requant's divisor, requant's bounds, threshold's hi: baked, decimal
+            std::string v;
+            ok = (bool)(ss >> v) && !v.empty();
+            SnaxDatapathParams &q = tests.back().p;
+            (key == "d" ? q.has_d : key == "lo" ? q.has_lo : q.has_hi) = true;
+            if (ok)
+            {
+                (key == "d" ? q.d : key == "lo" ? q.lo : q.hi) = bits_of(v);
             }
         }
         else if (key == "kcsr")
@@ -156,10 +174,15 @@ static bool parse(const std::string &path, std::vector<Test> &tests)
         {
             std::string name;
             ok = (bool)(ss >> name);
-            tests.back().p.op = name == snax_op_axpby_name ? SNAX_OP_AXPBY : -1;
+            tests.back().p.op = -1;
             for (int op = 0; op < SNAX_NB_OPS; op++)
             {
                 tests.back().p.op = name == snax_op_names[op] ? op : tests.back().p.op;
+            }
+            for (int i = 0; i < SNAX_NB_NAMED_OPS; i++)
+            {
+                tests.back().p.op = name == snax_named_ops[i] ? SNAX_OP_AXPBY + i
+                    : tests.back().p.op;
             }
             ok = ok && tests.back().p.op != -1;
         }
@@ -255,17 +278,22 @@ static int run(const Test &t)
             in.push_back(b.data());
         }
         dp->eval(in, s.en);
-        int out_lanes = dp->out_words * 64 / t.p.out_type.width;
-        out_lanes = (int)s.out.size() < out_lanes ? (int)s.out.size() : out_lanes;
+        // the output's beats (a HaloLink's taps), each in its own words: the step's lanes beat
+        // by beat, as many in each
+        int beat_words = dp->out_words / dp->out_beats;
+        int per = (int)s.out.size() / dp->out_beats;
+        int room = beat_words * 64 / t.p.out_type.width;
+        int out_lanes = (per < room ? per : room) * dp->out_beats;
         if ((int)s.out.size() != out_lanes)
         {
-            printf("%s: step %zu: %zu output lanes expected, the datapath has %d\n",
-                t.name.c_str(), k, s.out.size(), out_lanes);
+            printf("%s: step %zu: %zu output lanes expected, the datapath has %d in %d beat(s)\n",
+                t.name.c_str(), k, s.out.size(), room * dp->out_beats, dp->out_beats);
             errors++;
         }
         for (int l = 0; l < out_lanes; l++)
         {
-            uint64_t got = snax_lane_get(dp->out().data(), t.p.out_type.width, l);
+            uint64_t got = snax_lane_get(dp->out().data() + l / per * beat_words,
+                t.p.out_type.width, l % per);
             uint64_t want = (uint64_t)s.out[l] & snax_lane_mask(t.p.out_type.width);
             if (got != want)
             {
@@ -286,7 +314,8 @@ static int check_registry(int *count)
     struct Case { const char *name; SnaxDatapathParams p; bool builds; int latency, span; };
     SnaxDatapathParams two, one, plain, plain_bad, serial, link, one_k, two_k, axpby,
         axpby_no_k1, add_k1, mac_seed, mac_seed_bad, two_seed, plain_seed, bank, bank_seed,
-        bank_plain, bank_none;
+        bank_plain, bank_none, xyz, xyz_two, xyz_d3, xyz_no_d, requant, requant_no_lo, requant_k,
+        threshold, threshold_no_k, two_d, halo, halo_one, halo_w1;
     two.in_types = {i64, i64};
     one.in_types = {i64};
     one_k.in_types = {i64};
@@ -328,8 +357,49 @@ static int check_registry(int *count)
     bank_plain.rows = 2;
     bank_none = two;
     bank_none.rows = 0;
+    // axpbypcz: three inputs, d baked (a power of two), each k baked, from its CSR or unset;
+    // requant: one input, d, lo and hi; threshold: one input, k and hi; d on no other op
+    xyz.in_types = {i64, i64, i64};
+    xyz.op = SNAX_OP_AXPBYPCZ;
+    xyz.has_d = true;
+    xyz.d = 4;
+    xyz.has_k3 = xyz.k3_csr = true;
+    xyz_two = xyz;
+    xyz_two.in_types = {i64, i64};
+    xyz_d3 = xyz;
+    xyz_d3.d = 3;
+    xyz_no_d = xyz;
+    xyz_no_d.has_d = false;
+    requant.in_types = {i64};
+    requant.op = SNAX_OP_REQUANT;
+    requant.has_d = requant.has_lo = requant.has_hi = true;
+    requant_no_lo = requant;
+    requant_no_lo.has_lo = false;
+    requant_k = requant;
+    requant_k.has_k = true;
+    threshold.in_types = {i64};
+    threshold.op = SNAX_OP_THRESHOLD;
+    threshold.has_k = threshold.k_csr = threshold.has_hi = true;
+    threshold_no_k = threshold;
+    threshold_no_k.has_k = threshold_no_k.k_csr = false;
+    two_d = two;
+    two_d.has_d = true;
+    // a halo link: taps 2 or more, its one input of the link's dtype
+    halo.in_types = {{8, false}};
+    halo.out_type = {8, false};
+    halo.lanes = 8;
+    halo.taps = 3;
+    halo_one = halo;
+    halo_one.taps = 1;
+    halo_w1 = halo;
+    halo_w1.lanes = 1;
     std::vector<Case> cases = {
         {"SimdLanes", two, true, 0, 1}, {"SimdLanes", one_k, true, 0, 1},
+        {"SimdLanes", xyz, true, 0, 1}, {"SimdLanes", xyz_two, false, 0, 0},
+        {"SimdLanes", xyz_d3, false, 0, 0}, {"SimdLanes", xyz_no_d, false, 0, 0},
+        {"SimdLanes", requant, true, 0, 1}, {"SimdLanes", requant_no_lo, false, 0, 0},
+        {"SimdLanes", requant_k, false, 0, 0}, {"SimdLanes", threshold, true, 0, 1},
+        {"SimdLanes", threshold_no_k, false, 0, 0}, {"SimdLanes", two_d, false, 0, 0},
         {"SimdLanes", one, false, 0, 0}, {"SimdLanes", two_k, false, 0, 0},
         {"SimdLanes", axpby, true, 0, 1}, {"SimdLanes", axpby_no_k1, false, 0, 0},
         {"SimdLanes", add_k1, false, 0, 0},
@@ -344,6 +414,8 @@ static int check_registry(int *count)
         {"SerialAccumulate", serial, true, 1, 4},
         {"LaneAccumulate", one, true, 1, 1}, {"LaneAccumulate", two, false, 0, 0},
         {"LinkBuffer", link, true, 1, 1}, {"FifoBlock", one, false, 0, 0},
+        {"HaloLink", halo, true, 0, 1}, {"HaloLink", halo_w1, true, 0, 1},
+        {"HaloLink", halo_one, false, 0, 0}, {"HaloLink", two, false, 0, 0},
     };
     int errors = 0;
     *count = cases.size();

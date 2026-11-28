@@ -31,10 +31,18 @@ enum SnaxOp { SNAX_OP_ADD, SNAX_OP_SUB, SNAX_OP_MUL, SNAX_OP_AND, SNAX_OP_OR, SN
 static const char *const snax_op_names[SNAX_NB_OPS] =
     {"add", "sub", "mul", "and", "or", "xor", "min", "max"};
 
-// SimdLanes' one ternary op, k1 * a + k2 * b (no ElementwiseOp encoding):
-// snax-forge's SimdLanes.Axpby, after the ElementwiseOp ones
+// SimdLanes' ops of their own (no ElementwiseOp encoding), after the
+// ElementwiseOp ones, as snax-forge's SimdLanes.Axpby, Axpbypcz, Requant and
+// Threshold: k1 * a + k2 * b; (k1 * a + k2 * b + k3 * c) // d;
+// min(max(a // d, lo), hi); hi * min(max(a - k + 1, 0), 1)
 static const int SNAX_OP_AXPBY = SNAX_NB_OPS;
+static const int SNAX_OP_AXPBYPCZ = SNAX_NB_OPS + 1;
+static const int SNAX_OP_REQUANT = SNAX_NB_OPS + 2;
+static const int SNAX_OP_THRESHOLD = SNAX_NB_OPS + 3;
+static const int SNAX_NB_NAMED_OPS = 4;
 static const char *const snax_op_axpby_name = "axpby";
+static const char *const snax_named_ops[SNAX_NB_NAMED_OPS] =
+    {"axpby", "axpbypcz", "requant", "threshold"};
 
 
 // An element's type: width 8, 16, 32 or 64 bits, and its signedness. A value
@@ -234,6 +242,101 @@ inline void snax_op_axpby(int lanes, SnaxType a_t, SnaxType b_t, SnaxType t, Sna
         uint64_t scaled = has_k2 ? snax_op_compute(SNAX_OP_MUL, t, c2, y) : y;
         uint64_t r = snax_op_compute(SNAX_OP_ADD, t, snax_op_compute(SNAX_OP_MUL, t, c1, x), scaled);
         snax_lane_set(out, out_t.width, lane, snax_lane_cast(r, t, out_t));
+    }
+}
+
+
+// v (a value of t) // 2^shift, NumPy's floor division by a power of two: an
+// arithmetic shift at a signed t, a logical one at an unsigned t
+inline uint64_t snax_floor_shift(SnaxType t, uint64_t v, int shift)
+{
+    uint64_t mask = snax_lane_mask(t.width);
+    v &= mask;
+    if (shift == 0)
+    {
+        return v;
+    }
+    if (t.is_signed)
+    {
+        // NB (D143): NumPy's a // d rounds towards minus infinity, as the arithmetic shift
+        int up = 64 - t.width;
+        return (uint64_t)(((int64_t)(v << up) >> up) >> shift) & mask;
+    }
+    return v >> shift;
+}
+
+
+// An axpbypcz SimdLanes beat, as NumPy's
+// out = ((k1 * a + k2 * b + k3 * c) // d).astype(out_t): per lane, a, b and c
+// extended to t (the opType, holding their types), each term k * x at t (an
+// unset k, has_k[i] false: x itself), the sum at t, wrapping, divided by d =
+// 2^shift (snax_floor_shift), the result cast to out_t; each k given as its
+// bits (a value of t in 64 bits). out's words are cleared here.
+inline void snax_op_axpbypcz(int lanes, const SnaxType *in_t, SnaxType t, SnaxType out_t,
+    const uint64_t *const *in, const bool *has_k, const uint64_t *k, int shift, uint64_t *out)
+{
+    for (int w = 0; w < (lanes * out_t.width + 63) / 64; w++)
+    {
+        out[w] = 0;
+    }
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t sum = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            uint64_t x = snax_lane_cast(snax_lane_get(in[i], in_t[i].width, lane), in_t[i], t);
+            uint64_t term = has_k[i] ? snax_op_compute(SNAX_OP_MUL, t, k[i], x) : x;
+            sum = snax_op_compute(SNAX_OP_ADD, t, sum, term);
+        }
+        snax_lane_set(out, out_t.width, lane,
+            snax_lane_cast(snax_floor_shift(t, sum, shift), t, out_t));
+    }
+}
+
+
+// A requant SimdLanes beat, as NumPy's
+// out = np.minimum(np.maximum(a // d, lo), hi).astype(out_t): per lane, a
+// extended to t, divided by d = 2^shift (snax_floor_shift), then max with lo
+// and min with hi, in that order, comparing by t's signedness, the result cast
+// to out_t; lo and hi given as their bits. out's words are cleared here.
+inline void snax_op_requant(int lanes, SnaxType a_t, SnaxType t, SnaxType out_t,
+    const uint64_t *a, int shift, uint64_t lo, uint64_t hi, uint64_t *out)
+{
+    for (int w = 0; w < (lanes * out_t.width + 63) / 64; w++)
+    {
+        out[w] = 0;
+    }
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
+        uint64_t q = snax_floor_shift(t, x, shift);
+        uint64_t r = snax_op_compute(SNAX_OP_MIN, t, snax_op_compute(SNAX_OP_MAX, t, q, lo), hi);
+        snax_lane_set(out, out_t.width, lane, snax_lane_cast(r, t, out_t));
+    }
+}
+
+
+// A threshold SimdLanes beat, as NumPy's
+// out = (hi * np.minimum(np.maximum(a - k + 1, 0), 1)).astype(out_t): per
+// lane, a extended to t, delta = a - k + 1 at t, wrapping; the lane is hi
+// where delta is at least 1 by t's signedness, else 0, cast to out_t; k and hi
+// given as their bits. out's words are cleared here.
+inline void snax_op_threshold(int lanes, SnaxType a_t, SnaxType t, SnaxType out_t,
+    const uint64_t *a, uint64_t k, uint64_t hi, uint64_t *out)
+{
+    for (int w = 0; w < (lanes * out_t.width + 63) / 64; w++)
+    {
+        out[w] = 0;
+    }
+    uint64_t mask = snax_lane_mask(t.width);
+    uint64_t sign = (uint64_t)1 << (t.width - 1);
+    for (int lane = 0; lane < lanes; lane++)
+    {
+        uint64_t x = snax_lane_cast(snax_lane_get(a, a_t.width, lane), a_t, t);
+        // NB (D143): a - k + 1 wraps at t, as NumPy's; a comparison a >= k differs at t's ends
+        uint64_t delta = (x - k + 1) & mask;
+        bool above = delta != 0 && !(t.is_signed && (delta & sign));
+        snax_lane_set(out, out_t.width, lane, snax_lane_cast(above ? hi & mask : 0, t, out_t));
     }
 }
 

@@ -61,6 +61,18 @@ struct Case
     // each start) rather than baked; the arithmetic is the same
     bool has_k1 = false, k1_csr = false, has_k2 = false, k2_csr = false;
     uint64_t k1 = 0, k2 = 0;
+    // axpbypcz's k3 (as k1 and k2), threshold's k from its CSR, the baked d, lo and hi
+    bool has_k3 = false, k3_csr = false, k_csr = false, has_d = false, has_lo = false,
+        has_hi = false;
+    uint64_t k3 = 0, d = 1, lo = 0, hi = 0;
+    bool has_op_type = false;   // `optype`: the op's type, else the inputs' result type
+    SnaxType op_type = {64, true};
+
+    // One input computing lane by lane (relu's k, requant, threshold), not a fold
+    bool lanewise_one() const
+    {
+        return this->has_k || this->op == SNAX_OP_REQUANT || this->op == SNAX_OP_THRESHOLD;
+    }
     std::vector<StartLine> starts;
     std::vector<std::string> expects;   // run lines, in order
     std::vector<CycleLine> cycles;
@@ -128,7 +140,13 @@ static bool parse(const std::string &path, Case &c)
         }
         else if (key == "latency") { ok = (bool)(ss >> c.latency) && c.latency >= 0; }
         else if (key == "ii") { ok = (bool)(ss >> c.ii) && c.ii >= 1; }
-        else if (key == "inputs") { ok = (bool)(ss >> c.inputs) && (c.inputs == 1 || c.inputs == 2); }
+        else if (key == "inputs") { ok = (bool)(ss >> c.inputs) && c.inputs >= 1 && c.inputs <= 3; }
+        else if (key == "optype")
+        {
+            std::string name;
+            ok = (bool)(ss >> name) && tb_type_of(name, c.op_type);
+            c.has_op_type = ok;
+        }
         else if (key == "lanes") { ok = (bool)(ss >> c.lanes) && c.lanes > 0; }
         else if (key == "types")
         {
@@ -145,10 +163,14 @@ static bool parse(const std::string &path, Case &c)
         {
             std::string name;
             ok = (bool)(ss >> name);
-            c.op = name == snax_op_axpby_name ? SNAX_OP_AXPBY : -1;
+            c.op = -1;
             for (int op = 0; ok && op < SNAX_NB_OPS; op++)
             {
                 c.op = name == snax_op_names[op] ? op : c.op;
+            }
+            for (int i = 0; ok && i < SNAX_NB_NAMED_OPS; i++)
+            {
+                c.op = name == snax_named_ops[i] ? SNAX_OP_AXPBY + i : c.op;
             }
             ok = ok && c.op != -1;
         }
@@ -168,19 +190,10 @@ static bool parse(const std::string &path, Case &c)
             size_t last = rest.find_last_not_of(" \t\r");
             c.expects.push_back(first == std::string::npos ? "" : rest.substr(first, last - first + 1));
         }
-        else if (key == "k")
+        else if (key == "k" || key == "k1" || key == "k2" || key == "k3")
         {
-            std::string v;
-            ok = (bool)(ss >> v) && !v.empty();
-            if (ok)
-            {
-                c.k = v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
-                c.has_k = true;
-            }
-        }
-        else if (key == "k1" || key == "k2")
-        {
-            // k1 V [csr]: axpby's slot, baked, or read from its CSR
+            // k V [csr]: one input's constant or threshold's k; k1, k2, k3: axpby's and
+            // axpbypcz's slots; each baked, or read from its CSR (V the value written)
             std::string v, from;
             ok = (bool)(ss >> v) && !v.empty();
             bool csr = (bool)(ss >> from);
@@ -188,9 +201,25 @@ static bool parse(const std::string &path, Case &c)
             if (ok)
             {
                 uint64_t bits = v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
-                (key == "k1" ? c.k1 : c.k2) = bits;
-                (key == "k1" ? c.has_k1 : c.has_k2) = true;
-                (key == "k1" ? c.k1_csr : c.k2_csr) = csr;
+                int i = key == "k" ? 0 : key[1] - '0';
+                uint64_t *value[4] = {&c.k, &c.k1, &c.k2, &c.k3};
+                bool *has[4] = {&c.has_k, &c.has_k1, &c.has_k2, &c.has_k3};
+                bool *from_csr[4] = {&c.k_csr, &c.k1_csr, &c.k2_csr, &c.k3_csr};
+                *value[i] = bits;
+                *has[i] = true;
+                *from_csr[i] = csr;
+            }
+        }
+        else if (key == "d" || key == "lo" || key == "hi")
+        {
+            // axpbypcz's and requant's divisor, requant's bounds, threshold's hi: baked
+            std::string v;
+            ok = (bool)(ss >> v) && !v.empty();
+            if (ok)
+            {
+                (key == "d" ? c.d : key == "lo" ? c.lo : c.hi) =
+                    v[0] == '-' ? (uint64_t)std::stoll(v) : std::stoull(v);
+                (key == "d" ? c.has_d : key == "lo" ? c.has_lo : c.has_hi) = true;
             }
         }
         else if (key == "fold")
@@ -210,11 +239,26 @@ static bool parse(const std::string &path, Case &c)
             return false;
         }
     }
-    if ((c.op == SNAX_OP_AXPBY) != c.has_k1 || (c.has_k2 && !c.has_k1) ||
-        (c.op == SNAX_OP_AXPBY && c.inputs != 2))
+    bool axpby = c.op == SNAX_OP_AXPBY, xyz = c.op == SNAX_OP_AXPBYPCZ;
+    bool requant = c.op == SNAX_OP_REQUANT, threshold = c.op == SNAX_OP_THRESHOLD;
+    if ((axpby && (!c.has_k1 || c.inputs != 2)) || ((c.has_k1 || c.has_k2) && !axpby && !xyz))
     {
-        fprintf(stderr, "%s: op axpby takes two inputs and k1 (k2 optional), and only it\n",
-            path.c_str());
+        fprintf(stderr, "%s: op axpby takes two inputs and k1 (k2 optional); k1 and k2 are "
+            "axpby's and axpbypcz's\n", path.c_str());
+        return false;
+    }
+    if ((xyz && (c.inputs != 3 || !c.has_d)) || (c.inputs == 3 && !xyz) || (c.has_k3 && !xyz))
+    {
+        fprintf(stderr, "%s: op axpbypcz takes three inputs and d (k1, k2, k3 optional), and only "
+            "it\n", path.c_str());
+        return false;
+    }
+    if ((requant && (c.inputs != 1 || !c.has_d || !c.has_lo || !c.has_hi || c.has_k)) ||
+        (threshold && (c.inputs != 1 || !c.has_k || !c.has_hi)) || (c.has_lo && !requant) ||
+        (c.has_hi && !requant && !threshold) || (c.has_d && !requant && !xyz))
+    {
+        fprintf(stderr, "%s: op requant takes one input, d, lo and hi; threshold one input, k "
+            "and hi\n", path.c_str());
         return false;
     }
     if (c.lane_fold && (c.inputs != 1 || c.has_k))
@@ -271,6 +315,51 @@ struct Data
             return;
         }
         SnaxType out_t = this->c.types[this->c.inputs];
+        if (this->c.op == SNAX_OP_AXPBYPCZ || this->c.op == SNAX_OP_REQUANT ||
+            this->c.op == SNAX_OP_THRESHOLD)  // at optype, else the inputs' result type
+        {
+            std::vector<uint64_t> out(this->c.lanes * out_t.width / 64 + 1, 0);
+            SnaxType t = this->c.types[0];
+            for (int i = 1; i < this->c.inputs; i++)
+            {
+                snax_op_result_type(t, this->c.types[i], &t);
+            }
+            t = this->c.has_op_type ? this->c.op_type : t;
+            int shift = 0;
+            while (((uint64_t)1 << shift) < this->c.d)
+            {
+                shift++;
+            }
+            std::vector<std::vector<uint64_t>> w;
+            std::vector<const uint64_t *> in;
+            for (int i = 0; i < this->c.inputs; i++)
+            {
+                w.push_back(this->words(i, it->second));
+            }
+            for (const std::vector<uint64_t> &x : w)
+            {
+                in.push_back(x.data());
+            }
+            if (this->c.op == SNAX_OP_AXPBYPCZ)
+            {
+                const bool has[3] = {this->c.has_k1, this->c.has_k2, this->c.has_k3};
+                const uint64_t k[3] = {this->c.k1, this->c.k2, this->c.k3};
+                snax_op_axpbypcz(this->c.lanes, this->c.types.data(), t, out_t, in.data(), has, k,
+                    shift, out.data());
+            }
+            else if (this->c.op == SNAX_OP_REQUANT)
+            {
+                snax_op_requant(this->c.lanes, this->c.types[0], t, out_t, in[0], shift,
+                    this->c.lo, this->c.hi, out.data());
+            }
+            else
+            {
+                snax_op_threshold(this->c.lanes, this->c.types[0], t, out_t, in[0], this->c.k,
+                    this->c.hi, out.data());
+            }
+            this->pending.push_back(out);
+            return;
+        }
         if (this->c.op == SNAX_OP_AXPBY)  // k1 * a + k2 * b at the inputs' result type
         {
             SnaxType t;
@@ -334,7 +423,8 @@ struct Data
         this->pending.pop_front();
         auto it = this->c.results.find(index);
         SnaxType out_t = this->c.types[this->c.inputs];
-        int lanes = this->c.inputs == 1 && !this->c.has_k && !this->c.lane_fold ? 1 : this->c.lanes;
+        int lanes = this->c.inputs == 1 && !this->c.lanewise_one() && !this->c.lane_fold ? 1
+            : this->c.lanes;
         if (it == this->c.results.end() || (int)it->second.size() != lanes)
         {
             printf("%s: cycle %ld: push %d has no result of %d values\n", this->c.name.c_str(),

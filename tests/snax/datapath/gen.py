@@ -126,6 +126,144 @@ def simd_kcsr(name, op, t_a, lanes, steps=6, t_op=None):
     return t
 
 
+def rand_edges(dtype: str, n: int) -> np.ndarray:
+    """rand's values, one in four at the type's min, max, 0 or -1 (all ones)."""
+    info = np.iinfo(NP[dtype])
+    v = rand(dtype, n)
+    edge = RNG.random(n) < 0.25
+    pick = RNG.choice(np.array([info.min, info.max, 0, -1 if info.min < 0 else info.max],
+                               dtype=NP[dtype]), n)
+    return np.where(edge, pick, v).astype(NP[dtype])
+
+
+def d_max(dtype: str) -> int:
+    """The largest power of two the type holds: 2^(w-1), or 2^(w-2) signed."""
+    info = np.iinfo(NP[dtype])
+    return 1 << (info.bits - (2 if info.min < 0 else 1))
+
+
+def requant(name, t_a, t_op, t_out, lanes, d, lo, hi, steps=6):
+    """SimdLanes at requant: min(max(a // d, lo), hi) at t_op, d, lo and hi baked; NumPy's
+    floor division."""
+    T = NP[t_op]
+    t = Test(name, "SimdLanes", [t_a], t_op, t_out, lanes, op="requant", d=d, lo=lo, hi=hi)
+    for _ in range(steps):
+        a = rand_edges(t_a, lanes)
+        r = np.minimum(np.maximum(a.astype(T) // T(d), T(lo)), T(hi))
+        t.step(en(fire=1), [a], wrap(r, t_out))
+    return t
+
+
+def axpbypcz(name, t_in, t_op, t_out, lanes, ks, d, steps=6):
+    """SimdLanes at axpbypcz: (k1 * a + k2 * b + k3 * c) // d at t_op, each k an int (baked),
+    None (unset: the input itself) or "csr" (read from its CSR: a random value set before every
+    other step); d baked."""
+    T = NP[t_op]
+    kw = {"op": "axpbypcz"} | {f"k{i + 1}": k for i, k in enumerate(ks) if k is not None}
+    t = Test(name, "SimdLanes", [t_in] * 3, t_op, t_out, lanes, **kw, d=d)
+    now = {f"k{i + 1}": None for i, k in enumerate(ks) if k == "csr"}
+    for i in range(steps):
+        for s in now:
+            if i % 2 == 0:
+                now[s] = int(rand_edges(t_op, 1)[0])
+                t.lines.append(f"set {s} {now[s]}")
+        xs = [rand_edges(t_in, lanes) for _ in range(3)]
+        terms = [x.astype(T) if k is None else T(now[f"k{j + 1}"] if k == "csr" else k) * x.astype(T)
+                 for j, (x, k) in enumerate(zip(xs, ks))]
+        t.step(en(fire=1), xs, wrap((terms[0] + terms[1] + terms[2]) // T(d), t_out))
+    return t
+
+
+def threshold(name, t_a, t_op, t_out, lanes, k, hi, steps=6):
+    """SimdLanes at threshold: hi * min(max(a - k + 1, 0), 1) at t_op, wrapping; k an int (baked)
+    or "csr" (a random value set before each step), hi baked."""
+    T = NP[t_op]
+    t = Test(name, "SimdLanes", [t_a], t_op, t_out, lanes, op="threshold",
+             **({} if k == "csr" else {"k": k}), hi=hi)
+    if k == "csr":
+        t.lines.append("kcsr")
+    for _ in range(steps):
+        kv = k
+        if k == "csr":
+            kv = int(rand_edges(t_op, 1)[0])
+            t.lines.append(f"set k {kv}")
+        a = rand_edges(t_a, lanes)
+        delta = a.astype(T) - T(kv) + T(1)
+        t.step(en(fire=1), [a], wrap(T(hi) * np.minimum(np.maximum(delta, T(0)), T(1)), t_out))
+    return t
+
+
+def worked():
+    """The options' worked lanes, each checked against NumPy here."""
+    out = []
+    t = Test("requant_worked", "SimdLanes", ["int32"], "int32", "int8", 2, op="requant", d=1024,
+             lo=0, hi=127)
+    a = np.array([150000, -5000], np.int32)
+    r = np.minimum(np.maximum(a // np.int32(1024), np.int32(0)), np.int32(127)).astype(np.int8)
+    assert r.tolist() == [127, 0], r
+    t.step(en(fire=1), [a], r)
+    out.append(t)
+    for name, ks, d, x, want in (("gray", (77, 150, 29), 256, (200, 100, 50), 124),
+                                 ("blur", (None, 2, None), 4, (10, 20, 30), 20)):
+        kw = {f"k{i + 1}": k for i, k in enumerate(ks) if k is not None}
+        t = Test(f"axpbypcz_{name}_worked", "SimdLanes", ["uint8"] * 3, "uint16", "uint8", 1,
+                 op="axpbypcz", **kw, d=d)
+        terms = [np.uint16(v) * (np.uint16(1) if k is None else np.uint16(k)) for v, k in zip(x, ks)]
+        r = ((terms[0] + terms[1] + terms[2]) // np.uint16(d)).astype(np.uint8)
+        assert int(r) == want, r
+        t.step(en(fire=1), [[v] for v in x], [want])
+        out.append(t)
+    for name, k, a, want in (("k128", 128, 128, 255), ("km32768", -32768, 255, 0)):
+        t = Test(f"threshold_{name}_worked", "SimdLanes", ["uint8"], "int16", "uint8", 1,
+                 op="threshold", k=k, hi=255)
+        delta = np.int16(a) - np.int16(k) + np.int16(1)  # 255 + 32768 + 1 wraps to -32512
+        r = (np.int16(255) * np.minimum(np.maximum(delta, np.int16(0)), np.int16(1))).astype(np.uint8)
+        assert int(r) == want, r
+        t.step(en(fire=1), [[a]], [want])
+        out.append(t)
+    return out
+
+
+def options():
+    """requant, axpbypcz and threshold at their types, lanes 1, 4 and 8, the slots at the
+    type's ends (k at its min and max, lo = hi, d = 1 and the largest power of two it holds),
+    random, and from their CSRs."""
+    out = worked()
+    lanes = iter([1, 4, 8] * 40)
+    for t_a, t_op, t_out in (("int32", "int32", "int8"), ("int16", "int16", "int8"),
+                             ("uint32", "uint32", "uint8")):
+        info = np.iinfo(NP[t_op])
+        lo, hi = int(info.min), int(info.max)
+        v = int(rand(t_op, 1)[0])
+        for tag, (d, l, h) in (("full", (1, lo, hi)), ("dmax", (d_max(t_op), lo, hi)),
+                               ("lo_eq_hi", (4, v, v)), ("clamp", (1024, 0, 127)),
+                               ("lo_above_hi", (2, hi, lo))):
+            w = next(lanes)
+            out.append(requant(f"requant_{t_a}_to_{t_out}_w{w}_{tag}", t_a, t_op, t_out, w, d, l,
+                               h))
+    for t_in, t_op, t_out in (("uint8", "uint16", "uint8"), ("int32", "int32", "int32"),
+                              ("int32", "int32", "int8")):
+        info = np.iinfo(NP[t_op])
+        lo, hi = int(info.min), int(info.max)
+        for tag, ks, d in (("kmin", (lo, lo, lo), 1), ("kmax", (hi, hi, hi), d_max(t_op)),
+                           ("unset", (None, None, None), 4), ("mixed", (lo, None, hi), 256),
+                           ("csr", ("csr", None, "csr"), 2), ("csr3", ("csr", "csr", "csr"), 1)):
+            w = next(lanes)
+            out.append(axpbypcz(f"axpbypcz_{t_in}_at_{t_op}_to_{t_out}_w{w}_{tag}", t_in, t_op,
+                                t_out, w, ks, d))
+    for t_a, t_op, t_out in (("uint8", "int16", "uint8"), ("uint16", "uint16", "uint16"),
+                             ("int32", "int32", "int8")):
+        info = np.iinfo(NP[t_op])
+        lo, hi = int(info.min), int(info.max)
+        for tag, k, h in (("kmin", lo, hi), ("kmax", hi, 1), ("k0", 0, hi),
+                          ("krand", int(rand(t_op, 1)[0]), int(rand(t_op, 1)[0])),
+                          ("kcsr", "csr", hi)):
+            w = next(lanes)
+            out.append(threshold(f"threshold_{t_a}_at_{t_op}_to_{t_out}_w{w}_{tag}", t_a, t_op,
+                                 t_out, w, k, h))
+    return out
+
+
 def tree(name, t_in, t_out, lanes, beats, firings=10):
     t = Test(name, "TreeAccumulate", [t_in], t_out, t_out, lanes, op="add")
     acc, d = NP[t_out](0), 0
@@ -297,6 +435,88 @@ def buffer(name, dtype, lanes, depth, steps=12):
     return t
 
 
+class Halo:
+    """A halo link as snax-forge's DECISIONS states it: H = ceil((T - 1) / W) beats held, oldest first; tap t,
+    lane l is element l + t of the held beats' elements then the incoming beat's; on load the
+    held beats shift by one, the incoming beat the newest."""
+
+    def __init__(self, dtype, lanes, taps):
+        self.lanes, self.taps = lanes, taps
+        self.held = [np.zeros(lanes, NP[dtype]) for _ in range(-(-(taps - 1) // lanes))]
+
+    def out(self, beat):
+        e = np.concatenate(self.held + [beat])
+        return np.concatenate([e[t:t + self.lanes] for t in range(self.taps)])
+
+    def load(self, beat):
+        self.held = self.held[1:] + [np.asarray(beat)]
+
+
+def halo(name, dtype, lanes, taps, steps=12, p_load=0.7):
+    """A HaloLink on random beats and loads: its taps, tap by tap, every step."""
+    t = Test(name, "HaloLink", [dtype], dtype, dtype, lanes, taps=taps)
+    m = Halo(dtype, lanes, taps)
+    for _ in range(steps):
+        a = rand(dtype, lanes)
+        load = bool(RNG.random() < p_load)
+        t.step(en(load=load), [a], m.out(a))
+        if load:
+            m.load(a)
+    return t
+
+
+def halo_worked():
+    """The halo link's worked examples, a load every beat: from beat H + 1 on, each beat in gives one
+    output, so a job gives beats in - H; the steps before give the fill's taps (zeros held)."""
+    out = []
+    for lanes, taps, beats, want in (
+            (4, 3, [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]],
+             [[1, 2, 3, 4, 2, 3, 4, 5, 3, 4, 5, 6], [5, 6, 7, 8, 6, 7, 8, 9, 7, 8, 9, 10]]),
+            (1, 3, [[1], [2], [3], [4]], [[1, 2, 3], [2, 3, 4]]),
+            (2, 5, [[1, 2], [3, 4], [5, 6], [7, 8]],
+             [[1, 2, 2, 3, 3, 4, 4, 5, 5, 6], [3, 4, 4, 5, 5, 6, 6, 7, 7, 8]])):
+        t = Test(f"halo_worked_w{lanes}_t{taps}", "HaloLink", ["uint8"], "uint8", "uint8", lanes,
+                 taps=taps)
+        m = Halo("uint8", lanes, taps)
+        h = len(m.held)
+        assert len(beats) - h == len(want)
+        for i, b in enumerate(beats):
+            got = m.out(np.array(b, np.uint8))
+            if i >= h:
+                assert got.tolist() == want[i - h], (lanes, taps, i, got)
+            t.step(en(load=1), [b], got)
+            m.load(np.array(b, np.uint8))
+        out.append(t)
+    # W 8, T 3: tap t is bits [8 t, 8 t + 64) of {incoming, held} as 128 bits, held low
+    t = Test("halo_worked_w8_t3_bits", "HaloLink", ["uint8"], "uint8", "uint8", 8, taps=3)
+    m, held = Halo("uint8", 8, 3), 0
+    for _ in range(6):
+        a = rand("uint8", 8)
+        word = int.from_bytes(a.tobytes(), "little") << 64 | held
+        got = m.out(a)
+        for k in range(3):
+            assert int.from_bytes(got[8 * k:8 * k + 8].tobytes(), "little") == \
+                (word >> (8 * k)) & ((1 << 64) - 1)
+        t.step(en(load=1), [a], got)
+        m.load(a)
+        held = int.from_bytes(a.tobytes(), "little")
+    out.append(t)
+    return out
+
+
+def halos():
+    """The worked examples; T 2, 3 and 5 at W 1, 2, 4, 8 and 32 on uint8 and at W 4 on int32,
+    random beats and loads; and 200 beats at W 8, T 3, uint8, a load in most (the cross-check
+    with snax-forge's model)."""
+    out = halo_worked()
+    for taps in (2, 3, 5):
+        for lanes in (1, 2, 4, 8, 32):
+            out.append(halo(f"halo_uint8_w{lanes}_t{taps}", "uint8", lanes, taps))
+        out.append(halo(f"halo_int32_w4_t{taps}", "int32", 4, taps))
+    out.append(halo("halo_uint8_w8_t3_200", "uint8", 8, 3, steps=200, p_load=0.85))
+    return out
+
+
 def fixed():
     """The named vectors, worked by hand and checked against NumPy here."""
     out = []
@@ -466,6 +686,11 @@ def main():
         for op in ("mul", "add", "max"):
             tests.append(simd_kcsr(f"simd_kcsr_{op}_int8_at_int32_w8", op, "int8", 8, t_op="int32"))
         tests.append(simd_kcsr("simd_kcsr_mul_int16_at_int64_w4", "mul", "int16", 4, t_op="int64"))
+    # requant, axpbypcz and threshold; drawn last, so the tests above stay as they were
+    with np.errstate(over="ignore"):
+        tests += options()
+    # the halo link; drawn last, so the tests above stay as they were
+    tests += halos()
     head = ("# The datapath classes' vectors (snax/snax_datapath.hpp), written by gen.py from "
             "NumPy; do not edit.\n")
     (HERE / "vectors.txt").write_text(head + "\n".join(t.text() for t in tests))

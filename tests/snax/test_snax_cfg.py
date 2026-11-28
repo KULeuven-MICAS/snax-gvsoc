@@ -412,6 +412,33 @@ def dot1_cluster(folder: Path) -> Path:
                                                ("vsum", VSUM_STREAMER, 3, 2)])
 
 
+class LinkDatapaths(unittest.TestCase):
+    """A link's datapaths (LINK_DATAPATHS): their params and checks, and a halo link's fill."""
+
+    def test_params_and_refusals(self):
+        self.assertEqual(snax_cfg.link_datapath_why("HaloLink", {"taps": 3, "lanes": 8}, "uint8"),
+                         "")
+        self.assertEqual(snax_cfg.link_datapath_why("LinkBuffer", {"depth": 2, "lanes": 4},
+                                                    "int64"), "")
+        for name, params, dtype, why in (
+                ("HaloLink", {"taps": 1, "lanes": 8}, "uint8", "taps 1; HaloLink takes an int of "
+                 "at least 2"),
+                ("HaloLink", {"taps": 3, "lanes": 0}, "uint8", "lanes 0; HaloLink takes an int"),
+                ("HaloLink", {"depth": 1, "lanes": 8}, "uint8", "HaloLink takes taps, lanes"),
+                ("HaloLink", {"taps": 3, "lanes": 8}, "float32", "not a NumPy integer type"),
+                ("Fifo", {}, "uint8", "not a link's datapath")):
+            self.assertIn(why, snax_cfg.link_datapath_why(name, params, dtype))
+
+    def test_halo_held_and_outputs(self):
+        """H = ceil((T - 1) / W): 1 at W >= 2 with T 3, 2 at W 1 or at W 2 with T 5; a job of
+        beats gives beats - H outputs."""
+        for (taps, lanes), held in (((3, 4), 1), ((3, 8), 1), ((3, 1), 2), ((5, 2), 2),
+                                    ((2, 1), 1), ((5, 32), 1), ((9, 4), 2)):
+            self.assertEqual(snax_cfg.halo_held(taps, lanes), held, (taps, lanes))
+        self.assertEqual([snax_cfg.halo_outputs(b, 3, 4) for b in (0, 1, 3)], [0, 0, 2])
+        self.assertEqual(snax_cfg.halo_outputs(4, 3, 1), 2)
+
+
 class AccJson(unittest.TestCase):
     """accelerator.json beside the cluster file: what it holds, and each thing wrong in it a
     named error at its key."""
@@ -567,7 +594,8 @@ class AccJson(unittest.TestCase):
         self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k1", "not a slot of SimdLanes")
         self.acc = acc_json(VECADD)
         self.unit()["params"]["k2"] = 2
-        self.fails(snax_cfg.CfgTypeError, "units[0].params.k2", "k2 is axpby's, not add's")
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k2",
+                   "k2 is axpby's and axpbypcz's, not add's")
         self.acc = acc_json(VECADD)
         self.unit()["params"]["op"] = "axpby"
         self.unit()["params"]["k1"] = 2 ** 63
@@ -579,6 +607,81 @@ class AccJson(unittest.TestCase):
         self.unit()["datapath"] = "TreeAccumulate"
         self.unit()["scalars"] = {"k": "int64"}
         self.fails(snax_cfg.CfgTypeError, "units[0].scalars.k", "not a slot of SimdLanes")
+
+    def test_axpbypcz(self):
+        """axpbypcz: three inputs (gray's: uint8 at an opType uint16 that holds them), d baked,
+        a power of two, each k baked, from its CSR (K3 here) or unset; lo is requant's."""
+        u8 = {p: snax_cfg.Port(p, "uint8", 8, "out" if p == "out" else "in")
+              for p in ("a", "b", "c", "out")}
+        gray = snax_cfg.Unit("acc", "simd", "SimdLanes", u8, "uint16",
+                             {"op": "axpbypcz", "k1": 77, "k2": 150, "d": 256}, 0, 1,
+                             [Csr("K3", "rw", 2, 16, "k3")], scalars={"k3": "uint16"})
+        self.acc = acc_json(accelerator("gray_v1", gray, between=1))
+        self.streamer, self.rw = streamer([1, 1, 1], [1]), 3
+        (unit,) = self.load().description.groups[0].units
+        self.assertEqual((unit.params, unit.scalars),
+                         ({"op": "axpbypcz", "k1": 77, "k2": 150, "d": 256}, {"k3": "uint16"}))
+        self.unit()["params"]["d"] = 6
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.d",
+                   "6: not a power of two; the unit divides by shifting")
+        del self.unit()["params"]["d"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.d", "missing: axpbypcz takes d, baked in "
+                   "params")
+        self.unit()["params"]["d"] = 256
+        self.unit()["params"]["lo"] = 0
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.lo", "lo is requant's, not axpbypcz's")
+        del self.unit()["params"]["lo"]
+        self.unit()["params"]["k1"] = 2 ** 16
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k1", "does not fit the opType uint16")
+        self.unit()["params"]["k1"] = 77
+        del self.unit()["ports"]["c"]
+        self.acc["accelerators"][0]["inputs"] = ["acc.a", "acc.b"]
+        self.streamer = streamer([1, 1], [1])
+        self.fails(snax_cfg.CfgTargetError, "snax_datapath_cfg.accelerators[0].inputs",
+                   "2 inputs and 1 outputs; SimdLanes takes 3 and 1")
+
+    def test_requant_and_threshold(self):
+        """requant takes d, lo and hi, all baked (a CSR holds none of them); threshold k, baked or
+        from its CSR, and hi; each one input at an opType that holds it."""
+        one = {"a": snax_cfg.Port("a", "int32", 8, "in"),
+               "out": snax_cfg.Port("out", "int8", 8, "out")}
+        requant = snax_cfg.Unit("acc", "simd", "SimdLanes", one, "int32",
+                                {"op": "requant", "d": 1024, "lo": 0, "hi": 127}, 0, 1, [])
+        self.acc = acc_json(accelerator("requant_v1", requant))
+        self.streamer, self.rw = streamer([4], [1]), 2
+        (unit,) = self.load().description.groups[0].units
+        self.assertEqual(unit.params, {"op": "requant", "d": 1024, "lo": 0, "hi": 127})
+        del self.unit()["params"]["lo"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.lo", "missing: requant takes lo, baked "
+                   "in params")
+        self.unit()["params"]["lo"] = 0
+        self.unit()["params"]["k"] = 3
+        self.fails(snax_cfg.CfgTypeError, "units[0].params.k", "k is threshold's, not requant's")
+        del self.unit()["params"]["k"]
+        del self.unit()["params"]["hi"]
+        self.unit()["scalars"] = {"hi": "int32"}
+        self.fails(snax_cfg.CfgTypeError, "units[0].scalars.hi",
+                   "not a slot of SimdLanes a CSR holds (k, k1, k2, k3)")
+        u8 = {"a": snax_cfg.Port("a", "uint8", 8, "in"),
+              "out": snax_cfg.Port("out", "uint8", 8, "out")}
+        threshold = snax_cfg.Unit("acc", "simd", "SimdLanes", u8, "int16",
+                                  {"op": "threshold", "hi": 255}, 0, 1,
+                                  [Csr("K", "rw", 2, 16, "k")], scalars={"k": "int16"})
+        self.acc = acc_json(accelerator("threshold_v1", threshold, between=1))
+        self.streamer, self.rw = streamer([1], [1]), 3
+        (unit,) = self.load().description.groups[0].units
+        self.assertEqual((unit.params, unit.scalars), ({"op": "threshold", "hi": 255},
+                                                       {"k": "int16"}))
+        del self.unit()["params"]["hi"]
+        self.fails(snax_cfg.CfgKeyError, "units[0].params.hi", "missing: threshold takes hi")
+        self.unit()["params"]["hi"] = 255
+        self.unit()["opType"] = "int8"
+        self.unit()["scalars"] = {"k": "int8"}
+        self.unit()["csrs"][0]["width"] = 8
+        self.unit()["params"]["hi"] = 127
+        self.unit()["ports"]["a"]["dtype"] = "int16"
+        self.fails(snax_cfg.CfgSlotError, "snax_datapath_cfg.accelerators[0].groups",
+                   "opType int8 does not hold its one input's type int16")
 
     def test_dtype_and_op(self):
         self.unit()["ports"]["out"]["dtype"] = "float64"
